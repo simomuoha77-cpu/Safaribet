@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login – BetaKE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --green: #00c853; --green-dark: #009624;
+      --bg: #0a0e0a; --surface: #111711; --surface3: #1e271e;
+      --border: rgba(0,200,83,0.12); --text: #e8f5e9; --muted: #6a8a6a;
+      --red: #ff3b3b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .logo {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 36px; font-weight: 700;
+      color: var(--green); letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .logo span { color: #ffe600; }
+    .tagline { font-size: 14px; color: var(--muted); margin-bottom: 32px; text-align: center; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px 24px;
+      width: 100%; max-width: 380px;
+    }
+    .card-title {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 22px; font-weight: 700;
+      margin-bottom: 20px;
+    }
+    .field { margin-bottom: 16px; }
+    label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; font-weight: 500; }
+    input {
+      width: 100%;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: var(--green); }
+    .submit-btn {
+      width: 100%; padding: 14px;
+      background: var(--green); color: #000;
+      border: none; border-radius: 8px;
+      font-size: 16px; font-weight: 700;
+      cursor: pointer;
+      font-family: 'Rajdhani', sans-serif;
+      margin-top: 8px; letter-spacing: 0.5px;
+      transition: background 0.2s;
+    }
+    .submit-btn:hover { background: #00e65c; }
+    .submit-btn:disabled { background: var(--muted); cursor: not-allowed; }
+    .alt-link {
+      text-align: center; margin-top: 16px;
+      font-size: 14px; color: var(--muted);
+    }
+    .alt-link a { color: var(--green); text-decoration: none; font-weight: 600; }
+    .error-msg {
+      background: rgba(255,59,59,0.1);
+      border: 1px solid rgba(255,59,59,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px; color: var(--red);
+      margin-bottom: 14px; display: none;
+    }
+    .success-msg {
+      background: rgba(0,200,83,0.1);
+      border: 1px solid rgba(0,200,83,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px; color: var(--green);
+      margin-bottom: 14px; display: none;
+    }
+    .back-link {
+      margin-bottom: 24px;
+      font-size: 14px; color: var(--muted);
+      cursor: pointer; display: flex; align-items: center; gap: 6px;
+    }
+    .back-link:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <div class="logo">Beta<span>KE</span></div>
+  <div class="tagline">Your #1 Betting Platform in Kenya</div>
+
+  <div class="card">
+    <div class="back-link" onclick="window.location.href='/'">← Back to Home</div>
+    <div class="card-title">Sign In</div>
+
+    <div class="error-msg" id="errorMsg"></div>
+    <div class="success-msg" id="successMsg"></div>
+
+    <div class="field">
+      <label>Phone Number</label>
+      <input type="tel" id="phone" placeholder="0712345678" />
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter your password" />
+    </div>
+
+    <button class="submit-btn" id="loginBtn" onclick="login()">LOGIN</button>
+
+    <div class="alt-link">
+      Don't have an account? <a href="/pages/register.html">Register now</a>
+    </div>
+  </div>
+
+  <script>
+    // Redirect if already logged in
+    if (localStorage.getItem('token')) window.location.href = '/';
+
+    async function login() {
+      const phone = document.getElementById('phone').value.trim();
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('loginBtn');
+      const errorEl = document.getElementById('errorMsg');
+      const successEl = document.getElementById('successMsg');
+
+      errorEl.style.display = 'none';
+      successEl.style.display = 'none';
+
+      if (!phone || !password) {
+        errorEl.textContent = 'Please fill in all fields';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, password })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          successEl.textContent = 'Login successful! Redirecting...';
+          successEl.style.display = 'block';
+          setTimeout(() => window.location.href = '/', 1000);
+        } else {
+          errorEl.textContent = data.message || 'Login failed';
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'LOGIN';
+        }
+      } catch (err) {
+        errorEl.textContent = 'Connection error. Please try again.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'LOGIN';
+      }
+    }
+
+    // Allow Enter key
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter') login();
+    });
+  </script>
+</body>
+</html>

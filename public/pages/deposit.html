@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Deposit – BetaKE</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0a0e0a;color:#e8f5e9;min-height:100vh;display:flex;flex-direction:column}
+
+/* TOPBAR */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#111711;border-bottom:1px solid rgba(0,200,83,0.1)}
+.back{font-size:14px;color:#6a8a6a;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px}
+.back:hover{color:#e8f5e9}
+.title{font-size:17px;font-weight:700;color:#e8f5e9}
+.bal-badge{font-size:13px;font-weight:700;color:#00c853}
+
+/* MAIN */
+.main{flex:1;padding:16px;max-width:480px;margin:0 auto;width:100%}
+
+/* BALANCE CARD */
+.bal-card{background:linear-gradient(135deg,#003d1a,#001a0d);border:1px solid rgba(0,200,83,0.15);border-radius:14px;padding:20px;margin-bottom:20px;text-align:center}
+.bal-label{font-size:12px;color:#6a8a6a;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.bal-amount{font-size:40px;font-weight:800;color:#00c853;line-height:1}
+.bal-kes{font-size:16px;color:#6a8a6a;margin-top:4px}
+
+/* SECTION TITLE */
+.sec-title{font-size:13px;font-weight:700;color:#6a8a6a;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px}
+
+/* QUICK AMOUNTS */
+.quick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px}
+.qa{background:#182018;border:1.5px solid rgba(0,200,83,0.12);border-radius:10px;padding:12px 6px;text-align:center;font-size:15px;font-weight:700;color:#e8f5e9;cursor:pointer;transition:all 0.15s}
+.qa:hover,.qa.active{background:rgba(0,200,83,0.12);border-color:#00c853;color:#00c853}
+
+/* INPUT FIELDS */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:13px;color:#6a8a6a;font-weight:600;margin-bottom:6px}
+.field input{width:100%;background:#182018;border:1.5px solid rgba(0,200,83,0.12);border-radius:10px;padding:13px 14px;color:#e8f5e9;font-size:16px;font-weight:600;outline:none;transition:border-color 0.2s}
+.field input:focus{border-color:#00c853}
+.field input::placeholder{color:#3a5a3a;font-weight:400}
+.field .hint{font-size:11px;color:#3a5a3a;margin-top:5px}
+
+/* DEPOSIT BUTTON */
+.dep-btn{width:100%;padding:16px;background:#00c853;color:#000;border:none;border-radius:12px;font-size:17px;font-weight:800;cursor:pointer;transition:all 0.2s;margin-top:6px;letter-spacing:0.3px}
+.dep-btn:hover{background:#00e65c}
+.dep-btn:disabled{background:#2a4a2a;color:#3a6a3a;cursor:not-allowed}
+
+/* STATUS MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+.modal-bg.show{display:flex}
+.modal{background:#111711;border:1px solid rgba(0,200,83,0.2);border-radius:16px;padding:28px 24px;width:100%;max-width:360px;text-align:center}
+.modal-icon{font-size:52px;margin-bottom:14px;line-height:1}
+.modal-title{font-size:20px;font-weight:800;margin-bottom:8px}
+.modal-msg{font-size:14px;color:#6a8a6a;line-height:1.5;margin-bottom:20px}
+.modal-btn{width:100%;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px}
+.modal-btn.primary{background:#00c853;color:#000}
+.modal-btn.secondary{background:#182018;color:#6a8a6a;border:1px solid rgba(0,200,83,0.1)}
+
+/* SPINNER */
+.spinner{width:36px;height:36px;border:3px solid rgba(0,200,83,0.15);border-top-color:#00c853;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* PULSE DOTS */
+.pulse-dots{display:flex;justify-content:center;gap:6px;margin:10px 0}
+.dot{width:8px;height:8px;border-radius:50%;background:#00c853;animation:dotpulse 1.2s ease-in-out infinite}
+.dot:nth-child(2){animation-delay:0.2s}
+.dot:nth-child(3){animation-delay:0.4s}
+@keyframes dotpulse{0%,80%,100%{opacity:0.2;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
+
+/* HOW IT WORKS */
+.steps{background:#182018;border-radius:12px;padding:16px;margin-top:24px}
+.steps-title{font-size:13px;font-weight:700;color:#6a8a6a;margin-bottom:12px}
+.step{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.step:last-child{margin-bottom:0}
+.step-num{width:22px;height:22px;border-radius:50%;background:rgba(0,200,83,0.15);border:1px solid rgba(0,200,83,0.3);color:#00c853;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-text{font-size:13px;color:#6a8a6a;line-height:1.4}
+.step-text strong{color:#e8f5e9}
+
+/* TOAST */
+.toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#182018;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid #333;white-space:nowrap}
+.toast.show{opacity:1}
+.toast.err{border-color:#ff4444;color:#ff4444}
+.toast.ok{border-color:#00c853;color:#00c853}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="history.back()">← Back</button>
+  <div class="title">Deposit</div>
+  <div class="bal-badge">KES <span id="balTop">0.00</span></div>
+</div>
+
+<div class="main">
+
+  <!-- Balance Card -->
+  <div class="bal-card">
+    <div class="bal-label">Available Balance</div>
+    <div class="bal-amount" id="balBig">0.00</div>
+    <div class="bal-kes">Kenyan Shillings</div>
+  </div>
+
+  <!-- Quick Amounts -->
+  <div class="sec-title">Select Amount</div>
+  <div class="quick-grid">
+    <div class="qa" onclick="setAmt(100)">100</div>
+    <div class="qa" onclick="setAmt(200)">200</div>
+    <div class="qa" onclick="setAmt(500)">500</div>
+    <div class="qa" onclick="setAmt(1000)">1,000</div>
+    <div class="qa" onclick="setAmt(2000)">2,000</div>
+    <div class="qa" onclick="setAmt(5000)">5,000</div>
+  </div>
+
+  <!-- Amount Input -->
+  <div class="field">
+    <label>Amount (KES)</label>
+    <input type="number" id="amount" placeholder="Enter amount e.g. 500" min="10" max="150000" oninput="clearQuick()"/>
+    <div class="hint">Min KES 10 — Max KES 150,000</div>
+  </div>
+
+  <!-- Phone Input -->
+  <div class="field">
+    <label>M-Pesa Phone Number</label>
+    <input type="tel" id="phone" placeholder="e.g. 0712345678"/>
+    <div class="hint">The number that will receive the STK push prompt</div>
+  </div>
+
+  <button class="dep-btn" id="depBtn" onclick="deposit()">
+    💚 Deposit via M-Pesa
+  </button>
+
+  <!-- How it works -->
+  <div class="steps">
+    <div class="steps-title">HOW IT WORKS</div>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-text">Enter amount and your <strong>M-Pesa number</strong></div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-text">You'll receive a <strong>prompt on your phone</strong> — enter your M-Pesa PIN</div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-text">Your <strong>BetaKE balance is credited</strong> instantly after payment</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- WAITING MODAL (STK sent, waiting for PIN) -->
+<div class="modal-bg" id="waitModal">
+  <div class="modal">
+    <div class="spinner"></div>
+    <div class="modal-title">Check Your Phone</div>
+    <div class="modal-msg">An M-Pesa prompt has been sent to <strong id="sentTo"></strong>.<br/>Enter your PIN to complete.</div>
+    <div class="pulse-dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div style="font-size:12px;color:#3a5a3a;margin-bottom:16px">Waiting for confirmation...</div>
+    <button class="modal-btn secondary" onclick="cancelWait()">Cancel</button>
+  </div>
+</div>
+
+<!-- SUCCESS MODAL -->
+<div class="modal-bg" id="successModal">
+  <div class="modal">
+    <div class="modal-icon">🎉</div>
+    <div class="modal-title" style="color:#00c853">Deposit Successful!</div>
+    <div class="modal-msg">KES <strong id="successAmt"></strong> has been added to your BetaKE balance.</div>
+    <div style="background:rgba(0,200,83,0.08);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-size:12px;color:#6a8a6a">New Balance</div>
+      <div style="font-size:28px;font-weight:800;color:#00c853">KES <span id="newBal"></span></div>
+    </div>
+    <button class="modal-btn primary" onclick="doneSuccess()">Start Betting →</button>
+  </div>
+</div>
+
+<!-- FAILED MODAL -->
+<div class="modal-bg" id="failModal">
+  <div class="modal">
+    <div class="modal-icon">❌</div>
+    <div class="modal-title" style="color:#ff4444">Payment Failed</div>
+    <div class="modal-msg" id="failMsg">Payment was cancelled or timed out.</div>
+    <button class="modal-btn primary" onclick="closeFail()">Try Again</button>
+    <button class="modal-btn secondary" onclick="history.back()">Go Back</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let USER = null;
+let checkoutId = null;
+let pollTimer  = null;
+let pollCount  = 0;
+const MAX_POLLS = 30; // 30 * 3s = 90 seconds max
+
+window.addEventListener('DOMContentLoaded', () => {
+  const t = localStorage.getItem('token');
+  const u = localStorage.getItem('user');
+  if (!t || !u) { location.href = '/pages/login.html'; return; }
+  USER = JSON.parse(u);
+  updateBalDisplay();
+
+  // Pre-fill phone from account
+  if (USER.phone) {
+    document.getElementById('phone').value = USER.phone;
+  }
+});
+
+function updateBalDisplay() {
+  const bal = parseFloat(USER.balance || 0).toFixed(2);
+  document.getElementById('balTop').textContent = bal;
+  document.getElementById('balBig').textContent = bal;
+}
+
+function setAmt(v) {
+  document.getElementById('amount').value = v;
+  document.querySelectorAll('.qa').forEach(el => el.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function clearQuick() {
+  document.querySelectorAll('.qa').forEach(el => el.classList.remove('active'));
+}
+
+async function deposit() {
+  const amount = parseFloat(document.getElementById('amount').value);
+  const phone  = document.getElementById('phone').value.trim();
+  const btn    = document.getElementById('depBtn');
+
+  if (!amount || amount < 10)  return showToast('Minimum deposit is KES 10', 'err');
+  if (amount > 150000)         return showToast('Maximum deposit is KES 150,000', 'err');
+  if (!phone)                  return showToast('Enter your M-Pesa phone number', 'err');
+
+  btn.disabled = true;
+  btn.textContent = 'Sending request...';
+
+  try {
+    const res = await fetch('/api/mpesa/deposit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + localStorage.getItem('token')
+      },
+      body: JSON.stringify({ amount, phone })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      checkoutId = data.checkoutRequestId;
+      document.getElementById('sentTo').textContent = phone;
+      showModal('waitModal');
+      startPolling(amount);
+    } else {
+      showToast(data.message || 'Failed to send STK push', 'err');
+      btn.disabled = false;
+      btn.textContent = '💚 Deposit via M-Pesa';
+    }
+  } catch (err) {
+    showToast('Connection error. Try again.', 'err');
+    btn.disabled = false;
+    btn.textContent = '💚 Deposit via M-Pesa';
+  }
+}
+
+function startPolling(amount) {
+  pollCount = 0;
+  pollTimer = setInterval(async () => {
+    pollCount++;
+    if (pollCount > MAX_POLLS) {
+      stopPolling();
+      closeModal('waitModal');
+      document.getElementById('failMsg').textContent = 'Payment timed out. Please try again.';
+      showModal('failModal');
+      resetBtn();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/mpesa/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + localStorage.getItem('token')
+        },
+        body: JSON.stringify({ checkoutRequestId: checkoutId })
+      });
+      const data = await res.json();
+
+      if (data.status === 'completed') {
+        stopPolling();
+        closeModal('waitModal');
+        // Update local user balance
+        USER.balance = data.newBalance;
+        localStorage.setItem('user', JSON.stringify(USER));
+        updateBalDisplay();
+        document.getElementById('successAmt').textContent = amount.toFixed(2);
+        document.getElementById('newBal').textContent = parseFloat(data.newBalance).toFixed(2);
+        showModal('successModal');
+        resetBtn();
+      } else if (data.status === 'cancelled') {
+        stopPolling();
+        closeModal('waitModal');
+        document.getElementById('failMsg').textContent = 'You cancelled the M-Pesa payment.';
+        showModal('failModal');
+        resetBtn();
+      }
+      // status === 'pending' — keep polling
+    } catch {}
+  }, 3000); // poll every 3 seconds
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function cancelWait() {
+  stopPolling();
+  closeModal('waitModal');
+  resetBtn();
+  showToast('Payment cancelled', 'err');
+}
+
+function closeFail() {
+  closeModal('failModal');
+}
+
+function doneSuccess() {
+  closeModal('successModal');
+  location.href = '/';
+}
+
+function resetBtn() {
+  const btn = document.getElementById('depBtn');
+  btn.disabled = false;
+  btn.textContent = '💚 Deposit via M-Pesa';
+}
+
+function showModal(id)  { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+let toastTmr = null;
+function showToast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + type;
+  clearTimeout(toastTmr);
+  toastTmr = setTimeout(() => el.classList.remove('show'), 3500);
+}
+</script>
+</body>
+</html>

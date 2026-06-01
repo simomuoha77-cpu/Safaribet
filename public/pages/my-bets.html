@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>My Bets – BetaKE</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
+.back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer}
+.back:hover{color:var(--tx)}
+.ttl{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
+.bal{font-size:13px;font-weight:700;color:var(--g)}
+
+/* FILTER TABS */
+.ftabs{display:flex;background:var(--s1);border-bottom:1px solid var(--bd)}
+.ftab{flex:1;padding:11px 4px;text-align:center;font-size:13px;font-weight:600;color:var(--mt);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
+.ftab.on{color:var(--g);border-bottom-color:var(--g)}
+
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+.stat{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:12px;text-align:center}
+.stat-val{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;color:var(--g)}
+.stat-lbl{font-size:11px;color:var(--mt);margin-top:2px}
+
+/* BET CARDS */
+.bets-list{padding:0 12px 80px}
+.bcard{background:var(--s1);border:1px solid var(--bd);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.bcard-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--bd)}
+.bcard-code{font-size:12px;font-weight:700;color:var(--mt)}
+.bcard-date{font-size:11px;color:var(--mt)}
+.status-pill{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.sp-pending{background:rgba(255,214,0,0.12);color:var(--yl)}
+.sp-won{background:rgba(0,200,83,0.12);color:var(--g)}
+.sp-lost{background:rgba(255,59,59,0.12);color:var(--rd)}
+
+.sel-list{padding:8px 12px}
+.sel-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(0,200,83,0.05)}
+.sel-row:last-child{border:none}
+.sel-match{font-size:13px;font-weight:600}
+.sel-pick{font-size:11px;color:var(--mt);margin-top:1px}
+.sel-odd{font-size:13px;font-weight:700;color:var(--g)}
+.sel-result{font-size:10px;font-weight:700;margin-left:4px}
+.sr-won{color:var(--g)}
+.sr-lost{color:var(--rd)}
+.sr-pending{color:var(--yl)}
+
+.bcard-foot{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--s3)}
+.bf-item{text-align:center}
+.bf-lbl{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:0.3px}
+.bf-val{font-size:14px;font-weight:700;margin-top:2px}
+.bf-val.green{color:var(--g)}
+.bf-val.yellow{color:var(--yl)}
+
+/* EMPTY */
+.empty{text-align:center;padding:60px 20px;color:var(--mt)}
+.empty-ic{font-size:48px;margin-bottom:12px}
+.empty-ttl{font-size:17px;font-weight:700;color:var(--tx);margin-bottom:6px}
+.empty-sub{font-size:14px;line-height:1.5}
+.empty-btn{display:inline-block;margin-top:16px;padding:11px 24px;background:var(--g);color:#000;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;border:none}
+
+/* LOADING */
+.loading{text-align:center;padding:40px;color:var(--mt)}
+.spin{width:28px;height:28px;border:3px solid var(--bd);border-top-color:var(--g);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 10px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* BOTTOM NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);display:flex;height:56px}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--mt);cursor:pointer;gap:3px}
+.bni.on{color:var(--g)}
+.bni-ic{font-size:20px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="location.href='/'">← Home</button>
+  <div class="ttl">My Bets</div>
+  <div class="bal">KES <span id="balVal">0.00</span></div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="ftabs">
+  <div class="ftab on" onclick="filterBets('all',this)">All</div>
+  <div class="ftab" onclick="filterBets('pending',this)">Pending</div>
+  <div class="ftab" onclick="filterBets('won',this)">Won</div>
+  <div class="ftab" onclick="filterBets('lost',this)">Lost</div>
+</div>
+
+<!-- Stats -->
+<div class="stats">
+  <div class="stat"><div class="stat-val" id="statTotal">0</div><div class="stat-lbl">Total Bets</div></div>
+  <div class="stat"><div class="stat-val" id="statWon" style="color:var(--g)">0</div><div class="stat-lbl">Won</div></div>
+  <div class="stat"><div class="stat-val" id="statWin" style="color:var(--yl)">0.00</div><div class="stat-lbl">Total Won KES</div></div>
+</div>
+
+<!-- Bets List -->
+<div class="bets-list" id="betsList">
+  <div class="loading"><div class="spin"></div>Loading bets...</div>
+</div>
+
+<!-- Bottom Nav -->
+<nav class="bnav">
+  <div class="bni" onclick="location.href='/'"><div class="bni-ic">🏠</div>Home</div>
+  <div class="bni" onclick="location.href='/pages/aviator.html'"><div class="bni-ic">✈️</div>Aviator</div>
+  <div class="bni on"><div class="bni-ic">📋</div>My Bets</div>
+  <div class="bni" onclick="location.href='/pages/account.html'"><div class="bni-ic">👤</div>Account</div>
+</nav>
+
+<script>
+let allBets = [];
+let currentFilter = 'all';
+let USER = null;
+
+window.addEventListener('DOMContentLoaded', () => {
+  const t = localStorage.getItem('token');
+  const u = localStorage.getItem('user');
+  if (!t || !u) { location.href='/pages/login.html'; return; }
+  USER = JSON.parse(u);
+  document.getElementById('balVal').textContent = parseFloat(USER.balance||0).toFixed(2);
+  loadBets();
+});
+
+async function loadBets() {
+  try {
+    const res  = await fetch('/api/bets/my', {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+    const data = await res.json();
+    if (!data.success) { renderEmpty(); return; }
+
+    allBets = data.data;
+    updateStats();
+    renderBets(allBets);
+  } catch {
+    document.getElementById('betsList').innerHTML = '<div class="loading">Failed to load bets.</div>';
+  }
+}
+
+function updateStats() {
+  const won     = allBets.filter(b => b.status === 'won');
+  const totalWin = won.reduce((a,b) => a + b.payout, 0);
+  document.getElementById('statTotal').textContent = allBets.length;
+  document.getElementById('statWon').textContent   = won.length;
+  document.getElementById('statWin').textContent   = totalWin.toFixed(2);
+}
+
+function filterBets(f, el) {
+  currentFilter = f;
+  document.querySelectorAll('.ftab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  const filtered = f === 'all' ? allBets : allBets.filter(b => b.status === f);
+  renderBets(filtered);
+}
+
+function renderBets(bets) {
+  const el = document.getElementById('betsList');
+  if (!bets.length) { renderEmpty(); return; }
+
+  el.innerHTML = bets.map(bet => {
+    const d    = new Date(bet.placedAt);
+    const date = d.toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'});
+    const time = d.toLocaleTimeString('en-KE',{hour:'2-digit',minute:'2-digit'});
+    const spClass = bet.status === 'won' ? 'sp-won' : bet.status === 'lost' ? 'sp-lost' : 'sp-pending';
+    const spLabel = bet.status.charAt(0).toUpperCase() + bet.status.slice(1);
+
+    const sels = bet.selections.map(s => {
+      const rc = s.result === 'won' ? 'sr-won' : s.result === 'lost' ? 'sr-lost' : 'sr-pending';
+      const ri = s.result === 'won' ? '✓' : s.result === 'lost' ? '✗' : '•';
+      return `<div class="sel-row">
+        <div>
+          <div class="sel-match">${s.homeTeam} vs ${s.awayTeam}</div>
+          <div class="sel-pick">${s.pickLabel} <span class="sel-result ${rc}">${ri}</span></div>
+        </div>
+        <div class="sel-odd">${s.odds.toFixed(2)}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="bcard">
+      <div class="bcard-head">
+        <div>
+          <div class="bcard-code">${bet.betCode}</div>
+          <div class="bcard-date">${date} ${time}</div>
+        </div>
+        <span class="status-pill ${spClass}">${spLabel}</span>
+      </div>
+      <div class="sel-list">${sels}</div>
+      <div class="bcard-foot">
+        <div class="bf-item">
+          <div class="bf-lbl">Selections</div>
+          <div class="bf-val">${bet.selections.length}</div>
+        </div>
+        <div class="bf-item">
+          <div class="bf-lbl">Total Odds</div>
+          <div class="bf-val yellow">${bet.totalOdds.toFixed(2)}</div>
+        </div>
+        <div class="bf-item">
+          <div class="bf-lbl">Stake</div>
+          <div class="bf-val">KES ${bet.stake.toFixed(2)}</div>
+        </div>
+        <div class="bf-item">
+          <div class="bf-lbl">${bet.status === 'won' ? 'Won' : 'Pot. Win'}</div>
+          <div class="bf-val green">KES ${bet.status === 'won' ? bet.payout.toFixed(2) : bet.potentialWin.toFixed(2)}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderEmpty() {
+  document.getElementById('betsList').innerHTML = `
+    <div class="empty">
+      <div class="empty-ic">📋</div>
+      <div class="empty-ttl">No bets yet</div>
+      <div class="empty-sub">You haven't placed any bets.<br/>Pick a match and place your first bet!</div>
+      <button class="empty-btn" onclick="location.href='/'">Browse Matches</button>
+    </div>`;
+}
+</script>
+</body>
+</html>
