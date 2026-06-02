@@ -11,6 +11,7 @@ const aviatorRoutes = require('./routes/aviator');
 const mpesaRoutes   = require('./routes/mpesa');
 const betsRoutes    = require('./routes/bets');
 const scheduler     = require('./engine/scheduler');
+const adminRoutes   = require('./routes/admin');
 
 const app    = express();
 const server = http.createServer(app);
@@ -36,6 +37,10 @@ app.use('/api/odds',    oddsRoutes);
 app.use('/api/aviator', aviatorRoutes);
 app.use('/api/mpesa',   mpesaRoutes);
 app.use('/api/bets',    betsRoutes);
+// Admin — hidden path
+const ADMIN_PATH = process.env.ADMIN_PATH || '/api/xpanel';
+app.use(ADMIN_PATH, adminRoutes);
+console.log(`🔒 Admin panel at ${ADMIN_PATH}`);
 
 // ── Frontend ──
 app.get('*', (req, res) => {

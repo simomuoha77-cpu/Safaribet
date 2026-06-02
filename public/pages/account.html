@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Account – BetaKE</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:70px}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
+.back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer}
+.ttl{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
+.bal{font-size:13px;font-weight:700;color:var(--g);cursor:pointer}
+
+/* PROFILE CARD */
+.profile-card{margin:14px 12px;background:linear-gradient(135deg,#003d1a,#001a0d);border:1px solid var(--bd);border-radius:14px;padding:20px;display:flex;align-items:center;gap:14px}
+.avatar{width:60px;height:60px;border-radius:50%;background:var(--g);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:#000;flex-shrink:0}
+.profile-info h2{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700}
+.profile-info p{font-size:13px;color:var(--mt);margin-top:2px}
+.profile-info .phone{font-size:12px;color:var(--mt);margin-top:4px;display:flex;align-items:center;gap:5px}
+.verified{background:rgba(0,200,83,0.12);color:var(--g);font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+
+/* BALANCE STRIP */
+.bal-strip{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 12px 14px}
+.bs{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:12px;text-align:center}
+.bs-val{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;color:var(--g)}
+.bs-lbl{font-size:11px;color:var(--mt);margin-top:2px}
+.dep-btn{width:100%;margin:0 0 14px;padding:13px;background:var(--g);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;display:block;text-align:center}
+
+/* SECTIONS */
+.sec{margin:0 12px 14px;background:var(--s1);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+.sec-ttl{font-size:12px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px;padding:12px 14px 8px;border-bottom:1px solid var(--bd)}
+.menu-item{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid rgba(0,200,83,0.05);cursor:pointer;transition:background 0.15s}
+.menu-item:last-child{border:none}
+.menu-item:hover{background:var(--s2)}
+.mi-left{display:flex;align-items:center;gap:10px}
+.mi-icon{font-size:18px;width:28px;text-align:center}
+.mi-text{font-size:14px;font-weight:600}
+.mi-sub{font-size:11px;color:var(--mt);margin-top:1px}
+.mi-right{display:flex;align-items:center;gap:6px;color:var(--mt);font-size:13px}
+.mi-badge{background:var(--g);color:#000;border-radius:10px;padding:2px 7px;font-size:11px;font-weight:700}
+.mi-badge.red{background:var(--rd);color:#fff}
+.chevron{color:var(--mt);font-size:16px}
+
+/* STATS GRID */
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--bd)}
+.sg{background:var(--s1);padding:12px 8px;text-align:center}
+.sg-val{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
+.sg-lbl{font-size:10px;color:var(--mt);margin-top:2px}
+
+/* TRANSACTION LIST */
+.tx-list{max-height:300px;overflow-y:auto}
+.tx-item{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid rgba(0,200,83,0.05)}
+.tx-item:last-child{border:none}
+.tx-left{display:flex;align-items:center;gap:9px}
+.tx-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.tx-icon.dep{background:rgba(0,200,83,0.12)}
+.tx-icon.win{background:rgba(255,214,0,0.12)}
+.tx-icon.bet{background:rgba(255,59,59,0.08)}
+.tx-icon.ref{background:rgba(100,100,255,0.12)}
+.tx-desc{font-size:13px;font-weight:600}
+.tx-date{font-size:11px;color:var(--mt);margin-top:1px}
+.tx-amount{font-size:14px;font-weight:700}
+.tx-amount.pos{color:var(--g)}
+.tx-amount.neg{color:var(--rd)}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-bg.on{display:flex}
+.modal{background:var(--s1);border-top:2px solid var(--g);border-radius:16px 16px 0 0;padding:24px 16px;width:100%;max-width:480px}
+.modal-ttl{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between}
+.modal-close{background:none;border:none;color:var(--mt);font-size:22px;cursor:pointer}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--mt);font-weight:600;margin-bottom:5px}
+.field input{width:100%;background:var(--s3);border:1.5px solid var(--bd);border-radius:8px;padding:11px 13px;color:var(--tx);font-size:15px;outline:none;transition:border-color 0.2s}
+.field input:focus{border-color:var(--g)}
+.field input:disabled{opacity:0.5}
+.submit-btn{width:100%;padding:13px;background:var(--g);color:#000;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px}
+.submit-btn:disabled{background:var(--mt);cursor:not-allowed}
+.err-msg{background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--rd);margin-bottom:10px;display:none}
+.ok-msg{background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--g);margin-bottom:10px;display:none}
+
+.logout-btn{display:block;width:calc(100% - 24px);margin:0 12px 14px;padding:13px;background:rgba(255,59,59,0.08);border:1.5px solid rgba(255,59,59,0.2);color:var(--rd);border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;text-align:center}
+.logout-btn:hover{background:rgba(255,59,59,0.15)}
+
+/* BOTTOM NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);display:flex;height:56px;z-index:10}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--mt);cursor:pointer;gap:3px;transition:color 0.2s}
+.bni.on{color:var(--g)}
+.bni-ic{font-size:20px}
+
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid #444;white-space:nowrap}
+.toast.on{opacity:1}
+.toast.ok{border-color:var(--g);color:var(--g)}
+.toast.err{border-color:var(--rd);color:var(--rd)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="location.href='/'">← Home</button>
+  <div class="ttl">My Account</div>
+  <div class="bal" onclick="location.href='/pages/deposit.html'">KES <span id="balTop">0.00</span></div>
+</div>
+
+<!-- Profile Card -->
+<div class="profile-card">
+  <div class="avatar" id="avatarLetter">?</div>
+  <div class="profile-info">
+    <h2 id="profileName">Loading...</h2>
+    <p id="profileUsername">@username</p>
+    <div class="phone"><span id="profilePhone">—</span><span class="verified">✓ Verified</span></div>
+  </div>
+</div>
+
+<!-- Balance Strip -->
+<div class="bal-strip">
+  <div class="bs">
+    <div class="bs-val" id="mainBal">0.00</div>
+    <div class="bs-lbl">Main Balance</div>
+  </div>
+  <div class="bs">
+    <div class="bs-val" style="color:var(--yl)" id="bonusBal">0.00</div>
+    <div class="bs-lbl">Bonus Balance</div>
+  </div>
+</div>
+<button class="dep-btn" onclick="location.href='/pages/deposit.html'">💚 Deposit via M-Pesa</button>
+
+<!-- Betting Stats -->
+<div class="sec">
+  <div class="sec-ttl">Betting Stats</div>
+  <div class="stats-grid">
+    <div class="sg"><div class="sg-val" id="statTotal">0</div><div class="sg-lbl">Total Bets</div></div>
+    <div class="sg"><div class="sg-val" style="color:var(--g)" id="statWon">0</div><div class="sg-lbl">Won</div></div>
+    <div class="sg"><div class="sg-val" style="color:var(--rd)" id="statLost">0</div><div class="sg-lbl">Lost</div></div>
+    <div class="sg"><div class="sg-val" style="color:var(--yl)" id="statPending">0</div><div class="sg-lbl">Pending</div></div>
+    <div class="sg"><div class="sg-val" id="statStake">0</div><div class="sg-lbl">Total Staked</div></div>
+    <div class="sg"><div class="sg-val" style="color:var(--g)" id="statWin">0</div><div class="sg-lbl">Total Won</div></div>
+  </div>
+</div>
+
+<!-- Account Menu -->
+<div class="sec">
+  <div class="sec-ttl">Account</div>
+  <div class="menu-item" onclick="openModal('profileModal')">
+    <div class="mi-left"><span class="mi-icon">👤</span><div><div class="mi-text">Edit Profile</div><div class="mi-sub">Update your name and email</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="menu-item" onclick="openModal('passwordModal')">
+    <div class="mi-left"><span class="mi-icon">🔒</span><div><div class="mi-text">Change Password</div><div class="mi-sub">Keep your account secure</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="menu-item" onclick="location.href='/pages/deposit.html'">
+    <div class="mi-left"><span class="mi-icon">💰</span><div><div class="mi-text">Deposit</div><div class="mi-sub">Add money via M-Pesa</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="menu-item" onclick="location.href='/pages/my-bets.html'">
+    <div class="mi-left"><span class="mi-icon">📋</span><div><div class="mi-text">My Bets</div><div class="mi-sub">View bet history</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Transaction History -->
+<div class="sec">
+  <div class="sec-ttl">Transaction History</div>
+  <div class="tx-list" id="txList">
+    <div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">Loading...</div>
+  </div>
+</div>
+
+<button class="logout-btn" onclick="logout()">🚪 Logout</button>
+
+<!-- Edit Profile Modal -->
+<div class="modal-bg" id="profileModal">
+  <div class="modal">
+    <div class="modal-ttl">Edit Profile <button class="modal-close" onclick="closeModal('profileModal')">✕</button></div>
+    <div class="err-msg" id="profileErr"></div>
+    <div class="ok-msg" id="profileOk"></div>
+    <div class="field"><label>Username</label><input id="editUsername" type="text" placeholder="Username"/></div>
+    <div class="field"><label>Email</label><input id="editEmail" type="email" placeholder="Email address"/></div>
+    <button class="submit-btn" onclick="saveProfile()">Save Changes</button>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div class="modal-bg" id="passwordModal">
+  <div class="modal">
+    <div class="modal-ttl">Change Password <button class="modal-close" onclick="closeModal('passwordModal')">✕</button></div>
+    <div class="err-msg" id="pwErr"></div>
+    <div class="ok-msg" id="pwOk"></div>
+    <div class="field"><label>Current Password</label><input id="currentPw" type="password" placeholder="Enter current password"/></div>
+    <div class="field"><label>New Password</label><input id="newPw" type="password" placeholder="Min 6 characters"/></div>
+    <div class="field"><label>Confirm New Password</label><input id="confirmPw" type="password" placeholder="Repeat new password"/></div>
+    <button class="submit-btn" onclick="changePassword()">Update Password</button>
+  </div>
+</div>
+
+<nav class="bnav">
+  <div class="bni" onclick="location.href='/'"><div class="bni-ic">🏠</div>Home</div>
+  <div class="bni" onclick="location.href='/pages/aviator.html'"><div class="bni-ic">✈️</div>Aviator</div>
+  <div class="bni" onclick="location.href='/pages/my-bets.html'"><div class="bni-ic">📋</div>My Bets</div>
+  <div class="bni on"><div class="bni-ic">👤</div>Account</div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let USER = null;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const t = localStorage.getItem('token');
+  const u = localStorage.getItem('user');
+  if (!t || !u) { location.href = '/pages/login.html'; return; }
+  USER = JSON.parse(u);
+  renderProfile();
+  await Promise.all([loadStats(), loadTransactions()]);
+});
+
+function renderProfile() {
+  document.getElementById('avatarLetter').textContent  = USER.username?.[0]?.toUpperCase() || '?';
+  document.getElementById('profileName').textContent   = USER.username || '—';
+  document.getElementById('profileUsername').textContent = '@' + (USER.username || '—');
+  document.getElementById('profilePhone').textContent  = USER.phone || '—';
+  document.getElementById('balTop').textContent        = parseFloat(USER.balance || 0).toFixed(2);
+  document.getElementById('mainBal').textContent       = parseFloat(USER.balance || 0).toFixed(2);
+  document.getElementById('bonusBal').textContent      = parseFloat(USER.bonus || 0).toFixed(2);
+  // Pre-fill edit form
+  document.getElementById('editUsername').value = USER.username || '';
+  document.getElementById('editEmail').value    = USER.email || '';
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/bets/my?limit=1', {
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
+    });
+    const d = await r.json();
+    if (!d.success) return;
+    const s = d.stats || {};
+    document.getElementById('statTotal').textContent   = s.totalBets   || 0;
+    document.getElementById('statWon').textContent     = s.wonCount    || 0;
+    document.getElementById('statLost').textContent    = s.lostCount   || 0;
+    document.getElementById('statPending').textContent = s.pendingCount|| 0;
+    document.getElementById('statStake').textContent   = parseFloat(s.totalStake || 0).toFixed(0);
+    document.getElementById('statWin').textContent     = parseFloat(s.totalWon   || 0).toFixed(0);
+  } catch {}
+}
+
+async function loadTransactions() {
+  try {
+    const r = await fetch('/api/bets/transactions/history', {
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
+    });
+    const d = await r.json();
+    const list = document.getElementById('txList');
+
+    if (!d.success || !d.data.length) {
+      list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No transactions yet</div>';
+      return;
+    }
+
+    list.innerHTML = d.data.map(tx => {
+      const icons  = { deposit:'💰', win:'🏆', bet:'🎯', refund:'↩️', withdrawal:'📤', bonus:'🎁' };
+      const isPos  = ['deposit','win','refund','bonus'].includes(tx.type);
+      const amt    = Math.abs(tx.amount);
+      const date   = new Date(tx.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      return `<div class="tx-item">
+        <div class="tx-left">
+          <div class="tx-icon ${tx.type}">${icons[tx.type] || '💳'}</div>
+          <div>
+            <div class="tx-desc">${tx.description || tx.type}</div>
+            <div class="tx-date">${date}</div>
+          </div>
+        </div>
+        <div class="tx-amount ${isPos?'pos':'neg'}">${isPos?'+':'-'}KES ${amt.toFixed(2)}</div>
+      </div>`;
+    }).join('');
+  } catch {}
+}
+
+async function saveProfile() {
+  const username = document.getElementById('editUsername').value.trim();
+  const email    = document.getElementById('editEmail').value.trim();
+  const errEl    = document.getElementById('profileErr');
+  const okEl     = document.getElementById('profileOk');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!username || username.length < 3)
+    return showEl(errEl, 'Username must be at least 3 characters');
+
+  try {
+    const r = await fetch('/api/auth/update-profile', {
+      method:  'PUT',
+      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+localStorage.getItem('token') },
+      body:    JSON.stringify({ username, email })
+    });
+    const d = await r.json();
+    if (d.success) {
+      USER.username = username; USER.email = email;
+      localStorage.setItem('user', JSON.stringify(USER));
+      renderProfile();
+      showEl(okEl, 'Profile updated successfully!');
+    } else { showEl(errEl, d.message || 'Failed'); }
+  } catch { showEl(errEl, 'Connection error'); }
+}
+
+async function changePassword() {
+  const current = document.getElementById('currentPw').value;
+  const newPw   = document.getElementById('newPw').value;
+  const confirm = document.getElementById('confirmPw').value;
+  const errEl   = document.getElementById('pwErr');
+  const okEl    = document.getElementById('pwOk');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!current)          return showEl(errEl, 'Enter current password');
+  if (newPw.length < 6)  return showEl(errEl, 'New password must be at least 6 characters');
+  if (newPw !== confirm)  return showEl(errEl, 'Passwords do not match');
+  if (current === newPw)  return showEl(errEl, 'New password must be different');
+
+  try {
+    const r = await fetch('/api/auth/change-password', {
+      method:  'PUT',
+      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+localStorage.getItem('token') },
+      body:    JSON.stringify({ currentPassword: current, newPassword: newPw })
+    });
+    const d = await r.json();
+    if (d.success) {
+      showEl(okEl, 'Password changed! Please login again.');
+      setTimeout(() => { logout(); }, 2000);
+    } else { showEl(errEl, d.message || 'Failed'); }
+  } catch { showEl(errEl, 'Connection error'); }
+}
+
+function logout() {
+  localStorage.removeItem('token'); localStorage.removeItem('user');
+  location.href = '/pages/login.html';
+}
+
+function showEl(el, msg) { el.textContent = msg; el.style.display = 'block'; }
+function openModal(id)  { document.getElementById(id).classList.add('on'); }
+function closeModal(id) { document.getElementById(id).classList.remove('on'); }
+
+let tTmr = null;
+function showT(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `toast on ${type}`;
+  clearTimeout(tTmr); tTmr = setTimeout(() => el.classList.remove('on'), 3500);
+}
+</script>
+</body>
+</html>

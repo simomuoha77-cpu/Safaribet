@@ -109,3 +109,48 @@ router.get('/me', protect, async (req, res) => {
 });
 
 module.exports = router;
+
+// PUT /api/auth/update-profile
+router.put('/update-profile', protect, async (req, res) => {
+  try {
+    const { username, email } = req.body;
+    if (!username || username.length < 3)
+      return res.status(400).json({ success: false, message: 'Username too short' });
+
+    // Check username not taken by another user
+    const existing = await User.findOne({ username, _id: { $ne: req.user._id } });
+    if (existing)
+      return res.status(400).json({ success: false, message: 'Username already taken' });
+
+    req.user.username = username;
+    if (email) req.user.email = email;
+    await req.user.save();
+
+    res.json({ success: true, message: 'Profile updated', user: { username: req.user.username, email: req.user.email } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// PUT /api/auth/change-password
+router.put('/change-password', protect, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ success: false, message: 'All fields required' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ success: false, message: 'New password too short' });
+
+    const user = await User.findById(req.user._id);
+    const match = await user.comparePassword(currentPassword);
+    if (!match)
+      return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+
+    user.password = newPassword;
+    await user.save();
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
