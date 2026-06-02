@@ -149,7 +149,7 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
     <div class="wtxt">STARTING IN</div>
     <div class="wnum" id="wn">5</div>
   </div>
-  <div class="fair" onclick="showFair()" style="cursor:pointer">🔒 Provably Fair</div>
+  <div class="fair" onclick="showFair()">🔒 Provably Fair</div>
   <div class="pbadge">
     <div class="pavs">
       <div class="pav">👤</div><div class="pav">👤</div><div class="pav">👤</div>
@@ -182,12 +182,6 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
       <button class="qs" onclick="ss(1,500)">500</button>
       <button class="qs" onclick="ss(1,10000)">10,000</button>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
-      <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
-      <input id="ac1" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
-        style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
-      <span style="font-size:11px;color:#444">×</span>
-    </div>
     <!-- Slot 2 -->
     <div class="slot2">
       <div class="slot2-head">
@@ -207,12 +201,6 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
         <button class="qs" onclick="ss(2,200)">200</button>
         <button class="qs" onclick="ss(2,500)">500</button>
         <button class="qs" onclick="ss(2,10000)">10,000</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
-        <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
-        <input id="ac2" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
-          style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
-        <span style="font-size:11px;color:#444">×</span>
       </div>
     </div>
   </div>
@@ -571,12 +559,6 @@ function animLoop(ts){
     if(Math.floor(localMulti*2)>Math.floor(lastTickM*2)){
       playTick(); lastTickM=localMulti;
     }
-    // Auto cashout
-    [1,2].forEach(s=>{
-      const bet=s===1?BET1:BET2;
-      const ac=parseFloat(document.getElementById('ac'+s)?.value);
-      if(bet&&!bet.cashedOut&&ac&&localMulti>=ac) doCash(s);
-    });
 
     // Update cash out button live
     [1,2].forEach(s=>{
@@ -637,9 +619,7 @@ function startCountdown(from, roundId){
 // ══════════════════════════════════════
 async function poll(){
   try{
-    const token=localStorage.getItem('token');
-    const authH=token?{'Authorization':'Bearer '+token}:{};
-    const r=await fetch('/api/aviator/state',{headers:authH});
+    const r=await fetch('/api/aviator/state');
     const d=(await r.json()).data;
     if(!d) return;
     prevST=ST; ST=d.status; HIST=d.history||[];
@@ -676,6 +656,8 @@ async function poll(){
       }
       // Server multiplier takes precedence — sync if needed
       if(Math.abs(d.multiplier-localMulti)>0.5) localMulti=d.multiplier;
+      // Switch placed bets → Cash Out button now that flight is active
+      if(prevST==='waiting') updBtns();
 
     } else if(ST==='crashed'){
       if(flightActive) stopFlight();
@@ -694,8 +676,7 @@ async function poll(){
       updBtns();
     }
 
-    const _pt=localStorage.getItem('token');
-    fetch('/api/aviator/players',{headers:_pt?{'Authorization':'Bearer '+_pt}:{}}).then(r=>r.json()).then(d=>{
+    fetch('/api/aviator/players').then(r=>r.json()).then(d=>{
       PLAYERS=d.data||[];
       document.getElementById('pc').textContent=PLAYERS.length;
       renderBL();
