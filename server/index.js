@@ -37,10 +37,23 @@ app.use('/api/odds',    oddsRoutes);
 app.use('/api/aviator', aviatorRoutes);
 app.use('/api/mpesa',   mpesaRoutes);
 app.use('/api/bets',    betsRoutes);
-// Admin — hidden path
-const ADMIN_PATH = process.env.ADMIN_PATH || '/api/xpanel';
+// Admin — hidden API path
+const ADMIN_PATH     = process.env.ADMIN_PATH      || '/api/xpanel';
+const ADMIN_UI_PATH  = process.env.ADMIN_UI_PATH   || '/xpanel';
 app.use(ADMIN_PATH, adminRoutes);
-console.log(`🔒 Admin panel at ${ADMIN_PATH}`);
+console.log(`🔒 Admin panel → UI: ${ADMIN_UI_PATH}  API: ${ADMIN_PATH}`);
+
+// Serve admin panel HTML at hidden UI path
+app.get(ADMIN_UI_PATH, (req, res) => {
+  const fs   = require('fs');
+  const html = fs.readFileSync(path.join(__dirname, '../public/pages/xpanel.html'), 'utf8');
+  // Inject the API path as a meta tag so the frontend knows where to call
+  const patched = html.replace(
+    '<meta charset="UTF-8"/>',
+    `<meta charset="UTF-8"/><meta name="apath" content="${ADMIN_PATH}"/>`
+  );
+  res.send(patched);
+});
 
 // ── Frontend ──
 app.get('*', (req, res) => {

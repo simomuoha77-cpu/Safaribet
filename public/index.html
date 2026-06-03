@@ -325,6 +325,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('slipAction').innerHTML=
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
+  loadAvailableSports();
   loadMatches('soccer_epl');
   loadLiveTicker();
 
@@ -354,6 +355,46 @@ async function loadLiveTicker(){
   }catch{}
 }
 
+// ── LOAD AVAILABLE SPORTS ──
+async function loadAvailableSports(){
+  try{
+    const r=await fetch('/api/odds/available');
+    const d=await r.json();
+    if(!d.success||!d.data.length) return;
+
+    // Map sport keys to emoji + label
+    const labels={
+      soccer_epl:'⚽ Premier League',
+      soccer_spain_la_liga:'⚽ La Liga',
+      soccer_uefa_champs_league:'🏆 UCL',
+      soccer_germany_bundesliga:'⚽ Bundesliga',
+      soccer_italy_serie_a:'⚽ Serie A',
+      soccer_france_ligue_one:'⚽ Ligue 1',
+      basketball_nba:'🏀 NBA',
+      basketball_euroleague:'🏀 Euroleague',
+      americanfootball_nfl:'🏈 NFL',
+      baseball_mlb:'⚾ MLB',
+      icehockey_nhl:'🏒 NHL',
+      soccer_africa_cup_of_nations:'⚽ AFCON',
+      soccer_mls:'⚽ MLS',
+      cricket_ipl:'🏏 IPL',
+      rugbyunion_world_cup:'🏉 Rugby WC',
+    };
+
+    const nav=document.getElementById('stabs');
+    // Keep LIVE tab, rebuild rest
+    const liveTab=`<div class="stab" data-sport="live" onclick="pickSport(this)">🔴 LIVE</div>`;
+    const sportTabs=d.data.slice(0,12).map(s=>{
+      const label=labels[s.key]||('🎯 '+s.title);
+      const isActive=s.key===currentSport?'on':'';
+      return `<div class="stab ${isActive}" data-sport="${s.key}" onclick="pickSport(this)">${label}</div>`;
+    }).join('');
+    nav.innerHTML=sportTabs+liveTab;
+  }catch(e){
+    console.log('Could not load available sports:',e.message);
+  }
+}
+
 // ── LOAD MATCHES ──
 async function loadMatches(sport, silent=false){
   const el=document.getElementById('matchList');
@@ -365,7 +406,11 @@ async function loadMatches(sport, silent=false){
     const d=await r.json();
 
     if(!d.success||!d.data.length){
-      el.innerHTML='<div class="empty">No matches right now.<br/>Try another league.</div>';
+      el.innerHTML=`<div class="empty" style="padding:40px 20px">
+  <div style="font-size:36px;margin-bottom:12px">⚽</div>
+  <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches available</div>
+  <div style="font-size:13px;line-height:1.6">The ${currentSport.replace(/_/g,' ')} season may be off right now.<br/>Try another league from the tabs above.</div>
+</div>`;
       return;
     }
 

@@ -198,11 +198,10 @@ let curPage  = { users:1, bets:1, transactions:1 };
 let curTab   = 'dashboard';
 let selUser  = null, selBet = null, selMatch = null;
 
-// ── DETECT ADMIN PATH ──
-// The admin path is the current page's directory
-// e.g. /pages/xpanel.html -> API is at /api/xpanel
 window.addEventListener('DOMContentLoaded', () => {
-  APATH = '/api/xpanel';
+  // Read admin API path from meta tag (set by server) or default
+  const meta = document.querySelector('meta[name="apath"]');
+  APATH = meta ? meta.content : '/api/xpanel';
   ATOKEN = sessionStorage.getItem('atoken');
   if (ATOKEN) showPanel();
 });
