@@ -151,18 +151,25 @@ router.get('/my', requireAuth, async (req, res) => {
     ]);
 
     // Stats
-    const stats = await Bet.aggregate([
-      { $match: { userId: require('mongoose').Types.ObjectId(req.userId) } },
-      { $group: {
-        _id:         null,
-        totalBets:   { $sum: 1 },
-        totalStake:  { $sum: '$stake' },
-        totalWon:    { $sum: { $cond: [{ $eq: ['$status','won'] }, '$netPayout', 0] } },
-        wonCount:    { $sum: { $cond: [{ $eq: ['$status','won'] }, 1, 0] } },
-        lostCount:   { $sum: { $cond: [{ $eq: ['$status','lost'] }, 1, 0] } },
-        pendingCount:{ $sum: { $cond: [{ $eq: ['$status','pending'] }, 1, 0] } }
-      }}
+    // Safe stats — count manually to avoid ObjectId issues
+    const [wonCount, lostCount, pendingCount, wonBets] = await Promise.all([
+      Bet.countDocuments({ userId: req.userId, status: 'won' }),
+      Bet.countDocuments({ userId: req.userId, status: 'lost' }),
+      Bet.countDocuments({ userId: req.userId, status: 'pending' }),
+      Bet.find({ userId: req.userId, status: 'won' }).select('netPayout stake').lean()
     ]);
+    const totalStakeRes = await Bet.aggregate([
+      { $match: { userId: require('mongoose').Types.ObjectId.createFromHexString(req.userId) } },
+      { $group: { _id: null, total: { $sum: '$stake' } } }
+    ]).catch(() => []);
+    const stats = [{
+      totalBets:    total,
+      totalStake:   totalStakeRes[0]?.total || 0,
+      totalWon:     wonBets.reduce((a,b) => a + (b.netPayout||0), 0),
+      wonCount,
+      lostCount,
+      pendingCount
+    }];
 
     res.json({
       success: true,
