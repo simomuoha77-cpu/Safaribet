@@ -192,13 +192,13 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 </header>
 
 <nav class="stabs" id="stabs">
-  <div class="stab on" data-sport="soccer_epl" onclick="pickSport(this)">⚽ Premier League</div>
-  <div class="stab" data-sport="soccer_spain_la_liga" onclick="pickSport(this)">⚽ La Liga</div>
-  <div class="stab" data-sport="soccer_uefa_champs_league" onclick="pickSport(this)">🏆 UCL</div>
-  <div class="stab" data-sport="soccer_germany_bundesliga" onclick="pickSport(this)">⚽ Bundesliga</div>
-  <div class="stab" data-sport="soccer_italy_serie_a" onclick="pickSport(this)">⚽ Serie A</div>
-  <div class="stab" data-sport="soccer_france_ligue_one" onclick="pickSport(this)">⚽ Ligue 1</div>
-  <div class="stab" data-sport="basketball_nba" onclick="pickSport(this)">🏀 NBA</div>
+  <div class="stab on" data-sport="soccer_world_cup" onclick="pickSport(this)">🏆 World Cup</div>
+  <div class="stab" data-sport="soccer_kenya_premier_league" onclick="pickSport(this)">🇰🇪 Kenya Premier</div>
+  <div class="stab" data-sport="soccer_mls" onclick="pickSport(this)">🇺🇸 MLS</div>
+  <div class="stab" data-sport="soccer_brazil_serie_a" onclick="pickSport(this)">🇧🇷 Brazil</div>
+  <div class="stab" data-sport="soccer_caf_champions_league" onclick="pickSport(this)">🌍 CAF CL</div>
+  <div class="stab" data-sport="soccer_copa_america" onclick="pickSport(this)">🏆 Copa Am.</div>
+  <div class="stab" data-sport="soccer_wc_qual_europe" onclick="pickSport(this)">🌍 WC Qual EU</div>
   <div class="stab" data-sport="live" onclick="pickSport(this)">🔴 LIVE</div>
 </nav>
 
@@ -386,7 +386,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
   loadAvailableSports();
-  loadMatches('soccer_epl');
+  loadMatches('soccer_world_cup');
   loadLiveTicker();
 
   // Refresh odds every 60s
