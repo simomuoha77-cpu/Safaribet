@@ -224,20 +224,20 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 
   <!-- PROMO CARDS -->
   <div style="display:flex;gap:8px;padding:0 10px;margin-bottom:10px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch">
-    <div onclick="pickSportByKey('soccer_epl')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(0,200,83,0.2)">
+    <div onclick="pickSportByKey('soccer_world_cup')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,214,0,0.4)">
       <img src="https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=260&h=150&fit=crop&auto=format&q=70"
            style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
       <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
-        <div style="font-size:11px;font-weight:700;color:#fff">⚽ Premier League</div>
+        <div style="font-size:11px;font-weight:700;color:#ffd600">🏆 World Cup 2026</div>
         <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
       </div>
     </div>
-    <div onclick="pickSportByKey('soccer_uefa_champs_league')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,214,0,0.2)">
+    <div onclick="pickSportByKey('soccer_brazil_serie_a')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(0,200,83,0.2)">
       <img src="https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=260&h=150&fit=crop&auto=format&q=70"
            style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
       <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
-        <div style="font-size:11px;font-weight:700;color:#fff">🏆 UCL</div>
-        <div style="font-size:9px;color:var(--yl);font-weight:600">Bet Now</div>
+        <div style="font-size:11px;font-weight:700;color:#fff">🇧🇷 Brazil Série A</div>
+        <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
       </div>
     </div>
     <div onclick="location.href='/pages/aviator.html'" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,59,59,0.2);background:linear-gradient(135deg,#1a0505,#0d0505)">
@@ -254,11 +254,11 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
         <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
       </div>
     </div>
-    <div onclick="pickSportByKey('basketball_nba')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,107,0,0.2)">
+    <div onclick="pickSportByKey('soccer_mls')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,107,0,0.2)">
       <img src="https://images.unsplash.com/photo-1546519638-68e109498ffc?w=260&h=150&fit=crop&auto=format&q=70"
            style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
       <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
-        <div style="font-size:11px;font-weight:700;color:#fff">🏀 NBA</div>
+        <div style="font-size:11px;font-weight:700;color:#fff">🇺🇸 MLS</div>
         <div style="font-size:9px;color:#ff9500;font-weight:600">Bet Now</div>
       </div>
     </div>
@@ -272,7 +272,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 
   <!-- Matches -->
   <div class="sechd">
-    <div class="secttl" id="secTtl">Premier League</div>
+    <div class="secttl" id="secTtl">World Cup 2026</div>
     <div class="seeall">All matches →</div>
   </div>
   <div class="mth">
@@ -368,7 +368,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 
 <script>
 // ── STATE ──
-let USER=null, slip=[], currentSport='soccer_epl';
+let USER=null, slip=[], currentSport='soccer_world_cup';
 let oddsRefresh=null;
 
 // ── INIT ──
@@ -386,7 +386,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
   loadAvailableSports();
-  loadMatches('soccer_world_cup');
+  // Initial load handled inside loadAvailableSports → loadFirstWithMatches
+  // (tries each league in order until one returns real fixtures)
   loadLiveTicker();
 
   // Refresh odds every 60s
@@ -423,26 +424,22 @@ async function loadAvailableSports(){
     if(!d.success||!d.data.length) return;
 
     const labels={
-      soccer_epl:'⚽ Premier League',
-      soccer_spain_la_liga:'⚽ La Liga',
-      soccer_uefa_champs_league:'🏆 UCL',
-      soccer_germany_bundesliga:'⚽ Bundesliga',
-      soccer_italy_serie_a:'⚽ Serie A',
-      soccer_france_ligue_one:'⚽ Ligue 1',
-      basketball_nba:'🏀 NBA',
-      basketball_euroleague:'🏀 Euroleague',
-      americanfootball_nfl:'🏈 NFL',
-      baseball_mlb:'⚾ MLB',
-      icehockey_nhl:'🏒 NHL',
-      soccer_africa_cup_of_nations:'⚽ AFCON',
-      soccer_mls:'⚽ MLS',
-      cricket_ipl:'🏏 IPL',
-      soccer_brazil_campeonato:'⚽ Brazil',
-      soccer_argentina_primera_division:'⚽ Argentina',
-      soccer_turkey_super_league:'⚽ Turkey',
-      soccer_netherlands_eredivisie:'⚽ Eredivisie',
-      soccer_portugal_primeira_liga:'⚽ Portugal',
-      rugbyunion_world_cup:'🏉 Rugby WC',
+      soccer_world_cup:           '🏆 World Cup 2026',
+      soccer_mls:                 '🇺🇸 MLS',
+      soccer_brazil_serie_a:      '🇧🇷 Brazil Série A',
+      soccer_kenya_premier_league:'🇰🇪 Kenya Premier',
+      soccer_friendlies:          '🌐 Friendlies',
+      soccer_caf_champions_league:'🌍 CAF CL',
+      soccer_copa_america:        '🏆 Copa América',
+      soccer_wc_qual_europe:      '🌍 WC Qual EU',
+      soccer_nations_league:      '⚽ Nations League',
+      soccer_caf_confederation:   '🌍 CAF CC',
+      soccer_wc_qual_conmebol:    '🏆 WC Qual SA',
+      soccer_wc_qual_africa:      '🌍 WC Qual AF',
+      soccer_wc_qual_asia:        '🌏 WC Qual AS',
+      // Off-season (show graceful empty state when clicked)
+      soccer_epl:                 '⚽ Premier League',
+      soccer_uefa_champs_league:  '🏆 UCL',
     };
 
     const nav=document.getElementById('stabs');
@@ -465,28 +462,40 @@ async function loadAvailableSports(){
 }
 
 // ── FIND FIRST SPORT WITH REAL MATCHES ──
+// Try leagues known to be active in June first to minimise API quota usage
 async function loadFirstWithMatches(sports){
-  for(const s of sports){
+  // Preferred order: guaranteed-active leagues come first
+  const preferredOrder=['soccer_mls','soccer_brazil_serie_a','soccer_world_cup',
+                        'soccer_friendlies','soccer_kenya_premier_league'];
+  const sorted=[
+    ...preferredOrder.map(k=>sports.find(s=>s.key===k)).filter(Boolean),
+    ...sports.filter(s=>s.key!=='live'&&!preferredOrder.includes(s.key))
+  ];
+  for(const s of sorted){
     try{
       const r=await fetch(`/api/odds/matches/${s.key}`);
       const d=await r.json();
       if(d.success && d.data && d.data.length>0){
         currentSport=s.key;
-        // Update tab selection
         document.querySelectorAll('.stab').forEach(t=>{
           t.classList.remove('on');
           if(t.dataset.sport===s.key) t.classList.add('on');
         });
         document.getElementById('secTtl').textContent=
-          s.title.replace(/^[^a-zA-Z]+/,'').trim();
+          s.title.replace(/^[^\p{L}]+/u,'').trim()||s.title;
         renderMatches(d.data);
         return;
       }
     }catch(e){}
   }
-  // Nothing found
+  // Nothing found across all leagues
   document.getElementById('matchList').innerHTML=
-    '<div class="empty">No matches available right now. Check back later.</div>';
+    '<div class="empty" style="padding:40px 20px">'+
+    '<div style="font-size:36px;margin-bottom:12px">⚽</div>'+
+    '<div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches right now</div>'+
+    '<div style="font-size:13px;color:var(--mt)">All leagues may be on break. Try the LIVE tab or check back later.</div>'+
+    '<div style="margin-top:12px"><a href="/api/odds/debug" target="_blank" style="color:#4caf50;font-size:12px">🔧 API Debug</a></div>'+
+    '</div>';
 }
 
 // ── LOAD MATCHES ──
@@ -508,7 +517,7 @@ async function loadMatches(sport, silent=false){
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
   <div style="font-size:36px;margin-bottom:12px">⚽</div>
   <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches available</div>
-  <div style="font-size:13px;line-height:1.6">The ${currentSport.replace(/_/g,' ')} season may be off right now.<br/>Try another league from the tabs above.${dbgInfo}</div>
+  <div style="font-size:13px;line-height:1.6">The ${sport.replace(/_/g,' ')} season may be off right now.<br/>Try another league from the tabs above.${dbgInfo}</div>
 </div>`;
       return;
     }

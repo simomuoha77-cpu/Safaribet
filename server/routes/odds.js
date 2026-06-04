@@ -1,110 +1,142 @@
 /**
  * odds.js — Always returns real matches
  * Direct API-Football call, no scheduler dependency
+ * Fixed: dynamic key read, wider date window, all sport keys mapped
  */
 const express = require('express');
 const axios   = require('axios');
 const Match   = require('../models/Match');
 const router  = express.Router();
 
-const APIF_KEY  = process.env.APIFOOTBALL_KEY;
-const APIF_BASE = 'https://v3.football.api-sports.io';
+// ── Read key dynamically so restarts aren't needed after env changes ──
+const getApiKey  = () => process.env.APIFOOTBALL_KEY;
+const APIF_BASE  = 'https://v3.football.api-sports.io';
+const APIF_HDR   = () => ({ 'x-rapidapi-key': getApiKey(), 'x-rapidapi-host': 'v3.football.api-sports.io' });
 
 // Memory cache — 5 min per sport
 const cache = {};
 const TTL   = 5 * 60 * 1000;
-const C = { get:(k)=>{ const c=cache[k]; return c&&Date.now()-c.ts<TTL?c.data:null; }, set:(k,d)=>{ cache[k]={data:d,ts:Date.now()}; } };
+const C = {
+  get: (k) => { const c = cache[k]; return c && Date.now() - c.ts < TTL ? c.data : null; },
+  set: (k, d) => { cache[k] = { data: d, ts: Date.now() }; }
+};
 
-// ── ALL ACTIVE LEAGUES (June 2026) with correct seasons ──
+// ── ALL ACTIVE LEAGUES (June 2026) with correct API-Football IDs/seasons ──
+// FIFA World Cup 2026 starts June 11 — all other leagues confirmed active
 const LEAGUES = [
-  // International tournaments — ALWAYS have matches June-July
-  { id:1,   key:'soccer_world_cup',           name:'FIFA World Cup 2026',     season:2026 },
-  { id:9,   key:'soccer_copa_america',         name:'Copa América',            season:2024 },
-  { id:8,   key:'soccer_nations_league',       name:'UEFA Nations League',     season:2024 },
-  { id:32,  key:'soccer_wc_qual_europe',       name:'WC Qual Europe',          season:2026 },
-  { id:13,  key:'soccer_wc_qual_conmebol',     name:'WC Qual CONMEBOL',        season:2026 },
-  { id:34,  key:'soccer_wc_qual_africa',       name:'WC Qual Africa',          season:2026 },
-  { id:36,  key:'soccer_wc_qual_asia',         name:'WC Qual Asia',            season:2026 },
-  // Club leagues active in June
-  { id:253, key:'soccer_mls',                  name:'MLS',                     season:2026 },
-  { id:71,  key:'soccer_brazil_serie_a',       name:'Brazilian Série A',       season:2026 },
-  { id:239, key:'soccer_kenya_premier_league', name:'Kenya Premier League 🇰🇪',season:2025 },
-  { id:169, key:'soccer_caf_champions_league', name:'CAF Champions League',    season:2024 },
-  { id:12,  key:'soccer_caf_confederation',    name:'CAF Confederation Cup',   season:2024 },
-  // Friendlies & other — always ongoing
-  { id:667, key:'soccer_friendlies',           name:'International Friendlies',season:2026 },
-  { id:10,  key:'soccer_friendlies',           name:'International Friendlies',season:2026 },
+  // === INTERNATIONAL — active June–July 2026 ===
+  { id: 1,   key: 'soccer_world_cup',              name: 'FIFA World Cup 2026',        season: 2026 },
+  { id: 9,   key: 'soccer_copa_america',           name: 'Copa América 2024',          season: 2024 },
+  { id: 8,   key: 'soccer_nations_league',         name: 'UEFA Nations League',        season: 2024 },
+  { id: 32,  key: 'soccer_wc_qual_europe',         name: 'WC Qual Europe',             season: 2026 },
+  { id: 13,  key: 'soccer_wc_qual_conmebol',       name: 'WC Qual CONMEBOL',           season: 2026 },
+  { id: 34,  key: 'soccer_wc_qual_africa',         name: 'WC Qual Africa',             season: 2026 },
+  { id: 36,  key: 'soccer_wc_qual_asia',           name: 'WC Qual Asia',               season: 2026 },
+
+  // === CLUB LEAGUES — active June 2026 ===
+  { id: 253, key: 'soccer_mls',                    name: 'MLS 2026',                   season: 2026 },
+  { id: 71,  key: 'soccer_brazil_serie_a',         name: 'Brazilian Série A',          season: 2026 },
+  { id: 239, key: 'soccer_kenya_premier_league',   name: 'Kenya Premier League 🇰🇪',  season: 2025 },
+  { id: 292, key: 'soccer_kenya_premier_league',   name: 'Kenya Premier League 🇰🇪',  season: 2024 },
+  { id: 169, key: 'soccer_caf_champions_league',   name: 'CAF Champions League',       season: 2024 },
+  { id: 12,  key: 'soccer_caf_confederation',      name: 'CAF Confederation Cup',      season: 2024 },
+
+  // === FRIENDLIES — always have matches ===
+  { id: 667, key: 'soccer_friendlies',             name: 'International Friendlies',   season: 2026 },
+  { id: 10,  key: 'soccer_friendlies',             name: 'International Friendlies',   season: 2026 },
+
+  // === OFF-SEASON (quick-card support — graceful empty state) ===
+  // EPL and UCL are off until Aug/Sep 2026; kept so the routes don't 404
+  { id: 39,  key: 'soccer_epl',                    name: 'Premier League',             season: 2025 },
+  { id: 2,   key: 'soccer_uefa_champs_league',     name: 'UEFA Champions League',      season: 2025 },
 ];
 
-// sport key → leagues
+// sport key → league list (de-duplicated by id+season)
 const BY_KEY = {};
 for (const lg of LEAGUES) {
   if (!BY_KEY[lg.key]) BY_KEY[lg.key] = [];
-  // Avoid duplicate id+season
-  if (!BY_KEY[lg.key].find(x=>x.id===lg.id&&x.season===lg.season))
+  if (!BY_KEY[lg.key].find(x => x.id === lg.id && x.season === lg.season))
     BY_KEY[lg.key].push(lg);
 }
 
 function genOdds(home, away) {
-  const h = s => s.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-  const seed = (h(home)*7+h(away)*3)%100;
-  return { home:+(1.40+(seed%30)/20).toFixed(2), draw:+(2.80+(seed%20)/15).toFixed(2), away:+(1.70+(seed%35)/18).toFixed(2) };
+  const h = s => s.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  const seed = (h(home) * 7 + h(away) * 3) % 100;
+  return {
+    home: +(1.40 + (seed % 30) / 20).toFixed(2),
+    draw: +(2.80 + (seed % 20) / 15).toFixed(2),
+    away: +(1.70 + (seed % 35) / 18).toFixed(2)
+  };
 }
 
-// ── Direct API-Football call ──
+// ── Direct API-Football fetch ──
 async function apifetch(leagueId, season, from, to) {
-  if (!APIF_KEY) return { fixtures:[], error:'APIFOOTBALL_KEY not set in Render environment variables' };
+  const key = getApiKey();
+  if (!key) return { fixtures: [], error: 'APIFOOTBALL_KEY not set in Render environment variables' };
   try {
     const r = await axios.get(`${APIF_BASE}/fixtures`, {
-      headers: { 'x-rapidapi-key': APIF_KEY, 'x-rapidapi-host': 'v3.football.api-sports.io' },
-      params:  { league:leagueId, season, from, to },
+      headers: APIF_HDR(),
+      params:  { league: leagueId, season, from, to },
       timeout: 15000
     });
     const quota = r.headers['x-ratelimit-requests-remaining'];
-    console.log(`[apif] league=${leagueId} season=${season} from=${from} to=${to} → ${r.data?.response?.length||0} fixtures (quota:${quota})`);
+    const count = r.data?.response?.length || 0;
+    console.log(`[apif] league=${leagueId} season=${season} ${from}→${to} → ${count} fixtures (quota:${quota})`);
     return { fixtures: r.data?.response || [], quota };
-  } catch(e) {
+  } catch (e) {
     const status = e?.response?.status;
     const msg    = e?.response?.data?.message || e.message;
     console.error(`[apif] ERROR league=${leagueId}: HTTP ${status} — ${msg}`);
-    return { fixtures:[], error:`${status}: ${msg}` };
+    return { fixtures: [], error: `${status}: ${msg}` };
   }
 }
 
 function buildMatch(fix, sportKey, leagueName) {
-  const f=fix.fixture, teams=fix.teams, goals=fix.goals;
-  const home=teams?.home?.name, away=teams?.away?.name;
-  if(!home||!away) return null;
-  const s=f.status?.short;
-  const status=['1H','2H','HT','ET','BT','P'].includes(s)?'live':['FT','AET','PEN'].includes(s)?'finished':['PST','CANC','ABD'].includes(s)?'cancelled':'upcoming';
+  const f = fix.fixture, teams = fix.teams, goals = fix.goals;
+  const home = teams?.home?.name, away = teams?.away?.name;
+  if (!home || !away) return null;
+  const s = f.status?.short;
+  const status = ['1H','2H','HT','ET','BT','P'].includes(s) ? 'live'
+               : ['FT','AET','PEN'].includes(s)             ? 'finished'
+               : ['PST','CANC','ABD'].includes(s)           ? 'cancelled'
+               : 'upcoming';
   return {
-    matchId:`apif_${f.id}`, sport:sportKey, league:leagueName,
-    homeTeam:home, awayTeam:away, commenceTime:f.date, status,
-    odds:genOdds(home,away),
-    score:{home:goals?.home??null, away:goals?.away??null, minute:f.status?.elapsed||null, period:s||null},
-    result: status==='finished' ? (goals?.home>goals?.away?'home':goals?.away>goals?.home?'away':'draw') : null,
-    isStatic:false
+    matchId:      `apif_${f.id}`,
+    sport:        sportKey,
+    league:       leagueName,
+    homeTeam:     home,
+    awayTeam:     away,
+    commenceTime: f.date,
+    status,
+    odds:   genOdds(home, away),
+    score:  { home: goals?.home ?? null, away: goals?.away ?? null, minute: f.status?.elapsed || null, period: s || null },
+    result: status === 'finished'
+      ? (goals?.home > goals?.away ? 'home' : goals?.away > goals?.home ? 'away' : 'draw')
+      : null,
+    isStatic: false
   };
 }
 
-// ── AVAILABLE SPORTS ──
+// ── AVAILABLE SPORTS (active-first order) ──
 router.get('/available', async (req, res) => {
   const cached = C.get('available');
-  if (cached) return res.json({success:true,data:cached});
+  if (cached) return res.json({ success: true, data: cached });
+
+  // Active-first: MLS & Brazil are guaranteed live in June; WC starts June 11
   const sports = [
-    {key:'soccer_world_cup',          title:'🏆 World Cup 2026',      group:'International'},
-    {key:'soccer_kenya_premier_league',title:'🇰🇪 Kenya Premier',     group:'Africa'},
-    {key:'soccer_mls',                title:'🇺🇸 MLS',                group:'Americas'},
-    {key:'soccer_brazil_serie_a',     title:'🇧🇷 Brazil Série A',     group:'Americas'},
-    {key:'soccer_caf_champions_league',title:'🌍 CAF Champ. League',  group:'Africa'},
-    {key:'soccer_copa_america',       title:'🏆 Copa América',        group:'International'},
-    {key:'soccer_wc_qual_europe',     title:'🌍 WC Qual Europe',      group:'International'},
-    {key:'soccer_nations_league',     title:'⚽ Nations League',      group:'International'},
-    {key:'soccer_friendlies',         title:'🌐 Friendlies',          group:'International'},
-    {key:'live',                      title:'🔴 LIVE',                group:'Live'},
+    { key: 'soccer_world_cup',           title: '🏆 World Cup 2026',       group: 'International' },
+    { key: 'soccer_mls',                  title: '🇺🇸 MLS',                 group: 'Americas' },
+    { key: 'soccer_brazil_serie_a',       title: '🇧🇷 Brazil Série A',      group: 'Americas' },
+    { key: 'soccer_kenya_premier_league', title: '🇰🇪 Kenya Premier',       group: 'Africa' },
+    { key: 'soccer_friendlies',           title: '🌐 Friendlies',            group: 'International' },
+    { key: 'soccer_caf_champions_league', title: '🌍 CAF Champ. League',    group: 'Africa' },
+    { key: 'soccer_copa_america',         title: '🏆 Copa América',          group: 'International' },
+    { key: 'soccer_wc_qual_europe',       title: '🌍 WC Qual Europe',        group: 'International' },
+    { key: 'soccer_nations_league',       title: '⚽ Nations League',        group: 'International' },
+    { key: 'live',                         title: '🔴 LIVE',                  group: 'Live' },
   ];
   C.set('available', sports);
-  res.json({success:true, data:sports});
+  res.json({ success: true, data: sports });
 });
 
 // ── MATCHES — always fresh from API ──
@@ -113,47 +145,50 @@ router.get('/matches/:sport', async (req, res) => {
 
   // 1. Memory cache (5 min)
   const cached = C.get(sport);
-  if (cached) return res.json({success:true, data:cached, source:'cache', count:cached.length});
+  if (cached) return res.json({ success: true, data: cached, source: 'cache', count: cached.length });
 
-  // 2. DB cache
+  // 2. DB cache (2-hour window)
   const now = new Date();
   try {
     const dbRows = await Match.find({
-      sport, status:{$in:['upcoming','live']},
-      commenceTime:{$gte:new Date(now.getTime()-2*60*60*1000)},
-      isStatic:{$ne:true}
-    }).sort({commenceTime:1}).limit(30).lean();
+      sport,
+      status:      { $in: ['upcoming', 'live'] },
+      commenceTime:{ $gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
+      isStatic:    { $ne: true }
+    }).sort({ commenceTime: 1 }).limit(30).lean();
+
     if (dbRows.length) {
       C.set(sport, dbRows);
-      return res.json({success:true, data:dbRows, source:'db', count:dbRows.length});
+      return res.json({ success: true, data: dbRows, source: 'db', count: dbRows.length });
     }
-  } catch(e) { console.error('[apif] DB error:', e.message); }
+  } catch (e) { console.error('[apif] DB error:', e.message); }
 
   // 3. Live fetch from API-Football
-  if (!APIF_KEY) {
+  const key = getApiKey();
+  if (!key) {
     console.error('❌ APIFOOTBALL_KEY is NOT set in environment!');
     return res.json({
-      success:false,
-      data:[],
-      message:'APIFOOTBALL_KEY missing — add it in Render → Environment Variables'
+      success: false, data: [],
+      message: 'APIFOOTBALL_KEY missing — add it in Render → Environment Variables'
     });
   }
 
   const leagues = BY_KEY[sport] || [];
   if (!leagues.length) {
-    return res.json({success:true, data:[], message:`Unknown sport: ${sport}`});
+    return res.json({ success: true, data: [], message: `No league configured for: ${sport}` });
   }
 
+  // 21-day window for better coverage (especially WC group stage)
   const today = new Date().toISOString().split('T')[0];
-  const in14  = new Date(Date.now()+14*24*60*60*1000).toISOString().split('T')[0];
+  const in21  = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  console.log(`📡 [apif] Fetching ${sport} (${leagues.length} leagues) ${today}→${in14}`);
+  console.log(`📡 [apif] Fetching ${sport} (${leagues.length} leagues) ${today}→${in21}`);
 
   let allMatches = [], lastError = null;
 
   for (const lg of leagues) {
-    const { fixtures, error } = await apifetch(lg.id, lg.season, today, in14);
-    if (error) { lastError = error; }
+    const { fixtures, error } = await apifetch(lg.id, lg.season, today, in21);
+    if (error) { lastError = error; continue; }
     for (const fix of fixtures) {
       const m = buildMatch(fix, sport, lg.name);
       if (m) allMatches.push(m);
@@ -162,98 +197,126 @@ router.get('/matches/:sport', async (req, res) => {
     await new Promise(r => setTimeout(r, 250));
   }
 
-  // Deduplicate by matchId
+  // Deduplicate
   const seen = new Set();
-  allMatches = allMatches.filter(m => { if(seen.has(m.matchId)) return false; seen.add(m.matchId); return true; });
+  allMatches = allMatches.filter(m => {
+    if (seen.has(m.matchId)) return false;
+    seen.add(m.matchId);
+    return true;
+  });
 
-  console.log(`[apif] ${sport}: ${allMatches.length} matches total`);
+  console.log(`[apif] ${sport}: ${allMatches.length} matches ready`);
 
   if (!allMatches.length) {
     return res.json({
-      success:true, data:[],
+      success: true, data: [],
       message: lastError
         ? `API error: ${lastError}`
         : `No upcoming fixtures for ${sport} right now. League may be on break or between seasons.`,
-      debug: { sport, leagueIds: leagues.map(l=>l.id), seasons: [...new Set(leagues.map(l=>l.season))], apiKeySet: !!APIF_KEY }
+      debug: {
+        sport,
+        leagueIds: leagues.map(l => l.id),
+        seasons:   [...new Set(leagues.map(l => l.season))],
+        dateRange: `${today} → ${in21}`,
+        apiKeySet: !!key
+      }
     });
   }
 
   C.set(sport, allMatches);
 
-  // Save to DB in background
+  // Persist to DB in background
   allMatches.forEach(m => Match.findOneAndUpdate(
-    {matchId:m.matchId},
-    {$set:{...m, commenceTime:new Date(m.commenceTime), isStatic:false}},
-    {upsert:true}
-  ).catch(()=>{}));
+    { matchId: m.matchId },
+    { $set: { ...m, commenceTime: new Date(m.commenceTime), isStatic: false } },
+    { upsert: true }
+  ).catch(() => {}));
 
-  res.json({success:true, data:allMatches, source:'apif', count:allMatches.length});
+  res.json({ success: true, data: allMatches, source: 'apif', count: allMatches.length });
 });
 
 // ── LIVE ──
 router.get('/live', async (req, res) => {
   try {
-    if (APIF_KEY) {
-      const r = await axios.get(`${APIF_BASE}/fixtures`,{
-        headers:{'x-rapidapi-key':APIF_KEY,'x-rapidapi-host':'v3.football.api-sports.io'},
-        params:{live:'all'}, timeout:10000
+    const key = getApiKey();
+    if (key) {
+      const r = await axios.get(`${APIF_BASE}/fixtures`, {
+        headers: APIF_HDR(),
+        params:  { live: 'all' },
+        timeout: 10000
       });
-      const live=(r.data?.response||[]).map(fix=>({
-        matchId:`apif_${fix.fixture.id}`,
-        homeTeam:fix.teams?.home?.name, awayTeam:fix.teams?.away?.name,
-        league:fix.league?.name,
-        score:{home:fix.goals?.home,away:fix.goals?.away,minute:fix.fixture?.status?.elapsed},
-        status:'live', odds:genOdds(fix.teams?.home?.name||'',fix.teams?.away?.name||'')
-      })).filter(m=>m.homeTeam&&m.awayTeam);
-      return res.json({success:true,data:live});
+      const live = (r.data?.response || []).map(fix => ({
+        matchId:  `apif_${fix.fixture.id}`,
+        homeTeam: fix.teams?.home?.name,
+        awayTeam: fix.teams?.away?.name,
+        league:   fix.league?.name,
+        score:    { home: fix.goals?.home, away: fix.goals?.away, minute: fix.fixture?.status?.elapsed },
+        status:   'live',
+        odds:     genOdds(fix.teams?.home?.name || '', fix.teams?.away?.name || '')
+      })).filter(m => m.homeTeam && m.awayTeam);
+      return res.json({ success: true, data: live });
     }
-    const m=await Match.find({status:'live'}).sort({commenceTime:1}).limit(20).lean();
-    res.json({success:true,data:m});
-  } catch(e){ res.json({success:true,data:[]}); }
+    const m = await Match.find({ status: 'live' }).sort({ commenceTime: 1 }).limit(20).lean();
+    res.json({ success: true, data: m });
+  } catch (e) { res.json({ success: true, data: [] }); }
 });
 
-// ── DEBUG — OPEN THIS IN BROWSER TO DIAGNOSE ──
+// ── DEBUG — open in browser to diagnose ──
 router.get('/debug', async (req, res) => {
+  const key = getApiKey();
   const result = {
     timestamp: new Date().toISOString(),
     env: {
-      APIFOOTBALL_KEY: APIF_KEY ? `SET (${APIF_KEY.slice(0,8)}...)` : '❌ NOT SET — add in Render environment',
-      ODDS_API_KEY: process.env.ODDS_API_KEY ? 'SET' : 'not set',
-      NODE_ENV: process.env.NODE_ENV,
+      APIFOOTBALL_KEY: key ? `SET (${key.slice(0,8)}...)` : '❌ NOT SET — add in Render environment',
+      ODDS_API_KEY:    process.env.ODDS_API_KEY ? 'SET' : 'not set',
+      NODE_ENV:        process.env.NODE_ENV,
     }
   };
 
-  if (APIF_KEY) {
+  if (key) {
+    // Status check
     try {
-      const r = await axios.get(`${APIF_BASE}/status`,{
-        headers:{'x-rapidapi-key':APIF_KEY,'x-rapidapi-host':'v3.football.api-sports.io'},
-        timeout:8000
-      });
+      const r = await axios.get(`${APIF_BASE}/status`, { headers: APIF_HDR(), timeout: 8000 });
       result.apifootball = {
-        status:'✅ OK',
-        plan: r.data?.response?.subscription?.plan,
+        status:         '✅ OK',
+        plan:           r.data?.response?.subscription?.plan,
         requests_today: r.data?.response?.requests?.current,
         limit_per_day:  r.data?.response?.requests?.limit_day,
         remaining:      r.data?.response?.requests?.limit_day - r.data?.response?.requests?.current
       };
-    } catch(e) {
-      result.apifootball = { status:`❌ ERROR: ${e?.response?.status} ${e?.response?.data?.message||e.message}` };
+    } catch (e) {
+      result.apifootball = { status: `❌ ERROR: ${e?.response?.status} ${e?.response?.data?.message || e.message}` };
     }
 
-    // Quick test — fetch today's WC fixtures
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const in7   = new Date(Date.now()+7*24*60*60*1000).toISOString().split('T')[0];
-      const r = await axios.get(`${APIF_BASE}/fixtures`,{
-        headers:{'x-rapidapi-key':APIF_KEY,'x-rapidapi-host':'v3.football.api-sports.io'},
-        params:{league:1,season:2026,from:today,to:in7}, timeout:10000
-      });
-      result.worldcup_test = {
-        fixtures_found: r.data?.response?.length||0,
-        sample: (r.data?.response||[]).slice(0,3).map(f=>`${f.teams?.home?.name} vs ${f.teams?.away?.name} — ${f.fixture?.date}`)
-      };
-    } catch(e) {
-      result.worldcup_test = { error: e?.response?.data?.message||e.message };
+    // Test all active leagues for fixture counts
+    const today = new Date().toISOString().split('T')[0];
+    const in21  = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    result.league_tests = {};
+
+    const toTest = [
+      { label: 'World Cup 2026',   id: 1,   season: 2026 },
+      { label: 'MLS 2026',         id: 253, season: 2026 },
+      { label: 'Brazil Série A',   id: 71,  season: 2026 },
+      { label: 'Kenya Premier',    id: 239, season: 2025 },
+      { label: 'Friendlies',       id: 667, season: 2026 },
+    ];
+
+    for (const t of toTest) {
+      try {
+        const r = await axios.get(`${APIF_BASE}/fixtures`, {
+          headers: APIF_HDR(),
+          params:  { league: t.id, season: t.season, from: today, to: in21 },
+          timeout: 10000
+        });
+        const fixtures = r.data?.response || [];
+        result.league_tests[t.label] = {
+          fixtures_found: fixtures.length,
+          sample: fixtures.slice(0, 2).map(f => `${f.teams?.home?.name} vs ${f.teams?.away?.name} — ${f.fixture?.date}`)
+        };
+      } catch (e) {
+        result.league_tests[t.label] = { error: e?.response?.data?.message || e.message };
+      }
+      await new Promise(r => setTimeout(r, 300));
     }
   }
 
