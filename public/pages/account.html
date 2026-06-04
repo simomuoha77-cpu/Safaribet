@@ -127,7 +127,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
     <div class="bs-lbl">Bonus Balance</div>
   </div>
 </div>
-<button class="dep-btn" onclick="location.href='/pages/deposit.html'">💚 Deposit via M-Pesa</button>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 12px 14px">
+  <button onclick="location.href='/pages/deposit.html'" style="padding:13px;background:var(--g);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">💚 Deposit</button>
+  <button onclick="location.href='/pages/withdraw.html'" style="padding:13px;background:var(--s3);border:1.5px solid var(--bd);color:var(--tx);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">💸 Withdraw</button>
+</div>
 
 <!-- Betting Stats -->
 <div class="sec">
@@ -155,6 +158,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   </div>
   <div class="menu-item" onclick="location.href='/pages/deposit.html'">
     <div class="mi-left"><span class="mi-icon">💰</span><div><div class="mi-text">Deposit</div><div class="mi-sub">Add money via M-Pesa</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="menu-item" onclick="location.href='/pages/withdraw.html'">
+    <div class="mi-left"><span class="mi-icon">💸</span><div><div class="mi-text">Withdraw</div><div class="mi-sub">Send money to M-Pesa</div></div></div>
     <span class="chevron">›</span>
   </div>
   <div class="menu-item" onclick="location.href='/pages/my-bets.html'">

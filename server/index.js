@@ -10,6 +10,7 @@ const oddsRoutes    = require('./routes/odds');
 const aviatorRoutes = require('./routes/aviator');
 const mpesaRoutes   = require('./routes/mpesa');
 const betsRoutes    = require('./routes/bets');
+const withdrawRoutes = require('./routes/withdraw');
 const scheduler     = require('./engine/scheduler');
 const adminRoutes   = require('./routes/admin');
 
@@ -37,6 +38,7 @@ app.use('/api/odds',    oddsRoutes);
 app.use('/api/aviator', aviatorRoutes);
 app.use('/api/mpesa',   mpesaRoutes);
 app.use('/api/bets',    betsRoutes);
+app.use('/api/withdraw', withdrawRoutes);
 // Admin — hidden API path
 const ADMIN_PATH     = process.env.ADMIN_PATH      || '/api/xpanel';
 const ADMIN_UI_PATH  = process.env.ADMIN_UI_PATH   || '/xpanel';

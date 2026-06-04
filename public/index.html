@@ -204,6 +204,66 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 
 <main class="main">
 
+  <!-- HERO BANNER -->
+  <div style="margin:0 10px 10px;border-radius:14px;overflow:hidden;position:relative;min-height:130px;background:linear-gradient(135deg,#003d1a 0%,#001a0d 55%,#0a1a0a 100%);border:1px solid rgba(0,200,83,0.15)">
+    <div style="position:absolute;right:0;top:0;width:180px;height:180px;background:radial-gradient(circle,rgba(0,200,83,0.12) 0%,transparent 70%)"></div>
+    <img src="https://cdn-icons-png.flaticon.com/512/861/861512.png" 
+         style="position:absolute;right:0;bottom:0;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 0 10px rgba(0,200,83,0.4));opacity:0.9"
+         onerror="this.style.display='none'"/>
+    <div style="padding:16px 14px;position:relative;z-index:1;max-width:195px">
+      <div style="font-size:10px;color:var(--g);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">🎁 Welcome Bonus</div>
+      <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1.1;margin-bottom:3px">Bet & <span style="color:var(--g)">Win Big</span></div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:8px">KES 1,000 on first deposit</div>
+      <button onclick="location.href='/pages/register.html'" style="background:var(--g);color:#000;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">Claim →</button>
+    </div>
+    <div style="position:absolute;right:118px;top:50%;transform:translateY(-50%);text-align:center;z-index:1">
+      <div style="font-family:'Rajdhani',sans-serif;font-size:32px;font-weight:800;color:var(--yl);line-height:1;text-shadow:0 0 20px rgba(255,214,0,0.4)">1,000</div>
+      <div style="font-size:10px;color:var(--mt);font-weight:600">KES BONUS</div>
+    </div>
+  </div>
+
+  <!-- PROMO CARDS -->
+  <div style="display:flex;gap:8px;padding:0 10px;margin-bottom:10px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch">
+    <div onclick="pickSportByKey('soccer_epl')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(0,200,83,0.2)">
+      <img src="https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=260&h=150&fit=crop&auto=format&q=70"
+           style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
+        <div style="font-size:11px;font-weight:700;color:#fff">⚽ Premier League</div>
+        <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
+      </div>
+    </div>
+    <div onclick="pickSportByKey('soccer_uefa_champs_league')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,214,0,0.2)">
+      <img src="https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=260&h=150&fit=crop&auto=format&q=70"
+           style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
+        <div style="font-size:11px;font-weight:700;color:#fff">🏆 UCL</div>
+        <div style="font-size:9px;color:var(--yl);font-weight:600">Bet Now</div>
+      </div>
+    </div>
+    <div onclick="location.href='/pages/aviator.html'" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,59,59,0.2);background:linear-gradient(135deg,#1a0505,#0d0505)">
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
+        <div style="font-size:26px">✈️</div>
+        <div style="font-size:11px;font-weight:700;color:#fff">Aviator</div>
+        <div style="font-size:9px;color:#ff6b6b;font-weight:600">Play Now</div>
+      </div>
+    </div>
+    <div onclick="pickSportByKey('soccer_kenya_premier_league')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(0,200,83,0.2);background:linear-gradient(135deg,#001a0d,#060e06)">
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
+        <div style="font-size:24px">🇰🇪</div>
+        <div style="font-size:11px;font-weight:700;color:#fff">Kenya Premier</div>
+        <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
+      </div>
+    </div>
+    <div onclick="pickSportByKey('basketball_nba')" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,107,0,0.2)">
+      <img src="https://images.unsplash.com/photo-1546519638-68e109498ffc?w=260&h=150&fit=crop&auto=format&q=70"
+           style="width:100%;height:100%;object-fit:cover;opacity:0.65" onerror="this.style.display='none'"/>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(0,0,0,0.85));display:flex;flex-direction:column;justify-content:flex-end;padding:7px">
+        <div style="font-size:11px;font-weight:700;color:#fff">🏀 NBA</div>
+        <div style="font-size:9px;color:#ff9500;font-weight:600">Bet Now</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Live Ticker -->
   <div class="live-ticker" id="liveTicker" style="display:none">
     <span class="live-badge">LIVE</span>
@@ -362,7 +422,6 @@ async function loadAvailableSports(){
     const d=await r.json();
     if(!d.success||!d.data.length) return;
 
-    // Map sport keys to emoji + label
     const labels={
       soccer_epl:'⚽ Premier League',
       soccer_spain_la_liga:'⚽ La Liga',
@@ -378,18 +437,31 @@ async function loadAvailableSports(){
       soccer_africa_cup_of_nations:'⚽ AFCON',
       soccer_mls:'⚽ MLS',
       cricket_ipl:'🏏 IPL',
+      soccer_brazil_campeonato:'⚽ Brazil',
+      soccer_argentina_primera_division:'⚽ Argentina',
+      soccer_turkey_super_league:'⚽ Turkey',
+      soccer_netherlands_eredivisie:'⚽ Eredivisie',
+      soccer_portugal_primeira_liga:'⚽ Portugal',
       rugbyunion_world_cup:'🏉 Rugby WC',
     };
 
     const nav=document.getElementById('stabs');
-    // Keep LIVE tab, rebuild rest
+    const sports=d.data.slice(0,14);
     const liveTab=`<div class="stab" data-sport="live" onclick="pickSport(this)">🔴 LIVE</div>`;
-    const sportTabs=d.data.slice(0,12).map(s=>{
+    const sportTabs=sports.map((s,i)=>{
       const label=labels[s.key]||('🎯 '+s.title);
-      const isActive=s.key===currentSport?'on':'';
-      return `<div class="stab ${isActive}" data-sport="${s.key}" onclick="pickSport(this)">${label}</div>`;
+      const isFirst=i===0;
+      return `<div class="stab ${isFirst?'on':''}" data-sport="${s.key}" onclick="pickSport(this)">${label}</div>`;
     }).join('');
     nav.innerHTML=sportTabs+liveTab;
+
+    // Auto-load first available sport
+    if(sports.length>0){
+      currentSport=sports[0].key;
+      document.getElementById('secTtl').textContent=
+        (labels[sports[0].key]||sports[0].title).replace(/^[^\w]+/,'').trim();
+      loadMatches(currentSport);
+    }
   }catch(e){
     console.log('Could not load available sports:',e.message);
   }
@@ -446,6 +518,12 @@ async function loadMatches(sport, silent=false){
   }
 }
 
+function pickSportByKey(key){
+  const tab = document.querySelector(`.stab[data-sport="${key}"]`);
+  if(tab){ pickSport(tab); tab.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }
+  else { currentSport=key; loadMatches(key); }
+}
+
 function pickSport(el){
   document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');
@@ -471,8 +549,9 @@ function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, c
 }
 
 function renderMatch(m){
-  const isLive  = m.status==='live';
-  const scoreStr= isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
+  const isLive   = m.status==='live';
+  const isStatic = m.isStatic || m.matchId?.startsWith('static_');
+  const scoreStr = isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
   const hs=m.score?.home, as=m.score?.away;
   const homeLosing= isLive&&hs!==null&&hs<as;
   const awayLosing= isLive&&as!==null&&as<hs;
@@ -480,7 +559,8 @@ function renderMatch(m){
   return `<div class="mc" id="mc_${m.matchId}">
     <div class="mc-meta">
       <span class="mc-league">${m.league}</span>
-      ${isLive?`<span class="live-dot"></span><span class="live-lbl">LIVE</span><span class="live-score">${scoreStr}</span>`:''}
+      ${isLive?`<span class="live-dot"></span><span class="live-lbl">LIVE</span><span class="live-score">${scoreStr}`:''}
+      ${isStatic?`<span style="font-size:9px;color:var(--yl);background:rgba(255,214,0,0.1);padding:1px 5px;border-radius:4px;margin-left:auto">DEMO</span>`:''}
     </div>
     <div class="mc-row">
       <div class="teams">

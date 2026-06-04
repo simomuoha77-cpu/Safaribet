@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Withdraw – BetaKE</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:80px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
+.back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer}
+.ttl{font-size:17px;font-weight:700}
+.bal{font-size:13px;font-weight:700;color:var(--g)}
+
+/* BALANCE CARD */
+.bal-card{margin:14px 12px;background:linear-gradient(135deg,#003d1a,#001a0d);border:1px solid var(--bd);border-radius:14px;padding:20px;text-align:center;position:relative;overflow:hidden}
+.bal-card::before{content:'💰';position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:48px;opacity:0.15}
+.bal-lbl{font-size:12px;color:var(--mt);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.bal-amt{font-size:42px;font-weight:800;color:var(--g);line-height:1}
+.bal-sub{font-size:12px;color:var(--mt);margin-top:4px}
+
+/* QUICK AMOUNTS */
+.main{padding:0 12px}
+.sec-lbl{font-size:12px;color:var(--mt);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 8px}
+.quick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.qa{background:var(--s1);border:1.5px solid var(--bd);border-radius:10px;padding:12px;text-align:center;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.15s}
+.qa:hover,.qa.on{background:rgba(0,200,83,0.1);border-color:var(--g);color:var(--g)}
+
+/* FIELDS */
+.field{margin-bottom:12px}
+.field label{display:block;font-size:13px;color:var(--mt);font-weight:600;margin-bottom:5px}
+.field input{width:100%;background:var(--s1);border:1.5px solid var(--bd);border-radius:10px;padding:13px 14px;color:var(--tx);font-size:16px;font-weight:600;outline:none;transition:border-color 0.2s}
+.field input:focus{border-color:var(--g)}
+.field .hint{font-size:11px;color:var(--mt);margin-top:4px}
+
+/* FEE INFO */
+.fee-box{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.fee-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.fee-lbl{font-size:13px;color:var(--mt)}
+.fee-val{font-size:13px;font-weight:700}
+.fee-row.total{border-top:1px solid var(--bd);margin-top:6px;padding-top:10px}
+.fee-row.total .fee-lbl{color:var(--tx);font-weight:600}
+.fee-row.total .fee-val{color:var(--g);font-size:16px}
+
+/* BUTTON */
+.wd-btn{width:100%;padding:15px;background:var(--g);color:#000;border:none;border-radius:12px;font-size:17px;font-weight:800;cursor:pointer;transition:all 0.2s;margin-top:4px}
+.wd-btn:hover{background:#00e65c}
+.wd-btn:disabled{background:var(--mt);cursor:not-allowed}
+
+/* INFO BOX */
+.info-box{background:rgba(255,214,0,0.05);border:1px solid rgba(255,214,0,0.15);border-radius:10px;padding:14px;margin:14px 0}
+.info-title{font-size:12px;font-weight:700;color:var(--yl);text-transform:uppercase;margin-bottom:8px}
+.info-item{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;font-size:13px;color:var(--mt)}
+.info-item:last-child{margin:0}
+.info-dot{color:var(--yl);flex-shrink:0;margin-top:1px}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-bg.on{display:flex}
+.modal{background:var(--s1);border-top:2px solid var(--g);border-radius:16px 16px 0 0;padding:28px 20px;width:100%;max-width:480px;text-align:center}
+.modal-ic{font-size:52px;margin-bottom:12px}
+.modal-ttl{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;margin-bottom:6px}
+.modal-msg{font-size:14px;color:var(--mt);line-height:1.6;margin-bottom:20px}
+.modal-btn{width:100%;padding:13px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;border:none;margin-top:8px}
+.modal-btn.g{background:var(--g);color:#000}
+.modal-btn.o{background:var(--s3);color:var(--mt)}
+
+.spin{width:36px;height:36px;border:3px solid rgba(0,200,83,0.15);border-top-color:var(--g);border-radius:50%;animation:sp 0.8s linear infinite;margin:0 auto 12px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid #444;white-space:nowrap}
+.toast.on{opacity:1}
+.toast.ok{border-color:var(--g);color:var(--g)}
+.toast.err{border-color:var(--rd);color:var(--rd)}
+
+.bnav{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);display:flex;height:56px;z-index:10}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--mt);cursor:pointer;gap:3px}
+.bni-ic{font-size:20px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="history.back()">← Back</button>
+  <div class="ttl">Withdraw</div>
+  <div class="bal">KES <span id="balTop">0.00</span></div>
+</div>
+
+<!-- Balance Card -->
+<div class="bal-card">
+  <div class="bal-lbl">Withdrawable Balance</div>
+  <div class="bal-amt" id="balAmt">0.00</div>
+  <div class="bal-sub">Kenyan Shillings</div>
+</div>
+
+<div class="main">
+
+  <div class="sec-lbl">Select Amount</div>
+  <div class="quick-grid">
+    <div class="qa" onclick="setAmt(100)">100</div>
+    <div class="qa" onclick="setAmt(200)">200</div>
+    <div class="qa" onclick="setAmt(500)">500</div>
+    <div class="qa" onclick="setAmt(1000)">1,000</div>
+    <div class="qa" onclick="setAmt(2000)">2,000</div>
+    <div class="qa" onclick="setAmt(5000)">5,000</div>
+  </div>
+
+  <div class="field">
+    <label>Amount (KES)</label>
+    <input type="number" id="amount" placeholder="Min KES 50" min="50" oninput="calcFees()"/>
+    <div class="hint">Min KES 50 — Max KES 70,000</div>
+  </div>
+
+  <div class="field">
+    <label>M-Pesa Phone Number</label>
+    <input type="tel" id="phone" placeholder="0712345678"/>
+    <div class="hint">Number to receive the money</div>
+  </div>
+
+  <!-- Fee Breakdown -->
+  <div class="fee-box" id="feeBox" style="display:none">
+    <div class="fee-row"><span class="fee-lbl">Withdrawal Amount</span><span class="fee-val" id="feeAmt">KES 0</span></div>
+    <div class="fee-row"><span class="fee-lbl">M-Pesa Fee</span><span class="fee-val" style="color:var(--rd)" id="feeMpesa">- KES 0</span></div>
+    <div class="fee-row total"><span class="fee-lbl">You Receive</span><span class="fee-val" id="feeReceive">KES 0</span></div>
+  </div>
+
+  <button class="wd-btn" id="wdBtn" onclick="withdraw()">💸 Withdraw via M-Pesa</button>
+
+  <!-- Info -->
+  <div class="info-box">
+    <div class="info-title">⚡ Important Info</div>
+    <div class="info-item"><span class="info-dot">•</span>Withdrawals are processed within 1-5 minutes</div>
+    <div class="info-item"><span class="info-dot">•</span>M-Pesa transaction fees apply</div>
+    <div class="info-item"><span class="info-dot">•</span>Minimum withdrawal is KES 50</div>
+    <div class="info-item"><span class="info-dot">•</span>You can only have one pending withdrawal at a time</div>
+    <div class="info-item"><span class="info-dot">•</span>Winnings must be wagered at least once before withdrawal</div>
+  </div>
+
+</div>
+
+<!-- Processing Modal -->
+<div class="modal-bg" id="processingModal">
+  <div class="modal">
+    <div class="spin"></div>
+    <div class="modal-ttl">Processing...</div>
+    <div class="modal-msg">Your withdrawal is being processed.<br/>You'll receive M-Pesa shortly.</div>
+  </div>
+</div>
+
+<!-- Success Modal -->
+<div class="modal-bg" id="successModal">
+  <div class="modal">
+    <div class="modal-ic">🎉</div>
+    <div class="modal-ttl" style="color:var(--g)">Withdrawal Initiated!</div>
+    <div class="modal-msg" id="successMsg">Your money is on its way to your M-Pesa.</div>
+    <div style="background:rgba(0,200,83,0.08);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--mt)">New Balance</div>
+      <div style="font-size:28px;font-weight:800;color:var(--g)">KES <span id="newBal">0.00</span></div>
+    </div>
+    <button class="modal-btn g" onclick="location.href='/'">Go to Home</button>
+    <button class="modal-btn o" onclick="closeModal('successModal')">Close</button>
+  </div>
+</div>
+
+<!-- Failed Modal -->
+<div class="modal-bg" id="failModal">
+  <div class="modal">
+    <div class="modal-ic">❌</div>
+    <div class="modal-ttl" style="color:var(--rd)">Withdrawal Failed</div>
+    <div class="modal-msg" id="failMsg">Something went wrong.</div>
+    <button class="modal-btn g" onclick="closeModal('failModal')">Try Again</button>
+  </div>
+</div>
+
+<nav class="bnav">
+  <div class="bni" onclick="location.href='/'"><div class="bni-ic">🏠</div>Home</div>
+  <div class="bni" onclick="location.href='/pages/aviator.html'"><div class="bni-ic">✈️</div>Aviator</div>
+  <div class="bni" onclick="location.href='/pages/my-bets.html'"><div class="bni-ic">📋</div>My Bets</div>
+  <div class="bni" onclick="location.href='/pages/account.html'"><div class="bni-ic">👤</div>Account</div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let USER = null;
+
+// M-Pesa fee table (approximate)
+function getMpesaFee(amount) {
+  if (amount <= 100)   return 0;
+  if (amount <= 500)   return 7;
+  if (amount <= 1000)  return 13;
+  if (amount <= 1500)  return 23;
+  if (amount <= 2500)  return 33;
+  if (amount <= 3500)  return 53;
+  if (amount <= 5000)  return 57;
+  if (amount <= 7500)  return 78;
+  if (amount <= 10000) return 90;
+  if (amount <= 15000) return 100;
+  if (amount <= 20000) return 105;
+  if (amount <= 35000) return 108;
+  if (amount <= 50000) return 108;
+  return 108;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const t = localStorage.getItem('token');
+  const u = localStorage.getItem('user');
+  if (!t || !u) { location.href = '/pages/login.html'; return; }
+  USER = JSON.parse(u);
+  const bal = parseFloat(USER.balance || 0).toFixed(2);
+  document.getElementById('balTop').textContent = bal;
+  document.getElementById('balAmt').textContent = bal;
+  document.getElementById('phone').value = USER.phone || '';
+});
+
+function setAmt(v) {
+  document.getElementById('amount').value = v;
+  document.querySelectorAll('.qa').forEach(el => el.classList.remove('on'));
+  event.target.classList.add('on');
+  calcFees();
+}
+
+function calcFees() {
+  const amount = parseFloat(document.getElementById('amount').value) || 0;
+  const feeBox = document.getElementById('feeBox');
+  if (!amount) { feeBox.style.display = 'none'; return; }
+  const fee = getMpesaFee(amount);
+  const receive = Math.max(0, amount - fee);
+  feeBox.style.display = 'block';
+  document.getElementById('feeAmt').textContent    = `KES ${amount.toFixed(2)}`;
+  document.getElementById('feeMpesa').textContent  = `- KES ${fee.toFixed(2)}`;
+  document.getElementById('feeReceive').textContent= `KES ${receive.toFixed(2)}`;
+}
+
+async function withdraw() {
+  const amount = parseFloat(document.getElementById('amount').value);
+  const phone  = document.getElementById('phone').value.trim();
+  if (!amount || amount < 50) return showT('Min withdrawal KES 50','err');
+  if (!phone) return showT('Enter M-Pesa phone number','err');
+  if (amount > (USER.balance||0)) return showT('Insufficient balance','err');
+
+  document.getElementById('wdBtn').disabled = true;
+  openModal('processingModal');
+
+  try {
+    const r = await fetch('/api/withdraw/request', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+localStorage.getItem('token') },
+      body: JSON.stringify({ amount, phone })
+    });
+    const d = await r.json();
+    closeModal('processingModal');
+
+    if (d.success) {
+      USER.balance = d.newBalance;
+      localStorage.setItem('user', JSON.stringify(USER));
+      document.getElementById('balTop').textContent = parseFloat(d.newBalance).toFixed(2);
+      document.getElementById('balAmt').textContent = parseFloat(d.newBalance).toFixed(2);
+      document.getElementById('newBal').textContent = parseFloat(d.newBalance).toFixed(2);
+      document.getElementById('successMsg').textContent = d.message;
+      openModal('successModal');
+    } else {
+      document.getElementById('failMsg').textContent = d.message || 'Failed';
+      openModal('failModal');
+      document.getElementById('wdBtn').disabled = false;
+    }
+  } catch {
+    closeModal('processingModal');
+    showT('Connection error','err');
+    document.getElementById('wdBtn').disabled = false;
+  }
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('on'); }
+function closeModal(id) { document.getElementById(id).classList.remove('on'); document.getElementById('wdBtn').disabled=false; }
+
+let tTmr=null;
+function showT(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className=`toast on ${type}`;
+  clearTimeout(tTmr); tTmr=setTimeout(()=>el.classList.remove('on'),3500);
+}
+</script>
+</body>
+</html>
