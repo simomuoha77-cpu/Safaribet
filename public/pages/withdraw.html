@@ -204,15 +204,33 @@ function getMpesaFee(amount) {
   return 108;
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const t = localStorage.getItem('token');
   const u = localStorage.getItem('user');
   if (!t || !u) { location.href = '/pages/login.html'; return; }
   USER = JSON.parse(u);
-  const bal = parseFloat(USER.balance || 0).toFixed(2);
-  document.getElementById('balTop').textContent = bal;
-  document.getElementById('balAmt').textContent = bal;
+
+  // Show cached immediately
+  const cachedBal = parseFloat(USER.balance || 0).toFixed(2);
+  document.getElementById('balTop').textContent = cachedBal;
+  document.getElementById('balAmt').textContent = cachedBal;
   document.getElementById('phone').value = USER.phone || '';
+
+  // ── Fetch REAL balance from server — localStorage is always stale ──
+  try {
+    const r = await fetch('/api/user/balance', {
+      headers: { 'Authorization': 'Bearer ' + t }
+    });
+    if (r.status === 401) { location.href = '/pages/login.html'; return; }
+    const d = await r.json();
+    if (d.success) {
+      USER.balance = parseFloat(d.balance);
+      localStorage.setItem('user', JSON.stringify(USER));
+      const fresh = USER.balance.toFixed(2);
+      document.getElementById('balTop').textContent = fresh;
+      document.getElementById('balAmt').textContent = fresh;
+    }
+  } catch(e) { /* use cached */ }
 });
 
 function setAmt(v) {
@@ -239,7 +257,25 @@ async function withdraw() {
   const phone  = document.getElementById('phone').value.trim();
   if (!amount || amount < 50) return showT('Min withdrawal KES 50','err');
   if (!phone) return showT('Enter M-Pesa phone number','err');
-  if (amount > (USER.balance||0)) return showT('Insufficient balance','err');
+
+  // ── Re-fetch balance right before submitting — never trust cached ──
+  try {
+    const rb = await fetch('/api/user/balance', {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    });
+    const db = await rb.json();
+    if (db.success) {
+      USER.balance = parseFloat(db.balance);
+      localStorage.setItem('user', JSON.stringify(USER));
+      document.getElementById('balTop').textContent = USER.balance.toFixed(2);
+      document.getElementById('balAmt').textContent = USER.balance.toFixed(2);
+    }
+  } catch(e) {}
+
+  // Now check with fresh balance
+  if (amount > USER.balance) {
+    return showT(`Insufficient balance. Available: KES ${USER.balance.toFixed(2)}`,'err');
+  }
 
   document.getElementById('wdBtn').disabled = true;
   openModal('processingModal');

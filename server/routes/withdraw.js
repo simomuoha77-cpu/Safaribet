@@ -71,7 +71,7 @@ router.post('/request', requireAuth, async (req, res) => {
 
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
-    if (user.balance < amount)
+    if (parseFloat(user.balance) < parseFloat(amount))
       return res.status(400).json({ success:false, message:`Insufficient balance. Available: KES ${user.balance.toFixed(2)}` });
 
     // Check no pending withdrawal
@@ -79,7 +79,7 @@ router.post('/request', requireAuth, async (req, res) => {
     if(hasPending) return res.status(400).json({ success:false, message:'You have a pending withdrawal. Please wait.' });
 
     // Deduct balance immediately (reverse if fails)
-    user.balance = parseFloat((user.balance - amount).toFixed(2));
+    user.balance = parseFloat((parseFloat(user.balance) - parseFloat(amount)).toFixed(2));
     await user.save();
 
     // B2C payload
