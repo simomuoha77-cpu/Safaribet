@@ -70,21 +70,31 @@ async function fetchApifFixtures(leagueId) {
   try {
     const today   = new Date().toISOString().split('T')[0];
     const in7days = new Date(Date.now()+7*24*60*60*1000).toISOString().split('T')[0];
-    const season  = new Date().getFullYear();
+    const season = new Date().getFullYear();
+    const prevSeason = season - 1;
 
-    const r = await axios.get(`${APIF_BASE}/fixtures`, {
-      headers: {
-        'x-rapidapi-key':  APIF_KEY,
-        'x-rapidapi-host': 'v3.football.api-sports.io'
-      },
-      params: {
-        league: leagueId,
-        season,
-        from:   today,
-        to:     in7days,
-      },
-      timeout: 12000
-    });
+    // Try current season first, fall back to previous if empty
+    let response = null;
+    for (const s of [season, season - 1]) {
+      const resp = await axios.get(`${APIF_BASE}/fixtures`, {
+        headers: {
+          'x-rapidapi-key':  APIF_KEY,
+          'x-rapidapi-host': 'v3.football.api-sports.io'
+        },
+        params: { league: leagueId, season: s, from: today, to: in7days },
+        timeout: 12000
+      });
+      if (resp.data?.response?.length) { response = resp; break; }
+      // If no upcoming, get recent (past 7 days) for leagues that may have just finished
+      const past7 = new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
+      const resp2 = await axios.get(`${APIF_BASE}/fixtures`, {
+        headers: {'x-rapidapi-key':APIF_KEY,'x-rapidapi-host':'v3.football.api-sports.io'},
+        params: { league: leagueId, season: s, from: past7, to: in7days },
+        timeout: 12000
+      });
+      if (resp2.data?.response?.length) { response = resp2; break; }
+    }
+    const r = response || { data: { response: [] }, headers: {} };
 
     const remaining = r.headers['x-ratelimit-requests-remaining'];
     if (remaining !== undefined) console.log(`  API-Football quota remaining: ${remaining}`);
@@ -218,8 +228,7 @@ router.get('/matches/:sport', async (req, res) => {
       sport,
       status:       {$in:['upcoming','live']},
       commenceTime: {$gte: new Date(now.getTime()-3*60*60*1000)},
-      isStatic:     {$ne: true},
-      $or:[{'odds.home':{$ne:null}},{'odds.away':{$ne:null}}]
+      isStatic:     {$ne: true}
     }).sort({commenceTime:1}).limit(30).lean();
 
     if (dbMatches.length) {
