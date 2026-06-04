@@ -196,9 +196,9 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
   <div class="stab" data-sport="soccer_kenya_premier_league" onclick="pickSport(this)">🇰🇪 Kenya Premier</div>
   <div class="stab" data-sport="soccer_mls" onclick="pickSport(this)">🇺🇸 MLS</div>
   <div class="stab" data-sport="soccer_brazil_serie_a" onclick="pickSport(this)">🇧🇷 Brazil</div>
-  <div class="stab" data-sport="soccer_caf_champions_league" onclick="pickSport(this)">🌍 CAF CL</div>
   <div class="stab" data-sport="soccer_copa_america" onclick="pickSport(this)">🏆 Copa Am.</div>
-  <div class="stab" data-sport="soccer_wc_qual_europe" onclick="pickSport(this)">🌍 WC Qual EU</div>
+  <div class="stab" data-sport="soccer_caf_champions_league" onclick="pickSport(this)">🌍 CAF CL</div>
+  <div class="stab" data-sport="soccer_friendlies" onclick="pickSport(this)">🌐 Friendlies</div>
   <div class="stab" data-sport="live" onclick="pickSport(this)">🔴 LIVE</div>
 </nav>
 
@@ -500,10 +500,15 @@ async function loadMatches(sport, silent=false){
     const d=await r.json();
 
     if(!d.success||!d.data||!d.data.length){
+      // Show debug info if API returned a message
+      const dbgMsg = d.message || '';
+      const dbgInfo = dbgMsg.includes('missing') || dbgMsg.includes('error') || dbgMsg.includes('ERROR')
+        ? `<br/><a href="/api/odds/debug" target="_blank" style="color:#4caf50;font-size:11px">🔧 Check API status</a>`
+        : `<br/><small style="color:#333;font-size:10px">${dbgMsg}</small>`;
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
   <div style="font-size:36px;margin-bottom:12px">⚽</div>
   <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches available</div>
-  <div style="font-size:13px;line-height:1.6">The ${currentSport.replace(/_/g,' ')} season may be off right now.<br/>Try another league from the tabs above.</div>
+  <div style="font-size:13px;line-height:1.6">The ${currentSport.replace(/_/g,' ')} season may be off right now.<br/>Try another league from the tabs above.${dbgInfo}</div>
 </div>`;
       return;
     }
