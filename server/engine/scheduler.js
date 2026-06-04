@@ -13,6 +13,28 @@ async function run(name, fn) {
   finally { busy[name] = false; }
 }
 
+async function cleanOldMatches() {
+  try {
+    const Match = require('../models/Match');
+    const cutoff = new Date(Date.now() - 3*60*60*1000); // 3 hours ago
+    // Delete old static matches
+    const r1 = await Match.deleteMany({ isStatic: true });
+    // Delete old finished matches older than 3 days
+    const r2 = await Match.deleteMany({
+      status: 'finished',
+      settledAt: { $lt: new Date(Date.now() - 3*24*60*60*1000) }
+    });
+    // Delete matches with past commence time that are still upcoming (stale)
+    const r3 = await Match.deleteMany({
+      status: 'upcoming',
+      commenceTime: { $lt: new Date(Date.now() - 5*60*60*1000) }
+    });
+    console.log(`🧹 Cleaned: ${r1.deletedCount} static, ${r2.deletedCount} old finished, ${r3.deletedCount} stale upcoming`);
+  } catch(e) {
+    console.error('Cleanup error:', e.message);
+  }
+}
+
 function start() {
   console.log('⏰ Scheduler started');
 
@@ -33,6 +55,9 @@ function start() {
     await run('apif_settle', settleFromResults);
   });
 
+  // Cleanup old/static matches on startup
+  setTimeout(() => run('cleanup', cleanOldMatches), 2000);
+
   // Initial sync on startup (after 5s)
   setTimeout(async () => {
     console.log('🚀 Initial sync starting...');
@@ -41,6 +66,9 @@ function start() {
       await run('odds_init', syncOdds);
     }
   }, 5000);
+
+  // Daily cleanup at 3am
+  cron.schedule('0 3 * * *', () => run('daily_cleanup', cleanOldMatches));
 }
 
 module.exports = { start };

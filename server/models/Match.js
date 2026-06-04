@@ -40,6 +40,7 @@ const matchSchema = new mongoose.Schema({
 
   // Settlement
   settled:    { type: Boolean, default: false },
+  isStatic:   { type: Boolean, default: false },
   settledAt:  Date,
   betsCount:  { type: Number, default: 0 },
   payoutTotal:{ type: Number, default: 0 }

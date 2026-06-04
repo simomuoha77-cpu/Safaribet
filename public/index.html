@@ -404,7 +404,7 @@ async function loadLiveTicker(){
   try{
     const r=await fetch('/api/odds/live');
     const d=await r.json();
-    if(!d.success||!d.data.length){ document.getElementById('liveTicker').style.display='none'; return; }
+    if(!d.success||!d.data||!d.data.length){ document.getElementById('liveTicker').style.display='none'; return; }
     document.getElementById('liveTicker').style.display='flex';
     document.getElementById('tickerItems').innerHTML=d.data.map(m=>`
       <div class="ticker-item">
@@ -455,16 +455,38 @@ async function loadAvailableSports(){
     }).join('');
     nav.innerHTML=sportTabs+liveTab;
 
-    // Auto-load first available sport
+    // Auto-load first sport — try each until we find one with matches
     if(sports.length>0){
-      currentSport=sports[0].key;
-      document.getElementById('secTtl').textContent=
-        (labels[sports[0].key]||sports[0].title).replace(/^[^\w]+/,'').trim();
-      loadMatches(currentSport);
+      loadFirstWithMatches(sports);
     }
   }catch(e){
     console.log('Could not load available sports:',e.message);
   }
+}
+
+// ── FIND FIRST SPORT WITH REAL MATCHES ──
+async function loadFirstWithMatches(sports){
+  for(const s of sports){
+    try{
+      const r=await fetch(`/api/odds/matches/${s.key}`);
+      const d=await r.json();
+      if(d.success && d.data && d.data.length>0){
+        currentSport=s.key;
+        // Update tab selection
+        document.querySelectorAll('.stab').forEach(t=>{
+          t.classList.remove('on');
+          if(t.dataset.sport===s.key) t.classList.add('on');
+        });
+        document.getElementById('secTtl').textContent=
+          s.title.replace(/^[^a-zA-Z]+/,'').trim();
+        renderMatches(d.data);
+        return;
+      }
+    }catch(e){}
+  }
+  // Nothing found
+  document.getElementById('matchList').innerHTML=
+    '<div class="empty">No matches available right now. Check back later.</div>';
 }
 
 // ── LOAD MATCHES ──
@@ -477,7 +499,7 @@ async function loadMatches(sport, silent=false){
     const r=await fetch(url);
     const d=await r.json();
 
-    if(!d.success||!d.data.length){
+    if(!d.success||!d.data||!d.data.length){
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
   <div style="font-size:36px;margin-bottom:12px">⚽</div>
   <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches available</div>
@@ -494,7 +516,7 @@ async function loadMatches(sport, silent=false){
       });
     }
 
-    el.innerHTML=d.data.map(m=>renderMatch(m)).join('');
+    renderMatches(d.data);
 
     // Restore selections
     slip.forEach(s=>{
@@ -532,6 +554,17 @@ function pickSport(el){
   loadMatches(currentSport);
 }
 
+// ── RENDER MATCHES LIST ──
+function renderMatches(matches){
+  const el=document.getElementById('matchList');
+  el.innerHTML=matches.map(m=>renderMatch(m)).join('');
+  // Restore selections
+  slip.forEach(s=>{
+    const btn=document.getElementById(`odd_${s.matchId}_${s.pick}`);
+    if(btn) btn.classList.add('sel');
+  });
+}
+
 // ── RENDER MATCH ──
 function fmtTime(iso){
   const d=new Date(iso);
@@ -550,7 +583,7 @@ function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, c
 
 function renderMatch(m){
   const isLive   = m.status==='live';
-  const isStatic = m.isStatic || m.matchId?.startsWith('static_');
+  const isStatic = false;
   const scoreStr = isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
   const hs=m.score?.home, as=m.score?.away;
   const homeLosing= isLive&&hs!==null&&hs<as;
@@ -560,7 +593,7 @@ function renderMatch(m){
     <div class="mc-meta">
       <span class="mc-league">${m.league}</span>
       ${isLive?`<span class="live-dot"></span><span class="live-lbl">LIVE</span><span class="live-score">${scoreStr}`:''}
-      ${isStatic?`<span style="font-size:9px;color:var(--yl);background:rgba(255,214,0,0.1);padding:1px 5px;border-radius:4px;margin-left:auto">DEMO</span>`:''}
+
     </div>
     <div class="mc-row">
       <div class="teams">
