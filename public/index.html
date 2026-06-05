@@ -626,18 +626,24 @@ function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, c
 }
 
 function renderMatch(m){
-  const isLive   = m.status==='live';
-  const isStatic = false;
-  const scoreStr = isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
+  const isLive     = m.status==='live';
+  const scoreStr   = isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
   const hs=m.score?.home, as=m.score?.away;
-  const homeLosing= isLive&&hs!==null&&hs<as;
-  const awayLosing= isLive&&as!==null&&as<hs;
+  const homeLosing = isLive&&hs!==null&&hs<as;
+  const awayLosing = isLive&&as!==null&&as<hs;
+
+  // Odds badge — green LIVE ODDS when from real bookmaker, grey EST when calculated
+  const hasRealOdds = m.odds?.isReal === true;
+  const bkName      = m.odds?.bookmaker ? ` · ${m.odds.bookmaker}` : '';
+  const oddsBadge   = hasRealOdds
+    ? `<span style="display:inline-flex;align-items:center;background:rgba(0,200,83,0.13);border:1px solid rgba(0,200,83,0.4);border-radius:4px;padding:1px 5px;font-size:9px;color:#00c853;font-weight:700;margin-left:5px">● LIVE ODDS${bkName}</span>`
+    : `<span style="display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:1px 5px;font-size:9px;color:#555;margin-left:5px">EST</span>`;
 
   return `<div class="mc" id="mc_${m.matchId}">
-    <div class="mc-meta">
+    <div class="mc-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
       <span class="mc-league">${m.league}</span>
       ${isLive?`<span class="live-dot"></span><span class="live-lbl">LIVE</span><span class="live-score">${scoreStr}`:''}
-
+      ${oddsBadge}
     </div>
     <div class="mc-row">
       <div class="teams">
