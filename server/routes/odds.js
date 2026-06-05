@@ -58,19 +58,49 @@ for (const lg of APIF_LEAGUES) {
 }
 
 // ── TheSportsDB league map (fallback, free, no key) ──
-// Uses next-events endpoint: /eventsnextleague.php?id=LEAGUE_ID
+//
+// ONLY include IDs that have been verified to return FOOTBALL data.
+// Wrong IDs cause wrong-sport data (basketball, NFL etc) — DO NOT guess.
+//
+// Verified correct IDs:
+//   4429 = FIFA World Cup (confirmed: Mexico vs South Africa ✓)
+//   4346 = MLS (confirmed: CF Montréal vs Toronto FC ✓)
+//   4328 = English Premier League (well-known ID)
+//   4331 = Bundesliga (well-known ID)
+//   4335 = La Liga (well-known ID)
+//   4332 = Serie A (well-known ID)
+//   4334 = Ligue 1 (well-known ID)
+//   4480 = UEFA Champions League (well-known ID)
+//
+// REMOVED IDs that returned wrong sports:
+//   4423 → Copa América ID was wrong → returned basketball
+//   4391 → Friendlies ID was wrong → returned NFL
+//   4957 → Kenya Premier ID was wrong → returned US league
+//   4768 → Brazil Série A unverified → removed until confirmed
+//   4481 → CAF CL unverified → removed
+//
 const TSDB_LEAGUES = {
-  soccer_world_cup:            [{ id: '4429', name: 'FIFA World Cup 2026' }],
-  soccer_mls:                  [{ id: '4346', name: 'MLS' }],
-  soccer_brazil_serie_a:       [{ id: '4768', name: 'Brazilian Série A' }],
-  soccer_epl:                  [{ id: '4328', name: 'Premier League' }],
-  soccer_kenya_premier_league: [{ id: '4957', name: 'Kenya Premier League 🇰🇪' }],
-  soccer_caf_champions_league: [{ id: '4481', name: 'CAF Champions League' }],
-  soccer_copa_america:         [{ id: '4423', name: 'Copa América' }],
-  soccer_friendlies:           [{ id: '4391', name: 'International Friendlies' }],
-  soccer_nations_league:       [{ id: '4480', name: 'UEFA Nations League' }],
-  soccer_wc_qual_europe:       [{ id: '4455', name: 'WC Qualification Europe' }],
+  // Active NOW (June 2026) — use eventsseason for full fixture list
+  soccer_world_cup:  [{ id: '4429', name: 'FIFA World Cup 2026', season: '2026', usesSeason: true }],
+  soccer_mls:        [{ id: '4346', name: 'MLS',                 season: '2026', usesSeason: true }],
+
+  // Off-season but will have future fixtures — use eventsnextleague
+  soccer_epl:                  [{ id: '4328', name: 'Premier League',        usesSeason: false }],
+  soccer_bundesliga:           [{ id: '4331', name: 'Bundesliga',             usesSeason: false }],
+  soccer_la_liga:              [{ id: '4335', name: 'La Liga',                usesSeason: false }],
+  soccer_serie_a:              [{ id: '4332', name: 'Serie A',                usesSeason: false }],
+  soccer_ligue_1:              [{ id: '4334', name: 'Ligue 1',                usesSeason: false }],
+  soccer_uefa_champs_league:   [{ id: '4480', name: 'UEFA Champions League',  usesSeason: false }],
 };
+
+// Leagues shown in "Upcoming Matches" featured view
+// World Cup + MLS are active — pulling full season gives 20-60 real matches
+const TSDB_FEATURED = [
+  { id: '4429', key: 'soccer_world_cup', name: 'FIFA World Cup 2026', season: '2026', usesSeason: true },
+  { id: '4346', key: 'soccer_mls',       name: 'MLS',                 season: '2026', usesSeason: true },
+  { id: '4328', key: 'soccer_epl',       name: 'Premier League',      usesSeason: false },
+  { id: '4480', key: 'soccer_ucl',       name: 'UEFA Champions League', usesSeason: false },
+];
 
 // ── Odds generator (deterministic from team names) ──
 function genOdds(home, away) {
@@ -93,8 +123,6 @@ async function apiFetch(leagueId, season) {
   try {
     const r = await axios.get(`${APIF_BASE}/fixtures`, {
       headers: APIF_HDR(),
-      // `next=15` fetches the next 15 upcoming fixtures — works on free plan
-      // from/to date filter is a paid-only feature (caused 0 results)
       params:  { league: leagueId, season, next: 15 },
       timeout: 12000
     });
@@ -140,56 +168,72 @@ function buildApifMatch(fix, sportKey, leagueName) {
 
 // ────────────────────────────────────────────────────────────
 //  SOURCE 2: TheSportsDB  (free fallback — no API key needed)
+//
+//  Two strategies:
+//  - eventsseason.php → returns ALL fixtures for a season (for active leagues)
+//  - eventsnextleague.php → returns next few events (for off-season leagues)
 // ────────────────────────────────────────────────────────────
-async function tsdbFetch(sportKey) {
-  const leagues = TSDB_LEAGUES[sportKey] || [];
-  const matches = [];
+async function tsdbFetchLeague(lg, sportKey) {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const matches  = [];
 
-  for (const lg of leagues) {
-    try {
+  try {
+    let events = [];
+
+    if (lg.usesSeason && lg.season) {
+      // Full season endpoint — returns all fixtures, we filter for upcoming
+      const r = await axios.get(`${TSDB_BASE}/eventsseason.php`, {
+        params:  { id: lg.id, s: lg.season },
+        timeout: 15000
+      });
+      events = r.data?.events || [];
+      console.log(`[tsdb-season] id=${lg.id} (${lg.name}) season=${lg.season} → ${events.length} total, filtering for >=${todayStr}`);
+    } else {
+      // Next events endpoint — quicker, for off-season leagues
       const r = await axios.get(`${TSDB_BASE}/eventsnextleague.php`, {
         params:  { id: lg.id },
         timeout: 10000
       });
-      const events = r.data?.events || [];
-      console.log(`[tsdb] league=${lg.id} (${lg.name}) → ${events.length} events`);
-
-      // Accept any event dated today or in the future.
-      // We intentionally do NOT filter by exact time because TheSportsDB
-      // mixes UTC and local times, which would cause timezone-based false drops.
-      const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
-      for (const ev of events) {
-        const home = ev.strHomeTeam, away = ev.strAwayTeam;
-        if (!home || !away) continue;
-
-        const rawDate = ev.dateEvent || '';
-        if (!rawDate || rawDate < todayStr) continue;   // skip past dates only
-
-        const rawTime = ev.strTime || '12:00:00';
-        // Build ISO without Z — let JS treat it as local or just use as-is for display
-        const commence = new Date(`${rawDate}T${rawTime}`);
-
-        matches.push({
-          matchId:      `tsdb_${ev.idEvent}`,
-          sport:        sportKey,
-          league:       lg.name,
-          homeTeam:     home,
-          awayTeam:     away,
-          commenceTime: isNaN(commence.getTime()) ? `${rawDate}T${rawTime}Z` : commence.toISOString(),
-          status:       'upcoming',
-          odds:         genOdds(home, away),
-          score:        { home: null, away: null, minute: null, period: null },
-          result:       null,
-          isStatic:     false,
-          source:       'tsdb'
-        });
-      }
-    } catch (e) {
-      console.error(`[tsdb] ${lg.name} (id=${lg.id}): ${e.message}`);
+      events = r.data?.events || [];
+      console.log(`[tsdb-next] id=${lg.id} (${lg.name}) → ${events.length} events`);
     }
+
+    for (const ev of events) {
+      const home = ev.strHomeTeam, away = ev.strAwayTeam;
+      if (!home || !away) continue;
+
+      const rawDate = ev.dateEvent || '';
+      if (!rawDate || rawDate < todayStr) continue;   // skip past
+
+      const rawTime  = ev.strTime || '12:00:00';
+      const commence = new Date(`${rawDate}T${rawTime}`);
+      const key      = lg.key || sportKey;
+
+      matches.push({
+        matchId:      `tsdb_${ev.idEvent}`,
+        sport:        key,
+        league:       lg.name,
+        homeTeam:     home,
+        awayTeam:     away,
+        commenceTime: isNaN(commence.getTime()) ? `${rawDate}T12:00:00Z` : commence.toISOString(),
+        status:       'upcoming',
+        odds:         genOdds(home, away),
+        score:        { home: null, away: null, minute: null, period: null },
+        result:       null,
+        isStatic:     false,
+        source:       'tsdb'
+      });
+    }
+  } catch (e) {
+    console.error(`[tsdb] ${lg.name} (id=${lg.id}): ${e.message}`);
   }
   return matches;
+}
+
+async function tsdbFetch(sportKey) {
+  const leagues = TSDB_LEAGUES[sportKey] || [];
+  const results = await Promise.all(leagues.map(lg => tsdbFetchLeague(lg, sportKey)));
+  return results.flat();
 }
 
 // ────────────────────────────────────────────────────────────
@@ -318,60 +362,41 @@ router.get('/live', async (req, res) => {
   } catch { res.json({ success: true, data: [] }); }
 });
 
-// ── FEATURED — all active leagues in parallel, combined & sorted ──
-// This is the homepage default: shows matches across ALL leagues at once.
-// Far faster than sequential per-league calls.
+// ── FEATURED — all active leagues combined, sorted by date ──
+// Uses TheSportsDB eventsseason for WC+MLS (gives 20-60 real matches)
+// plus eventsnextleague for off-season leagues
 router.get('/featured', async (req, res) => {
   const cached = C.get('featured');
   if (cached) return res.json({ success: true, data: cached, source: 'cache', count: cached.length });
 
-  // All sports to query (skip 'live' tab)
-  const sportKeys = [
-    'soccer_world_cup',
-    'soccer_mls',
-    'soccer_brazil_serie_a',
-    'soccer_kenya_premier_league',
-    'soccer_friendlies',
-    'soccer_caf_champions_league',
-    'soccer_copa_america',
-    'soccer_nations_league',
-  ];
+  console.log(`📡 [featured] Fetching all leagues in parallel...`);
 
-  console.log(`📡 [featured] Fetching ${sportKeys.length} leagues in parallel via TheSportsDB...`);
-
-  // Fetch ALL leagues simultaneously — much faster than sequential
+  // Fetch WC + MLS via season endpoint + EPL/UCL via next endpoint — all in parallel
   const results = await Promise.allSettled(
-    sportKeys.map(async sport => {
-      // Check per-sport cache first
-      const sportCached = C.get(sport);
-      if (sportCached && sportCached.length) return sportCached;
-      return fetchMatchesForSport(sport);
-    })
+    TSDB_FEATURED.map(lg => tsdbFetchLeague(lg, lg.key))
   );
 
-  // Combine, deduplicate, sort by date
   const seen = new Set();
   let allMatches = [];
+
   for (const r of results) {
-    if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+    if (r.status === 'fulfilled') {
       for (const m of r.value) {
         if (!seen.has(m.matchId)) { seen.add(m.matchId); allMatches.push(m); }
       }
     }
   }
 
-  // Sort by commence time ascending
+  // Sort by commence time and cap at 50
   allMatches.sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
+  allMatches = allMatches.slice(0, 50);
 
-  // Cap at 40 matches for the homepage
-  allMatches = allMatches.slice(0, 40);
-
-  console.log(`✅ [featured] ${allMatches.length} total matches across all leagues`);
+  console.log(`✅ [featured] ${allMatches.length} total matches`);
 
   if (!allMatches.length) {
     return res.json({
       success: false, data: [],
-      message: 'No upcoming fixtures found across any league. Check /api/odds/debug for details.'
+      message: 'No upcoming fixtures. Check /api/odds/debug for details.'
     });
   }
 
@@ -435,22 +460,26 @@ router.get('/debug', async (req, res) => {
     }
   }
 
-  // TheSportsDB test (no key needed)
+  // TheSportsDB test (no key needed) — only verified IDs
   result.tsdb_tests = {};
   const toTestTsdb = [
-    { label: 'MLS',        id: '4346' },
-    { label: 'Brazil SA',  id: '4768' },
-    { label: 'World Cup',  id: '4429' },
+    { label: 'World Cup 2026 (season)', id: '4429', season: '2026', usesSeason: true  },
+    { label: 'MLS 2026 (season)',       id: '4346', season: '2026', usesSeason: true  },
+    { label: 'Premier League (next)',   id: '4328', season: null,   usesSeason: false },
   ];
   for (const t of toTestTsdb) {
     try {
-      const r = await axios.get(`${TSDB_BASE}/eventsnextleague.php`, {
-        params: { id: t.id }, timeout: 8000
-      });
-      const ev = r.data?.events || [];
+      const url    = t.usesSeason
+        ? `${TSDB_BASE}/eventsseason.php`
+        : `${TSDB_BASE}/eventsnextleague.php`;
+      const params = t.usesSeason ? { id: t.id, s: t.season } : { id: t.id };
+      const r      = await axios.get(url, { params, timeout: 10000 });
+      const todayStr = new Date().toISOString().split('T')[0];
+      const ev = (r.data?.events || []).filter(e => !t.usesSeason || e.dateEvent >= todayStr);
       result.tsdb_tests[t.label] = {
+        endpoint:     t.usesSeason ? 'eventsseason' : 'eventsnextleague',
         events_found: ev.length,
-        sample: ev.slice(0, 2).map(e => `${e.strHomeTeam} vs ${e.strAwayTeam} — ${e.dateEvent}`)
+        sample: ev.slice(0, 3).map(e => `${e.strHomeTeam} vs ${e.strAwayTeam} — ${e.dateEvent}`)
       };
     } catch (e) {
       result.tsdb_tests[t.label] = { error: e.message };
