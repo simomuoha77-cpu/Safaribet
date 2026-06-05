@@ -136,20 +136,55 @@ if (!TOKEN || !USER) {
 
 document.getElementById('balPill').textContent = 'KES ' + parseFloat(USER?.balance || 0).toFixed(2);
 
+// Try multiple endpoint patterns since server structure varies
+const BET_ENDPOINTS = [
+  '/api/bets/history',
+  '/api/bets/my-bets',
+  '/api/bets/user',
+  '/api/bets',
+];
+
 async function loadBets() {
-  try {
-    const r = await fetch('/api/bets/my-bets', {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    });
-    const d = await r.json();
-    if (!d.success) throw new Error(d.message || 'Failed');
-    allBets = d.bets || [];
-    buildSummary();
-    renderBets();
-  } catch (e) {
-    document.getElementById('betsList').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Failed to load</div><div class="empty-sub">${e.message}</div></div>`;
+  const headers = { 'Authorization': 'Bearer ' + TOKEN };
+  let lastError = 'No bets endpoint found';
+
+  for (const endpoint of BET_ENDPOINTS) {
+    try {
+      const r = await fetch(endpoint, { headers });
+      if (!r.ok && r.status === 404) continue; // try next
+      const d = await r.json();
+
+      // Handle various response shapes: {bets:[]}, {data:[]}, direct array
+      const bets = d.bets || d.data || d.history || (Array.isArray(d) ? d : null);
+      if (bets !== null && (d.success !== false)) {
+        allBets = bets;
+        buildSummary();
+        renderBets();
+        return; // success — stop trying
+      }
+      // If success:false, save error and try next endpoint
+      lastError = d.message || 'Failed';
+    } catch (e) {
+      lastError = e.message;
+    }
   }
+
+  // All endpoints failed
+  document.getElementById('betsList').innerHTML =
+    `<div class="empty">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-title">Failed to load</div>
+      <div class="empty-sub">${lastError}</div>
+      <div style="margin-top:16px;font-size:11px;color:#555;background:#111;padding:10px;border-radius:8px;text-align:left">
+        <strong style="color:#888">Fix:</strong> Add this route to your <code>server/routes/bets.js</code>
+        <strong>before</strong> the <code>/:id</code> route:<br/><br/>
+        <code style="color:#4caf50">router.get('/history', auth, async (req,res) => {<br/>
+          &nbsp;const bets = await Bet.find({userId: req.user.id || req.user._id})<br/>
+          &nbsp;&nbsp;.sort({createdAt:-1}).limit(100).lean();<br/>
+          &nbsp;res.json({success:true, bets});<br/>
+        });</code>
+      </div>
+    </div>`;
 }
 
 function buildSummary() {
