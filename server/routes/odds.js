@@ -143,7 +143,6 @@ function buildApifMatch(fix, sportKey, leagueName) {
 // ────────────────────────────────────────────────────────────
 async function tsdbFetch(sportKey) {
   const leagues = TSDB_LEAGUES[sportKey] || [];
-  const now     = new Date();
   const matches = [];
 
   for (const lg of leagues) {
@@ -155,15 +154,21 @@ async function tsdbFetch(sportKey) {
       const events = r.data?.events || [];
       console.log(`[tsdb] league=${lg.id} (${lg.name}) → ${events.length} events`);
 
+      // Accept any event dated today or in the future.
+      // We intentionally do NOT filter by exact time because TheSportsDB
+      // mixes UTC and local times, which would cause timezone-based false drops.
+      const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
       for (const ev of events) {
         const home = ev.strHomeTeam, away = ev.strAwayTeam;
         if (!home || !away) continue;
 
-        // Build a proper ISO date from TheSportsDB's separate date + time fields
         const rawDate = ev.dateEvent || '';
-        const rawTime = ev.strTime   || '12:00:00';
-        const commence = new Date(`${rawDate}T${rawTime}Z`);
-        if (isNaN(commence.getTime()) || commence < now) continue;
+        if (!rawDate || rawDate < todayStr) continue;   // skip past dates only
+
+        const rawTime = ev.strTime || '12:00:00';
+        // Build ISO without Z — let JS treat it as local or just use as-is for display
+        const commence = new Date(`${rawDate}T${rawTime}`);
 
         matches.push({
           matchId:      `tsdb_${ev.idEvent}`,
@@ -171,7 +176,7 @@ async function tsdbFetch(sportKey) {
           league:       lg.name,
           homeTeam:     home,
           awayTeam:     away,
-          commenceTime: commence.toISOString(),
+          commenceTime: isNaN(commence.getTime()) ? `${rawDate}T${rawTime}Z` : commence.toISOString(),
           status:       'upcoming',
           odds:         genOdds(home, away),
           score:        { home: null, away: null, minute: null, period: null },
@@ -311,6 +316,67 @@ router.get('/live', async (req, res) => {
     const m = await Match.find({ status: 'live' }).sort({ commenceTime: 1 }).limit(20).lean();
     res.json({ success: true, data: m });
   } catch { res.json({ success: true, data: [] }); }
+});
+
+// ── FEATURED — all active leagues in parallel, combined & sorted ──
+// This is the homepage default: shows matches across ALL leagues at once.
+// Far faster than sequential per-league calls.
+router.get('/featured', async (req, res) => {
+  const cached = C.get('featured');
+  if (cached) return res.json({ success: true, data: cached, source: 'cache', count: cached.length });
+
+  // All sports to query (skip 'live' tab)
+  const sportKeys = [
+    'soccer_world_cup',
+    'soccer_mls',
+    'soccer_brazil_serie_a',
+    'soccer_kenya_premier_league',
+    'soccer_friendlies',
+    'soccer_caf_champions_league',
+    'soccer_copa_america',
+    'soccer_nations_league',
+  ];
+
+  console.log(`📡 [featured] Fetching ${sportKeys.length} leagues in parallel via TheSportsDB...`);
+
+  // Fetch ALL leagues simultaneously — much faster than sequential
+  const results = await Promise.allSettled(
+    sportKeys.map(async sport => {
+      // Check per-sport cache first
+      const sportCached = C.get(sport);
+      if (sportCached && sportCached.length) return sportCached;
+      return fetchMatchesForSport(sport);
+    })
+  );
+
+  // Combine, deduplicate, sort by date
+  const seen = new Set();
+  let allMatches = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+      for (const m of r.value) {
+        if (!seen.has(m.matchId)) { seen.add(m.matchId); allMatches.push(m); }
+      }
+    }
+  }
+
+  // Sort by commence time ascending
+  allMatches.sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
+
+  // Cap at 40 matches for the homepage
+  allMatches = allMatches.slice(0, 40);
+
+  console.log(`✅ [featured] ${allMatches.length} total matches across all leagues`);
+
+  if (!allMatches.length) {
+    return res.json({
+      success: false, data: [],
+      message: 'No upcoming fixtures found across any league. Check /api/odds/debug for details.'
+    });
+  }
+
+  C.set('featured', allMatches);
+  res.json({ success: true, data: allMatches, count: allMatches.length });
 });
 
 // ── DEBUG ──

@@ -391,7 +391,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
   loadLiveTicker();
 
   // Refresh odds every 60s
-  oddsRefresh=setInterval(()=>loadMatches(currentSport, true), 60000);
+  oddsRefresh=setInterval(()=>{
+    if(currentSport==='featured'){
+      // Invalidate featured cache and reload
+      fetch('/api/odds/featured').then(r=>r.json()).then(d=>{
+        if(d.success&&d.data&&d.data.length) renderMatches(d.data);
+      }).catch(()=>{});
+    } else {
+      loadMatches(currentSport, true);
+    }
+  }, 60000);
   // Refresh live ticker every 30s
   setInterval(loadLiveTicker, 30000);
 });
@@ -461,10 +470,27 @@ async function loadAvailableSports(){
   }
 }
 
-// ── FIND FIRST SPORT WITH REAL MATCHES ──
-// Try leagues known to be active in June first to minimise API quota usage
+// ── LOAD FEATURED MATCHES (homepage default — all leagues combined) ──
 async function loadFirstWithMatches(sports){
-  // Preferred order: guaranteed-active leagues come first
+  const el = document.getElementById('matchList');
+  el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+
+  try{
+    const r = await fetch('/api/odds/featured');
+    const d = await r.json();
+
+    if(d.success && d.data && d.data.length > 0){
+      // Show "Upcoming Matches" heading — tab stays on World Cup but data is multi-league
+      document.getElementById('secTtl').textContent = 'Upcoming Matches';
+      // Mark no tab as selected — this is the combined view
+      document.querySelectorAll('.stab').forEach(t => t.classList.remove('on'));
+      currentSport = 'featured';
+      renderMatches(d.data);
+      return;
+    }
+  } catch(e){ console.warn('Featured fetch failed:', e.message); }
+
+  // Fallback: try each sport sequentially (old behaviour)
   const preferredOrder=['soccer_mls','soccer_brazil_serie_a','soccer_world_cup',
                         'soccer_friendlies','soccer_kenya_premier_league'];
   const sorted=[
@@ -488,8 +514,9 @@ async function loadFirstWithMatches(sports){
       }
     }catch(e){}
   }
-  // Nothing found across all leagues
-  document.getElementById('matchList').innerHTML=
+
+  // Nothing found anywhere
+  el.innerHTML=
     '<div class="empty" style="padding:40px 20px">'+
     '<div style="font-size:36px;margin-bottom:12px">⚽</div>'+
     '<div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches right now</div>'+
