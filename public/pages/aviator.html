@@ -82,17 +82,6 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 .abtn.bwait{background:#1e1e1e;border:1.5px solid #2a2a2a;color:#444}
 .abtn.bplaced{background:#1e1e1e;border:1.5px solid #333;color:#888}
 .abtn:disabled{opacity:.45;cursor:not-allowed;animation:none;box-shadow:none}
-.autopanel{display:none;flex-direction:column;gap:7px;padding:4px 0}
-.autopanel.on{display:flex}
-.arow{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#888;font-family:'Rajdhani',sans-serif;font-weight:600}
-.arow label{display:flex;align-items:center;gap:6px;cursor:pointer}
-.atoggle{position:relative;width:38px;height:20px;background:#1a1a1a;border-radius:10px;border:1px solid #333;cursor:pointer;transition:background .2s;flex-shrink:0}
-.atoggle.on{background:#1a8c3c;border-color:#22b04e}
-.atoggle::after{content:'';position:absolute;width:14px;height:14px;background:#555;border-radius:50%;top:2px;left:2px;transition:all .2s}
-.atoggle.on::after{background:#fff;left:20px}
-.asinp{width:70px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;color:#fff;font-size:13px;font-weight:700;font-family:'Rajdhani',sans-serif;text-align:center;padding:3px 5px;outline:none}
-.asinp:focus{border-color:#22b04e}
-.astatus{font-size:10px;color:#22b04e;font-family:'Rajdhani',sans-serif;font-weight:700;letter-spacing:.5px;min-height:14px;text-align:center}
 .qrow{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:0}
 .qs{background:#222;border:1px solid #2a2a2a;border-radius:6px;padding:5px 2px;font-size:12px;font-weight:700;color:#666;cursor:pointer;transition:all .12s;font-family:'Rajdhani',sans-serif;text-align:center}
 .qs:active{background:#2e2e2e;color:#ccc}
@@ -160,7 +149,7 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
     <div class="wtxt">STARTING IN</div>
     <div class="wnum" id="wn">5</div>
   </div>
-  <div class="fair" onclick="showFair()">🔒 Provably Fair</div>
+  <div class="fair" onclick="showFair()" style="cursor:pointer">🔒 Provably Fair</div>
   <div class="pbadge">
     <div class="pavs">
       <div class="pav">👤</div><div class="pav">👤</div><div class="pav">👤</div>
@@ -174,83 +163,56 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 
   <!-- BET PANEL -->
   <div class="bpanel">
-    <!-- SLOT 1 -->
     <div class="mtabs">
-      <button class="mtab on" onclick="switchTab(1,'bet',this)">Bet</button>
-      <button class="mtab" onclick="switchTab(1,'auto',this)">Auto</button>
+      <button class="mtab on">Bet</button>
+      <button class="mtab" onclick="showT('Auto-bet coming soon','ti')">Auto</button>
     </div>
-    <!-- Slot 1 Manual -->
-    <div id="manpanel1">
+    <!-- Slot 1 -->
+    <div class="srow">
+      <button class="sbtn" onclick="chg(1,-10)">−</button>
+      <input class="sinp" id="s1" type="number" value="10" min="10"/>
+      <button class="sbtn" onclick="chg(1,10)">+</button>
+      <button class="abtn bbet" id="b1" onclick="hbet(1)">
+        Bet<br><span class="sub" id="b1s">10.00 KES</span>
+      </button>
+    </div>
+    <div class="qrow">
+      <button class="qs" onclick="ss(1,100)">100</button>
+      <button class="qs" onclick="ss(1,200)">200</button>
+      <button class="qs" onclick="ss(1,500)">500</button>
+      <button class="qs" onclick="ss(1,10000)">10,000</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
+      <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
+      <input id="ac1" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
+        style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
+      <span style="font-size:11px;color:#444">×</span>
+    </div>
+    <!-- Slot 2 -->
+    <div class="slot2">
+      <div class="slot2-head">
+        <button class="stab on">Bet</button>
+        <button class="stab" onclick="showT('Auto coming soon','ti')">Auto</button>
+      </div>
       <div class="srow">
-        <button class="sbtn" onclick="chg(1,-10)">−</button>
-        <input class="sinp" id="s1" type="number" value="10" min="10"/>
-        <button class="sbtn" onclick="chg(1,10)">+</button>
-        <button class="abtn bbet" id="b1" onclick="hbet(1)">
-          Bet<br><span class="sub">10.00 KES</span>
+        <button class="sbtn" onclick="chg(2,-10)">−</button>
+        <input class="sinp" id="s2" type="number" value="10" min="10"/>
+        <button class="sbtn" onclick="chg(2,10)">+</button>
+        <button class="abtn bbet" id="b2" onclick="hbet(2)">
+          Bet<br><span class="sub" id="b2s">10.00 KES</span>
         </button>
       </div>
       <div class="qrow">
-        <button class="qs" onclick="ss(1,100)">100</button>
-        <button class="qs" onclick="ss(1,200)">200</button>
-        <button class="qs" onclick="ss(1,500)">500</button>
-        <button class="qs" onclick="ss(1,10000)">10,000</button>
+        <button class="qs" onclick="ss(2,100)">100</button>
+        <button class="qs" onclick="ss(2,200)">200</button>
+        <button class="qs" onclick="ss(2,500)">500</button>
+        <button class="qs" onclick="ss(2,10000)">10,000</button>
       </div>
-    </div>
-    <!-- Slot 1 Auto -->
-    <div id="autopanel1" class="autopanel">
-      <div class="srow">
-        <button class="sbtn" onclick="chgA(1,-10)">−</button>
-        <input class="sinp asinp" id="as1" type="number" value="10" min="10" style="flex:1"/>
-        <button class="sbtn" onclick="chgA(1,10)">+</button>
-        <button class="abtn" id="ab1" onclick="toggleAuto(1)" style="background:linear-gradient(160deg,#1a3a8c,#2255d0);color:#fff">
-          Auto Bet<br><span class="sub" id="ab1s">OFF</span>
-        </button>
-      </div>
-      <div class="arow">
-        <span>Auto Cash Out at</span>
-        <label><input class="asinp" id="aco1" type="number" value="2.00" step="0.1" min="1.1" style="width:80px"/> ×</label>
-      </div>
-      <div class="astatus" id="ast1"></div>
-    </div>
-
-    <!-- SLOT 2 -->
-    <div class="slot2">
-      <div class="slot2-head">
-        <button class="stab on" onclick="switchTab(2,'bet',this)">Bet</button>
-        <button class="stab" onclick="switchTab(2,'auto',this)">Auto</button>
-      </div>
-      <!-- Slot 2 Manual -->
-      <div id="manpanel2">
-        <div class="srow">
-          <button class="sbtn" onclick="chg(2,-10)">−</button>
-          <input class="sinp" id="s2" type="number" value="10" min="10"/>
-          <button class="sbtn" onclick="chg(2,10)">+</button>
-          <button class="abtn bbet" id="b2" onclick="hbet(2)">
-            Bet<br><span class="sub">10.00 KES</span>
-          </button>
-        </div>
-        <div class="qrow">
-          <button class="qs" onclick="ss(2,100)">100</button>
-          <button class="qs" onclick="ss(2,200)">200</button>
-          <button class="qs" onclick="ss(2,500)">500</button>
-          <button class="qs" onclick="ss(2,10000)">10,000</button>
-        </div>
-      </div>
-      <!-- Slot 2 Auto -->
-      <div id="autopanel2" class="autopanel">
-        <div class="srow">
-          <button class="sbtn" onclick="chgA(2,-10)">−</button>
-          <input class="sinp asinp" id="as2" type="number" value="10" min="10" style="flex:1"/>
-          <button class="sbtn" onclick="chgA(2,10)">+</button>
-          <button class="abtn" id="ab2" onclick="toggleAuto(2)" style="background:linear-gradient(160deg,#1a3a8c,#2255d0);color:#fff">
-            Auto Bet<br><span class="sub" id="ab2s">OFF</span>
-          </button>
-        </div>
-        <div class="arow">
-          <span>Auto Cash Out at</span>
-          <label><input class="asinp" id="aco2" type="number" value="2.00" step="0.1" min="1.1" style="width:80px"/> ×</label>
-        </div>
-        <div class="astatus" id="ast2"></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
+        <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
+        <input id="ac2" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
+          style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
+        <span style="font-size:11px;color:#444">×</span>
       </div>
     </div>
   </div>
@@ -609,6 +571,12 @@ function animLoop(ts){
     if(Math.floor(localMulti*2)>Math.floor(lastTickM*2)){
       playTick(); lastTickM=localMulti;
     }
+    // Auto cashout
+    [1,2].forEach(s=>{
+      const bet=s===1?BET1:BET2;
+      const ac=parseFloat(document.getElementById('ac'+s)?.value);
+      if(bet&&!bet.cashedOut&&ac&&localMulti>=ac) doCash(s);
+    });
 
     // Update cash out button live
     [1,2].forEach(s=>{
@@ -616,8 +584,6 @@ function animLoop(ts){
       if(bet&&!bet.cashedOut&&btn.classList.contains('bcash'))
         btn.innerHTML=`Cash Out<br><span class="sub">${localMulti.toFixed(2)}× — KES ${(bet.stake*localMulti).toFixed(2)}</span>`;
     });
-    // Auto cash-out check
-    autoTick();
   }
   draw();
   animFrame=requestAnimationFrame(animLoop);
@@ -671,7 +637,9 @@ function startCountdown(from, roundId){
 // ══════════════════════════════════════
 async function poll(){
   try{
-    const r=await fetch('/api/aviator/state');
+    const token=localStorage.getItem('token');
+    const authH=token?{'Authorization':'Bearer '+token}:{};
+    const r=await fetch('/api/aviator/state',{headers:authH});
     const d=(await r.json()).data;
     if(!d) return;
     prevST=ST; ST=d.status; HIST=d.history||[];
@@ -680,10 +648,6 @@ async function poll(){
       lastRound=d.roundId;
       if(ST!=='waiting'){BET1=null;BET2=null;}
       updBtns();
-      // Auto-bet: new round → queue bets
-      if(ST==='waiting'){
-        setTimeout(()=>{ if(AUTO[1].on) autoQueueBet(1); if(AUTO[2].on) autoQueueBet(2); },400);
-      }
     }
 
     updHist();
@@ -712,8 +676,6 @@ async function poll(){
       }
       // Server multiplier takes precedence — sync if needed
       if(Math.abs(d.multiplier-localMulti)>0.5) localMulti=d.multiplier;
-      // Switch placed bets → Cash Out button now that flight is active
-      if(prevST==='waiting') updBtns();
 
     } else if(ST==='crashed'){
       if(flightActive) stopFlight();
@@ -729,14 +691,11 @@ async function poll(){
           if(i===0)BET1=null; else BET2=null;
         }
       });
-      // Update auto status labels
-      [1,2].forEach(s=>{
-        if(AUTO[s].on) document.getElementById('ast'+s).textContent='⏳ Waiting for next round...';
-      });
       updBtns();
     }
 
-    fetch('/api/aviator/players').then(r=>r.json()).then(d=>{
+    const _pt=localStorage.getItem('token');
+    fetch('/api/aviator/players',{headers:_pt?{'Authorization':'Bearer '+_pt}:{}}).then(r=>r.json()).then(d=>{
       PLAYERS=d.data||[];
       document.getElementById('pc').textContent=PLAYERS.length;
       renderBL();
@@ -812,7 +771,7 @@ async function doCash(s){
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')}});
     const d=await r.json();
     if(d.success){
-      if(s===1) BET1=null; else BET2=null;
+      const bet=s===1?BET1:BET2; if(bet) bet.cashedOut=true;
       USER.balance=d.newBalance; updBal(); playCashout();
       showT(`💰 ${d.multiplier.toFixed(2)}× — Won KES ${d.won.toFixed(2)}`,'tw'); updBtns();
     } else { showT(d.message||'Failed','tl'); btn.disabled=false; }
@@ -833,7 +792,7 @@ function updBtns(){
     } else if(!flightActive&&bet){
       btn.classList.add('bplaced'); btn.innerHTML=`Placed<br><span class="sub">KES ${bet.stake.toFixed(2)}</span>`; btn.disabled=true;
     } else if(ST==='crashed'){
-      btn.classList.add('bbet'); btn.innerHTML=`Bet<br><span class="sub">${stake.toFixed(2)} KES</span>`;
+      btn.classList.add('bbet'); btn.innerHTML=`Bet<br><span class="sub">${stake.toFixed(2)} KES</span>`; btn.disabled=true;
     } else {
       btn.classList.add('bbet'); btn.innerHTML=`Bet<br><span class="sub">${stake.toFixed(2)} KES</span>`;
     }
@@ -842,96 +801,6 @@ function updBtns(){
 
 function chg(s,d){ const e=document.getElementById('s'+s); e.value=Math.max(10,(parseFloat(e.value)||10)+d); updBtns(); }
 function ss(s,v){ document.getElementById('s'+s).value=v; updBtns(); }
-function chgA(s,d){ const e=document.getElementById('as'+s); e.value=Math.max(10,(parseFloat(e.value)||10)+d); }
-
-// ── Tab switch ──────────────────────────────
-function switchTab(s,tab,btn){
-  // Update tab button styles
-  const tabs=btn.parentElement.querySelectorAll(s===1?'.mtab':'.stab');
-  tabs.forEach(t=>t.classList.remove('on')); btn.classList.add('on');
-  document.getElementById('manpanel'+s).style.display=tab==='bet'?'':'none';
-  const ap=document.getElementById('autopanel'+s);
-  ap.classList.toggle('on',tab==='auto');
-}
-
-// ── Auto-bet state ───────────────────────────
-let AUTO={1:{on:false,pendingBet:false,pendingCash:false},2:{on:false,pendingBet:false,pendingCash:false}};
-
-function toggleAuto(s){
-  if(!USER){ showT('Login to use Auto-bet','ti'); return; }
-  AUTO[s].on=!AUTO[s].on;
-  const btn=document.getElementById('ab'+s);
-  const lbl=document.getElementById('ab'+s+'s');
-  if(AUTO[s].on){
-    btn.style.background='linear-gradient(160deg,#c49000,var(--gold))';
-    btn.style.color='#000';
-    lbl.textContent='ON — Active';
-    document.getElementById('ast'+s).textContent='⚡ Auto-bet active';
-    // If we're in waiting phase and no bet placed yet, queue immediately
-    if(ST==='waiting'||ST==='crashed') autoQueueBet(s);
-  } else {
-    AUTO[s].pendingBet=false; AUTO[s].pendingCash=false;
-    btn.style.background='linear-gradient(160deg,#1a3a8c,#2255d0)';
-    btn.style.color='#fff';
-    lbl.textContent='OFF';
-    document.getElementById('ast'+s).textContent='';
-  }
-}
-
-async function autoQueueBet(s){
-  if(!AUTO[s].on) return;
-  if(flightActive) return; // already flying, wait for next round
-  const bet=s===1?BET1:BET2;
-  if(bet) return; // already have a bet this round
-  const stake=parseFloat(document.getElementById('as'+s).value);
-  if(!stake||stake<10){ showT('Auto: min KES 10','tl'); return; }
-  document.getElementById('ast'+s).textContent='⏳ Placing auto-bet...';
-  await doBetAuto(s, stake);
-}
-
-async function doBetAuto(s, stake){
-  const btn=document.getElementById('b'+s); btn.disabled=true;
-  try{
-    const r=await fetch('/api/aviator/bet',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
-      body:JSON.stringify({stake})});
-    const d=await r.json();
-    if(d.success){
-      USER.balance=d.newBalance; updBal();
-      if(s===1) BET1={stake,cashedOut:false}; else BET2={stake,cashedOut:false};
-      document.getElementById('ast'+s).textContent=`✅ Auto-bet KES ${stake.toFixed(2)} placed`;
-      showT('⚡ Auto-bet KES '+stake.toFixed(2),'ti'); updBtns();
-    } else {
-      document.getElementById('ast'+s).textContent='❌ '+( d.message||'Bet failed');
-      showT(d.message||'Auto-bet failed','tl'); btn.disabled=false;
-    }
-  }catch(e){
-    document.getElementById('ast'+s).textContent='❌ Error';
-    showT('Auto-bet error','tl'); btn.disabled=false;
-  }
-}
-
-async function autoCashCheck(s){
-  if(!AUTO[s].on) return;
-  const bet=s===1?BET1:BET2;
-  if(!bet||bet.cashedOut) return;
-  const target=parseFloat(document.getElementById('aco'+s).value)||2.0;
-  if(localMulti>=target){
-    document.getElementById('ast'+s).textContent=`💰 Auto cash-out @ ${localMulti.toFixed(2)}×`;
-    await doCash(s);
-  }
-}
-
-// Hook auto-cashout into animation loop — called from the rAF tick
-function autoTick(){
-  if(flightActive){
-    if(AUTO[1].on) autoCashCheck(1);
-    if(AUTO[2].on) autoCashCheck(2);
-  }
-}
-
-// ── Hook new round into auto-bet ─────────────
-
 document.getElementById('s1').addEventListener('input',updBtns);
 document.getElementById('s2').addEventListener('input',updBtns);
 function setBT(el){ document.querySelectorAll('.btab2').forEach(t=>t.classList.remove('on')); el.classList.add('on'); }
@@ -975,5 +844,23 @@ window.addEventListener('DOMContentLoaded',()=>{
   setInterval(poll,300);
 });
 </script>
+<nav class="bnav">
+  <div class="bni" id="bni-home" onclick="location.href='/'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
+    Home
+  </div>
+  <div class="bni" id="bni-aviator" class="bni on" onclick="location.href='/pages/aviator.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>
+    Aviator
+  </div>
+  <div class="bni" id="bni-bets" onclick="location.href='/pages/my-bets.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>
+    My Bets
+  </div>
+  <div class="bni" id="bni-account" onclick="location.href='/pages/account.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+    Account
+  </div>
+</nav>
 </body>
 </html>

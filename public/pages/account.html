@@ -4,175 +4,196 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Account – BetaKE</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
-:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
+:root{--g:#00c853;--g2:#00e65c;--bg:#080c08;--s1:#0d120d;--s3:#192019;--bd:rgba(0,200,83,0.08);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b;--bn:62px}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:70px}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:calc(var(--bn)+16px)}
 
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
-.back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer}
-.ttl{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
-.bal{font-size:13px;font-weight:700;color:var(--g);cursor:pointer}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(8,12,8,0.98);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:50;backdrop-filter:blur(20px)}
+.tb-back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:4px}
+.tb-back svg{width:16px;height:16px;fill:currentColor}
+.tb-title{font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700}
+.tb-bal{font-size:13px;font-weight:800;color:var(--g)}
 
-/* PROFILE CARD */
-.profile-card{margin:14px 12px;background:linear-gradient(135deg,#003d1a,#001a0d);border:1px solid var(--bd);border-radius:14px;padding:20px;display:flex;align-items:center;gap:14px}
-.avatar{width:60px;height:60px;border-radius:50%;background:var(--g);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:#000;flex-shrink:0}
-.profile-info h2{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700}
-.profile-info p{font-size:13px;color:var(--mt);margin-top:2px}
-.profile-info .phone{font-size:12px;color:var(--mt);margin-top:4px;display:flex;align-items:center;gap:5px}
-.verified{background:rgba(0,200,83,0.12);color:var(--g);font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+/* PROFILE HERO */
+.profile-hero{margin:14px 12px;background:linear-gradient(135deg,#003d1a 0%,#001a0d 60%,#080c08 100%);border:1px solid rgba(0,200,83,0.15);border-radius:16px;padding:20px;display:flex;align-items:center;gap:16px;position:relative;overflow:hidden}
+.profile-hero::after{content:'';position:absolute;right:-20px;top:-20px;width:120px;height:120px;background:radial-gradient(circle,rgba(0,200,83,0.1) 0%,transparent 70%);border-radius:50%}
+.avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#00e65c,#00c853);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#000;flex-shrink:0;box-shadow:0 0 20px rgba(0,200,83,0.3)}
+.profile-info h2{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.profile-info .handle{font-size:13px;color:var(--mt);margin-top:3px}
+.profile-info .phone{font-size:12px;color:var(--mt);margin-top:5px;display:flex;align-items:center;gap:6px}
+.verified{background:rgba(0,200,83,0.12);color:var(--g);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,200,83,0.2)}
 
-/* BALANCE STRIP */
-.bal-strip{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 12px 14px}
-.bs{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:12px;text-align:center}
-.bs-val{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;color:var(--g)}
-.bs-lbl{font-size:11px;color:var(--mt);margin-top:2px}
-.dep-btn{width:100%;margin:0 0 14px;padding:13px;background:var(--g);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;display:block;text-align:center}
+/* BALANCE CARDS */
+.bal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px;margin-bottom:10px}
+.bal-card{background:linear-gradient(135deg,rgba(19,26,19,0.95),rgba(13,18,13,0.98));border:1px solid var(--bd);border-radius:12px;padding:14px;text-align:center}
+.bal-val{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
+.bal-lbl{font-size:11px;color:var(--mt);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px}
 
-/* SECTIONS */
-.sec{margin:0 12px 14px;background:var(--s1);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
-.sec-ttl{font-size:12px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px;padding:12px 14px 8px;border-bottom:1px solid var(--bd)}
-.menu-item{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid rgba(0,200,83,0.05);cursor:pointer;transition:background 0.15s}
-.menu-item:last-child{border:none}
-.menu-item:hover{background:var(--s2)}
-.mi-left{display:flex;align-items:center;gap:10px}
-.mi-icon{font-size:18px;width:28px;text-align:center}
+/* ACTION BUTTONS */
+.action-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px;margin-bottom:16px}
+.act-btn{padding:14px;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;border:none;display:flex;flex-direction:column;align-items:center;gap:4px;transition:all 0.2s}
+.act-btn-icon{font-size:22px}
+.act-btn.deposit{background:linear-gradient(135deg,#00e65c,#00c853);color:#000;box-shadow:0 4px 16px rgba(0,200,83,0.25)}
+.act-btn.deposit:hover{box-shadow:0 6px 24px rgba(0,200,83,0.4)}
+.act-btn.withdraw{background:rgba(19,26,19,0.95);border:1.5px solid rgba(0,200,83,0.2);color:var(--tx)}
+.act-btn.withdraw:hover{background:rgba(0,200,83,0.06)}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(0,200,83,0.06);border-radius:12px;overflow:hidden;margin:0 12px 16px}
+.sg{background:var(--s1);padding:14px 8px;text-align:center}
+.sg-val{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;line-height:1}
+.sg-lbl{font-size:10px;color:var(--mt);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px}
+
+/* SECTION */
+.sec{margin:0 12px 12px;background:linear-gradient(135deg,rgba(19,26,19,0.95),rgba(13,18,13,0.98));border:1px solid var(--bd);border-radius:14px;overflow:hidden}
+.sec-hd{font-size:11px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.8px;padding:12px 16px 8px;border-bottom:1px solid rgba(0,200,83,0.05)}
+
+/* MENU ITEMS */
+.mi{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(0,200,83,0.04);cursor:pointer;transition:background 0.15s}
+.mi:last-child{border:none}
+.mi:hover{background:rgba(0,200,83,0.04)}
+.mi:active{background:rgba(0,200,83,0.08)}
+.mi-l{display:flex;align-items:center;gap:12px}
+.mi-icon{width:38px;height:38px;border-radius:10px;background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.1);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 .mi-text{font-size:14px;font-weight:600}
-.mi-sub{font-size:11px;color:var(--mt);margin-top:1px}
-.mi-right{display:flex;align-items:center;gap:6px;color:var(--mt);font-size:13px}
-.mi-badge{background:var(--g);color:#000;border-radius:10px;padding:2px 7px;font-size:11px;font-weight:700}
-.mi-badge.red{background:var(--rd);color:#fff}
-.chevron{color:var(--mt);font-size:16px}
+.mi-sub{font-size:12px;color:var(--mt);margin-top:1px}
+.chevron{color:var(--mt);font-size:20px;line-height:1}
 
-/* STATS GRID */
-.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--bd)}
-.sg{background:var(--s1);padding:12px 8px;text-align:center}
-.sg-val{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
-.sg-lbl{font-size:10px;color:var(--mt);margin-top:2px}
-
-/* TRANSACTION LIST */
-.tx-list{max-height:300px;overflow-y:auto}
-.tx-item{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid rgba(0,200,83,0.05)}
-.tx-item:last-child{border:none}
-.tx-left{display:flex;align-items:center;gap:9px}
-.tx-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
-.tx-icon.dep{background:rgba(0,200,83,0.12)}
-.tx-icon.win{background:rgba(255,214,0,0.12)}
-.tx-icon.bet{background:rgba(255,59,59,0.08)}
-.tx-icon.ref{background:rgba(100,100,255,0.12)}
-.tx-desc{font-size:13px;font-weight:600}
+/* TX LIST */
+.tx-list{max-height:280px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#1a2a1a transparent}
+.tx{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(0,200,83,0.04)}
+.tx:last-child{border:none}
+.tx-l{display:flex;align-items:center;gap:10px}
+.tx-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.tx-icon.dep{background:rgba(0,200,83,0.1)}
+.tx-icon.win{background:rgba(255,214,0,0.1)}
+.tx-icon.bet{background:rgba(255,59,59,0.07)}
+.tx-icon.ref{background:rgba(100,100,255,0.1)}
+.tx-icon.withdrawal{background:rgba(255,100,0,0.1)}
+.tx-desc{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
 .tx-date{font-size:11px;color:var(--mt);margin-top:1px}
-.tx-amount{font-size:14px;font-weight:700}
-.tx-amount.pos{color:var(--g)}
-.tx-amount.neg{color:var(--rd)}
+.tx-amt{font-size:14px;font-weight:800;flex-shrink:0}
+.tx-amt.pos{color:var(--g)}
+.tx-amt.neg{color:var(--rd)}
+
+/* LOGOUT */
+.logout-btn{display:block;width:calc(100% - 24px);margin:0 12px 14px;padding:14px;background:rgba(255,59,59,0.06);border:1.5px solid rgba(255,59,59,0.15);color:var(--rd);border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;text-align:center;transition:all 0.2s}
+.logout-btn:hover{background:rgba(255,59,59,0.12)}
 
 /* MODAL */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;display:none;align-items:flex-end;justify-content:center;padding:0}
 .modal-bg.on{display:flex}
-.modal{background:var(--s1);border-top:2px solid var(--g);border-radius:16px 16px 0 0;padding:24px 16px;width:100%;max-width:480px}
-.modal-ttl{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between}
-.modal-close{background:none;border:none;color:var(--mt);font-size:22px;cursor:pointer}
+.modal{background:rgba(13,18,13,0.98);border-top:2px solid var(--g);border-radius:20px 20px 0 0;padding:24px 18px;width:100%;max-width:480px;backdrop-filter:blur(20px)}
+.modal-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.modal-ttl{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700}
+.modal-close{background:rgba(255,255,255,0.06);border:none;border-radius:8px;color:var(--mt);font-size:18px;cursor:pointer;width:32px;height:32px;display:flex;align-items:center;justify-content:center}
 .field{margin-bottom:12px}
-.field label{display:block;font-size:12px;color:var(--mt);font-weight:600;margin-bottom:5px}
-.field input{width:100%;background:var(--s3);border:1.5px solid var(--bd);border-radius:8px;padding:11px 13px;color:var(--tx);font-size:15px;outline:none;transition:border-color 0.2s}
-.field input:focus{border-color:var(--g)}
+.field label{display:block;font-size:11px;color:var(--mt);font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px}
+.field input{width:100%;background:rgba(19,26,19,0.8);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:12px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;transition:all 0.2s;font-family:'Inter',sans-serif}
+.field input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(0,200,83,0.08)}
+.field input::placeholder{color:var(--mt);font-weight:400}
 .field input:disabled{opacity:0.5}
-.submit-btn{width:100%;padding:13px;background:var(--g);color:#000;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px}
-.submit-btn:disabled{background:var(--mt);cursor:not-allowed}
-.err-msg{background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--rd);margin-bottom:10px;display:none}
-.ok-msg{background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--g);margin-bottom:10px;display:none}
+.sbtn{width:100%;padding:14px;background:linear-gradient(135deg,#00e65c,#00c853);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,200,83,0.25);transition:all 0.2s}
+.sbtn:disabled{background:#1a2a1a;color:var(--mt);cursor:not-allowed;box-shadow:none}
+.err-msg{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--rd);margin-bottom:10px;display:none}
+.ok-msg{background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--g);margin-bottom:10px;display:none}
 
-.logout-btn{display:block;width:calc(100% - 24px);margin:0 12px 14px;padding:13px;background:rgba(255,59,59,0.08);border:1.5px solid rgba(255,59,59,0.2);color:var(--rd);border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;text-align:center}
-.logout-btn:hover{background:rgba(255,59,59,0.15)}
-
-/* BOTTOM NAV */
-.bnav{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);display:flex;height:56px;z-index:10}
-.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--mt);cursor:pointer;gap:3px;transition:color 0.2s}
+/* BNAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:199;background:rgba(8,12,8,0.98);border-top:1px solid rgba(0,200,83,0.1);display:flex;height:var(--bn);backdrop-filter:blur(20px);padding-bottom:env(safe-area-inset-bottom)}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--mt);cursor:pointer;gap:2px;transition:all 0.2s;position:relative;padding:6px 0;text-transform:uppercase;letter-spacing:0.3px}
 .bni.on{color:var(--g)}
-.bni-ic{font-size:20px}
+.bni.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:var(--g);border-radius:0 0 3px 3px}
+.bni-ic{width:26px;height:26px;display:flex;align-items:center;justify-content:center}
+.bni.on .bni-ic{transform:scale(1.1)}
+.bni svg{width:22px;height:22px;fill:currentColor}
+.bni.on svg{filter:drop-shadow(0 0 6px rgba(0,200,83,0.5))}
 
-.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid #444;white-space:nowrap}
+.toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:rgba(13,18,13,0.95);border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap;backdrop-filter:blur(10px)}
 .toast.on{opacity:1}
-.toast.ok{border-color:var(--g);color:var(--g)}
-.toast.err{border-color:var(--rd);color:var(--rd)}
+.toast.ok{border:1px solid var(--g);color:var(--g)}
+.toast.err{border:1px solid var(--rd);color:var(--rd)}
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <button class="back" onclick="location.href='/'">← Home</button>
-  <div class="ttl">My Account</div>
-  <div class="bal" onclick="location.href='/pages/deposit.html'">KES <span id="balTop">0.00</span></div>
+  <button class="tb-back" onclick="location.href='/'">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    Home
+  </button>
+  <div class="tb-title">My Account</div>
+  <div class="tb-bal">KES <span id="balTop">0.00</span></div>
 </div>
 
-<!-- Profile Card -->
-<div class="profile-card">
+<!-- Profile Hero -->
+<div class="profile-hero" style="margin-top:14px">
   <div class="avatar" id="avatarLetter">?</div>
   <div class="profile-info">
     <h2 id="profileName">Loading...</h2>
-    <p id="profileUsername">@username</p>
-    <div class="phone"><span id="profilePhone">—</span><span class="verified">✓ Verified</span></div>
+    <div class="handle" id="profileHandle">@username</div>
+    <div class="phone">
+      <span id="profilePhone">—</span>
+      <span class="verified">✓ Verified</span>
+    </div>
   </div>
 </div>
 
-<!-- Balance Strip -->
-<div class="bal-strip">
-  <div class="bs">
-    <div class="bs-val" id="mainBal">0.00</div>
-    <div class="bs-lbl">Main Balance</div>
+<!-- Balance Cards -->
+<div class="bal-grid">
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--g)" id="mainBal">0.00</div>
+    <div class="bal-lbl">Main Balance</div>
   </div>
-  <div class="bs">
-    <div class="bs-val" style="color:var(--yl)" id="bonusBal">0.00</div>
-    <div class="bs-lbl">Bonus Balance</div>
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--yl)" id="bonusBal">0.00</div>
+    <div class="bal-lbl">Bonus Balance</div>
   </div>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 12px 14px">
-  <button onclick="location.href='/pages/deposit.html'" style="padding:13px;background:var(--g);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">💚 Deposit</button>
-  <button onclick="location.href='/pages/withdraw.html'" style="padding:13px;background:var(--s3);border:1.5px solid var(--bd);color:var(--tx);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">💸 Withdraw</button>
+
+<!-- Action Buttons -->
+<div class="action-row">
+  <button class="act-btn deposit" onclick="location.href='/pages/deposit.html'">
+    <span class="act-btn-icon">💰</span>
+    Deposit
+  </button>
+  <button class="act-btn withdraw" onclick="location.href='/pages/withdraw.html'">
+    <span class="act-btn-icon">💸</span>
+    Withdraw
+  </button>
 </div>
 
 <!-- Betting Stats -->
-<div class="sec">
-  <div class="sec-ttl">Betting Stats</div>
-  <div class="stats-grid">
-    <div class="sg"><div class="sg-val" id="statTotal">0</div><div class="sg-lbl">Total Bets</div></div>
-    <div class="sg"><div class="sg-val" style="color:var(--g)" id="statWon">0</div><div class="sg-lbl">Won</div></div>
-    <div class="sg"><div class="sg-val" style="color:var(--rd)" id="statLost">0</div><div class="sg-lbl">Lost</div></div>
-    <div class="sg"><div class="sg-val" style="color:var(--yl)" id="statPending">0</div><div class="sg-lbl">Pending</div></div>
-    <div class="sg"><div class="sg-val" id="statStake">0</div><div class="sg-lbl">Total Staked</div></div>
-    <div class="sg"><div class="sg-val" style="color:var(--g)" id="statWin">0</div><div class="sg-lbl">Total Won</div></div>
-  </div>
+<div class="stats-grid">
+  <div class="sg"><div class="sg-val" id="sTot">0</div><div class="sg-lbl">Total Bets</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--g)" id="sWon">0</div><div class="sg-lbl">Won</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--rd)" id="sLost">0</div><div class="sg-lbl">Lost</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--yl)" id="sPend">0</div><div class="sg-lbl">Pending</div></div>
+  <div class="sg"><div class="sg-val" id="sStake">0</div><div class="sg-lbl">Staked KES</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--g)" id="sEarn">0</div><div class="sg-lbl">Won KES</div></div>
 </div>
 
 <!-- Account Menu -->
 <div class="sec">
-  <div class="sec-ttl">Account</div>
-  <div class="menu-item" onclick="openModal('profileModal')">
-    <div class="mi-left"><span class="mi-icon">👤</span><div><div class="mi-text">Edit Profile</div><div class="mi-sub">Update your name and email</div></div></div>
+  <div class="sec-hd">Account Settings</div>
+  <div class="mi" onclick="openModal('profileModal')">
+    <div class="mi-l"><div class="mi-icon">👤</div><div><div class="mi-text">Edit Profile</div><div class="mi-sub">Update your name and email</div></div></div>
     <span class="chevron">›</span>
   </div>
-  <div class="menu-item" onclick="openModal('passwordModal')">
-    <div class="mi-left"><span class="mi-icon">🔒</span><div><div class="mi-text">Change Password</div><div class="mi-sub">Keep your account secure</div></div></div>
+  <div class="mi" onclick="openModal('passwordModal')">
+    <div class="mi-l"><div class="mi-icon">🔒</div><div><div class="mi-text">Change Password</div><div class="mi-sub">Keep your account secure</div></div></div>
     <span class="chevron">›</span>
   </div>
-  <div class="menu-item" onclick="location.href='/pages/deposit.html'">
-    <div class="mi-left"><span class="mi-icon">💰</span><div><div class="mi-text">Deposit</div><div class="mi-sub">Add money via M-Pesa</div></div></div>
-    <span class="chevron">›</span>
-  </div>
-  <div class="menu-item" onclick="location.href='/pages/withdraw.html'">
-    <div class="mi-left"><span class="mi-icon">💸</span><div><div class="mi-text">Withdraw</div><div class="mi-sub">Send money to M-Pesa</div></div></div>
-    <span class="chevron">›</span>
-  </div>
-  <div class="menu-item" onclick="location.href='/pages/my-bets.html'">
-    <div class="mi-left"><span class="mi-icon">📋</span><div><div class="mi-text">My Bets</div><div class="mi-sub">View bet history</div></div></div>
+  <div class="mi" onclick="location.href='/pages/my-bets.html'">
+    <div class="mi-l"><div class="mi-icon">📋</div><div><div class="mi-text">My Bets</div><div class="mi-sub">View full bet history</div></div></div>
     <span class="chevron">›</span>
   </div>
 </div>
 
 <!-- Transaction History -->
 <div class="sec">
-  <div class="sec-ttl">Transaction History</div>
+  <div class="sec-hd">Transaction History</div>
   <div class="tx-list" id="txList">
     <div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">Loading...</div>
   </div>
@@ -183,178 +204,144 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 <!-- Edit Profile Modal -->
 <div class="modal-bg" id="profileModal">
   <div class="modal">
-    <div class="modal-ttl">Edit Profile <button class="modal-close" onclick="closeModal('profileModal')">✕</button></div>
+    <div class="modal-hd">
+      <div class="modal-ttl">Edit Profile</div>
+      <button class="modal-close" onclick="closeModal('profileModal')">✕</button>
+    </div>
     <div class="err-msg" id="profileErr"></div>
     <div class="ok-msg" id="profileOk"></div>
     <div class="field"><label>Username</label><input id="editUsername" type="text" placeholder="Username"/></div>
-    <div class="field"><label>Email</label><input id="editEmail" type="email" placeholder="Email address"/></div>
-    <button class="submit-btn" onclick="saveProfile()">Save Changes</button>
+    <div class="field"><label>Email (optional)</label><input id="editEmail" type="email" placeholder="your@email.com"/></div>
+    <button class="sbtn" onclick="saveProfile()">Save Changes</button>
   </div>
 </div>
 
 <!-- Change Password Modal -->
 <div class="modal-bg" id="passwordModal">
   <div class="modal">
-    <div class="modal-ttl">Change Password <button class="modal-close" onclick="closeModal('passwordModal')">✕</button></div>
+    <div class="modal-hd">
+      <div class="modal-ttl">Change Password</div>
+      <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+    </div>
     <div class="err-msg" id="pwErr"></div>
     <div class="ok-msg" id="pwOk"></div>
     <div class="field"><label>Current Password</label><input id="currentPw" type="password" placeholder="Enter current password"/></div>
     <div class="field"><label>New Password</label><input id="newPw" type="password" placeholder="Min 6 characters"/></div>
     <div class="field"><label>Confirm New Password</label><input id="confirmPw" type="password" placeholder="Repeat new password"/></div>
-    <button class="submit-btn" onclick="changePassword()">Update Password</button>
+    <button class="sbtn" onclick="changePassword()">Update Password</button>
   </div>
 </div>
 
 <nav class="bnav">
-  <div class="bni" onclick="location.href='/'"><div class="bni-ic">🏠</div>Home</div>
-  <div class="bni" onclick="location.href='/pages/aviator.html'"><div class="bni-ic">✈️</div>Aviator</div>
-  <div class="bni" onclick="location.href='/pages/my-bets.html'"><div class="bni-ic">📋</div>My Bets</div>
-  <div class="bni on"><div class="bni-ic">👤</div>Account</div>
+  <div class="bni" onclick="location.href='/'"><div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>Home</div>
+  <div class="bni" onclick="location.href='/pages/aviator.html'"><div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>Aviator</div>
+  <div class="bni" onclick="location.href='/pages/my-bets.html'"><div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>My Bets</div>
+  <div class="bni on"><div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>Account</div>
 </nav>
 
 <div class="toast" id="toast"></div>
 
 <script>
-let USER = null;
-
-window.addEventListener('DOMContentLoaded', async () => {
-  const t = localStorage.getItem('token');
-  const u = localStorage.getItem('user');
-  if (!t || !u) { location.href = '/pages/login.html'; return; }
-  USER = JSON.parse(u);
+let USER=null;
+window.addEventListener('DOMContentLoaded',async()=>{
+  const t=localStorage.getItem('token'),u=localStorage.getItem('user');
+  if(!t||!u){location.href='/pages/login.html';return}
+  USER=JSON.parse(u);
   renderProfile();
-  await Promise.all([loadStats(), loadTransactions()]);
+  await Promise.all([loadStats(),loadTx()]);
 });
 
-function renderProfile() {
-  document.getElementById('avatarLetter').textContent  = USER.username?.[0]?.toUpperCase() || '?';
-  document.getElementById('profileName').textContent   = USER.username || '—';
-  document.getElementById('profileUsername').textContent = '@' + (USER.username || '—');
-  document.getElementById('profilePhone').textContent  = USER.phone || '—';
-  document.getElementById('balTop').textContent        = parseFloat(USER.balance || 0).toFixed(2);
-  document.getElementById('mainBal').textContent       = parseFloat(USER.balance || 0).toFixed(2);
-  document.getElementById('bonusBal').textContent      = parseFloat(USER.bonus || 0).toFixed(2);
-  // Pre-fill edit form
-  document.getElementById('editUsername').value = USER.username || '';
-  document.getElementById('editEmail').value    = USER.email || '';
+function renderProfile(){
+  document.getElementById('avatarLetter').textContent=USER.username?.[0]?.toUpperCase()||'?';
+  document.getElementById('profileName').textContent=USER.username||'—';
+  document.getElementById('profileHandle').textContent='@'+(USER.username||'—');
+  document.getElementById('profilePhone').textContent=USER.phone||'—';
+  const bal=parseFloat(USER.balance||0).toFixed(2);
+  document.getElementById('balTop').textContent=bal;
+  document.getElementById('mainBal').textContent=bal;
+  document.getElementById('bonusBal').textContent=parseFloat(USER.bonus||0).toFixed(2);
+  document.getElementById('editUsername').value=USER.username||'';
+  document.getElementById('editEmail').value=USER.email||'';
 }
 
-async function loadStats() {
-  try {
-    const r = await fetch('/api/bets/my?limit=1', {
-      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
-    });
-    const d = await r.json();
-    if (!d.success) return;
-    const s = d.stats || {};
-    document.getElementById('statTotal').textContent   = s.totalBets   || 0;
-    document.getElementById('statWon').textContent     = s.wonCount    || 0;
-    document.getElementById('statLost').textContent    = s.lostCount   || 0;
-    document.getElementById('statPending').textContent = s.pendingCount|| 0;
-    document.getElementById('statStake').textContent   = parseFloat(s.totalStake || 0).toFixed(0);
-    document.getElementById('statWin').textContent     = parseFloat(s.totalWon   || 0).toFixed(0);
-  } catch {}
+async function loadStats(){
+  try{
+    const r=await fetch('/api/bets/my?limit=1',{headers:{Authorization:'Bearer '+localStorage.getItem('token')}});
+    const d=await r.json();
+    if(!d.success) return;
+    const s=d.stats||{};
+    document.getElementById('sTot').textContent=s.totalBets||0;
+    document.getElementById('sWon').textContent=s.wonCount||0;
+    document.getElementById('sLost').textContent=s.lostCount||0;
+    document.getElementById('sPend').textContent=s.pendingCount||0;
+    document.getElementById('sStake').textContent=parseFloat(s.totalStake||0).toFixed(0);
+    document.getElementById('sEarn').textContent=parseFloat(s.totalWon||0).toFixed(0);
+  }catch{}
 }
 
-async function loadTransactions() {
-  try {
-    const r = await fetch('/api/bets/transactions/history', {
-      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') }
-    });
-    const d = await r.json();
-    const list = document.getElementById('txList');
-
-    if (!d.success || !d.data.length) {
-      list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No transactions yet</div>';
-      return;
-    }
-
-    list.innerHTML = d.data.map(tx => {
-      const icons  = { deposit:'💰', win:'🏆', bet:'🎯', refund:'↩️', withdrawal:'📤', bonus:'🎁' };
-      const isPos  = ['deposit','win','refund','bonus'].includes(tx.type);
-      const amt    = Math.abs(tx.amount);
-      const date   = new Date(tx.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-      return `<div class="tx-item">
-        <div class="tx-left">
-          <div class="tx-icon ${tx.type}">${icons[tx.type] || '💳'}</div>
-          <div>
-            <div class="tx-desc">${tx.description || tx.type}</div>
-            <div class="tx-date">${date}</div>
-          </div>
+async function loadTx(){
+  try{
+    const r=await fetch('/api/bets/transactions/history',{headers:{Authorization:'Bearer '+localStorage.getItem('token')}});
+    const d=await r.json();
+    const el=document.getElementById('txList');
+    if(!d.success||!d.data.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No transactions yet</div>';return}
+    const icons={deposit:'💰',win:'🏆',bet:'🎯',refund:'↩️',withdrawal:'📤',bonus:'🎁'};
+    el.innerHTML=d.data.map(tx=>{
+      const pos=['deposit','win','refund','bonus'].includes(tx.type);
+      const date=new Date(tx.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      return `<div class="tx">
+        <div class="tx-l">
+          <div class="tx-icon ${tx.type}">${icons[tx.type]||'💳'}</div>
+          <div><div class="tx-desc">${tx.description||tx.type}</div><div class="tx-date">${date}</div></div>
         </div>
-        <div class="tx-amount ${isPos?'pos':'neg'}">${isPos?'+':'-'}KES ${amt.toFixed(2)}</div>
+        <div class="tx-amt ${pos?'pos':'neg'}">${pos?'+':'-'}KES ${Math.abs(tx.amount).toFixed(2)}</div>
       </div>`;
     }).join('');
-  } catch {}
+  }catch{}
 }
 
-async function saveProfile() {
-  const username = document.getElementById('editUsername').value.trim();
-  const email    = document.getElementById('editEmail').value.trim();
-  const errEl    = document.getElementById('profileErr');
-  const okEl     = document.getElementById('profileOk');
-  errEl.style.display = 'none'; okEl.style.display = 'none';
-
-  if (!username || username.length < 3)
-    return showEl(errEl, 'Username must be at least 3 characters');
-
-  try {
-    const r = await fetch('/api/auth/update-profile', {
-      method:  'PUT',
-      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+localStorage.getItem('token') },
-      body:    JSON.stringify({ username, email })
-    });
-    const d = await r.json();
-    if (d.success) {
-      USER.username = username; USER.email = email;
-      localStorage.setItem('user', JSON.stringify(USER));
-      renderProfile();
-      showEl(okEl, 'Profile updated successfully!');
-    } else { showEl(errEl, d.message || 'Failed'); }
-  } catch { showEl(errEl, 'Connection error'); }
+async function saveProfile(){
+  const username=document.getElementById('editUsername').value.trim();
+  const email=document.getElementById('editEmail').value.trim();
+  const err=document.getElementById('profileErr');
+  const ok=document.getElementById('profileOk');
+  err.style.display='none';ok.style.display='none';
+  if(!username||username.length<3){err.textContent='Username must be at least 3 chars';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/auth/update-profile',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')},body:JSON.stringify({username,email})});
+    const d=await r.json();
+    if(d.success){USER.username=username;USER.email=email;localStorage.setItem('user',JSON.stringify(USER));renderProfile();ok.textContent='Profile updated!';ok.style.display='block';}
+    else{err.textContent=d.message||'Failed';err.style.display='block'}
+  }catch{err.textContent='Connection error';err.style.display='block'}
 }
 
-async function changePassword() {
-  const current = document.getElementById('currentPw').value;
-  const newPw   = document.getElementById('newPw').value;
-  const confirm = document.getElementById('confirmPw').value;
-  const errEl   = document.getElementById('pwErr');
-  const okEl    = document.getElementById('pwOk');
-  errEl.style.display = 'none'; okEl.style.display = 'none';
-
-  if (!current)          return showEl(errEl, 'Enter current password');
-  if (newPw.length < 6)  return showEl(errEl, 'New password must be at least 6 characters');
-  if (newPw !== confirm)  return showEl(errEl, 'Passwords do not match');
-  if (current === newPw)  return showEl(errEl, 'New password must be different');
-
-  try {
-    const r = await fetch('/api/auth/change-password', {
-      method:  'PUT',
-      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+localStorage.getItem('token') },
-      body:    JSON.stringify({ currentPassword: current, newPassword: newPw })
-    });
-    const d = await r.json();
-    if (d.success) {
-      showEl(okEl, 'Password changed! Please login again.');
-      setTimeout(() => { logout(); }, 2000);
-    } else { showEl(errEl, d.message || 'Failed'); }
-  } catch { showEl(errEl, 'Connection error'); }
+async function changePassword(){
+  const current=document.getElementById('currentPw').value;
+  const newPw=document.getElementById('newPw').value;
+  const confirm=document.getElementById('confirmPw').value;
+  const err=document.getElementById('pwErr');
+  const ok=document.getElementById('pwOk');
+  err.style.display='none';ok.style.display='none';
+  if(!current){err.textContent='Enter current password';err.style.display='block';return}
+  if(newPw.length<6){err.textContent='Min 6 characters';err.style.display='block';return}
+  if(newPw!==confirm){err.textContent='Passwords do not match';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/auth/change-password',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')},body:JSON.stringify({currentPassword:current,newPassword:newPw})});
+    const d=await r.json();
+    if(d.success){ok.textContent='Password changed! Logging out...';ok.style.display='block';setTimeout(logout,2000);}
+    else{err.textContent=d.message||'Failed';err.style.display='block'}
+  }catch{err.textContent='Connection error';err.style.display='block'}
 }
 
-function logout() {
-  localStorage.removeItem('token'); localStorage.removeItem('user');
-  location.href = '/pages/login.html';
-}
+function logout(){localStorage.removeItem('token');localStorage.removeItem('user');location.href='/pages/login.html'}
+function openModal(id){document.getElementById(id).classList.add('on')}
+function closeModal(id){document.getElementById(id).classList.remove('on')}
 
-function showEl(el, msg) { el.textContent = msg; el.style.display = 'block'; }
-function openModal(id)  { document.getElementById(id).classList.add('on'); }
-function closeModal(id) { document.getElementById(id).classList.remove('on'); }
-
-let tTmr = null;
-function showT(msg, type='') {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.className = `toast on ${type}`;
-  clearTimeout(tTmr); tTmr = setTimeout(() => el.classList.remove('on'), 3500);
+let tTmr=null;
+function showT(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className=`toast on ${type}`;
+  clearTimeout(tTmr);tTmr=setTimeout(()=>el.classList.remove('on'),3500);
 }
 </script>
 </body>

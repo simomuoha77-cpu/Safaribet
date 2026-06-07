@@ -1,183 +1,110 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Login – BetaKE</title>
-  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --green: #00c853; --green-dark: #009624;
-      --bg: #0a0e0a; --surface: #111711; --surface3: #1e271e;
-      --border: rgba(0,200,83,0.12); --text: #e8f5e9; --muted: #6a8a6a;
-      --red: #ff3b3b;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Inter', sans-serif;
-      background: var(--bg); color: var(--text);
-      min-height: 100vh;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 20px;
-    }
-    .logo {
-      font-family: 'Rajdhani', sans-serif;
-      font-size: 36px; font-weight: 700;
-      color: var(--green); letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-    .logo span { color: #ffe600; }
-    .tagline { font-size: 14px; color: var(--muted); margin-bottom: 32px; text-align: center; }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 28px 24px;
-      width: 100%; max-width: 380px;
-    }
-    .card-title {
-      font-family: 'Rajdhani', sans-serif;
-      font-size: 22px; font-weight: 700;
-      margin-bottom: 20px;
-    }
-    .field { margin-bottom: 16px; }
-    label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; font-weight: 500; }
-    input {
-      width: 100%;
-      background: var(--surface3);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 14px;
-      color: var(--text);
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    input:focus { border-color: var(--green); }
-    .submit-btn {
-      width: 100%; padding: 14px;
-      background: var(--green); color: #000;
-      border: none; border-radius: 8px;
-      font-size: 16px; font-weight: 700;
-      cursor: pointer;
-      font-family: 'Rajdhani', sans-serif;
-      margin-top: 8px; letter-spacing: 0.5px;
-      transition: background 0.2s;
-    }
-    .submit-btn:hover { background: #00e65c; }
-    .submit-btn:disabled { background: var(--muted); cursor: not-allowed; }
-    .alt-link {
-      text-align: center; margin-top: 16px;
-      font-size: 14px; color: var(--muted);
-    }
-    .alt-link a { color: var(--green); text-decoration: none; font-weight: 600; }
-    .error-msg {
-      background: rgba(255,59,59,0.1);
-      border: 1px solid rgba(255,59,59,0.3);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 13px; color: var(--red);
-      margin-bottom: 14px; display: none;
-    }
-    .success-msg {
-      background: rgba(0,200,83,0.1);
-      border: 1px solid rgba(0,200,83,0.3);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 13px; color: var(--green);
-      margin-bottom: 14px; display: none;
-    }
-    .back-link {
-      margin-bottom: 24px;
-      font-size: 14px; color: var(--muted);
-      cursor: pointer; display: flex; align-items: center; gap: 6px;
-    }
-    .back-link:hover { color: var(--text); }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Login – BetaKE</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--g2:#00e65c;--bg:#080c08;--s1:#0d120d;--s2:#131a13;--s3:#192019;--bd:rgba(0,200,83,0.12);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden}
+
+/* Ambient background */
+body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at 30% 20%,rgba(0,200,83,0.06) 0%,transparent 50%),radial-gradient(ellipse at 70% 80%,rgba(0,100,40,0.04) 0%,transparent 50%);pointer-events:none}
+
+.logo-wrap{text-align:center;margin-bottom:32px}
+.logo{font-family:'Rajdhani',sans-serif;font-size:42px;font-weight:700;color:var(--g);letter-spacing:2px;line-height:1}
+.logo span{color:var(--yl)}
+.logo-dot{display:inline-block;width:8px;height:8px;background:var(--g);border-radius:50%;margin-left:2px;margin-bottom:4px;box-shadow:0 0 12px var(--g)}
+.tagline{font-size:13px;color:var(--mt);margin-top:6px;font-weight:500}
+
+.card{background:rgba(13,18,13,0.95);border:1px solid var(--bd);border-radius:20px;padding:28px 24px;width:100%;max-width:400px;backdrop-filter:blur(10px);box-shadow:0 8px 40px rgba(0,0,0,0.4),0 0 0 1px rgba(0,200,83,0.05)}
+
+.card-title{font-family:'Rajdhani',sans-serif;font-size:24px;font-weight:700;margin-bottom:4px}
+.card-sub{font-size:13px;color:var(--mt);margin-bottom:24px}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--mt);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+.field input{width:100%;background:rgba(19,26,19,0.8);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:13px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;transition:all 0.2s;font-family:'Inter',sans-serif}
+.field input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(0,200,83,0.08);background:rgba(19,26,19,1)}
+.field input::placeholder{color:var(--mt);font-weight:400}
+
+.submit-btn{width:100%;padding:15px;background:linear-gradient(135deg,#00e65c,#00c853);color:#000;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer;margin-top:6px;letter-spacing:0.3px;box-shadow:0 4px 20px rgba(0,200,83,0.3);transition:all 0.2s;font-family:'Inter',sans-serif}
+.submit-btn:hover{box-shadow:0 6px 28px rgba(0,200,83,0.5);transform:translateY(-1px)}
+.submit-btn:active{transform:translateY(0)}
+.submit-btn:disabled{background:#1a2a1a;color:var(--mt);cursor:not-allowed;box-shadow:none;transform:none}
+
+.divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--mt);font-size:12px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:rgba(0,200,83,0.08)}
+
+.alt-link{text-align:center;font-size:14px;color:var(--mt)}
+.alt-link a{color:var(--g);text-decoration:none;font-weight:700}
+.alt-link a:hover{color:var(--g2)}
+
+.err-msg{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--rd);margin-bottom:14px;display:none;border-radius:10px}
+.ok-msg{background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.25);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--g);margin-bottom:14px;display:none}
+
+.back-link{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mt);cursor:pointer;margin-bottom:20px;font-weight:600}
+.back-link:hover{color:var(--tx)}
+.back-link svg{width:16px;height:16px;fill:currentColor}
+</style>
 </head>
 <body>
 
-  <div class="logo">Beta<span>KE</span></div>
-  <div class="tagline">Your #1 Betting Platform in Kenya</div>
+<div class="logo-wrap">
+  <div class="logo">Beta<span>KE</span><span class="logo-dot"></span></div>
+  <div class="tagline">Kenya's Premier Betting Platform</div>
+</div>
 
-  <div class="card">
-    <div class="back-link" onclick="window.location.href='/'">← Back to Home</div>
-    <div class="card-title">Sign In</div>
+<div class="card">
+  <div class="back-link" onclick="location.href='/'">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    Back to Home
+  </div>
+  <div class="card-title">Welcome Back</div>
+  <div class="card-sub">Sign in to your account</div>
 
-    <div class="error-msg" id="errorMsg"></div>
-    <div class="success-msg" id="successMsg"></div>
+  <div class="err-msg" id="errMsg"></div>
+  <div class="ok-msg" id="okMsg"></div>
 
-    <div class="field">
-      <label>Phone Number</label>
-      <input type="tel" id="phone" placeholder="0712345678" />
-    </div>
-    <div class="field">
-      <label>Password</label>
-      <input type="password" id="password" placeholder="Enter your password" />
-    </div>
-
-    <button class="submit-btn" id="loginBtn" onclick="login()">LOGIN</button>
-
-    <div class="alt-link">
-      Don't have an account? <a href="/pages/register.html">Register now</a>
-    </div>
+  <div class="field">
+    <label>Phone Number</label>
+    <input type="tel" id="phone" placeholder="0712 345 678" autocomplete="tel"/>
+  </div>
+  <div class="field">
+    <label>Password</label>
+    <input type="password" id="password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')login()"/>
   </div>
 
-  <script>
-    // Redirect if already logged in
-    if (localStorage.getItem('token')) window.location.href = '/';
+  <button class="submit-btn" id="loginBtn" onclick="login()">Sign In</button>
 
-    async function login() {
-      const phone = document.getElementById('phone').value.trim();
-      const password = document.getElementById('password').value;
-      const btn = document.getElementById('loginBtn');
-      const errorEl = document.getElementById('errorMsg');
-      const successEl = document.getElementById('successMsg');
+  <div class="divider">or</div>
+  <div class="alt-link">Don't have an account? <a href="/pages/register.html">Create one free</a></div>
+</div>
 
-      errorEl.style.display = 'none';
-      successEl.style.display = 'none';
+<script>
+if(localStorage.getItem('token')) location.href='/';
 
-      if (!phone || !password) {
-        errorEl.textContent = 'Please fill in all fields';
-        errorEl.style.display = 'block';
-        return;
-      }
-
-      btn.disabled = true;
-      btn.textContent = 'Signing in...';
-
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone, password })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
-          successEl.textContent = 'Login successful! Redirecting...';
-          successEl.style.display = 'block';
-          setTimeout(() => window.location.href = '/', 1000);
-        } else {
-          errorEl.textContent = data.message || 'Login failed';
-          errorEl.style.display = 'block';
-          btn.disabled = false;
-          btn.textContent = 'LOGIN';
-        }
-      } catch (err) {
-        errorEl.textContent = 'Connection error. Please try again.';
-        errorEl.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'LOGIN';
-      }
-    }
-
-    // Allow Enter key
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Enter') login();
-    });
-  </script>
+async function login(){
+  const phone=document.getElementById('phone').value.trim();
+  const password=document.getElementById('password').value;
+  const btn=document.getElementById('loginBtn');
+  const err=document.getElementById('errMsg');
+  const ok=document.getElementById('okMsg');
+  err.style.display='none'; ok.style.display='none';
+  if(!phone||!password){err.textContent='Please fill in all fields';err.style.display='block';return}
+  btn.disabled=true;btn.textContent='Signing in...';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,password})});
+    const d=await r.json();
+    if(d.success){
+      localStorage.setItem('token',d.token);localStorage.setItem('user',JSON.stringify(d.user));
+      ok.textContent='Login successful! Redirecting...';ok.style.display='block';
+      setTimeout(()=>location.href='/',800);
+    } else{err.textContent=d.message||'Login failed';err.style.display='block';btn.disabled=false;btn.textContent='Sign In'}
+  }catch{err.textContent='Connection error. Try again.';err.style.display='block';btn.disabled=false;btn.textContent='Sign In'}
+}
+</script>
 </body>
 </html>
