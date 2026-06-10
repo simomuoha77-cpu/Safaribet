@@ -1,10 +1,15 @@
+/**
+ * SCHEDULER - RENDER FREE TIER COMPATIBLE
+ * ─────────────────────────────────────────
+ * Problem: Render free tier sleeps after 15min inactivity
+ * Solution: Self-ping every 10 minutes to stay awake
+ * + Run settlement every 5 minutes
+ */
+
 const cron = require('node-cron');
-const { syncOdds }     = require('./oddsEngine');
-const { runSettlement, updateLiveScores } = require('./settlementEngine');
-const { syncFixtures, updateLive, settleFromResults } = require('./apifootball');
+const axios = require('axios');
 
 let busy = {};
-
 async function run(name, fn) {
   if (busy[name]) return;
   busy[name] = true;
@@ -13,62 +18,60 @@ async function run(name, fn) {
   finally { busy[name] = false; }
 }
 
-async function cleanOldMatches() {
-  try {
-    const Match = require('../models/Match');
-    const cutoff = new Date(Date.now() - 3*60*60*1000); // 3 hours ago
-    // Delete old static matches
-    const r1 = await Match.deleteMany({ isStatic: true });
-    // Delete old finished matches older than 3 days
-    const r2 = await Match.deleteMany({
-      status: 'finished',
-      settledAt: { $lt: new Date(Date.now() - 3*24*60*60*1000) }
-    });
-    // Delete matches with past commence time that are still upcoming (stale)
-    const r3 = await Match.deleteMany({
-      status: 'upcoming',
-      commenceTime: { $lt: new Date(Date.now() - 5*60*60*1000) }
-    });
-    console.log(`🧹 Cleaned: ${r1.deletedCount} static, ${r2.deletedCount} old finished, ${r3.deletedCount} stale upcoming`);
-  } catch(e) {
-    console.error('Cleanup error:', e.message);
-  }
-}
-
 function start() {
   console.log('⏰ Scheduler started');
 
-  // Sync fixtures from API-Football every 30 min
-  cron.schedule('*/30 * * * *', () => run('apif_fixtures', syncFixtures));
+  const { runSettlement }  = require('./settlementEngine');
+  const { syncFixtures, updateLive } = require('./apifootball');
 
-  // Update live scores every 60 seconds
-  cron.schedule('* * * * *', () => run('apif_live', updateLive));
-
-  // Sync odds from The Odds API every 5 min (if key available)
-  if (process.env.ODDS_API_KEY) {
-    cron.schedule('*/5 * * * *', () => run('odds_sync', syncOdds));
+  // ── SELF PING — keeps Render awake ──
+  const APP_URL = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL;
+  if (APP_URL) {
+    cron.schedule('*/10 * * * *', async () => {
+      try {
+        await axios.get(`${APP_URL}/api/health`, { timeout: 8000 });
+        console.log('💓 Self-ping OK');
+      } catch(e) {
+        console.log('💓 Self-ping failed:', e.message);
+      }
+    });
+    console.log(`💓 Self-ping enabled → ${APP_URL}`);
+  } else {
+    console.log('⚠️  APP_URL not set — add RENDER_EXTERNAL_URL to env for auto keep-alive');
   }
 
-  // Run settlement every 5 min (both sources)
-  cron.schedule('*/5 * * * *', async () => {
-    await run('settlement', runSettlement);
-    await run('apif_settle', settleFromResults);
+  // ── SETTLEMENT every 5 min ──
+  cron.schedule('*/5 * * * *', () => run('settlement', runSettlement));
+
+  // ── LIVE SCORES every 60 sec ──
+  cron.schedule('* * * * *', () => run('live', updateLive));
+
+  // ── SYNC FIXTURES every 30 min ──
+  cron.schedule('*/30 * * * *', () => run('fixtures', syncFixtures));
+
+  // ── CLEANUP stale matches daily at 3am ──
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const Match = require('../models/Match');
+      const r1 = await Match.deleteMany({ isStatic: true });
+      const r2 = await Match.deleteMany({
+        status: 'finished', settled: true,
+        settledAt: { $lt: new Date(Date.now() - 7*24*60*60*1000) }
+      });
+      const r3 = await Match.deleteMany({
+        status: 'upcoming',
+        commenceTime: { $lt: new Date(Date.now() - 6*60*60*1000) }
+      });
+      console.log(`🧹 Cleaned ${r1.deletedCount} static, ${r2.deletedCount} old, ${r3.deletedCount} stale`);
+    } catch(e) { console.error('Cleanup error:', e.message); }
   });
 
-  // Cleanup old/static matches on startup
-  setTimeout(() => run('cleanup', cleanOldMatches), 2000);
-
-  // Initial sync on startup (after 5s)
+  // ── STARTUP — run immediately after 5s ──
   setTimeout(async () => {
-    console.log('🚀 Initial sync starting...');
-    await run('apif_fixtures_init', syncFixtures);
-    if (process.env.ODDS_API_KEY) {
-      await run('odds_init', syncOdds);
-    }
+    console.log('🚀 Startup tasks...');
+    await run('startup_settlement', runSettlement);
+    await run('startup_fixtures',   syncFixtures);
   }, 5000);
-
-  // Daily cleanup at 3am
-  cron.schedule('0 3 * * *', () => run('daily_cleanup', cleanOldMatches));
 }
 
 module.exports = { start };
