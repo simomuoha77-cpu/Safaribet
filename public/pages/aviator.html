@@ -10,49 +10,49 @@
 html,body{width:100%;height:100%;overflow:hidden;background:#111;font-family:'Rajdhani',sans-serif;color:#fff}
 body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 
-/* ── TOPBAR — exactly like Spribe: logo center, back left, balance right ── */
+/* ── TOPBAR — Spribe style: back left, logo center, balance right ── */
 .topbar{
   display:flex;align-items:center;justify-content:space-between;
-  height:44px;padding:0 12px;
-  background:#1a1a1a;border-bottom:1px solid #222;flex-shrink:0;
+  height:38px;padding:0 10px;
+  background:#111;border-bottom:1px solid #1e1e1e;flex-shrink:0;
 }
-.tbback{font-size:12px;color:#666;background:none;border:none;font-family:'Rajdhani',sans-serif;font-weight:700;cursor:pointer;min-width:60px}
-/* Spribe logo: red italic serif "✈ Aviator" */
+.tbback{font-size:11px;color:#555;background:none;border:none;font-family:'Rajdhani',sans-serif;font-weight:700;cursor:pointer;min-width:50px}
 .tblogo{
   font-family:Georgia,'Times New Roman',serif;
-  font-style:italic;font-weight:900;font-size:21px;
+  font-style:italic;font-weight:900;font-size:20px;
   color:#e8001e;letter-spacing:-0.5px;
-  display:flex;align-items:center;gap:5px;
+  display:flex;align-items:center;gap:4px;
 }
-.tblogo svg{width:18px;height:18px;fill:#e8001e}
-.tbbal{font-size:13px;font-weight:700;color:#ccc;min-width:60px;text-align:right}
-.tbbal span{color:#aaa;font-size:10px}
+.tblogo svg{width:16px;height:16px;fill:#e8001e}
+.tbbal{font-size:12px;font-weight:700;color:#ccc;min-width:50px;text-align:right}
+.tbbal span{color:#777;font-size:10px}
 
-/* ── HISTORY BAR — plain colored numbers, no pill background ── */
+/* ── HISTORY BAR ── */
 .hbar{
-  display:flex;align-items:center;gap:9px;
-  padding:0 10px;height:28px;
-  background:#1a1a1a;border-bottom:1px solid #222;
+  display:flex;align-items:center;gap:6px;
+  padding:0 8px;height:24px;
+  background:#111;border-bottom:1px solid #1a1a1a;
   overflow-x:auto;scrollbar-width:none;flex-shrink:0;
 }
 .hbar::-webkit-scrollbar{display:none}
-/* Spribe history: plain colored text — cyan/blue for low, purple for high */
 .hc{font-size:11px;font-weight:700;flex-shrink:0;cursor:pointer;font-family:'Rajdhani',sans-serif}
 .hc.r{color:#e8001e}
-.hc.c{color:#00c8ff}  /* cyan — Spribe's main color for 1-2x */
+.hc.c{color:#00c8ff}
 .hc.y{color:#ffb300}
 .hc.p{color:#d070ff}
-.hmore{background:none;border:none;color:#444;cursor:pointer;font-size:14px;flex-shrink:0}
+.hmore{background:none;border:none;color:#444;cursor:pointer;font-size:13px;flex-shrink:0}
 
-/* ── GAME CANVAS — tall, fills available space ── */
+/* ── GAME CANVAS — FULL HEIGHT like Spribe ── */
+/* Spribe canvas ≈ 75% of screen. Topbar=38, hbar=24, bpanel=192 → canvas=rest */
 .gwrap{
   position:relative;
   width:100%;
-  /* Takes remaining space minus bet panel height (~230px) */
+  /* Fixed height = 55vh like Spribe */
   flex:0 0 auto;
-  height:calc(100dvh - 42px - 28px - 225px);
-  min-height:220px;max-height:460px;
-  background:#0f0f12;overflow:hidden;
+  height:55vh;
+  min-height:200px;
+  max-height:500px;
+  background:#0c0c0f;overflow:hidden;
 }
 #gc{position:absolute;inset:0;width:100%;height:100%;display:block}
 
@@ -78,20 +78,20 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 .pav img{width:100%;height:100%;object-fit:cover}
 
 /* ── SCROLL AREA ── */
-.scroll{flex:1;overflow-y:auto;scrollbar-width:none;background:#111;min-height:0}
+.scroll{flex:1 1 auto;overflow-y:auto;scrollbar-width:none;background:#111;min-height:0}
 .scroll::-webkit-scrollbar{display:none}
 
 /* ── BET PANEL ── */
-.bpanel{background:#1a1a1a;padding:8px 0 0}
+.bpanel{background:#1a1a1a;padding:6px 0 0;flex-shrink:0}
 
 /* Spribe tab row: centered pill tabs "Bet / Auto" */
-.trow{display:flex;justify-content:center;margin-bottom:7px;padding:0 12px}
+.trow{display:flex;justify-content:center;margin-bottom:5px;padding:0 12px}
 .tabs{display:inline-flex;background:#111;border-radius:20px;padding:2px;gap:1px}
 .tab{padding:4px 20px;border-radius:16px;border:none;font-size:12px;font-weight:700;font-family:'Rajdhani',sans-serif;text-transform:capitalize;color:#444;background:none;cursor:pointer;transition:all .15s;letter-spacing:.3px}
 .tab.on{background:#2a2a2a;color:#e5e5e5}
 
 /* Input row: − [amount] + [BIG GREEN BUTTON] */
-.irow{display:flex;align-items:center;gap:8px;padding:0 12px;margin-bottom:5px}
+.irow{display:flex;align-items:center;gap:8px;padding:0 10px;margin-bottom:3px}
 /* Spribe −/+ : small gray circles */
 .pm{width:30px;height:30px;border-radius:50%;background:#252525;border:1px solid #2e2e2e;color:#aaa;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .1s;font-weight:300}
 .pm:active{background:#333;transform:scale(.88)}
@@ -99,14 +99,14 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 .amt{flex:1;text-align:center;font-size:20px;font-weight:700;background:none;border:none;color:#fff;outline:none;font-family:'Rajdhani',sans-serif}
 /* Spribe bet button: tall green rounded rectangle */
 .bbtn{
-  flex:0 0 140px;height:60px;border-radius:10px;border:none;
-  font-size:17px;font-weight:800;cursor:pointer;font-family:'Rajdhani',sans-serif;
+  flex:0 0 138px;height:60px;border-radius:10px;border:none;
+  font-size:18px;font-weight:800;cursor:pointer;font-family:'Rajdhani',sans-serif;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  line-height:1.15;transition:all .15s;letter-spacing:.2px;
+  line-height:1.2;transition:all .12s;letter-spacing:.3px;
 }
-.bbtn .bsub{font-size:14px;font-weight:800}
+.bbtn .bsub{font-size:14px;font-weight:800;opacity:.95}
 /* States */
-.bbtn.bet{background:#2eb050;color:#fff;box-shadow:0 3px 14px rgba(46,176,80,.35)}
+.bbtn.bet{background:#3ac95a;color:#fff;box-shadow:0 4px 18px rgba(58,201,90,.40)}
 .bbtn.bet:active{transform:scale(.97)}
 .bbtn.cash{background:linear-gradient(160deg,#d45500,#ff6a00);color:#fff;animation:cpulse .5s infinite alternate}
 @keyframes cpulse{from{box-shadow:0 0 8px rgba(255,100,0,.4)}to{box-shadow:0 0 26px rgba(255,100,0,.9)}}
@@ -116,12 +116,12 @@ body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 
 /* Quick amounts — Spribe: 4 equal gray boxes */
 .qrow{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-bottom:0;padding:0}
-.qs{background:#141414;border:none;border-top:1px solid #222;padding:6px 2px;font-size:12px;font-weight:700;color:#555;cursor:pointer;font-family:'Rajdhani',sans-serif;text-align:center;transition:background .1s}
+.qs{background:#141414;border:none;border-top:1px solid #1e1e1e;padding:5px 2px;font-size:12px;font-weight:700;color:#555;cursor:pointer;font-family:'Rajdhani',sans-serif;text-align:center;transition:background .1s}
 .qs:active{background:#1e1e1e;color:#bbb}
 
 /* Slot 2 separator */
 .sep{height:1px;background:#222;margin:0}
-.s2head{display:flex;align-items:center;gap:6px;padding:7px 12px 5px;justify-content:space-between}
+.s2head{display:flex;align-items:center;gap:6px;padding:5px 12px 4px;justify-content:space-between}
 .s2tabs{display:inline-flex;background:#111;border-radius:16px;padding:2px;gap:1px}
 .s2tab{padding:3px 14px;border-radius:14px;border:none;font-size:11px;font-weight:700;font-family:'Rajdhani',sans-serif;color:#444;background:none;cursor:pointer;text-transform:capitalize;transition:all .12s}
 .s2tab.on{background:#252525;color:#ddd}
@@ -378,11 +378,20 @@ function playTick(){
 
 // ── CANVAS ──
 const cv=document.getElementById('gc'),cx=cv.getContext('2d');
-function rsz(){const gw=document.getElementById('gw');cv.width=gw.clientWidth;cv.height=gw.clientHeight;}
-rsz();window.addEventListener('resize',rsz);
+function rsz(){
+  const gw=document.getElementById('gw');
+  const w=gw.clientWidth||gw.offsetWidth||window.innerWidth;
+  const h=gw.clientHeight||gw.offsetHeight||Math.round(window.innerHeight*0.55);
+  if(w>0&&h>0){cv.width=w;cv.height=h;}
+}
+window.addEventListener('resize',rsz);
+// rsz called after DOMContentLoaded below
 
 function draw(){
+  // Re-size if canvas has no dimensions yet
+  if(!cv.width||!cv.height||cv.width<10||cv.height<10) rsz();
   const W=cv.width,H=cv.height;
+  if(!W||!H)return;
   cx.clearRect(0,0,W,H);
 
   // Pure black bg
@@ -426,10 +435,10 @@ function draw(){
   if(pathPts.length<2)return;
   const crashed=ST==='crashed';
 
-  // Map pts to canvas
+  // Map pts — Spribe: trail mostly flat, plane stays low
   const pts=pathPts.map(p=>({
-    x:OX+p.t*(W*.93),
-    y:OY-p.r*(H*.90)
+    x:OX+p.t*(W*.91),
+    y:OY-p.r*(H*.82)
   }));
 
   // ── RED FILL under curve ──
@@ -469,29 +478,99 @@ function draw(){
 }
 
 function drawPlane(c,cr){
-  c.save();c.scale(1.25,1.25);
-  // Halo glow
-  if(!cr){const rg=c.createRadialGradient(0,0,4,0,0,46);rg.addColorStop(0,'rgba(255,50,50,.22)');rg.addColorStop(1,'rgba(0,0,0,0)');c.beginPath();c.arc(0,0,46,0,Math.PI*2);c.fillStyle=rg;c.fill();}
-  // Fuselage
-  c.beginPath();c.moveTo(52,0);c.bezierCurveTo(42,-6,16,-8,-6,-8);c.lineTo(-20,-8);c.lineTo(-24,0);c.lineTo(-20,8);c.lineTo(-6,8);c.bezierCurveTo(16,8,42,6,52,0);c.closePath();
-  c.fillStyle=cr?'#881111':'#cc1212';if(!cr){c.shadowBlur=12;c.shadowColor='rgba(255,40,40,.6)';}c.fill();c.shadowBlur=0;
-  // Wing
-  c.beginPath();c.moveTo(26,5);c.lineTo(-3,48);c.lineTo(-16,46);c.lineTo(-8,5);c.closePath();c.fillStyle=cr?'#771111':'#aa1111';c.fill();
-  // Vtail
-  c.beginPath();c.moveTo(-6,-8);c.lineTo(-22,-28);c.lineTo(-24,-28);c.lineTo(-20,-8);c.closePath();c.fillStyle='#991111';c.fill();
-  // Hstab
-  c.beginPath();c.moveTo(-8,-4);c.lineTo(-23,-16);c.lineTo(-25,-16);c.lineTo(-20,-4);c.closePath();c.fillStyle='#881111';c.fill();
-  // Cockpit
-  c.beginPath();c.ellipse(27,-3,14,6,-.08,0,Math.PI*2);c.fillStyle='rgba(60,155,255,.72)';c.shadowBlur=7;c.shadowColor='rgba(60,160,255,.45)';c.fill();
-  c.beginPath();c.ellipse(24,-5,7,3,-.2,0,Math.PI);c.fillStyle='rgba(255,255,255,.30)';c.shadowBlur=0;c.fill();
-  // Flame
+  // Exact Spribe side-view jet — scale ~1.1 to match screenshot size
+  c.save();
+  const sc = cr ? 0.72 : 0.75;
+  c.scale(sc, sc);
+
+  // Soft red glow behind plane
   if(!cr){
-    c.beginPath();c.moveTo(-20,0);c.bezierCurveTo(-36,-9,-48,0,-38,0);c.bezierCurveTo(-48,0,-36,9,-20,0);
-    const fl=c.createLinearGradient(-20,0,-48,0);fl.addColorStop(0,'rgba(255,245,80,1)');fl.addColorStop(.5,'rgba(255,110,0,.9)');fl.addColorStop(1,'rgba(255,40,0,0)');
-    c.fillStyle=fl;c.shadowBlur=22;c.shadowColor='rgba(255,140,0,.9)';c.fill();
-    c.beginPath();c.moveTo(-20,0);c.bezierCurveTo(-28,-4,-33,0,-28,0);c.bezierCurveTo(-33,0,-28,4,-20,0);
-    c.fillStyle='rgba(255,255,200,.95)';c.shadowBlur=8;c.fill();
+    const rg=c.createRadialGradient(0,2,2,0,2,38);
+    rg.addColorStop(0,'rgba(220,30,30,.30)');
+    rg.addColorStop(1,'rgba(0,0,0,0)');
+    c.beginPath();c.arc(0,2,38,0,Math.PI*2);
+    c.fillStyle=rg;c.fill();
   }
+
+  // ── MAIN FUSELAGE: long thin side-view body ──
+  // Nose points right (+x), tail at left (-x)
+  // Spribe shape: thin elongated teardrop
+  c.beginPath();
+  c.moveTo(44, 0);                          // nose tip
+  c.bezierCurveTo(36,-4, 18,-7, 0,-7);      // top of body
+  c.lineTo(-18,-7);                          // top to tail
+  c.bezierCurveTo(-22,-7,-24,-4,-24,0);     // tail curve top
+  c.bezierCurveTo(-24,4,-22,7,-18,7);       // tail curve bottom
+  c.lineTo(0,7);                             // bottom to front
+  c.bezierCurveTo(18,7, 36,4, 44,0);        // bottom nose
+  c.closePath();
+  c.fillStyle = cr ? '#7a0f0f' : '#bf1010';
+  if(!cr){c.shadowBlur=10;c.shadowColor='rgba(255,30,30,.5)';}
+  c.fill();c.shadowBlur=0;
+
+  // ── SWEPT WING: large triangle below fuselage, swept back ──
+  // In Spribe: wing starts at ~1/3 from nose, sweeps back and down
+  c.beginPath();
+  c.moveTo(18, 6);    // wing root front (on fuselage bottom)
+  c.lineTo(-8, 44);   // wing tip (down and back)
+  c.lineTo(-20, 44);  // wing tip back edge
+  c.lineTo(-14, 6);   // wing root back
+  c.closePath();
+  c.fillStyle = cr ? '#6a0d0d' : '#a50e0e';
+  c.fill();
+
+  // ── VERTICAL TAIL: small fin at top-rear ──
+  c.beginPath();
+  c.moveTo(-14, -7);  // base front
+  c.lineTo(-22, -22); // tip
+  c.lineTo(-26, -22); // tip back
+  c.lineTo(-20, -7);  // base back
+  c.closePath();
+  c.fillStyle = cr ? '#881111' : '#991111';
+  c.fill();
+
+  // ── HORIZONTAL STABILIZER ──
+  c.beginPath();
+  c.moveTo(-16, -7);
+  c.lineTo(-26,-16);
+  c.lineTo(-28,-16);
+  c.lineTo(-20,-7);
+  c.closePath();
+  c.fillStyle='#881111';c.fill();
+
+  // ── COCKPIT CANOPY: blue oval on top-front ──
+  c.beginPath();
+  c.ellipse(22, -4, 11, 5, -0.15, 0, Math.PI*2);
+  c.fillStyle='rgba(80,170,255,.80)';
+  c.shadowBlur=6;c.shadowColor='rgba(60,150,255,.50)';
+  c.fill();
+  // Glare
+  c.beginPath();
+  c.ellipse(20,-6,6,2.5,-0.2,0,Math.PI);
+  c.fillStyle='rgba(255,255,255,.35)';
+  c.shadowBlur=0;c.fill();
+
+  // ── EXHAUST FLAME ──
+  if(!cr){
+    // Outer flame — orange/yellow
+    c.beginPath();
+    c.moveTo(-22, 0);
+    c.bezierCurveTo(-32,-8,-44,0,-36,0);
+    c.bezierCurveTo(-44,0,-32,8,-22,0);
+    const fl=c.createLinearGradient(-22,0,-44,0);
+    fl.addColorStop(0,'rgba(255,240,60,1)');
+    fl.addColorStop(0.45,'rgba(255,100,0,.95)');
+    fl.addColorStop(1,'rgba(255,30,0,0)');
+    c.fillStyle=fl;c.shadowBlur=18;c.shadowColor='rgba(255,130,0,.85)';c.fill();
+    // Inner white core
+    c.beginPath();
+    c.moveTo(-22,0);
+    c.bezierCurveTo(-27,-3,-31,0,-28,0);
+    c.bezierCurveTo(-31,0,-27,3,-22,0);
+    c.fillStyle='rgba(255,255,210,.95)';c.shadowBlur=6;c.fill();
+    c.shadowBlur=0;
+  }
+
   c.restore();
 }
 
@@ -504,7 +583,8 @@ function animLoop(ts){
     const el=(ts-flyStart)/1000;
     localMulti=Math.exp(.09*el);
     const mv=document.getElementById('mv');mv.className='mval';mv.textContent=localMulti.toFixed(2)+'x';
-    const tN=Math.min(el/24,.95),rN=Math.min(Math.log(Math.max(localMulti,1.001))*.40,.92);
+    // Spribe-style: trail stays flat near bottom, rises slowly
+    const tN=Math.min(el/28,.95),rN=Math.min(Math.log(Math.max(localMulti,1.001))*.22,.88);
     pathPts.push({t:tN,r:rN});if(pathPts.length>800)pathPts.shift();
     if(Math.floor(localMulti*2)>Math.floor(lastTickM*2)){playTick();lastTickM=localMulti;}
     [1,2].forEach(s=>{
@@ -682,8 +762,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   function unlock(){if(au)return;au=true;gAC();if(flightActive)startJet(true);}
   document.addEventListener('touchstart',unlock,{capture:true,once:true});
   document.addEventListener('click',unlock,{capture:true,once:true});
+  rsz(); // size canvas after layout
   document.getElementById('wo').classList.add('on');
   startCountdown(5,'init');
+  updBtns();
   requestAnimationFrame(animLoop);
   poll();setInterval(poll,300);
 });
