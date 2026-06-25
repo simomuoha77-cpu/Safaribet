@@ -132,4 +132,19 @@ router.get('/balance', auth, async (req, res) => {
   res.json({ success: true, balance: user.balance });
 });
 
+// ── ADMIN: DELETE USER (for cleanup) ──
+router.delete('/admin/user/:phone', async (req, res) => {
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
+    return res.status(401).json({ success: false });
+  try {
+    let phone = req.params.phone.replace(/\D/g,'');
+    if (phone.startsWith('0')) phone = '254' + phone.slice(1);
+    const user = await User.findOneAndDelete({ $or: [{ phone }, { username: req.params.phone }] });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, message: `Deleted user: ${user.username} (${user.phone})` });
+  } catch(e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 module.exports = router;
