@@ -621,10 +621,11 @@ async function loadFirstWithMatches(sports){
     const d = await r.json();
 
     if(d.success && d.data && d.data.length > 0){
-      // Show "Upcoming Matches" heading — tab stays on World Cup but data is multi-league
-      document.getElementById('secTtl').textContent = 'Upcoming Matches';
-      // Mark no tab as selected — this is the combined view
+      document.getElementById('secTtl').textContent = 'World Cup 2026';
+      // Keep World Cup tab active
       document.querySelectorAll('.stab').forEach(t => t.classList.remove('on'));
+      const wcTab = document.querySelector('.stab[data-sport="soccer_world_cup"]');
+      if(wcTab) wcTab.classList.add('on');
       currentSport = 'featured';
       renderMatches(d.data);
       return;
