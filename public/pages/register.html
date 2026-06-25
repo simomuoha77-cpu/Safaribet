@@ -57,7 +57,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
 <div class="bonus-banner">
   <div class="bonus-icon">🎁</div>
-  <div class="bonus-text">Register now and get <strong>KES 1,000</strong> welcome bonus on first deposit!</div>
+  <div class="bonus-text">Register now and get <strong>KES 20</strong> welcome bonus on first deposit!</div>
 </div>
 
 <div class="card">
@@ -73,12 +73,12 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
   <div class="field">
     <label>Username</label>
-    <input type="text" id="username" placeholder="e.g. JohnKe" maxlength="20"/>
+    <input type="text" id="username" placeholder="e.g. JohnKe" maxlength="20" autocomplete="off"/>
     <div class="hint">3–20 characters</div>
   </div>
   <div class="field">
     <label>M-Pesa Phone Number</label>
-    <input type="tel" id="phone" placeholder="0712 345 678"/>
+    <input type="tel" id="phone" placeholder="e.g. 0712345678" autocomplete="off"/>
     <div class="hint">Used for deposits & withdrawals</div>
   </div>
   <div class="field">
@@ -94,7 +94,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
   <div class="terms">By registering you confirm you are 18+ and agree to our Terms & Conditions</div>
   <div class="divider">or</div>
-  <div class="alt-link">Already have an account? <a href="/pages/login.html">Sign in</a></div>
+  <div class="alt-link">Already have an account? <a href="/login">Sign in</a></div>
 </div>
 
 <script>
@@ -111,7 +111,10 @@ async function register(){
   err.style.display='none';ok.style.display='none';
   if(!username||!phone||!password||!confirm){err.textContent='Please fill in all fields';err.style.display='block';return}
   if(username.length<3){err.textContent='Username must be at least 3 characters';err.style.display='block';return}
-  if(!/^(\+254|0)[17]\d{8}$/.test(phone)){err.textContent='Enter a valid Kenyan number (e.g. 0712345678)';err.style.display='block';return}
+  // Accept 07XX or 01XX (10 digits) or +254 format
+  const cleanPhone=phone.replace(/\D/g,'');
+  const normPhone=cleanPhone.startsWith('0')?'254'+cleanPhone.slice(1):cleanPhone;
+  if(normPhone.length!==12||!normPhone.startsWith('254')){err.textContent='Enter a valid phone: e.g. 0712345678';err.style.display='block';return}
   if(password.length<6){err.textContent='Password must be at least 6 characters';err.style.display='block';return}
   if(password!==confirm){err.textContent='Passwords do not match';err.style.display='block';return}
   btn.disabled=true;btn.textContent='Creating account...';

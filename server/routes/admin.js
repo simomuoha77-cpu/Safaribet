@@ -164,4 +164,29 @@ router.post('/settle', async (req, res) => {
   }
 });
 
+// ── FIX DB INDEXES (run once if registration is broken) ──
+router.post('/fix-indexes', async (req, res) => {
+  try {
+    // Drop and recreate indexes to fix any corrupt unique index
+    await User.collection.dropIndexes();
+    await User.syncIndexes();
+    
+    // Also find and delete any users with empty/null username or phone
+    const bad = await User.deleteMany({ 
+      $or: [
+        { username: { $in: [null, '', undefined] } },
+        { phone: { $in: [null, '', undefined] } }
+      ]
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Indexes rebuilt successfully',
+      deletedBadRecords: bad.deletedCount
+    });
+  } catch(e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 module.exports = router;

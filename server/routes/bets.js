@@ -186,3 +186,15 @@ router.get('/stats/summary', auth, async (req, res) => {
 });
 
 module.exports = router;
+
+// ── USER-TRIGGERED SETTLE (checks their own pending bets) ──
+router.post('/settle', auth, async (req, res) => {
+  try {
+    const { runSettlement } = require('../engine/settlementEngine');
+    const result = await runSettlement();
+    res.json({ success: true, settled: result.settled, paid: result.paid });
+  } catch (e) {
+    console.error('[bets/settle]', e.message);
+    res.status(500).json({ success: false, message: 'Settlement failed' });
+  }
+});
