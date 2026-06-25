@@ -8,14 +8,14 @@ const router  = express.Router();
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { success: false, message: 'Too many login attempts. Try again in 15 minutes.' },
-  standardHeaders: true, legacyHeaders: false
+  max: 20,
+  message: { success: false, message: 'Too many login attempts. Try again in 15 minutes.' }
 });
 
+// Very relaxed register limiter — 50 per hour per IP
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: 50,
   message: { success: false, message: 'Too many registrations from this IP.' }
 });
 
@@ -27,86 +27,101 @@ router.post('/register', registerLimiter, async (req, res) => {
     if (!username || !phone || !password) {
       return res.status(400).json({ success: false, message: 'All fields required' });
     }
-    username = username.trim().toLowerCase();
-    phone = phone.replace(/\D/g, '');
 
+    username = username.trim().toLowerCase();
+    phone    = String(phone).replace(/\D/g, '');
+
+    // Username validation
     if (username.length < 3 || username.length > 24) {
       return res.status(400).json({ success: false, message: 'Username must be 3-24 characters' });
     }
     if (!/^[a-z0-9_]+$/.test(username)) {
       return res.status(400).json({ success: false, message: 'Username: letters, numbers, underscore only' });
     }
+
+    // Password validation
     if (password.length < 6) {
       return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
     }
-    // Kenyan phone: 07XX or 01XX → normalize to 254
-    if (phone.startsWith('0')) phone = '254' + phone.slice(1);
-    // Accept any valid Kenyan mobile (07XX, 01XX)
-    if (!/^254[0-9]{9}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: 'Enter a valid phone: 0712345678' });
+
+    // Phone normalization — accept 07XX, 01XX, 254XXX, +254XXX
+    if (phone.startsWith('254')) {
+      // already normalized
+    } else if (phone.startsWith('0')) {
+      phone = '254' + phone.slice(1);
+    } else if (phone.length === 9) {
+      phone = '254' + phone;
     }
 
+    if (!/^254[0-9]{9}$/.test(phone)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid Kenyan phone: e.g. 0712345678' });
+    }
+
+    // Check duplicates separately for clear errors
     const existsUsername = await User.findOne({ username });
     if (existsUsername) {
-      return res.status(400).json({ success: false, message: 'Username already taken. Choose another.' });
-    }
-    const existsPhone = await User.findOne({ phone });
-    if (existsPhone) {
-      return res.status(400).json({ success: false, message: 'Phone number already registered. Try logging in.' });
+      return res.status(400).json({ success: false, message: 'Username taken. Try another.' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const existsPhone = await User.findOne({ phone });
+    if (existsPhone) {
+      return res.status(400).json({ success: false, message: 'Phone already registered. Please login instead.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ username, phone, passwordHash });
 
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
     res.json({
       success: true,
       token,
       user: { id: user._id, username: user.username, balance: user.balance }
     });
+
   } catch (e) {
-    if (e.code === 11000) return res.status(400).json({ success: false, message: 'Username or phone already taken' });
-    console.error('[auth/register]', e.message);
-    res.status(500).json({ success: false, message: 'Registration failed' });
+    if (e.code === 11000) {
+      const field = e.keyPattern?.username ? 'Username' : 'Phone number';
+      return res.status(400).json({ success: false, message: `${field} already taken.` });
+    }
+    console.error('[register]', e.message);
+    res.status(500).json({ success: false, message: 'Registration failed. Try again.' });
   }
 });
 
-// ── LOGIN ──
+// ── LOGIN — accepts phone OR username ──
 router.post('/login', loginLimiter, async (req, res) => {
   try {
-    // Accept phone or username as identifier
     const { username, phone, password } = req.body;
-    const identifier = (phone || username || '').trim();
+    const identifier = String(phone || username || '').trim();
+
     if (!identifier || !password) {
-      return res.status(400).json({ success: false, message: 'Phone number and password required' });
+      return res.status(400).json({ success: false, message: 'Phone/username and password required' });
     }
 
-    // Normalize phone if it looks like a phone number
+    // Detect phone vs username
     let query;
-    const digitsOnly = identifier.replace(/\D/g,'');
-    if (digitsOnly.length >= 9) {
-      // It's a phone number — normalize and search by phone
-      let normalized = digitsOnly;
-      if (normalized.startsWith('0')) normalized = '254' + normalized.slice(1);
+    const digits = identifier.replace(/\D/g, '');
+    if (digits.length >= 9) {
+      let normalized = digits;
+      if (normalized.startsWith('0'))   normalized = '254' + normalized.slice(1);
       if (!normalized.startsWith('254')) normalized = '254' + normalized;
       query = { phone: normalized };
     } else {
-      // It's a username
       query = { username: identifier.toLowerCase() };
     }
 
     const user = await User.findOne(query);
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    if (!user.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
-    if (user.isLocked) return res.status(429).json({ success: false, message: 'Account locked. Try again in 15 minutes.' });
+    if (!user)           return res.status(401).json({ success: false, message: 'Wrong phone/username or password' });
+    if (!user.isActive)  return res.status(403).json({ success: false, message: 'Account suspended. Contact support.' });
+    if (user.isLocked)   return res.status(429).json({ success: false, message: 'Account locked 15 min due to failed attempts.' });
 
     const ok = await user.comparePassword(password);
     if (!ok) {
       await user.incLoginAttempts();
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      return res.status(401).json({ success: false, message: 'Wrong phone/username or password' });
     }
 
-    // Reset on success
     await user.updateOne({ $set: { loginAttempts: 0, lastLogin: new Date() }, $unset: { lockUntil: 1 } });
 
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '30d' });
@@ -115,9 +130,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       token,
       user: { id: user._id, username: user.username, balance: user.balance }
     });
+
   } catch (e) {
-    console.error('[auth/login]', e.message);
-    res.status(500).json({ success: false, message: 'Login failed' });
+    console.error('[login]', e.message);
+    res.status(500).json({ success: false, message: 'Login failed. Try again.' });
   }
 });
 
@@ -130,21 +146,6 @@ router.get('/me', auth, async (req, res) => {
 router.get('/balance', auth, async (req, res) => {
   const user = await User.findById(req.user._id).select('balance');
   res.json({ success: true, balance: user.balance });
-});
-
-// ── ADMIN: DELETE USER (for cleanup) ──
-router.delete('/admin/user/:phone', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
-    return res.status(401).json({ success: false });
-  try {
-    let phone = req.params.phone.replace(/\D/g,'');
-    if (phone.startsWith('0')) phone = '254' + phone.slice(1);
-    const user = await User.findOneAndDelete({ $or: [{ phone }, { username: req.params.phone }] });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, message: `Deleted user: ${user.username} (${user.phone})` });
-  } catch(e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
 });
 
 module.exports = router;
