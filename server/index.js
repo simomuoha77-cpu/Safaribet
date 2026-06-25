@@ -15,7 +15,6 @@ const aviatorRoutes = require('./routes/aviator');
 const mpesaRoutes   = require('./routes/mpesa');
 const betsRoutes    = require('./routes/bets');
 const withdrawRoutes= require('./routes/withdraw');
-const adminRoutes   = require('./routes/admin');
 const scheduler     = require('./engine/scheduler');
 
 const app    = express();
@@ -33,7 +32,19 @@ try {
 
 // ── SECURITY ──
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
+      styleSrc:    ["'self'", "'unsafe-inline'", "fonts.googleapis.com", "fonts.gstatic.com"],
+      fontSrc:     ["'self'", "fonts.googleapis.com", "fonts.gstatic.com"],
+      connectSrc:  ["'self'", "wss:", "ws:"],
+      imgSrc:      ["'self'", "data:", "https:"],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+    }
+  },
+  // Prevent source inspection
   crossOriginEmbedderPolicy: false
 }));
 
@@ -83,7 +94,6 @@ app.use('/api/aviator',  aviatorRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);
 app.use('/api/withdraw', withdrawRoutes);
-app.use('/api/admin',   adminRoutes);
 
 // ── HEALTH ──
 app.get('/api/health', (req, res) => {
@@ -103,36 +113,10 @@ app.post('/api/admin/settle', async (req, res) => {
   }
 });
 
-// ── ADMIN PANEL UI ──
-app.get('/x9panel', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
-});
-
-// ── CLEAN URL ROUTING ──
-// Map clean URLs to page files
-const PAGE_MAP = {
-  '/my-bets':  'my-bets.html',
-  '/aviator':  'aviator.html',
-  '/account':  'account.html',
-  '/deposit':  'deposit.html',
-  '/withdraw': 'withdraw.html',
-  '/login':    'login.html',
-  '/register': 'register.html',
-};
-
-// Serve clean URLs
-Object.entries(PAGE_MAP).forEach(([route, file]) => {
-  app.get(route, (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/pages', file));
-  });
-});
-
-// Also keep /pages/* working for backward compatibility
-app.get('/pages/:page', (req, res) => {
-  const page = req.params.page;
-  const cleanRoute = '/' + page.replace('.html','');
-  // Redirect to clean URL
-  return res.redirect(301, cleanRoute);
+// ── SERVE PAGES ──
+app.get('/pages/*', (req, res) => {
+  const page = req.path.split('/').pop();
+  res.sendFile(path.join(__dirname, '../public/pages', page));
 });
 
 // ── 404 → index ──
