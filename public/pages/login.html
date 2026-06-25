@@ -70,7 +70,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
   <div class="field">
     <label>Phone Number</label>
-    <input type="tel" id="phone" placeholder="e.g. 0712345678" autocomplete="tel"/>
+    <input type="tel" id="phone" placeholder="0712 345 678" autocomplete="tel"/>
   </div>
   <div class="field">
     <label>Password</label>
@@ -80,7 +80,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
   <button class="submit-btn" id="loginBtn" onclick="login()">Sign In</button>
 
   <div class="divider">or</div>
-  <div class="alt-link">Don't have an account? <a href="/register">Create one free</a></div>
+  <div class="alt-link">Don't have an account? <a href="/pages/register.html">Create one free</a></div>
 </div>
 
 <script>
@@ -96,7 +96,7 @@ async function login(){
   if(!phone||!password){err.textContent='Please fill in all fields';err.style.display='block';return}
   btn.disabled=true;btn.textContent='Signing in...';
   try{
-    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password})});
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,password})});
     const d=await r.json();
     if(d.success){
       localStorage.setItem('token',d.token);localStorage.setItem('user',JSON.stringify(d.user));
