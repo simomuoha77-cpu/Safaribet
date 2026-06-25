@@ -114,8 +114,16 @@ router.post('/callback', async (req, res) => {
     const tx = await Transaction.findOne({ reference: ref, status: 'pending' }).lean();
     if (!tx) return;
 
-    // Credit user
-    const user = await User.findByIdAndUpdate(tx.userId, { $inc: { balance: amount } }, { new: true });
+    // Check if this is user's FIRST ever deposit
+    const prevDeposits = await Transaction.countDocuments({
+      userId: tx.userId, type: 'deposit', status: 'completed'
+    });
+    const isFirstDeposit = prevDeposits === 0;
+    const BONUS = 20;
+
+    // Credit deposit amount (+ bonus if first deposit)
+    const totalCredit = isFirstDeposit ? amount + BONUS : amount;
+    const user = await User.findByIdAndUpdate(tx.userId, { $inc: { balance: totalCredit } }, { new: true });
     if (!user) return;
 
     await Transaction.findByIdAndUpdate(tx._id, {
@@ -125,7 +133,19 @@ router.post('/callback', async (req, res) => {
       description: `Deposit KES ${amount} — M-Pesa ${mpRef}`
     });
 
-    console.log(`✅ Deposit: ${user.username} +KES ${amount} (${mpRef})`);
+    // Record bonus transaction separately
+    if (isFirstDeposit) {
+      await Transaction.create({
+        userId:      tx.userId,
+        type:        'bonus',
+        amount:      BONUS,
+        balance:     user.balance,
+        description: `🎁 Welcome bonus KES ${BONUS} — first deposit reward`
+      });
+      console.log(`🎁 Welcome bonus KES ${BONUS} → ${user.username}`);
+    }
+
+    console.log(`✅ Deposit: ${user.username} +KES ${amount}${isFirstDeposit?' +KES '+BONUS+' bonus':''} (${mpRef})`);
   } catch (e) {
     console.error('[mpesa/callback]', e.message);
   }
