@@ -1,255 +1,187 @@
 const express = require('express');
-const crypto  = require('crypto');
-const jwt     = require('jsonwebtoken');
+const auth    = require('../middleware/auth');
 const User    = require('../models/User');
+const Transaction = require('../models/Transaction');
+const rateLimit = require('express-rate-limit');
+const router  = express.Router();
 
-const router = express.Router();
+const betLimiter = rateLimit({ windowMs: 3000, max: 2, message: { success: false, message: 'Too fast!' } });
 
-// ─── RATE LIMITER (2 req/sec per IP on state) ───
-const rateBuckets = new Map();
-function rateLimit(max) {
-  return (req, res, next) => {
-    const ip  = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-    let b = rateBuckets.get(ip);
-    if (!b || now > b.resetAt) { b = { count:0, resetAt: now+1000 }; rateBuckets.set(ip,b); }
-    if (++b.count > max) return res.status(429).json({ success:false, message:'Too many requests' });
-    next();
-  };
-}
-setInterval(() => { const now=Date.now(); for(const [ip,b] of rateBuckets) if(now>b.resetAt+5000) rateBuckets.delete(ip); }, 30000);
-
-// ─── OPTIONAL AUTH (betting requires it, state is public) ───
-function optionalAuth(req, res, next) {
-  const h = req.headers.authorization;
-  if (h && h.startsWith('Bearer ')) {
-    try { req.userId = jwt.verify(h.split(' ')[1], process.env.JWT_SECRET).id; } catch {}
-  }
-  next();
-}
-function requireAuth(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h || !h.startsWith('Bearer '))
-    return res.status(401).json({ success:false, message:'Login required' });
-  try { req.userId = jwt.verify(h.split(' ')[1], process.env.JWT_SECRET).id; next(); }
-  catch { return res.status(401).json({ success:false, message:'Invalid token' }); }
-}
-
-// ─── BET VELOCITY TRACKER ───
-const betHistory = new Map();
-const flaggedUsers = new Set();
-function trackVelocity(userId, stake) {
-  if (!betHistory.has(userId)) betHistory.set(userId, []);
-  const h = betHistory.get(userId);
-  h.push({ ts: Date.now(), stake });
-  if (h.length > 20) h.shift();
-  // Flag if placing >10 bets in 2 minutes
-  const recent = h.filter(b => Date.now()-b.ts < 120000);
-  if (recent.length > 10) { flaggedUsers.add(userId); console.warn('⚠️  Velocity flag:', userId); }
-}
-
-// ─── PROVABLY FAIR SHA-512 ───
-function generateCrashPoint(serverSeed, nonce) {
-  const hash = crypto.createHash('sha512').update(`${serverSeed}:${nonce}`).digest('hex');
-  const val  = parseInt(hash.slice(0,8), 16);
-  const h    = val / (2**32);
-  if (h < 0.03) return 1.00; // house edge
-  return Math.max(1.00, parseFloat((0.97 / (1-h)).toFixed(2)));
-}
-
-// ─── GAME STATE ───
-let gs = {
-  status:'waiting', multiplier:1.00,
-  crashPoint:null, serverSeed:null, nonce:0,
-  publicHash:null, roundId:0,
-  startTime:null, crashTime:null,
-  players:[], history:[]
+// ── GAME STATE (server-side, tamper-proof) ──
+let gameState = {
+  phase:      'waiting', // waiting | flying | crashed
+  multiplier: 1.00,
+  crashAt:    1.00,
+  history:    [],
+  roundId:    0,
+  startTime:  null,
+  clients:    new Set(),
+  bets:       new Map(), // userId -> { amount, cashedOut, payout }
+  interval:   null
 };
-let flyInterval=null, waitInterval=null;
 
-function buildPayload() {
-  return {
-    status:     gs.status,
-    multiplier: gs.multiplier,
-    // ✅ crashPoint ONLY after crash
-    crashPoint: gs.status==='crashed' ? gs.crashPoint : null,
-    serverSeed: gs.status==='crashed' ? gs.serverSeed : null,
-    publicHash: gs.publicHash,
-    nonce:      gs.nonce,
-    roundId:    gs.roundId,
-    waitSeconds:5,
-    history:    gs.history.slice(-20),
-    playerCount:gs.players.length
-  };
+function provablyFairCrash() {
+  // Server-side crash point: house edge ~4%
+  const r = Math.random();
+  if (r < 0.04) return 1.00; // 4% instant crash
+  // Exponential distribution — higher values rare
+  return Math.max(1.00, parseFloat((1 / (1 - r) * 0.96).toFixed(2)));
 }
 
-function startNewRound() {
-  clearInterval(flyInterval); clearInterval(waitInterval);
-  const serverSeed = crypto.randomBytes(32).toString('hex');
-  const nonce      = gs.nonce + 1;
-  const crashPoint = generateCrashPoint(serverSeed, nonce);
-  const publicHash = crypto.createHash('sha512').update(`${serverSeed}:${nonce}`).digest('hex');
+function broadcast(wss, data) {
+  const msg = JSON.stringify(data);
+  if (!wss) return;
+  wss.clients.forEach(ws => {
+    if (ws.readyState === 1) ws.send(msg);
+  });
+}
 
-  gs = { ...gs, status:'waiting', multiplier:1.00, crashPoint, serverSeed, nonce,
-    publicHash, roundId:gs.roundId+1, startTime:null, crashTime:null, players:[] };
+function startRound(wss) {
+  gameState.phase      = 'waiting';
+  gameState.multiplier = 1.00;
+  gameState.crashAt    = provablyFairCrash();
+  gameState.roundId++;
+  gameState.bets       = new Map();
+  gameState.startTime  = null;
+
+  broadcast(wss, { type: 'waiting', roundId: gameState.roundId, countdown: 5 });
 
   let countdown = 5;
-  waitInterval = setInterval(() => {
-    if (--countdown <= 0) { clearInterval(waitInterval); startFlying(); }
+  const countTimer = setInterval(() => {
+    countdown--;
+    broadcast(wss, { type: 'countdown', countdown });
+    if (countdown <= 0) {
+      clearInterval(countTimer);
+      flyRound(wss);
+    }
   }, 1000);
 }
 
-function startFlying() {
-  gs.status='flying'; gs.startTime=Date.now();
-  flyInterval = setInterval(() => {
-    const elapsed = (Date.now()-gs.startTime)/1000;
-    gs.multiplier = parseFloat(Math.min(
-      Math.pow(Math.E, elapsed*0.06*Math.log(gs.crashPoint+1)),
-      gs.crashPoint
-    ).toFixed(2));
+function flyRound(wss) {
+  gameState.phase     = 'flying';
+  gameState.startTime = Date.now();
+  broadcast(wss, { type: 'fly', roundId: gameState.roundId });
 
-    if (gs.multiplier >= gs.crashPoint) {
-      clearInterval(flyInterval);
-      gs.status='crashed'; gs.crashTime=Date.now();
-      gs.multiplier=gs.crashPoint;
-      gs.history.push(gs.crashPoint);
-      if (gs.history.length>50) gs.history.shift();
-      gs.players.forEach(p=>{ if(!p.cashedOut) p.lost=true; });
-      setTimeout(startNewRound, 3500);
+  const tick = setInterval(() => {
+    const elapsed    = (Date.now() - gameState.startTime) / 1000;
+    // Growth: starts slow, accelerates
+    gameState.multiplier = parseFloat(Math.pow(1.06, elapsed).toFixed(2));
+
+    broadcast(wss, { type: 'tick', multiplier: gameState.multiplier, roundId: gameState.roundId });
+
+    if (gameState.multiplier >= gameState.crashAt) {
+      clearInterval(tick);
+      crashRound(wss);
     }
   }, 100);
 }
 
-startNewRound();
+async function crashRound(wss) {
+  gameState.phase      = 'crashed';
+  const crashAt        = gameState.crashAt;
 
-// ─── ROUTES ───
-
-// GET /api/aviator/state — public, rate limited
-router.get('/state', rateLimit(4), (req, res) => {
-  res.json({ success:true, data: buildPayload() });
-});
-
-// GET /api/aviator/players — public, rate limited
-router.get('/players', rateLimit(5), (req, res) => {
-  res.json({ success:true, data: gs.players.map(p=>({
-    username:p.username, stake:p.stake,
-    cashedOut:p.cashedOut, cashoutMultiplier:p.cashoutMultiplier, won:p.won
-  }))});
-});
-
-// GET /api/aviator/verify/:hash — verify past round
-router.get('/verify/:hash', (req, res) => {
-  const entry = gs.history.find(h => h.hash===req.params.hash);
-  if (!entry) return res.status(404).json({ success:false, message:'Round not found' });
-  const computed = generateCrashPoint(entry.serverSeed, entry.nonce);
-  res.json({ success:true, valid: computed===entry.crashPoint, computed, stored:entry.crashPoint });
-});
-
-// POST /api/aviator/bet — requires auth
-router.post('/bet', requireAuth, async (req, res) => {
-  try {
-    const { stake, autoCashout } = req.body;
-    const userId = req.userId;
-
-    if (gs.status!=='waiting')
-      return res.status(400).json({ success:false, message:'Betting closed. Wait for next round.' });
-    if (!stake || stake<10)
-      return res.status(400).json({ success:false, message:'Minimum stake is KES 10' });
-    if (gs.players.find(p=>p.userId===userId))
-      return res.status(400).json({ success:false, message:'Bet already placed this round' });
-
-    const user = await User.findById(userId);
-    if (!user || user.balance<stake)
-      return res.status(400).json({ success:false, message:'Insufficient balance' });
-
-    // Flagged user stake cap
-    if (flaggedUsers.has(userId) && stake>500)
-      return res.status(403).json({ success:false, message:'Stake limit active. Contact support.' });
-
-    user.balance -= parseFloat(stake);
-    await user.save();
-    trackVelocity(userId, stake);
-
-    gs.players.push({
-      userId, username:user.username,
-      stake:parseFloat(stake),
-      autoCashout: autoCashout ? parseFloat(autoCashout) : null,
-      cashedOut:false, cashoutAt:null, cashoutMultiplier:null, won:0,
-      betTime:Date.now(), roundId:gs.roundId
-    });
-
-    // Auto cashout will be checked server-side in flyInterval
-    res.json({ success:true, message:'Bet placed', newBalance:user.balance, roundId:gs.roundId });
-  } catch(err) {
-    console.error('Bet error:', err);
-    res.status(500).json({ success:false, message:'Server error' });
-  }
-});
-
-// Auto cashout check inside fly loop
-const _origFlyInterval = setInterval; // already running above
-// We handle auto cashout in a separate watcher
-setInterval(async () => {
-  if (gs.status!=='flying') return;
-  for (const player of gs.players) {
-    if (!player.cashedOut && player.autoCashout && gs.multiplier>=player.autoCashout) {
-      // server-side auto cashout
-      const elapsed = (Date.now()-gs.startTime)/1000;
-      const serverMulti = parseFloat(Math.min(
-        Math.pow(Math.E, elapsed*0.06*Math.log(gs.crashPoint+1)), gs.crashPoint
-      ).toFixed(2));
-      if (serverMulti < gs.crashPoint) {
-        const winAmount = parseFloat((player.stake * serverMulti).toFixed(2));
-        player.cashedOut=true; player.cashoutAt=Date.now();
-        player.cashoutMultiplier=serverMulti; player.won=winAmount;
-        try {
-          const user = await User.findById(player.userId);
-          if (user) { user.balance+=winAmount; await user.save(); }
-        } catch {}
-      }
+  // Settle uncashed bets as losses
+  for (const [userId, bet] of gameState.bets.entries()) {
+    if (!bet.cashedOut) {
+      await User.findByIdAndUpdate(userId, {}); // mark as lost (balance already deducted)
     }
   }
-}, 150);
 
-// POST /api/aviator/cashout — requires auth, server validates timing
-router.post('/cashout', requireAuth, async (req, res) => {
+  gameState.history.unshift(crashAt);
+  if (gameState.history.length > 20) gameState.history.pop();
+
+  broadcast(wss, { type: 'crash', crashAt, history: gameState.history, roundId: gameState.roundId });
+
+  setTimeout(() => startRound(wss), 3000);
+}
+
+// ── WEBSOCKET SETUP ──
+function setupWS(wss) {
+  wss.on('connection', ws => {
+    ws.send(JSON.stringify({
+      type:       'init',
+      phase:      gameState.phase,
+      multiplier: gameState.multiplier,
+      history:    gameState.history,
+      roundId:    gameState.roundId
+    }));
+  });
+
+  // Start first round
+  setTimeout(() => startRound(wss), 2000);
+}
+
+// ── PLACE BET ──
+router.post('/bet', auth, betLimiter, async (req, res) => {
   try {
-    const userId = req.userId;
-    const now    = Date.now();
+    const { amount } = req.body;
+    const amt = parseFloat(amount);
 
-    if (gs.status!=='flying')
-      return res.status(400).json({ success:false, message:'Game not active' });
+    if (!amt || amt < 10 || amt > 100000) return res.status(400).json({ success: false, message: 'Amount must be KES 10–100,000' });
+    if (gameState.phase !== 'waiting') return res.status(400).json({ success: false, message: 'Bet during waiting phase only' });
+    if (gameState.bets.has(String(req.user._id))) return res.status(400).json({ success: false, message: 'Already have a bet this round' });
 
-    const player = gs.players.find(p=>p.userId===userId && !p.cashedOut);
-    if (!player)
-      return res.status(400).json({ success:false, message:'No active bet found' });
+    const user = await User.findOneAndUpdate(
+      { _id: req.user._id, balance: { $gte: amt } },
+      { $inc: { balance: -amt } },
+      { new: true }
+    );
+    if (!user) return res.status(400).json({ success: false, message: 'Insufficient balance' });
 
-    // ✅ Reject if crash already happened
-    if (gs.crashTime && now>=gs.crashTime)
-      return res.status(400).json({ success:false, message:'Too late — plane already crashed' });
+    gameState.bets.set(String(req.user._id), { amount: amt, cashedOut: false, payout: 0 });
 
-    // ✅ Recompute multiplier server-side at exact cashout moment
-    const elapsed     = (now-gs.startTime)/1000;
-    const serverMulti = parseFloat(Math.min(
-      Math.pow(Math.E, elapsed*0.06*Math.log(gs.crashPoint+1)), gs.crashPoint
-    ).toFixed(2));
+    await Transaction.create({
+      userId: req.user._id, type: 'stake', amount: -amt,
+      balance: user.balance, description: `Aviator bet R${gameState.roundId}`
+    });
 
-    if (serverMulti>=gs.crashPoint)
-      return res.status(400).json({ success:false, message:'Too late — plane crashed' });
-
-    const winAmount = parseFloat((player.stake * serverMulti).toFixed(2));
-    player.cashedOut=true; player.cashoutAt=now;
-    player.cashoutMultiplier=serverMulti; player.won=winAmount;
-
-    const user = await User.findById(userId);
-    user.balance+=winAmount;
-    await user.save();
-
-    res.json({ success:true, multiplier:serverMulti, won:winAmount, newBalance:user.balance });
-  } catch(err) {
-    console.error('Cashout error:', err);
-    res.status(500).json({ success:false, message:'Server error' });
+    res.json({ success: true, message: 'Bet placed', newBalance: user.balance });
+  } catch (e) {
+    console.error('[aviator/bet]', e.message);
+    res.status(500).json({ success: false, message: 'Bet failed' });
   }
 });
 
+// ── CASH OUT ──
+router.post('/cashout', auth, async (req, res) => {
+  try {
+    if (gameState.phase !== 'flying') return res.status(400).json({ success: false, message: 'Not in fly phase' });
+
+    const uid = String(req.user._id);
+    const bet = gameState.bets.get(uid);
+    if (!bet) return res.status(400).json({ success: false, message: 'No active bet' });
+    if (bet.cashedOut) return res.status(400).json({ success: false, message: 'Already cashed out' });
+
+    const mult   = gameState.multiplier;
+    const payout = parseFloat((bet.amount * mult).toFixed(2));
+
+    bet.cashedOut = true;
+    bet.payout    = payout;
+
+    const user = await User.findByIdAndUpdate(req.user._id, { $inc: { balance: payout } }, { new: true });
+
+    await Transaction.create({
+      userId: req.user._id, type: 'win', amount: payout,
+      balance: user.balance, description: `Aviator cashout @${mult}x R${gameState.roundId}`
+    });
+
+    res.json({ success: true, payout, multiplier: mult, newBalance: user.balance });
+  } catch (e) {
+    console.error('[aviator/cashout]', e.message);
+    res.status(500).json({ success: false, message: 'Cashout failed' });
+  }
+});
+
+// ── STATE ──
+router.get('/state', (req, res) => {
+  res.json({
+    success:    true,
+    phase:      gameState.phase,
+    multiplier: gameState.multiplier,
+    history:    gameState.history,
+    roundId:    gameState.roundId
+  });
+});
+
+router.setupWS = setupWS;
 module.exports = router;

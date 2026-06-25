@@ -1,52 +1,33 @@
 const mongoose = require('mongoose');
 
 const matchSchema = new mongoose.Schema({
-  matchId:      { type: String, unique: true, required: true }, // from odds API
-  sport:        { type: String, required: true },               // soccer_epl etc
+  matchId:      { type: String, required: true, unique: true, index: true },
+  sport:        { type: String, required: true, index: true },
   league:       { type: String, required: true },
   homeTeam:     { type: String, required: true },
   awayTeam:     { type: String, required: true },
-  commenceTime: { type: Date,   required: true },
-
-  // Odds (updated live)
+  commenceTime: { type: Date, required: true, index: true },
+  status:       { type: String, enum: ['upcoming','live','finished','cancelled'], default: 'upcoming', index: true },
+  result:       { type: String, enum: ['home','draw','away',null], default: null },
   odds: {
-    home: Number,
-    draw: Number,
-    away: Number,
-    updatedAt: Date
+    home:      { type: Number },
+    draw:      { type: Number },
+    away:      { type: Number },
+    updatedAt: { type: Date, default: Date.now }
   },
-
-  // Live score
   score: {
-    home:    { type: Number, default: null },
-    away:    { type: Number, default: null },
-    minute:  { type: Number, default: null },
-    period:  { type: String, default: null } // 1H | 2H | HT | FT | ET
+    home:   { type: Number, default: null },
+    away:   { type: Number, default: null },
+    minute: { type: Number, default: null },
+    period: { type: String, default: null }
   },
-
-  // Status
-  status: {
-    type: String,
-    enum: ['upcoming','live','finished','cancelled','postponed'],
-    default: 'upcoming'
-  },
-
-  // Result for settlement
-  result: {
-    type: String,
-    enum: ['home','draw','away',null],
-    default: null
-  },
-
-  // Settlement
   settled:    { type: Boolean, default: false },
+  settledAt:  { type: Date },
   isStatic:   { type: Boolean, default: false },
-  settledAt:  Date,
-  betsCount:  { type: Number, default: 0 },
-  payoutTotal:{ type: Number, default: 0 }
+  source:     { type: String, enum: ['apif','tsdb','manual'], default: 'apif' }
 }, { timestamps: true });
 
-matchSchema.index({ status: 1, settled: 1 });
-matchSchema.index({ commenceTime: 1 });
+matchSchema.index({ status: 1, commenceTime: 1 });
+matchSchema.index({ sport: 1, status: 1, commenceTime: 1 });
 
 module.exports = mongoose.model('Match', matchSchema);

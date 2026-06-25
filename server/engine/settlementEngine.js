@@ -1,135 +1,71 @@
-/**
- * SETTLEMENT ENGINE - FIXED
- * Uses API-Football for results (reliable)
- * Also falls back to The Odds API scores
- */
 const axios       = require('axios');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const User        = require('../models/User');
 const Transaction = require('../models/Transaction');
 
-const APIF_KEY  = process.env.APIFOOTBALL_KEY;
-const ODDS_KEY  = process.env.ODDS_API_KEY;
+const APIF_KEY  = () => process.env.APIFOOTBALL_KEY;
 const APIF_BASE = 'https://v3.football.api-sports.io';
-const ODDS_BASE = 'https://api.the-odds-api.com/v4';
 
-// All league IDs to check for results
-const LEAGUE_IDS = [1,2,3,4,6,10,15,20,39,61,71,78,135,140,169,239,253,292,606,686,667];
-
-function getResult(home, away) {
-  if (home === null || away === null || home === undefined || away === undefined) return null;
-  if (home > away)  return 'home';
-  if (away > home)  return 'away';
-  return 'draw';
+function getResult(h, a) {
+  if (h === null || a === null || h === undefined || a === undefined) return null;
+  return h > a ? 'home' : a > h ? 'away' : 'draw';
 }
 
 async function gradeBet(bet) {
   const allDone = bet.selections.every(s => s.result !== 'pending');
   if (!allDone) return null;
   const anyLost = bet.selections.some(s => s.result === 'lost');
-  if (anyLost) return { status:'lost', payout:0, netPayout:0 };
+  if (anyLost) return { status: 'lost', payout: 0, netPayout: 0 };
   const payout    = parseFloat((bet.stake * bet.totalOdds).toFixed(2));
   const winnings  = payout - bet.stake;
-  const tax       = Math.max(0, winnings * 0.20); // Kenya 20% excise
+  const tax       = Math.max(0, winnings * 0.20); // Kenya excise
   const netPayout = parseFloat((payout - tax).toFixed(2));
-  return { status:'won', payout, netPayout };
+  return { status: 'won', payout, netPayout };
 }
 
-// ── FETCH RESULTS FROM API-FOOTBALL ──
-async function fetchApifResults() {
-  if (!APIF_KEY) return [];
+async function fetchResults() {
+  if (!APIF_KEY()) return [];
   const results = [];
-  const season  = new Date().getFullYear();
-  // Get yesterday and today
-  const yesterday = new Date(Date.now()-24*60*60*1000).toISOString().split('T')[0];
+  const year      = new Date().getFullYear();
+  const yesterday = new Date(Date.now() - 24*3600000).toISOString().split('T')[0];
   const today     = new Date().toISOString().split('T')[0];
+  const leagues   = [1,2,3,6,8,9,10,39,61,71,78,135,140,169,239,253,292,667];
 
-  for (const leagueId of LEAGUE_IDS) {
+  for (const id of leagues) {
     try {
       const r = await axios.get(`${APIF_BASE}/fixtures`, {
-        headers: {'x-rapidapi-key':APIF_KEY,'x-rapidapi-host':'v3.football.api-sports.io'},
-        params:  { league:leagueId, season, from:yesterday, to:today, status:'FT-AET-PEN' },
+        headers: { 'x-rapidapi-key': APIF_KEY(), 'x-rapidapi-host': 'v3.football.api-sports.io' },
+        params:  { league: id, season: year, from: yesterday, to: today, status: 'FT-AET-PEN' },
         timeout: 10000
       });
-      const fixtures = r.data?.response || [];
-      for (const fix of fixtures) {
-        const home = fix.goals?.home;
-        const away = fix.goals?.away;
-        const result = getResult(home, away);
+      for (const fix of r.data?.response || []) {
+        const result = getResult(fix.goals?.home, fix.goals?.away);
         if (result) {
           results.push({
             matchId:  `apif_${fix.fixture.id}`,
             homeTeam: fix.teams?.home?.name,
             awayTeam: fix.teams?.away?.name,
-            home, away, result
-          });
-        }
-      }
-      if (fixtures.length > 0) {
-        console.log(`  ✅ League ${leagueId}: ${fixtures.length} finished matches`);
-      }
-    } catch(err) {
-      // silent fail per league
-    }
-    await new Promise(r => setTimeout(r, 100)); // rate limit
-  }
-  return results;
-}
-
-// ── FETCH RESULTS FROM ODDS API ──
-async function fetchOddsApiResults() {
-  if (!ODDS_KEY) return [];
-  const sports = ['soccer_epl','soccer_spain_la_liga','soccer_germany_bundesliga',
-    'soccer_italy_serie_a','soccer_france_ligue_one','soccer_uefa_champs_league',
-    'soccer_mls','basketball_nba'];
-  const results = [];
-
-  for (const sport of sports) {
-    try {
-      const r = await axios.get(`${ODDS_BASE}/sports/${sport}/scores`, {
-        params: { apiKey:ODDS_KEY, daysFrom:3, dateFormat:'iso' },
-        timeout: 8000
-      });
-      for (const game of (r.data||[])) {
-        if (!game.completed) continue;
-        const homeScore = game.scores?.find(s=>s.name===game.home_team)?.score;
-        const awayScore = game.scores?.find(s=>s.name===game.away_team)?.score;
-        const result = getResult(
-          homeScore!==undefined ? parseInt(homeScore) : null,
-          awayScore!==undefined ? parseInt(awayScore) : null
-        );
-        if (result) {
-          results.push({
-            matchId:  game.id,
-            homeTeam: game.home_team,
-            awayTeam: game.away_team,
-            home:     parseInt(homeScore)||0,
-            away:     parseInt(awayScore)||0,
+            home:     fix.goals.home,
+            away:     fix.goals.away,
             result
           });
         }
       }
     } catch {}
+    await new Promise(r => setTimeout(r, 100));
   }
   return results;
 }
 
-// ── SETTLE BETS FOR A MATCH ──
-async function settleBetsForMatch(matchId, result, homeScore, awayScore) {
-  // Update match record
+async function settleBets(matchId, result, homeScore, awayScore) {
   await Match.findOneAndUpdate(
     { matchId },
-    { $set: { status:'finished', result, settled:true, settledAt:new Date(),
-              'score.home':homeScore, 'score.away':awayScore, 'score.period':'FT' }}
-  ).catch(()=>{});
+    { $set: { status: 'finished', result, settled: true, settledAt: new Date(),
+              'score.home': homeScore, 'score.away': awayScore, 'score.period': 'FT' } }
+  ).catch(() => {});
 
-  // Find all pending bets containing this match
-  const bets = await Bet.find({
-    status: 'pending',
-    'selections.matchId': matchId
-  });
-
+  const bets = await Bet.find({ status: 'pending', 'selections.matchId': matchId });
   let settled = 0, paid = 0;
 
   for (const bet of bets) {
@@ -152,11 +88,9 @@ async function settleBetsForMatch(matchId, result, homeScore, awayScore) {
       await bet.save();
       settled++;
 
-      if (grade.status === 'won') {
-        const user = await User.findById(bet.userId);
+      if (grade.status === 'won' && grade.netPayout > 0) {
+        const user = await User.findByIdAndUpdate(bet.userId, { $inc: { balance: grade.netPayout } }, { new: true });
         if (user) {
-          user.balance += grade.netPayout;
-          await user.save();
           await Transaction.create({
             userId:      bet.userId,
             type:        'win',
@@ -164,80 +98,54 @@ async function settleBetsForMatch(matchId, result, homeScore, awayScore) {
             balance:     user.balance,
             reference:   bet.betCode,
             description: `Win: ${bet.betCode} — KES ${grade.netPayout}`
-          }).catch(()=>{});
+          }).catch(() => {});
           paid++;
           console.log(`  💰 Paid KES ${grade.netPayout} → ${user.username} [${bet.betCode}]`);
         }
       }
     } else {
-      await bet.save(); // save partial progress
+      await bet.save();
     }
   }
-
   return { settled, paid };
 }
 
-// ── MAIN SETTLEMENT RUN ──
 async function runSettlement() {
-  console.log('\n🔄 Settlement engine running...');
+  console.log('\n🔄 Settlement running...');
+  const pending = await Bet.countDocuments({ status: 'pending' });
+  if (!pending) { console.log('  Nothing to settle.'); return { settled: 0, paid: 0 }; }
+  console.log(`  Pending bets: ${pending}`);
+
+  const results = await fetchResults();
+  console.log(`  Fetched ${results.length} finished matches`);
+
   let totalSettled = 0, totalPaid = 0;
-
-  // Get all pending bets
-  const pendingBets = await Bet.countDocuments({ status:'pending' });
-  console.log(`  Pending bets: ${pendingBets}`);
-  if (pendingBets === 0) { console.log('  Nothing to settle.'); return { settled:0, paid:0 }; }
-
-  // Fetch results from both sources
-  console.log('  Fetching results from API-Football...');
-  const apifResults  = await fetchApifResults();
-  console.log(`  API-Football: ${apifResults.length} finished matches`);
-
-  console.log('  Fetching results from The Odds API...');
-  const oddsResults  = await fetchOddsApiResults();
-  console.log(`  Odds API: ${oddsResults.length} finished matches`);
-
-  // Merge results (API-Football takes priority)
-  const allResults   = [...apifResults];
-  for (const r of oddsResults) {
-    if (!allResults.find(a => a.matchId === r.matchId)) {
-      allResults.push(r);
-    }
-  }
-  console.log(`  Total unique results: ${allResults.length}`);
-
-  // Also check DB for pending bets and try to find their match results
-  // by team name matching
-  const pendingBetDocs = await Bet.find({ status:'pending' })
-    .select('selections betCode userId stake totalOdds potentialWin')
-    .lean();
-
-  for (const result of allResults) {
-    const { settled, paid } = await settleBetsForMatch(
-      result.matchId, result.result, result.home, result.away
-    );
+  for (const r of results) {
+    const { settled, paid } = await settleBets(r.matchId, r.result, r.home, r.away);
     totalSettled += settled;
     totalPaid    += paid;
 
-    // Also try to match by team names (handles matchId mismatch)
+    // Also match by team name in case matchId differs
     if (settled === 0) {
-      for (const bet of pendingBetDocs) {
+      const betsByTeam = await Bet.find({
+        status: 'pending',
+        'selections.homeTeam': new RegExp(r.homeTeam, 'i'),
+        'selections.awayTeam': new RegExp(r.awayTeam, 'i')
+      });
+      for (const bet of betsByTeam) {
         for (const sel of bet.selections) {
-          const homeMatch = sel.homeTeam?.toLowerCase() === result.homeTeam?.toLowerCase();
-          const awayMatch = sel.awayTeam?.toLowerCase() === result.awayTeam?.toLowerCase();
-          if (homeMatch && awayMatch && sel.result === 'pending') {
-            // Settle using team name match
-            const { settled: s, paid: p } = await settleBetsForMatch(
-              sel.matchId, result.result, result.home, result.away
-            );
-            totalSettled += s;
-            totalPaid    += p;
+          if (sel.homeTeam?.toLowerCase() === r.homeTeam?.toLowerCase() &&
+              sel.awayTeam?.toLowerCase() === r.awayTeam?.toLowerCase() &&
+              sel.result === 'pending') {
+            const { settled: s, paid: p } = await settleBets(sel.matchId, r.result, r.home, r.away);
+            totalSettled += s; totalPaid += p;
           }
         }
       }
     }
   }
 
-  console.log(`✅ Settlement done — ${totalSettled} bets settled, ${totalPaid} paid out\n`);
+  console.log(`✅ Settlement done — ${totalSettled} settled, ${totalPaid} paid\n`);
   return { settled: totalSettled, paid: totalPaid };
 }
 

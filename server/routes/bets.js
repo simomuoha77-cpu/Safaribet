@@ -1,211 +1,187 @@
-const express     = require('express');
-const jwt         = require('jsonwebtoken');
-const User        = require('../models/User');
-const Bet         = require('../models/Bet');
-const Match       = require('../models/Match');
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const auth    = require('../middleware/auth');
+const Bet     = require('../models/Bet');
+const Match   = require('../models/Match');
+const User    = require('../models/User');
 const Transaction = require('../models/Transaction');
+const router  = express.Router();
 
-const router = express.Router();
+const betLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many bets. Slow down.' }
+});
 
-function requireAuth(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h?.startsWith('Bearer '))
-    return res.status(401).json({ success: false, message: 'Login required' });
-  try { req.userId = jwt.verify(h.split(' ')[1], process.env.JWT_SECRET).id; next(); }
-  catch { return res.status(401).json({ success: false, message: 'Invalid token' }); }
+// Validate selections
+function validateSelections(selections) {
+  if (!Array.isArray(selections) || !selections.length) return 'No selections provided';
+  if (selections.length > 20) return 'Maximum 20 selections per bet';
+  const seen = new Set();
+  for (const s of selections) {
+    if (!s.matchId || !s.pick || !s.odds) return 'Invalid selection data';
+    if (!['home','draw','away'].includes(s.pick)) return 'Invalid pick: must be home, draw, or away';
+    if (s.odds < 1.01 || s.odds > 500) return 'Invalid odds';
+    if (seen.has(s.matchId)) return 'Duplicate match in bet slip';
+    seen.add(s.matchId);
+  }
+  return null;
 }
 
-// ── POST /api/bets/place ──
-router.post('/place', requireAuth, async (req, res) => {
+// ── PLACE BET ──
+router.post('/place', auth, betLimiter, async (req, res) => {
   try {
     const { selections, stake } = req.body;
 
-    // Validations
-    if (!selections?.length)
-      return res.status(400).json({ success: false, message: 'No selections' });
-    if (selections.length > 20)
-      return res.status(400).json({ success: false, message: 'Max 20 selections per bet' });
-    if (!stake || stake < 10)
-      return res.status(400).json({ success: false, message: 'Minimum stake is KES 10' });
-    if (stake > 500000)
-      return res.status(400).json({ success: false, message: 'Maximum stake is KES 500,000' });
+    const err = validateSelections(selections);
+    if (err) return res.status(400).json({ success: false, message: err });
 
-    // Verify odds are still valid from DB
+    const stakeAmt = parseFloat(stake);
+    if (!stakeAmt || stakeAmt < 10) return res.status(400).json({ success: false, message: 'Minimum stake is KES 10' });
+    if (stakeAmt > 500000) return res.status(400).json({ success: false, message: 'Maximum stake is KES 500,000' });
+
+    // Verify matches exist and are still bettable + verify server-side odds
+    const matchIds = selections.map(s => s.matchId);
+    const matches  = await Match.find({ matchId: { $in: matchIds } });
+
+    const matchMap = {};
+    matches.forEach(m => { matchMap[m.matchId] = m; });
+
     const verifiedSelections = [];
-    for (const sel of selections) {
-      // Try to verify odds from DB match record
-      const match = await Match.findOne({ matchId: sel.matchId });
-      let verifiedOdds = sel.odds;
+    let totalOdds = 1;
 
-      if (match) {
-        // Check match hasn't started yet (no live betting for now)
-        if (match.status === 'finished' || match.status === 'cancelled') {
-          return res.status(400).json({
-            success: false,
-            message: `Match ${sel.homeTeam} vs ${sel.awayTeam} has already finished`
-          });
-        }
-        // Use DB odds (most current)
-        const dbOdds = match.odds?.[sel.pick];
-        if (dbOdds) verifiedOdds = dbOdds;
-      }
+    for (const s of selections) {
+      const match = matchMap[s.matchId];
+      if (!match) return res.status(400).json({ success: false, message: `Match not found: ${s.matchId}` });
+      if (match.status === 'finished') return res.status(400).json({ success: false, message: `Match already finished: ${match.homeTeam} vs ${match.awayTeam}` });
+      if (match.status === 'cancelled') return res.status(400).json({ success: false, message: `Match cancelled: ${match.homeTeam} vs ${match.awayTeam}` });
 
-      if (!verifiedOdds || verifiedOdds < 1)
-        return res.status(400).json({ success: false, message: `Invalid odds for ${sel.homeTeam} vs ${sel.awayTeam}` });
+      // Use SERVER odds, not client odds (anti-cheat)
+      const serverOdds = match.odds?.[s.pick];
+      if (!serverOdds) return res.status(400).json({ success: false, message: `Odds unavailable for ${s.pick} in ${match.homeTeam} vs ${match.awayTeam}` });
 
       verifiedSelections.push({
-        matchId:      sel.matchId,
-        homeTeam:     sel.homeTeam,
-        awayTeam:     sel.awayTeam,
-        league:       sel.league || '',
-        sport:        sel.sport || '',
-        pick:         sel.pick,
-        pickLabel:    sel.pickLabel,
-        odds:         parseFloat(verifiedOdds),
-        commenceTime: sel.commenceTime ? new Date(sel.commenceTime) : null
+        matchId:   s.matchId,
+        homeTeam:  match.homeTeam,
+        awayTeam:  match.awayTeam,
+        league:    match.league,
+        sport:     match.sport,
+        pick:      s.pick,
+        pickLabel: s.pick === 'home' ? match.homeTeam : s.pick === 'away' ? match.awayTeam : 'Draw',
+        odds:      serverOdds,
+        result:    'pending'
       });
+      totalOdds *= serverOdds;
     }
 
-    // Check for duplicate matches
-    const matchIds = verifiedSelections.map(s => s.matchId);
-    if (new Set(matchIds).size !== matchIds.length)
-      return res.status(400).json({ success: false, message: 'Duplicate match in bet slip' });
+    totalOdds = parseFloat(totalOdds.toFixed(4));
+    const potentialWin  = parseFloat((stakeAmt * totalOdds).toFixed(2));
+    const winnings      = Math.max(0, potentialWin - stakeAmt);
+    const tax           = parseFloat((winnings * 0.20).toFixed(2));
+    const netPayout     = parseFloat((potentialWin - tax).toFixed(2));
 
-    const user = await User.findById(req.userId);
-    if (!user)
-      return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.balance < stake)
-      return res.status(400).json({
-        success: false,
-        message: `Insufficient balance. Available: KES ${user.balance.toFixed(2)}`
-      });
+    // Deduct balance atomically
+    const user = await User.findOneAndUpdate(
+      { _id: req.user._id, balance: { $gte: stakeAmt } },
+      { $inc: { balance: -stakeAmt } },
+      { new: true }
+    );
+    if (!user) return res.status(400).json({ success: false, message: 'Insufficient balance' });
 
-    // Calculate
-    const totalOdds    = parseFloat(verifiedSelections.reduce((a,s) => a * s.odds, 1).toFixed(2));
-    const potentialWin = parseFloat((stake * totalOdds).toFixed(2));
-
-    // Deduct balance
-    user.balance = parseFloat((user.balance - parseFloat(stake)).toFixed(2));
-    await user.save();
-
-    // Create bet
     const bet = await Bet.create({
-      userId:       req.userId,
-      selections:   verifiedSelections,
-      stake:        parseFloat(stake),
+      userId:      req.user._id,
+      selections:  verifiedSelections,
+      stake:       stakeAmt,
       totalOdds,
-      potentialWin,
-      betType:      'prematch',
-      ipAddress:    req.ip
+      potentialWin: netPayout,
+      tax,
+      ipAddress:   req.ip
     });
 
-    // Transaction record
     await Transaction.create({
-      userId:      req.userId,
-      type:        'bet',
-      amount:      -parseFloat(stake),
+      userId:      req.user._id,
+      type:        'stake',
+      amount:      -stakeAmt,
       balance:     user.balance,
       reference:   bet.betCode,
-      description: `Bet placed: ${bet.betCode} — ${verifiedSelections.length} selection(s)`
+      description: `Bet ${bet.betCode} — ${verifiedSelections.length} selection(s)`
     });
-
-    // Update match bet count
-    for (const sel of verifiedSelections) {
-      await Match.findOneAndUpdate(
-        { matchId: sel.matchId },
-        { $inc: { betsCount: 1 } }
-      );
-    }
 
     res.json({
       success:      true,
-      message:      'Bet placed!',
       betCode:      bet.betCode,
+      selections:   verifiedSelections.length,
       totalOdds,
-      potentialWin: bet.netPotential,
-      stake:        parseFloat(stake),
-      newBalance:   user.balance,
-      selections:   verifiedSelections.length
+      stake:        stakeAmt,
+      potentialWin: netPayout,
+      newBalance:   user.balance
     });
-
-  } catch (err) {
-    console.error('Place bet error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (e) {
+    console.error('[bets/place]', e.message);
+    res.status(500).json({ success: false, message: 'Failed to place bet' });
   }
 });
 
-// ── GET /api/bets/my ──
-router.get('/my', requireAuth, async (req, res) => {
+// ── MY BETS ──
+router.get('/my', auth, async (req, res) => {
   try {
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(50, parseInt(req.query.limit) || 20);
-    const status = req.query.status; // filter by status
-    const skip   = (page - 1) * limit;
-
-    const query = { userId: req.userId };
-    if (status && status !== 'all') query.status = status;
+    const { status, page = 1 } = req.query;
+    const limit = 20;
+    const skip = (parseInt(page) - 1) * limit;
+    const filter = { userId: req.user._id };
+    if (status && ['pending','won','lost'].includes(status)) filter.status = status;
 
     const [bets, total] = await Promise.all([
-      Bet.find(query).sort({ placedAt: -1 }).skip(skip).limit(limit).lean(),
-      Bet.countDocuments(query)
+      Bet.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Bet.countDocuments(filter)
     ]);
 
-    // Stats
-    // Safe stats — count manually to avoid ObjectId issues
-    const [wonCount, lostCount, pendingCount, wonBets] = await Promise.all([
-      Bet.countDocuments({ userId: req.userId, status: 'won' }),
-      Bet.countDocuments({ userId: req.userId, status: 'lost' }),
-      Bet.countDocuments({ userId: req.userId, status: 'pending' }),
-      Bet.find({ userId: req.userId, status: 'won' }).select('netPayout stake').lean()
-    ]);
-    const totalStakeRes = await Bet.aggregate([
-      { $match: { userId: require('mongoose').Types.ObjectId.createFromHexString(req.userId) } },
-      { $group: { _id: null, total: { $sum: '$stake' } } }
-    ]).catch(() => []);
-    const stats = [{
-      totalBets:    total,
-      totalStake:   totalStakeRes[0]?.total || 0,
-      totalWon:     wonBets.reduce((a,b) => a + (b.netPayout||0), 0),
-      wonCount,
-      lostCount,
-      pendingCount
-    }];
-
-    res.json({
-      success: true,
-      data:    bets,
-      total,
-      page,
-      pages:   Math.ceil(total / limit),
-      stats:   stats[0] || { totalBets:0, totalStake:0, totalWon:0, wonCount:0, lostCount:0, pendingCount:0 }
-    });
-  } catch (err) {
-    console.error('My bets error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit) });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Failed to load bets' });
   }
 });
 
-// ── GET /api/bets/:betCode ──
-router.get('/:betCode', requireAuth, async (req, res) => {
+// ── BET DETAIL ──
+router.get('/:code', auth, async (req, res) => {
   try {
-    const bet = await Bet.findOne({ betCode: req.params.betCode, userId: req.userId }).lean();
+    const bet = await Bet.findOne({ betCode: req.params.code.toUpperCase(), userId: req.user._id }).lean();
     if (!bet) return res.status(404).json({ success: false, message: 'Bet not found' });
     res.json({ success: true, data: bet });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Failed to load bet' });
   }
 });
 
-// ── GET /api/bets/transactions/history ──
-router.get('/transactions/history', requireAuth, async (req, res) => {
+// ── STATS ──
+router.get('/stats/summary', auth, async (req, res) => {
   try {
-    const txns = await Transaction.find({ userId: req.userId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
-    res.json({ success: true, data: txns });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    const [all, won, pending] = await Promise.all([
+      Bet.countDocuments({ userId: req.user._id }),
+      Bet.countDocuments({ userId: req.user._id, status: 'won' }),
+      Bet.countDocuments({ userId: req.user._id, status: 'pending' })
+    ]);
+    const totalStaked = await Bet.aggregate([
+      { $match: { userId: req.user._id } },
+      { $group: { _id: null, total: { $sum: '$stake' } } }
+    ]);
+    const totalWon = await Bet.aggregate([
+      { $match: { userId: req.user._id, status: 'won' } },
+      { $group: { _id: null, total: { $sum: '$netPayout' } } }
+    ]);
+    res.json({
+      success: true,
+      data: {
+        total:   all,
+        won,
+        pending,
+        lost:    all - won - pending,
+        staked:  totalStaked[0]?.total || 0,
+        earned:  totalWon[0]?.total || 0
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Failed to load stats' });
   }
 });
 

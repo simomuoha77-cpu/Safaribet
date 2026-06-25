@@ -4,771 +4,863 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no"/>
 <title>Aviator – BetaKE</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Orbitron:wght@900&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{width:100%;height:100%;overflow:hidden;background:#111;font-family:'Rajdhani',sans-serif;color:#fff}
+:root{--red:#e8001e;--gold:#ffd600;--green:#00e676;--bg:#111;--bg2:#1a1a1a;--border:rgba(255,255,255,0.07)}
+html,body{font-family:'Rajdhani',sans-serif;background:#0f0f0f;color:#fff;height:100%;overflow:hidden}
 body{display:flex;flex-direction:column;height:100dvh;height:100vh}
 
-/* ── TOPBAR — Spribe style: back left, logo center, balance right ── */
-.topbar{
-  display:flex;align-items:center;justify-content:space-between;
-  height:38px;padding:0 10px;
-  background:#111;border-bottom:1px solid #1e1e1e;flex-shrink:0;
-}
-.tbback{font-size:11px;color:#555;background:none;border:none;font-family:'Rajdhani',sans-serif;font-weight:700;cursor:pointer;min-width:50px}
-.tblogo{
-  font-family:Georgia,'Times New Roman',serif;
-  font-style:italic;font-weight:900;font-size:20px;
-  color:#e8001e;letter-spacing:-0.5px;
-  display:flex;align-items:center;gap:4px;
-}
-.tblogo svg{width:16px;height:16px;fill:#e8001e}
-.tbbal{font-size:12px;font-weight:700;color:#ccc;min-width:50px;text-align:right}
-.tbbal span{color:#777;font-size:10px}
+/* TOPBAR */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 12px;height:42px;background:#111;border-bottom:1px solid #222;flex-shrink:0}
+.back-btn{font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:'Rajdhani',sans-serif;font-weight:700;display:flex;align-items:center;gap:4px}
+.avi-logo{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;color:var(--red);font-style:italic;letter-spacing:0}
+.bal{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:700;color:var(--green);cursor:pointer}
+.bal span{color:#888;font-size:11px;margin-left:2px}
 
-/* ── HISTORY BAR ── */
-.hbar{
-  display:flex;align-items:center;gap:6px;
-  padding:0 8px;height:24px;
-  background:#111;border-bottom:1px solid #1a1a1a;
-  overflow-x:auto;scrollbar-width:none;flex-shrink:0;
-}
+/* HISTORY BAR */
+.hbar{display:flex;align-items:center;gap:5px;padding:5px 10px;background:#111;border-bottom:1px solid #1e1e1e;overflow-x:auto;scrollbar-width:none;flex-shrink:0;height:30px}
 .hbar::-webkit-scrollbar{display:none}
-.hc{font-size:11px;font-weight:700;flex-shrink:0;cursor:pointer;font-family:'Rajdhani',sans-serif}
-.hc.r{color:#e8001e}
-.hc.c{color:#00c8ff}
-.hc.y{color:#ffb300}
-.hc.p{color:#d070ff}
-.hmore{background:none;border:none;color:#444;cursor:pointer;font-size:13px;flex-shrink:0}
+.hc{flex-shrink:0;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;font-family:'Rajdhani',sans-serif;letter-spacing:.3px}
+.hc.r{background:rgba(232,0,30,.2);color:#ff4455}
+.hc.b{background:rgba(100,160,255,.15);color:#78b4ff}
+.hc.y{background:rgba(255,180,0,.15);color:#ffb400}
+.hc.p{background:rgba(200,100,255,.15);color:#cc88ff}
+.hmore{flex-shrink:0;width:24px;height:24px;border-radius:50%;background:#222;border:none;color:#666;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px}
 
-/* ── GAME CANVAS — FULL HEIGHT like Spribe ── */
-/* Spribe canvas ≈ 75% of screen. Topbar=38, hbar=24, bpanel=192 → canvas=rest */
-.gwrap{
-  position:relative;
-  width:100%;
-  /* Fixed height = 55vh like Spribe */
-  flex:0 0 auto;
-  height:55vh;
-  min-height:200px;
-  max-height:500px;
-  background:#0c0c0f;overflow:hidden;
+/* GAME CANVAS — exactly like screenshot: square-ish, not full height */
+.game-wrap{
+  position:relative;width:100%;
+  /* Fixed pixel height like Spribe — fits on screen with panel below */
+  height:52vw;
+  min-height:200px;max-height:320px;
+  background:#111;flex-shrink:0;overflow:hidden;
 }
-#gc{position:absolute;inset:0;width:100%;height:100%;display:block}
+#gc{display:block;width:100%;height:100%}
 
-/* ── MULTIPLIER — large white bold center ── */
-.mwrap{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:3;pointer-events:none;width:100%}
-/* Spribe font: very bold, slightly condensed */
-.mval{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:clamp(54px,15vw,90px);line-height:1;color:#fff;letter-spacing:-1px}
-.mval.crash{color:#e8001e}
+/* MULTIPLIER — center of canvas */
+.mwrap{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;z-index:2;width:100%}
+.mval{font-family:'Rajdhani',sans-serif;font-size:clamp(48px,13vw,80px);font-weight:700;line-height:1;letter-spacing:0}
+.mval.fly{color:#fff;text-shadow:0 0 40px rgba(100,180,255,.6),0 0 80px rgba(60,120,255,.3)}
+.mval.crash{color:var(--red);text-shadow:0 0 30px rgba(232,0,30,.7);animation:none}
 .mval.wait{display:none}
 
-/* ── WAIT OVERLAY ── */
-.wovl{position:absolute;inset:0;background:rgba(8,8,12,.9);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:5}
+/* WAIT OVERLAY */
+.wovl{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;z-index:4;background:rgba(10,10,14,.88)}
 .wovl.on{display:flex}
-.wlbl{font-size:11px;color:#444;letter-spacing:3px;text-transform:uppercase;font-weight:700;margin-bottom:10px}
-.wnum{font-family:'Orbitron',monospace;font-size:clamp(68px,18vw,92px);font-weight:900;color:#ffd600;line-height:1;text-shadow:0 0 30px rgba(255,214,0,.5);transition:transform .1s}
-.wnum.t{transform:scale(1.18)}
+.wtxt{font-size:11px;color:#555;letter-spacing:3px;text-transform:uppercase;font-weight:700;margin-bottom:10px}
+.wnum{font-family:'Orbitron',monospace;font-size:clamp(64px,18vw,90px);font-weight:900;color:var(--gold);line-height:1;text-shadow:0 0 30px rgba(255,214,0,.5);transition:transform .12s ease-out}
+.wnum.tick{transform:scale(1.18)}
 
-/* ── PLAYER COUNT — bottom right ── */
-.pcount{position:absolute;bottom:7px;right:8px;display:flex;align-items:center;gap:5px;z-index:3;font-size:11px;color:#555}
+/* PLAYERS BADGE */
+.pbadge{position:absolute;bottom:7px;right:8px;display:flex;align-items:center;gap:4px;background:rgba(0,0,0,.55);border-radius:20px;padding:3px 9px;font-size:11px;color:#555;z-index:2;border:1px solid #222}
 .pavs{display:flex}
-.pav{width:18px;height:18px;border-radius:50%;overflow:hidden;margin-left:-6px;border:1.5px solid #222;background:#1a2535}
-.pav:first-child{margin-left:0}
-.pav img{width:100%;height:100%;object-fit:cover}
+.pav{width:16px;height:16px;border-radius:50%;background:#1a2a40;border:1px solid #254060;margin-left:-5px;display:flex;align-items:center;justify-content:center;font-size:7px}
 
-/* ── SCROLL AREA ── */
-.scroll{flex:1 1 auto;overflow-y:auto;scrollbar-width:none;background:#111;min-height:0}
-.scroll::-webkit-scrollbar{display:none}
+/* FAIR BADGE */
+.fair{position:absolute;top:7px;right:8px;background:rgba(0,0,0,.55);border:1px solid #222;border-radius:5px;padding:2px 7px;font-size:9px;color:#444;cursor:pointer;z-index:2}
 
-/* ── BET PANEL ── */
-.bpanel{background:#1a1a1a;padding:6px 0 0;flex-shrink:0}
+/* SCROLL AREA — bet panels + table */
+.scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;background:#0f0f0f}
+.scroll-area::-webkit-scrollbar{display:none}
 
-/* Spribe tab row: centered pill tabs "Bet / Auto" */
-.trow{display:flex;justify-content:center;margin-bottom:5px;padding:0 12px}
-.tabs{display:inline-flex;background:#111;border-radius:20px;padding:2px;gap:1px}
-.tab{padding:4px 20px;border-radius:16px;border:none;font-size:12px;font-weight:700;font-family:'Rajdhani',sans-serif;text-transform:capitalize;color:#444;background:none;cursor:pointer;transition:all .15s;letter-spacing:.3px}
-.tab.on{background:#2a2a2a;color:#e5e5e5}
+/* BET PANEL */
+.bpanel{background:#1a1a1a;border-bottom:1px solid #222;padding:8px 10px 10px}
+.mtabs{display:inline-flex;background:#111;border-radius:20px;padding:2px;margin-bottom:8px;border:1px solid #222}
+.mtab{padding:5px 18px;border-radius:16px;font-size:12px;font-weight:700;cursor:pointer;color:#555;border:none;background:none;transition:all .2s;font-family:'Rajdhani',sans-serif;text-transform:uppercase;letter-spacing:.5px}
+.mtab.on{background:#2a2a2a;color:#fff}
+.srow{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.sbtn{width:32px;height:32px;border-radius:50%;background:#252525;border:1px solid #333;color:#aaa;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s;line-height:1}
+.sbtn:active{background:#333;transform:scale(.88)}
+.sinp{flex:1;text-align:center;font-size:18px;font-weight:700;background:none;border:none;color:#fff;outline:none;font-family:'Rajdhani',sans-serif}
+.abtn{flex:2;height:58px;border-radius:12px;border:none;font-size:17px;font-weight:700;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.2;margin-left:6px;font-family:'Rajdhani',sans-serif;letter-spacing:.3px}
+.abtn .sub{font-size:11px;font-weight:600;opacity:.85;letter-spacing:.2px}
+.abtn.bbet{background:linear-gradient(160deg,#1a8c3c,#22b04e);color:#fff;box-shadow:0 4px 16px rgba(20,150,60,.35)}
+.abtn.bbet:active{transform:scale(.97)}
+.abtn.bcash{background:linear-gradient(160deg,#c49000,var(--gold));color:#000;animation:cashpulse .55s infinite alternate}
+@keyframes cashpulse{from{box-shadow:0 0 8px rgba(255,214,0,.5)}to{box-shadow:0 0 28px rgba(255,214,0,1),0 0 55px rgba(255,214,0,.3)}}
+.abtn.bwait{background:#1e1e1e;border:1.5px solid #2a2a2a;color:#444}
+.abtn.bplaced{background:#1e1e1e;border:1.5px solid #333;color:#888}
+.abtn:disabled{opacity:.45;cursor:not-allowed;animation:none;box-shadow:none}
+.qrow{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:0}
+.qs{background:#222;border:1px solid #2a2a2a;border-radius:6px;padding:5px 2px;font-size:12px;font-weight:700;color:#666;cursor:pointer;transition:all .12s;font-family:'Rajdhani',sans-serif;text-align:center}
+.qs:active{background:#2e2e2e;color:#ccc}
+.slot2{margin-top:8px;padding-top:8px;border-top:1px solid #222}
+.slot2-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.stab{padding:3px 12px;border-radius:12px;font-size:11px;font-weight:700;cursor:pointer;color:#444;background:#222;border:none;transition:all .15s;font-family:'Rajdhani',sans-serif;text-transform:uppercase}
+.stab.on{background:#2a2a2a;color:#fff}
 
-/* Input row: − [amount] + [BIG GREEN BUTTON] */
-.irow{display:flex;align-items:center;gap:8px;padding:0 10px;margin-bottom:3px}
-/* Spribe −/+ : small gray circles */
-.pm{width:30px;height:30px;border-radius:50%;background:#252525;border:1px solid #2e2e2e;color:#aaa;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .1s;font-weight:300}
-.pm:active{background:#333;transform:scale(.88)}
-/* Amount: centered bold number */
-.amt{flex:1;text-align:center;font-size:20px;font-weight:700;background:none;border:none;color:#fff;outline:none;font-family:'Rajdhani',sans-serif}
-/* Spribe bet button: tall green rounded rectangle */
-.bbtn{
-  flex:0 0 138px;height:60px;border-radius:10px;border:none;
-  font-size:18px;font-weight:800;cursor:pointer;font-family:'Rajdhani',sans-serif;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  line-height:1.2;transition:all .12s;letter-spacing:.3px;
-}
-.bbtn .bsub{font-size:14px;font-weight:800;opacity:.95}
-/* States */
-.bbtn.bet{background:#3ac95a;color:#fff;box-shadow:0 4px 18px rgba(58,201,90,.40)}
-.bbtn.bet:active{transform:scale(.97)}
-.bbtn.cash{background:linear-gradient(160deg,#d45500,#ff6a00);color:#fff;animation:cpulse .5s infinite alternate}
-@keyframes cpulse{from{box-shadow:0 0 8px rgba(255,100,0,.4)}to{box-shadow:0 0 26px rgba(255,100,0,.9)}}
-.bbtn.wait{background:#1e1e1e;border:1px solid #2a2a2a;color:#333}
-.bbtn.placed{background:#152515;border:1px solid #2a4a2a;color:#2eb050}
-.bbtn:disabled{opacity:.45;cursor:not-allowed;animation:none;box-shadow:none}
+/* BETS TABLE */
+.btable{background:#111}
+.btabs2{display:flex;border-bottom:1px solid #1e1e1e}
+.btab2{flex:1;padding:8px 4px;text-align:center;font-size:11px;font-weight:700;color:#444;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;letter-spacing:.3px;text-transform:uppercase}
+.btab2.on{color:#fff;border-bottom-color:var(--red)}
+.bhead{display:grid;grid-template-columns:1fr 65px 48px 65px;padding:5px 12px;font-size:9px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1a1a1a}
+.blist{overflow-y:auto;scrollbar-width:thin;scrollbar-color:#1a1a1a transparent}
+.brow{display:grid;grid-template-columns:1fr 65px 48px 65px;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(255,255,255,.02);align-items:center}
+.brow .un{font-weight:700;color:#888}
+.brow .cx{color:var(--green);font-weight:700;font-family:'Orbitron',monospace;font-size:10px}
+.brow .cw{color:var(--green);font-weight:700}
+.brow .pd{color:#2a2a2a;font-style:italic}
+.twin{padding:6px 12px;font-size:11px;color:#333;border-top:1px solid #1a1a1a}
+.twin strong{color:#555}
+.bcount{font-size:10px;color:#444;padding:4px 12px;display:flex;align-items:center;gap:5px}
 
-/* Quick amounts — Spribe: 4 equal gray boxes */
-.qrow{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-bottom:0;padding:0}
-.qs{background:#141414;border:none;border-top:1px solid #1e1e1e;padding:5px 2px;font-size:12px;font-weight:700;color:#555;cursor:pointer;font-family:'Rajdhani',sans-serif;text-align:center;transition:background .1s}
-.qs:active{background:#1e1e1e;color:#bbb}
-
-/* Slot 2 separator */
-.sep{height:1px;background:#222;margin:0}
-.s2head{display:flex;align-items:center;gap:6px;padding:5px 12px 4px;justify-content:space-between}
-.s2tabs{display:inline-flex;background:#111;border-radius:16px;padding:2px;gap:1px}
-.s2tab{padding:3px 14px;border-radius:14px;border:none;font-size:11px;font-weight:700;font-family:'Rajdhani',sans-serif;color:#444;background:none;cursor:pointer;text-transform:capitalize;transition:all .12s}
-.s2tab.on{background:#252525;color:#ddd}
-.s2col{background:#252525;border:1px solid #2a2a2a;border-radius:5px;padding:2px 8px;font-size:13px;color:#444;cursor:pointer;border:none}
-
-/* Auto panel */
-.auto{display:none;flex-direction:column;gap:6px;padding:3px 12px 5px}
-.auto.on{display:flex}
-.arow{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#555;font-weight:700}
-.ainp{background:#111;border:1px solid #252525;border-radius:5px;color:#ccc;font-size:13px;font-weight:700;font-family:'Rajdhani',sans-serif;text-align:center;padding:3px 6px;outline:none;width:75px}
-.autobtn{height:52px;flex:0 0 140px;border-radius:10px;border:none;font-size:13px;font-weight:800;cursor:pointer;font-family:'Rajdhani',sans-serif;color:#888;background:#252525;border:1px solid #2e2e2e;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.2;transition:all .15s}
-.autobtn.on{background:#2eb050;color:#fff;border-color:#2eb050}
-.astat{font-size:10px;color:#2eb050;font-weight:700;min-height:13px;text-align:center;font-family:'Rajdhani',sans-serif}
-
-/* ── BETS TABLE ── */
-.btbl{background:#0d0d0d}
-.btabs{display:flex;border-bottom:1px solid #1a1a1a}
-.btab{flex:1;padding:8px;text-align:center;font-size:11px;font-weight:700;color:#333;cursor:pointer;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.4px;transition:all .15s}
-.btab.on{color:#ddd;border-bottom-color:#e8001e}
-.bcnt{display:flex;align-items:center;gap:6px;padding:5px 12px;font-size:10px;color:#333;border-bottom:1px solid #111}
-.bhdr{display:grid;grid-template-columns:1fr 60px 44px 60px;padding:4px 12px;font-size:9px;font-weight:700;color:#222;text-transform:uppercase;letter-spacing:.5px}
-.blist{max-height:150px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#1a1a1a transparent}
-.brow{display:grid;grid-template-columns:1fr 60px 44px 60px;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(255,255,255,.025);align-items:center}
-.brow .u{font-weight:700;color:#555}
-.brow .x{color:#2eb050;font-weight:800;font-size:10px;font-family:'Orbitron',monospace}
-.brow .w{color:#2eb050;font-weight:700}
-.brow .d{color:#1e1e1e;font-style:italic}
-
-/* ── TOAST ── */
-.toast{position:fixed;top:50px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;font-family:'Rajdhani',sans-serif;z-index:999;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+/* TOAST */
+.toast{position:fixed;top:50px;left:50%;transform:translateX(-50%);background:#1a1a1a;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none;border:1px solid #222;white-space:nowrap;font-family:'Rajdhani',sans-serif;letter-spacing:.3px}
 .toast.on{opacity:1}
-.toast.tw{border-color:#2eb050;color:#2eb050}
-.toast.tl{border-color:#e8001e;color:#e8001e}
-.toast.ti{border-color:#ffd600;color:#ffd600}
+.toast.tw{border-color:var(--green);color:var(--green)}
+.toast.tl{border-color:var(--red);color:var(--red)}
+.toast.ti{border-color:var(--gold);color:var(--gold)}
+
+/* CRASH FLASH */
 @keyframes cflash{0%{background:rgba(232,0,30,.18)}100%{background:transparent}}
-.cf{animation:cflash .35s ease-out forwards}
+.cf{animation:cflash .4s ease-out forwards}
 </style>
 </head>
 <body>
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <button class="tbback" onclick="history.back()">← Back</button>
-  <div class="tblogo">
-    <svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-    Aviator
+  <button class="back-btn" onclick="history.back()">← Go Back</button>
+  <div class="avi-logo">✈ Aviator</div>
+  <div class="bal" onclick="location.href='/pages/account.html'">
+    <span id="bv">0.00</span><span>KES</span>
   </div>
-  <div class="tbbal"><span id="bv">0.00</span> <span>KES</span></div>
 </div>
 
-<!-- HISTORY BAR -->
+<!-- HISTORY -->
 <div class="hbar" id="hbar">
-  <span class="hc c">1.01x</span><span class="hc c">1.92x</span>
-  <span class="hc r">1.00x</span><span class="hc c">1.20x</span>
-  <span class="hc r">1.06x</span><span class="hc p">6.24x</span>
-  <span class="hc c">1.91x</span><span class="hc y">1.98x</span>
+  <span class="hc r">1.22x</span>
+  <span class="hc b">1.11x</span>
+  <span class="hc y">1.47x</span>
+  <span class="hc p">3.09x</span>
   <button class="hmore">•••</button>
 </div>
 
 <!-- GAME CANVAS -->
-<div class="gwrap" id="gw">
+<div class="game-wrap" id="gw">
   <canvas id="gc"></canvas>
   <div class="mwrap">
     <div class="mval wait" id="mv">1.00x</div>
   </div>
+  <!-- WAIT/COUNTDOWN OVERLAY -->
   <div class="wovl" id="wo">
-    <div class="wlbl">STARTING IN</div>
+    <div class="wtxt">STARTING IN</div>
     <div class="wnum" id="wn">5</div>
   </div>
-  <div class="pcount">
+  <div class="fair" onclick="showFair()" style="cursor:pointer">🔒 Provably Fair</div>
+  <div class="pbadge">
     <div class="pavs">
-      <div class="pav"><div style="width:100%;height:100%;background:#1e3a5f;border-radius:50%"></div></div>
-      <div class="pav"><div style="width:100%;height:100%;background:#1a2a3f;border-radius:50%"></div></div>
-      <div class="pav"><div style="width:100%;height:100%;background:#162030;border-radius:50%"></div></div>
+      <div class="pav">👤</div><div class="pav">👤</div><div class="pav">👤</div>
     </div>
     <span id="pc">0</span>
   </div>
 </div>
 
-<!-- SCROLL AREA -->
-<div class="scroll">
+<!-- SCROLLABLE AREA -->
+<div class="scroll-area">
 
   <!-- BET PANEL -->
   <div class="bpanel">
-
-    <!-- SLOT 1 TABS -->
-    <div class="trow">
-      <div class="tabs">
-        <button class="tab on" onclick="swTab(1,'bet',this)">Bet</button>
-        <button class="tab" onclick="swTab(1,'auto',this)">Auto</button>
-      </div>
+    <div class="mtabs">
+      <button class="mtab on">Bet</button>
+      <button class="mtab" onclick="showT('Auto-bet coming soon','ti')">Auto</button>
     </div>
-
-    <!-- Slot 1 Manual -->
-    <div id="mp1">
-      <div class="irow">
-        <button class="pm" onclick="chg(1,-10)">−</button>
-        <input class="amt" id="s1" type="number" value="10" min="10"/>
-        <button class="pm" onclick="chg(1,10)">+</button>
-        <button class="bbtn bet" id="b1" onclick="hbet(1)">
-          Bet<br><span class="bsub" id="b1a">10.00 KES</span>
+    <!-- Slot 1 -->
+    <div class="srow">
+      <button class="sbtn" onclick="chg(1,-10)">−</button>
+      <input class="sinp" id="s1" type="number" value="10" min="10"/>
+      <button class="sbtn" onclick="chg(1,10)">+</button>
+      <button class="abtn bbet" id="b1" onclick="hbet(1)">
+        Bet<br><span class="sub" id="b1s">10.00 KES</span>
+      </button>
+    </div>
+    <div class="qrow">
+      <button class="qs" onclick="ss(1,100)">100</button>
+      <button class="qs" onclick="ss(1,200)">200</button>
+      <button class="qs" onclick="ss(1,500)">500</button>
+      <button class="qs" onclick="ss(1,10000)">10,000</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
+      <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
+      <input id="ac1" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
+        style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
+      <span style="font-size:11px;color:#444">×</span>
+    </div>
+    <!-- Slot 2 -->
+    <div class="slot2">
+      <div class="slot2-head">
+        <button class="stab on">Bet</button>
+        <button class="stab" onclick="showT('Auto coming soon','ti')">Auto</button>
+      </div>
+      <div class="srow">
+        <button class="sbtn" onclick="chg(2,-10)">−</button>
+        <input class="sinp" id="s2" type="number" value="10" min="10"/>
+        <button class="sbtn" onclick="chg(2,10)">+</button>
+        <button class="abtn bbet" id="b2" onclick="hbet(2)">
+          Bet<br><span class="sub" id="b2s">10.00 KES</span>
         </button>
       </div>
       <div class="qrow">
-        <button class="qs" onclick="ss(1,100)">100</button>
-        <button class="qs" onclick="ss(1,200)">200</button>
-        <button class="qs" onclick="ss(1,500)">500</button>
-        <button class="qs" onclick="ss(1,10000)">10,000</button>
+        <button class="qs" onclick="ss(2,100)">100</button>
+        <button class="qs" onclick="ss(2,200)">200</button>
+        <button class="qs" onclick="ss(2,500)">500</button>
+        <button class="qs" onclick="ss(2,10000)">10,000</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:0 2px">
+        <span style="font-size:11px;color:#444;flex-shrink:0">Auto cashout</span>
+        <input id="ac2" type="number" min="1.1" step="0.1" placeholder="e.g. 2.00"
+          style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:5px 8px;color:#aaa;font-size:12px;outline:none"/>
+        <span style="font-size:11px;color:#444">×</span>
       </div>
     </div>
-
-    <!-- Slot 1 Auto -->
-    <div id="ap1" class="auto">
-      <div class="irow" style="margin-bottom:0">
-        <button class="pm" onclick="chgA(1,-10)">−</button>
-        <input class="amt" id="as1" type="number" value="10" min="10"/>
-        <button class="pm" onclick="chgA(1,10)">+</button>
-        <button class="autobtn" id="ab1" onclick="togAuto(1)">
-          Auto Bet<br><span id="ab1s" style="font-size:10px">OFF</span>
-        </button>
-      </div>
-      <div class="arow">
-        <span>Auto Cash Out at ×</span>
-        <input class="ainp" id="aco1" type="number" value="2.00" step="0.1" min="1.1"/>
-      </div>
-      <div class="astat" id="ast1"></div>
-    </div>
-
-    <!-- SLOT 2 -->
-    <div class="sep"></div>
-    <div class="s2head">
-      <div class="s2tabs">
-        <button class="s2tab on" onclick="swTab(2,'bet',this)">Bet</button>
-        <button class="s2tab" onclick="swTab(2,'auto',this)">Auto</button>
-      </div>
-      <button class="s2col" onclick="togS2()" id="s2c">−</button>
-    </div>
-    <div id="s2body">
-      <div id="mp2">
-        <div class="irow">
-          <button class="pm" onclick="chg(2,-10)">−</button>
-          <input class="amt" id="s2" type="number" value="10" min="10"/>
-          <button class="pm" onclick="chg(2,10)">+</button>
-          <button class="bbtn bet" id="b2" onclick="hbet(2)">
-            Bet<br><span class="bsub" id="b2a">10.00 KES</span>
-          </button>
-        </div>
-        <div class="qrow">
-          <button class="qs" onclick="ss(2,100)">100</button>
-          <button class="qs" onclick="ss(2,200)">200</button>
-          <button class="qs" onclick="ss(2,500)">500</button>
-          <button class="qs" onclick="ss(2,10000)">10,000</button>
-        </div>
-      </div>
-      <div id="ap2" class="auto">
-        <div class="irow" style="margin-bottom:0">
-          <button class="pm" onclick="chgA(2,-10)">−</button>
-          <input class="amt" id="as2" type="number" value="10" min="10"/>
-          <button class="pm" onclick="chgA(2,10)">+</button>
-          <button class="autobtn" id="ab2" onclick="togAuto(2)">
-            Auto Bet<br><span id="ab2s" style="font-size:10px">OFF</span>
-          </button>
-        </div>
-        <div class="arow">
-          <span>Auto Cash Out at ×</span>
-          <input class="ainp" id="aco2" type="number" value="2.00" step="0.1" min="1.1"/>
-        </div>
-        <div class="astat" id="ast2"></div>
-      </div>
-    </div>
-
-  </div><!-- /bpanel -->
-
-  <!-- BETS TABLE -->
-  <div class="btbl">
-    <div class="btabs">
-      <div class="btab on" onclick="setBT(this)">All Bets</div>
-      <div class="btab" onclick="setBT(this)">Previous</div>
-      <div class="btab" onclick="setBT(this)">Top</div>
-    </div>
-    <div class="bcnt">
-      <div class="pavs" style="margin-right:4px">
-        <div class="pav"><div style="background:#1e3a5f;width:100%;height:100%;border-radius:50%"></div></div>
-        <div class="pav"><div style="background:#162030;width:100%;height:100%;border-radius:50%"></div></div>
-      </div>
-      <span id="bcnt" style="font-size:10px;color:#444">0/0 Bets</span>
-      <span style="margin-left:auto;font-size:10px;color:#333">Total win KES <strong id="tw" style="color:#444">0.00</strong></span>
-    </div>
-    <div class="bhdr"><span>USER</span><span>BET KES</span><span>×</span><span>WIN KES</span></div>
-    <div class="blist" id="bl"></div>
   </div>
 
-</div><!-- /scroll -->
+  <!-- BETS TABLE -->
+  <div class="btable">
+    <div class="btabs2">
+      <div class="btab2 on" onclick="setBT(this)">All Bets</div>
+      <div class="btab2" onclick="setBT(this)">Previous</div>
+      <div class="btab2" onclick="setBT(this)">Top</div>
+    </div>
+    <div class="bcount"><div class="pavs"><div class="pav">👤</div><div class="pav">👤</div></div><span id="bcount">0/0 Bets</span><span style="margin-left:auto;color:#555">Total win KES <strong id="tw">0.00</strong></span></div>
+    <div class="bhead"><span>USER</span><span>BET KES</span><span>×</span><span>WIN KES</span></div>
+    <div class="blist" id="bl" style="min-height:80px"></div>
+  </div>
+
+</div><!-- end scroll-area -->
 
 <div class="toast" id="tst"></div>
 
 <script>
-// ── STATE ──
-let ST='waiting',HIST=[],PLAYERS=[];
-let BET1=null,BET2=null,USER=null;
-let lastRound=null,prevST='waiting',lastTickM=0;
-let flyStart=null,localMulti=1,flightActive=false;
-let pathPts=[],animFrame=null,waitTimer=null,countVal=5;
-let s2collapsed=false;
-let AUTO={1:{on:false},2:{on:false}};
+// ══════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════
+let ST='waiting', MULTI=1.00, HIST=[], PLAYERS=[];
+let BET1=null, BET2=null, USER=null;
+let lastRound=null, prevST='waiting', lastTickM=0;
 
-// ── AUDIO ──
-let AC=null,JET=null;
-function gAC(){if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();return AC;}
+// ── LOCAL FLIGHT SIMULATION ──
+// The plane moves smoothly via rAF, NOT waiting for server poll
+let flyStart=null;       // timestamp when flight began
+let localMulti=1.00;     // locally computed multiplier (smooth)
+let flightActive=false;
+let pathPts=[];          // [{t,r}] normalised points
+let animFrame=null;
+
+// ── COUNTDOWN ──
+let waitTimer=null;
+let countVal=5;
+
+// ══════════════════════════════════════
+//  AUDIO
+// ══════════════════════════════════════
+let AC=null;
+let JET=null;
+
+function getAC(){
+  if(!AC) AC=new(window.AudioContext||window.webkitAudioContext)();
+  if(AC.state==='suspended') AC.resume();
+  return AC;
+}
+
 function startJet(instant){
-  stopJet();const ac=gAC(),now=ac.currentTime,r=instant?.05:1;
-  const out=ac.createGain();out.gain.value=.38;out.connect(ac.destination);const ns=[];
-  const w=ac.createOscillator();w.type='sine';w.frequency.setValueAtTime(instant?900:600,now);w.frequency.linearRampToValueAtTime(1050,now+r*1.5);
-  const g=ac.createGain();g.gain.setValueAtTime(0,now);g.gain.linearRampToValueAtTime(.14,now+r*.6);w.connect(g);g.connect(out);w.start(now);ns.push(w);
-  const nb=ac.createBuffer(1,ac.sampleRate*4,ac.sampleRate);const nd=nb.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
-  const n=ac.createBufferSource();n.buffer=nb;n.loop=true;
-  const nf=ac.createBiquadFilter();nf.type='bandpass';nf.frequency.value=800;nf.Q.value=.8;
-  const ng=ac.createGain();ng.gain.setValueAtTime(0,now);ng.gain.linearRampToValueAtTime(.11,now+r*.5);
-  n.connect(nf);nf.connect(ng);ng.connect(out);n.start(now);ns.push(n);
-  JET={nodes:ns,out};
+  stopJet();
+  const ac=getAC(), now=ac.currentTime, ramp=instant?.05:1.0;
+  const out=ac.createGain(); out.gain.value=0.55; out.connect(ac.destination);
+  const nodes=[];
+
+  // Main turbine whine — warm mid range
+  const w1=ac.createOscillator(); w1.type='sine';
+  w1.frequency.setValueAtTime(instant?900:600,now);
+  w1.frequency.linearRampToValueAtTime(1050,now+ramp*1.5);
+  const g1=ac.createGain(); g1.gain.setValueAtTime(0,now); g1.gain.linearRampToValueAtTime(0.18,now+ramp*.6);
+  w1.connect(g1); g1.connect(out); w1.start(now); nodes.push(w1);
+
+  // Soft 2nd harmonic
+  const w2=ac.createOscillator(); w2.type='sine';
+  w2.frequency.setValueAtTime(instant?1800:1200,now);
+  w2.frequency.linearRampToValueAtTime(2000,now+ramp*1.5);
+  const g2=ac.createGain(); g2.gain.setValueAtTime(0,now); g2.gain.linearRampToValueAtTime(0.05,now+ramp*.8);
+  w2.connect(g2); g2.connect(out); w2.start(now); nodes.push(w2);
+
+  // Low hum — the warm base
+  const w3=ac.createOscillator(); w3.type='sine';
+  w3.frequency.setValueAtTime(instant?180:120,now);
+  w3.frequency.linearRampToValueAtTime(210,now+ramp);
+  const g3=ac.createGain(); g3.gain.setValueAtTime(0,now); g3.gain.linearRampToValueAtTime(0.22,now+ramp*.9);
+  w3.connect(g3); g3.connect(out); w3.start(now); nodes.push(w3);
+
+  // Air rush — lowpass filtered noise (warm not sharp)
+  const nb=ac.createBuffer(1,ac.sampleRate*4,ac.sampleRate);
+  const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1);
+  const ns=ac.createBufferSource(); ns.buffer=nb; ns.loop=true;
+  const nf1=ac.createBiquadFilter(); nf1.type='bandpass'; nf1.frequency.setValueAtTime(instant?900:600,now); nf1.frequency.linearRampToValueAtTime(1100,now+ramp*1.2); nf1.Q.value=0.8;
+  const nf2=ac.createBiquadFilter(); nf2.type='lowpass'; nf2.frequency.value=1800;
+  const ng=ac.createGain(); ng.gain.setValueAtTime(0,now); ng.gain.linearRampToValueAtTime(0.18,now+ramp*.5);
+  ns.connect(nf1); nf1.connect(nf2); nf2.connect(ng); ng.connect(out); ns.start(now); nodes.push(ns);
+
+  // Deep exhaust
+  const eb=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate);
+  const ed=eb.getChannelData(0); for(let i=0;i<ed.length;i++) ed[i]=(Math.random()*2-1);
+  const es=ac.createBufferSource(); es.buffer=eb; es.loop=true;
+  const ef=ac.createBiquadFilter(); ef.type='lowpass'; ef.frequency.value=180;
+  const eg=ac.createGain(); eg.gain.setValueAtTime(0,now); eg.gain.linearRampToValueAtTime(0.18,now+ramp*1.2);
+  es.connect(ef); ef.connect(eg); eg.connect(out); es.start(now); nodes.push(es);
+
+  JET={nodes,out};
 }
+
 function stopJet(){
-  if(!JET)return;const ac=gAC(),now=ac.currentTime;
-  JET.out.gain.setValueAtTime(JET.out.gain.value,now);JET.out.gain.linearRampToValueAtTime(0,now+.3);
-  const j=JET;JET=null;setTimeout(()=>j.nodes.forEach(n=>{try{n.stop()}catch(e){}}),400);
+  if(!JET) return;
+  const ac=getAC(), now=ac.currentTime;
+  JET.out.gain.setValueAtTime(JET.out.gain.value,now);
+  JET.out.gain.linearRampToValueAtTime(0,now+0.3);
+  const j=JET; JET=null;
+  setTimeout(()=>{ j.nodes.forEach(n=>{try{n.stop()}catch(e){}}) },400);
 }
+
 function playCrash(){
-  stopJet();const ac=gAC(),now=ac.currentTime;
-  const out=ac.createGain();out.gain.value=.5;out.connect(ac.destination);
-  const o=ac.createOscillator();o.type='sine';o.frequency.setValueAtTime(1050,now);o.frequency.exponentialRampToValueAtTime(60,now+.8);
-  const g=ac.createGain();g.gain.setValueAtTime(.28,now);g.gain.exponentialRampToValueAtTime(.001,now+.9);
-  o.connect(g);g.connect(out);o.start(now);o.stop(now+.9);
+  stopJet();
+  const ac=getAC(), now=ac.currentTime;
+  const out=ac.createGain(); out.gain.value=0.65; out.connect(ac.destination);
+  const wd=ac.createOscillator(); wd.type='sine';
+  wd.frequency.setValueAtTime(1050,now); wd.frequency.exponentialRampToValueAtTime(60,now+.8);
+  const wg=ac.createGain(); wg.gain.setValueAtTime(.28,now); wg.gain.exponentialRampToValueAtTime(.001,now+.9);
+  wd.connect(wg); wg.connect(out); wd.start(now); wd.stop(now+.9);
+  const boom=ac.createOscillator(); boom.type='sine';
+  boom.frequency.setValueAtTime(140,now+.05); boom.frequency.exponentialRampToValueAtTime(18,now+1);
+  const bg=ac.createGain(); bg.gain.setValueAtTime(0,now); bg.gain.linearRampToValueAtTime(.55,now+.12); bg.gain.exponentialRampToValueAtTime(.001,now+1.2);
+  boom.connect(bg); bg.connect(out); boom.start(now); boom.stop(now+1.2);
+  const nb=ac.createBuffer(1,ac.sampleRate,ac.sampleRate); const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1);
+  const ns=ac.createBufferSource(); ns.buffer=nb;
+  const nf=ac.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=1200;
+  const ng=ac.createGain(); ng.gain.setValueAtTime(.38,now+.05); ng.gain.exponentialRampToValueAtTime(.001,now+1);
+  ns.connect(nf); nf.connect(ng); ng.connect(out); ns.start(now+.05); ns.stop(now+1);
   document.getElementById('gw').classList.add('cf');
   setTimeout(()=>document.getElementById('gw').classList.remove('cf'),400);
 }
+
 function playCashout(){
-  const ac=gAC(),now=ac.currentTime;const out=ac.createGain();out.gain.value=.42;out.connect(ac.destination);
-  [523,659,784,1047].forEach((f,i)=>{const t=now+i*.08;const o=ac.createOscillator();o.type='sine';o.frequency.value=f;
-    const g=ac.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.2,t+.03);g.gain.exponentialRampToValueAtTime(.001,t+.4);
-    o.connect(g);g.connect(out);o.start(t);o.stop(t+.4);});
-}
-function playBet(){
-  const ac=gAC(),now=ac.currentTime;const out=ac.createGain();out.gain.value=.4;out.connect(ac.destination);
-  const o=ac.createOscillator();o.type='sine';o.frequency.setValueAtTime(280,now);o.frequency.exponentialRampToValueAtTime(160,now+.09);
-  const g=ac.createGain();g.gain.setValueAtTime(.3,now);g.gain.exponentialRampToValueAtTime(.001,now+.12);
-  o.connect(g);g.connect(out);o.start(now);o.stop(now+.12);
-}
-function playTick(){
-  const ac=gAC(),now=ac.currentTime;const out=ac.createGain();out.gain.value=.22;out.connect(ac.destination);
-  const o=ac.createOscillator();o.type='sine';o.frequency.value=Math.min(380+localMulti*55,1200);
-  const g=ac.createGain();g.gain.setValueAtTime(.15,now);g.gain.exponentialRampToValueAtTime(.001,now+.05);
-  o.connect(g);g.connect(out);o.start(now);o.stop(now+.05);
+  const ac=getAC(), now=ac.currentTime;
+  const out=ac.createGain(); out.gain.value=0.55; out.connect(ac.destination);
+  [523.25,659.25,783.99,1046.50].forEach((f,i)=>{
+    const t=now+i*.09;
+    const o=ac.createOscillator(); o.type='sine'; o.frequency.value=f;
+    const g=ac.createGain(); g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(.28,t+.03); g.gain.exponentialRampToValueAtTime(.001,t+.5);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t+.5);
+    if(i<3){const o2=ac.createOscillator(); o2.type='sine'; o2.frequency.value=f*1.5; const g2=ac.createGain(); g2.gain.setValueAtTime(.06,t); g2.gain.exponentialRampToValueAtTime(.001,t+.3); o2.connect(g2); g2.connect(out); o2.start(t); o2.stop(t+.3);}
+  });
+  for(let i=0;i<7;i++){
+    const t=now+.04+i*.06+Math.random()*.03;
+    const o=ac.createOscillator(); o.type='sine'; o.frequency.value=600+Math.random()*600;
+    const g=ac.createGain(); g.gain.setValueAtTime(.12,t); g.gain.exponentialRampToValueAtTime(.001,t+.2);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t+.2);
+  }
 }
 
-// ── CANVAS ──
-const cv=document.getElementById('gc'),cx=cv.getContext('2d');
-function rsz(){
-  const gw=document.getElementById('gw');
-  const w=gw.clientWidth||gw.offsetWidth||window.innerWidth;
-  const h=gw.clientHeight||gw.offsetHeight||Math.round(window.innerHeight*0.55);
-  if(w>0&&h>0){cv.width=w;cv.height=h;}
+function playBet(){
+  const ac=getAC(), now=ac.currentTime;
+  const out=ac.createGain(); out.gain.value=0.45; out.connect(ac.destination);
+  const o=ac.createOscillator(); o.type='sine';
+  o.frequency.setValueAtTime(280,now); o.frequency.exponentialRampToValueAtTime(160,now+.09);
+  const g=ac.createGain(); g.gain.setValueAtTime(.35,now); g.gain.exponentialRampToValueAtTime(.001,now+.12);
+  o.connect(g); g.connect(out); o.start(now); o.stop(now+.12);
 }
-window.addEventListener('resize',rsz);
-// rsz called after DOMContentLoaded below
+
+function playTick(){
+  const ac=getAC(), now=ac.currentTime;
+  const out=ac.createGain(); out.gain.value=0.30; out.connect(ac.destination);
+  const freq=Math.min(400+localMulti*60,1400);
+  const o=ac.createOscillator(); o.type='sine'; o.frequency.value=freq;
+  const g=ac.createGain(); g.gain.setValueAtTime(.20,now); g.gain.exponentialRampToValueAtTime(.001,now+.055);
+  o.connect(g); g.connect(out); o.start(now); o.stop(now+.055);
+}
+
+// ══════════════════════════════════════
+//  CANVAS + DRAW
+// ══════════════════════════════════════
+const cv=document.getElementById('gc');
+const cx=cv.getContext('2d');
+
+function resizeCanvas(){
+  const gw=document.getElementById('gw');
+  cv.width=gw.clientWidth; cv.height=gw.clientHeight;
+}
+resizeCanvas();
+window.addEventListener('resize',resizeCanvas);
 
 function draw(){
-  // Re-size if canvas has no dimensions yet
-  if(!cv.width||!cv.height||cv.width<10||cv.height<10) rsz();
-  const W=cv.width,H=cv.height;
-  if(!W||!H)return;
+  const W=cv.width, H=cv.height;
   cx.clearRect(0,0,W,H);
 
-  // Pure black bg
-  cx.fillStyle='#0c0c0f';cx.fillRect(0,0,W,H);
+  // Dark background
+  cx.fillStyle='#111'; cx.fillRect(0,0,W,H);
 
-  // Origin — bottom-left like Spribe
-  const OX=W*.04, OY=H*.95;
+  // Origin: bottom-left
+  const OX=W*0.05, OY=H*0.92;
 
-  // ── SUNBURST RAYS — dark alternating stripes from bottom-left ──
-  // Spribe has ~20 rays, dark charcoal/near-black alternating
+  // ── Radial rays from bottom-left (like Spribe) ──
   cx.save();
-  const N=22;
-  for(let i=0;i<N;i++){
-    const a=(i/N)*Math.PI*.65+Math.PI*.025;
-    const da=Math.PI*.015;
-    const R=W*3;
-    // Alternating very dark shades
-    const even=i%2===0;
-    const gr=cx.createLinearGradient(OX,OY,OX+Math.cos(a)*R,OY-Math.sin(a)*R);
-    gr.addColorStop(0,even?'rgba(28,22,36,.80)':'rgba(20,15,26,.60)');
-    gr.addColorStop(.45,even?'rgba(22,17,30,.20)':'rgba(15,11,20,.12)');
+  for(let i=0;i<32;i++){
+    const ang=(i/31)*Math.PI*.55+Math.PI*0.05;
+    const r=W*2.5;
+    const x2=OX+Math.cos(ang)*r, y2=OY-Math.sin(ang)*r;
+    const gr=cx.createLinearGradient(OX,OY,x2,y2);
+    gr.addColorStop(0,'rgba(40,40,40,0.40)');
+    gr.addColorStop(0.4,'rgba(30,30,30,0.10)');
     gr.addColorStop(1,'rgba(0,0,0,0)');
-    cx.beginPath();cx.moveTo(OX,OY);
-    cx.lineTo(OX+Math.cos(a-da)*R,OY-Math.sin(a-da)*R);
-    cx.lineTo(OX+Math.cos(a+da)*R,OY-Math.sin(a+da)*R);
-    cx.closePath();cx.fillStyle=gr;cx.fill();
+    const dAng=Math.PI*.022;
+    cx.beginPath(); cx.moveTo(OX,OY);
+    cx.arc(OX,OY,r,-(ang+dAng/2)+(Math.PI*.5-Math.PI*.5),-(ang-dAng/2)+(Math.PI*.5-Math.PI*.5));
+    // simpler: just draw fan triangles
+    cx.beginPath(); cx.moveTo(OX,OY);
+    cx.lineTo(OX+Math.cos(ang-dAng)*r, OY-Math.sin(ang-dAng)*r);
+    cx.lineTo(OX+Math.cos(ang+dAng)*r, OY-Math.sin(ang+dAng)*r);
+    cx.closePath(); cx.fillStyle=gr; cx.fill();
   }
   cx.restore();
 
-  // ── PURPLE GLOW — bright center, exactly like Spribe ──
-  // Center at ~55% width, ~40% height
-  const pgx=W*.54,pgy=H*.40;
-  const pg=cx.createRadialGradient(pgx,pgy,0,pgx,pgy,W*.50);
-  pg.addColorStop(0,'rgba(130,0,220,.60)');
-  pg.addColorStop(.18,'rgba(110,0,190,.45)');
-  pg.addColorStop(.38,'rgba(85,0,160,.28)');
-  pg.addColorStop(.60,'rgba(60,0,120,.12)');
-  pg.addColorStop(1,'rgba(0,0,0,0)');
-  cx.save();cx.fillStyle=pg;cx.fillRect(0,0,W,H);cx.restore();
+  // Center blue/white glow (like Spribe during flight)
+  if(flightActive){
+    const cg=cx.createRadialGradient(W*.5,H*.38,0,W*.5,H*.38,W*.42);
+    cg.addColorStop(0,'rgba(40,100,200,0.22)');
+    cg.addColorStop(.5,'rgba(20,60,160,0.08)');
+    cg.addColorStop(1,'rgba(0,0,0,0)');
+    cx.save(); cx.beginPath(); cx.arc(W*.5,H*.38,W*.42,0,Math.PI*2);
+    cx.fillStyle=cg; cx.fill(); cx.restore();
+  }
 
-  if(pathPts.length<2)return;
-  const crashed=ST==='crashed';
+  if(pathPts.length<2) return;
 
-  // Map pts — Spribe: trail mostly flat, plane stays low
+  const crashed=(ST==='crashed');
+  const lineColor=crashed?'#ff2233':'#ff2233';
+  const glowColor=crashed?'rgba(255,20,30,.5)':'rgba(255,20,30,.4)';
+
+  // Map normalised pts → canvas pixels
   const pts=pathPts.map(p=>({
-    x:OX+p.t*(W*.91),
-    y:OY-p.r*(H*.82)
+    x: OX + p.t*(W*0.93),
+    y: OY - p.r*(H*0.85)
   }));
 
-  // ── RED FILL under curve ──
+  // Fill area under curve
   cx.save();
-  cx.beginPath();cx.moveTo(OX,OY);
-  for(const p of pts)cx.lineTo(p.x,p.y);
-  cx.lineTo(pts[pts.length-1].x,OY);cx.closePath();
-  const fg=cx.createLinearGradient(0,OY-H*.85,0,OY);
-  fg.addColorStop(0,crashed?'rgba(255,0,30,.30)':'rgba(230,0,30,.28)');
-  fg.addColorStop(.55,'rgba(200,0,25,.09)');
+  cx.beginPath(); cx.moveTo(OX,OY);
+  // Smooth bezier fill
+  for(let i=0;i<pts.length;i++) cx.lineTo(pts[i].x,pts[i].y);
+  cx.lineTo(pts[pts.length-1].x,OY); cx.closePath();
+  const fg=cx.createLinearGradient(0,OY-H*.7,0,OY);
+  fg.addColorStop(0,crashed?'rgba(255,30,30,0.20)':'rgba(255,20,30,0.18)');
+  fg.addColorStop(0.6,'rgba(255,10,20,0.06)');
   fg.addColorStop(1,'rgba(0,0,0,0)');
-  cx.fillStyle=fg;cx.fill();cx.restore();
+  cx.fillStyle=fg; cx.fill(); cx.restore();
 
-  // ── RED TRAIL LINE — thick bright ──
+  // Trail line — smooth quadratic
   cx.save();
-  cx.shadowBlur=crashed?6:22;
-  cx.shadowColor=crashed?'rgba(255,0,30,.65)':'rgba(255,0,30,.55)';
-  cx.strokeStyle='#e8001e';
-  cx.lineWidth=3;cx.lineJoin='round';cx.lineCap='round';
-  cx.beginPath();cx.moveTo(pts[0].x,pts[0].y);
+  cx.shadowBlur=crashed?8:16; cx.shadowColor=glowColor;
+  cx.strokeStyle=lineColor; cx.lineWidth=2.5; cx.lineJoin='round'; cx.lineCap='round';
+  cx.beginPath(); cx.moveTo(pts[0].x,pts[0].y);
   for(let i=1;i<pts.length-1;i++){
-    const mx=(pts[i].x+pts[i+1].x)/2,my=(pts[i].y+pts[i+1].y)/2;
+    const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2;
     cx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my);
   }
   cx.lineTo(pts[pts.length-1].x,pts[pts.length-1].y);
-  cx.stroke();cx.restore();
+  cx.stroke(); cx.restore();
 
-  // ── PLANE ──
+  // Plane at tip
   const tip=pts[pts.length-1];
-  if(!crashed&&pts.length>4){
-    const lb=Math.min(7,pts.length-1),ref=pts[pts.length-1-lb];
-    const ang=Math.atan2(ref.y-tip.y,tip.x-ref.x);
-    cx.save();cx.translate(tip.x,tip.y);cx.rotate(-ang);drawPlane(cx,false);cx.restore();
-  }else if(crashed){
-    cx.save();cx.translate(tip.x,tip.y);cx.rotate(Math.PI*.44);drawPlane(cx,true);cx.restore();
+  if(!crashed && pts.length>3){
+    const lb=Math.min(8,pts.length-1);
+    const ref=pts[pts.length-1-lb];
+    const ang=Math.atan2(ref.y-tip.y, tip.x-ref.x);
+    cx.save(); cx.translate(tip.x,tip.y); cx.rotate(-ang);
+    drawPlane(cx,false); cx.restore();
+  } else if(crashed){
+    cx.save(); cx.translate(tip.x,tip.y); cx.rotate(Math.PI*.45);
+    drawPlane(cx,true); cx.restore();
   }
 }
 
-function drawPlane(c,cr){
-  // Exact Spribe side-view jet — scale ~1.1 to match screenshot size
-  c.save();
-  const sc = cr ? 0.72 : 0.75;
-  c.scale(sc, sc);
-
-  // Soft red glow behind plane
-  if(!cr){
-    const rg=c.createRadialGradient(0,2,2,0,2,38);
-    rg.addColorStop(0,'rgba(220,30,30,.30)');
-    rg.addColorStop(1,'rgba(0,0,0,0)');
-    c.beginPath();c.arc(0,2,38,0,Math.PI*2);
-    c.fillStyle=rg;c.fill();
+function drawPlane(c,crashed){
+  c.save(); c.scale(1.05,1.05);
+  // Glow halo
+  if(!crashed){
+    const rg=c.createRadialGradient(0,0,5,0,0,50);
+    rg.addColorStop(0,'rgba(255,50,50,.28)'); rg.addColorStop(1,'rgba(255,50,50,0)');
+    c.beginPath(); c.arc(0,0,50,0,Math.PI*2); c.fillStyle=rg; c.fill();
   }
-
-  // ── MAIN FUSELAGE: long thin side-view body ──
-  // Nose points right (+x), tail at left (-x)
-  // Spribe shape: thin elongated teardrop
-  c.beginPath();
-  c.moveTo(44, 0);                          // nose tip
-  c.bezierCurveTo(36,-4, 18,-7, 0,-7);      // top of body
-  c.lineTo(-18,-7);                          // top to tail
-  c.bezierCurveTo(-22,-7,-24,-4,-24,0);     // tail curve top
-  c.bezierCurveTo(-24,4,-22,7,-18,7);       // tail curve bottom
-  c.lineTo(0,7);                             // bottom to front
-  c.bezierCurveTo(18,7, 36,4, 44,0);        // bottom nose
-  c.closePath();
-  c.fillStyle = cr ? '#7a0f0f' : '#bf1010';
-  if(!cr){c.shadowBlur=10;c.shadowColor='rgba(255,30,30,.5)';}
-  c.fill();c.shadowBlur=0;
-
-  // ── SWEPT WING: large triangle below fuselage, swept back ──
-  // In Spribe: wing starts at ~1/3 from nose, sweeps back and down
-  c.beginPath();
-  c.moveTo(18, 6);    // wing root front (on fuselage bottom)
-  c.lineTo(-8, 44);   // wing tip (down and back)
-  c.lineTo(-20, 44);  // wing tip back edge
-  c.lineTo(-14, 6);   // wing root back
-  c.closePath();
-  c.fillStyle = cr ? '#6a0d0d' : '#a50e0e';
+  // Body
+  c.beginPath(); c.moveTo(52,0);
+  c.bezierCurveTo(42,-6,16,-8,-6,-8);
+  c.lineTo(-20,-8); c.lineTo(-24,0); c.lineTo(-20,8); c.lineTo(-6,8);
+  c.bezierCurveTo(16,8,42,6,52,0); c.closePath();
+  c.fillStyle=crashed?'#881111':'#cc1111';
+  if(!crashed){c.shadowBlur=14; c.shadowColor='rgba(255,40,40,.7)';}
   c.fill();
-
-  // ── VERTICAL TAIL: small fin at top-rear ──
-  c.beginPath();
-  c.moveTo(-14, -7);  // base front
-  c.lineTo(-22, -22); // tip
-  c.lineTo(-26, -22); // tip back
-  c.lineTo(-20, -7);  // base back
-  c.closePath();
-  c.fillStyle = cr ? '#881111' : '#991111';
-  c.fill();
-
-  // ── HORIZONTAL STABILIZER ──
-  c.beginPath();
-  c.moveTo(-16, -7);
-  c.lineTo(-26,-16);
-  c.lineTo(-28,-16);
-  c.lineTo(-20,-7);
-  c.closePath();
-  c.fillStyle='#881111';c.fill();
-
-  // ── COCKPIT CANOPY: blue oval on top-front ──
-  c.beginPath();
-  c.ellipse(22, -4, 11, 5, -0.15, 0, Math.PI*2);
-  c.fillStyle='rgba(80,170,255,.80)';
-  c.shadowBlur=6;c.shadowColor='rgba(60,150,255,.50)';
-  c.fill();
-  // Glare
-  c.beginPath();
-  c.ellipse(20,-6,6,2.5,-0.2,0,Math.PI);
-  c.fillStyle='rgba(255,255,255,.35)';
-  c.shadowBlur=0;c.fill();
-
-  // ── EXHAUST FLAME ──
-  if(!cr){
-    // Outer flame — orange/yellow
-    c.beginPath();
-    c.moveTo(-22, 0);
-    c.bezierCurveTo(-32,-8,-44,0,-36,0);
-    c.bezierCurveTo(-44,0,-32,8,-22,0);
-    const fl=c.createLinearGradient(-22,0,-44,0);
-    fl.addColorStop(0,'rgba(255,240,60,1)');
-    fl.addColorStop(0.45,'rgba(255,100,0,.95)');
-    fl.addColorStop(1,'rgba(255,30,0,0)');
-    c.fillStyle=fl;c.shadowBlur=18;c.shadowColor='rgba(255,130,0,.85)';c.fill();
-    // Inner white core
-    c.beginPath();
-    c.moveTo(-22,0);
-    c.bezierCurveTo(-27,-3,-31,0,-28,0);
-    c.bezierCurveTo(-31,0,-27,3,-22,0);
-    c.fillStyle='rgba(255,255,210,.95)';c.shadowBlur=6;c.fill();
-    c.shadowBlur=0;
+  // Main wing
+  c.shadowBlur=0;
+  c.beginPath(); c.moveTo(26,5); c.lineTo(-3,48); c.lineTo(-16,46); c.lineTo(-8,5); c.closePath();
+  c.fillStyle=crashed?'#771111':'#aa1111'; c.fill();
+  // Vertical tail
+  c.beginPath(); c.moveTo(-6,-8); c.lineTo(-22,-28); c.lineTo(-24,-28); c.lineTo(-20,-8); c.closePath();
+  c.fillStyle='#991111'; c.fill();
+  // H-stab
+  c.beginPath(); c.moveTo(-8,-4); c.lineTo(-23,-16); c.lineTo(-25,-16); c.lineTo(-20,-4); c.closePath();
+  c.fillStyle='#881111'; c.fill();
+  // Cockpit
+  c.beginPath(); c.ellipse(27,-3,14,6,-.08,0,Math.PI*2);
+  c.fillStyle='rgba(60,150,255,.65)'; c.shadowBlur=6; c.shadowColor='rgba(60,160,255,.4)'; c.fill();
+  c.beginPath(); c.ellipse(24,-5,7,3,-.2,0,Math.PI);
+  c.fillStyle='rgba(255,255,255,.28)'; c.shadowBlur=0; c.fill();
+  // Engine flame (only flying)
+  if(!crashed){
+    c.beginPath(); c.moveTo(-20,0);
+    c.bezierCurveTo(-35,-8,-46,0,-37,0); c.bezierCurveTo(-46,0,-35,8,-20,0);
+    const fl=c.createLinearGradient(-20,0,-46,0);
+    fl.addColorStop(0,'rgba(255,245,80,1)'); fl.addColorStop(.5,'rgba(255,110,0,.9)'); fl.addColorStop(1,'rgba(255,40,0,0)');
+    c.fillStyle=fl; c.shadowBlur=20; c.shadowColor='rgba(255,140,0,.8)'; c.fill();
+    // inner bright core
+    c.beginPath(); c.moveTo(-20,0); c.bezierCurveTo(-27,-4,-32,0,-27,0); c.bezierCurveTo(-32,0,-27,4,-20,0);
+    c.fillStyle='rgba(255,255,200,.9)'; c.shadowBlur=8; c.shadowColor='rgba(255,255,160,.8)'; c.fill();
   }
-
   c.restore();
 }
 
-// ── FLIGHT ──
-function startFlight(){flightActive=true;flyStart=performance.now();localMulti=1;pathPts=[];lastTickM=0;startJet(false);}
-function stopFlight(){flightActive=false;}
+// ══════════════════════════════════════
+//  SMOOTH FLIGHT ENGINE (rAF based)
+//  Plane moves every frame — no lag
+// ══════════════════════════════════════
+function startFlight(){
+  flightActive=true;
+  flyStart=performance.now();
+  localMulti=1.00;
+  pathPts=[];
+  lastTickM=0;
+  startJet(false);
+}
 
+function stopFlight(){
+  flightActive=false;
+}
+
+// Main animation loop — always running
 function animLoop(ts){
-  if(flightActive&&flyStart!==null){
-    const el=(ts-flyStart)/1000;
-    localMulti=Math.exp(.09*el);
-    const mv=document.getElementById('mv');mv.className='mval';mv.textContent=localMulti.toFixed(2)+'x';
-    // Spribe-style: trail stays flat near bottom, rises slowly
-    const tN=Math.min(el/28,.95),rN=Math.min(Math.log(Math.max(localMulti,1.001))*.22,.88);
-    pathPts.push({t:tN,r:rN});if(pathPts.length>800)pathPts.shift();
-    if(Math.floor(localMulti*2)>Math.floor(lastTickM*2)){playTick();lastTickM=localMulti;}
+  if(flightActive && flyStart!==null){
+    const elapsed=(ts-flyStart)/1000; // seconds
+
+    // Smooth multiplier growth: 1.00 * e^(k*t)
+    // k=0.09 makes it feel like real aviator pacing
+    localMulti=Math.exp(0.09*elapsed);
+    MULTI=localMulti;
+
+    // Update multiplier display
+    const mv=document.getElementById('mv');
+    mv.className='mval fly';
+    mv.textContent=localMulti.toFixed(2)+'x';
+
+    // Add path point every frame — smooth!
+    // t: how far right (0→1 over ~25s)
+    // r: how far up, based on log of multiplier
+    const tN=Math.min(elapsed/24, 0.95);
+    const rN=Math.min(Math.log(Math.max(localMulti,1.001))*0.40, 0.92);
+    pathPts.push({t:tN, r:rN});
+    if(pathPts.length>800) pathPts.shift();
+
+    // Tick sound
+    if(Math.floor(localMulti*2)>Math.floor(lastTickM*2)){
+      playTick(); lastTickM=localMulti;
+    }
+    // Auto cashout
     [1,2].forEach(s=>{
-      const bet=s===1?BET1:BET2,btn=document.getElementById('b'+s);
-      if(bet&&!bet.cashedOut&&btn.classList.contains('cash'))
-        btn.innerHTML=`Cash Out<br><span class="bsub">${localMulti.toFixed(2)}× KES ${(bet.stake*localMulti).toFixed(2)}</span>`;
+      const bet=s===1?BET1:BET2;
+      const ac=parseFloat(document.getElementById('ac'+s)?.value);
+      if(bet&&!bet.cashedOut&&ac&&localMulti>=ac) doCash(s);
     });
-    autoTick();
+
+    // Update cash out button live
+    [1,2].forEach(s=>{
+      const bet=s===1?BET1:BET2, btn=document.getElementById('b'+s);
+      if(bet&&!bet.cashedOut&&btn.classList.contains('bcash'))
+        btn.innerHTML=`Cash Out<br><span class="sub">${localMulti.toFixed(2)}× — KES ${(bet.stake*localMulti).toFixed(2)}</span>`;
+    });
   }
   draw();
   animFrame=requestAnimationFrame(animLoop);
 }
 
-// ── COUNTDOWN ──
-let cdRound=null;
-function startCountdown(from,rid){
-  if(cdRound===rid&&waitTimer)return;
-  cdRound=rid;clearInterval(waitTimer);countVal=from||5;
-  const el=document.getElementById('wn');el.textContent=countVal;
-  el.classList.remove('t');void el.offsetWidth;el.classList.add('t');setTimeout(()=>el.classList.remove('t'),120);
+// ══════════════════════════════════════
+//  COUNTDOWN  5 → 0 → FLIGHT
+// ══════════════════════════════════════
+let countdownRound=null; // track which round the countdown belongs to
+
+function startCountdown(from, roundId){
+  // ── NEVER restart if already counting for this same round ──
+  if(countdownRound===roundId && waitTimer) return;
+  countdownRound=roundId;
+
+  clearInterval(waitTimer);
+  countVal=from||5;
+  const el=document.getElementById('wn');
+  el.textContent=countVal;
+
+  // Immediate bounce on show
+  el.classList.remove('tick');
+  void el.offsetWidth;
+  el.classList.add('tick');
+  setTimeout(()=>el.classList.remove('tick'),150);
+
   waitTimer=setInterval(()=>{
-    countVal--;el.textContent=Math.max(0,countVal);
-    el.classList.remove('t');void el.offsetWidth;el.classList.add('t');setTimeout(()=>el.classList.remove('t'),120);
-    if(countVal<=0){clearInterval(waitTimer);waitTimer=null;
+    countVal--;
+    const show=Math.max(0,countVal);
+    el.textContent=show;
+
+    // Bounce each tick
+    el.classList.remove('tick');
+    void el.offsetWidth;
+    el.classList.add('tick');
+    setTimeout(()=>el.classList.remove('tick'),150);
+
+    if(countVal<=0){
+      clearInterval(waitTimer);
+      waitTimer=null;
+      // Hide overlay → start flight
       document.getElementById('wo').classList.remove('on');
       document.getElementById('mv').style.display='block';
-      if(!flightActive)startFlight();}
+      if(!flightActive) startFlight();
+    }
   },1000);
 }
 
-// ── POLL ──
+// ══════════════════════════════════════
+//  SERVER POLL
+// ══════════════════════════════════════
 async function poll(){
   try{
-    const r=await fetch('/api/aviator/state');const d=(await r.json()).data;if(!d)return;
-    prevST=ST;ST=d.status;HIST=d.history||[];
+    const token=localStorage.getItem('token');
+    const authH=token?{'Authorization':'Bearer '+token}:{};
+    const r=await fetch('/api/aviator/state',{headers:authH});
+    const d=(await r.json()).data;
+    if(!d) return;
+    prevST=ST; ST=d.status; HIST=d.history||[];
+
     if(d.roundId!==lastRound){
-      lastRound=d.roundId;if(ST!=='waiting'){BET1=null;BET2=null;}updBtns();
-      if(ST==='waiting')setTimeout(()=>{if(AUTO[1].on)aqBet(1);if(AUTO[2].on)aqBet(2);},400);
-    }
-    updHist();
-    const wo=document.getElementById('wo'),mv=document.getElementById('mv');
-    if(ST==='waiting'){
-      if(flightActive){stopFlight();pathPts=[];}stopJet();
-      mv.className='mval wait';mv.style.display='none';wo.classList.add('on');
-      startCountdown(d.waitSeconds||5,d.roundId||lastRound||'x');
-    }else if(ST==='flying'){
-      wo.classList.remove('on');mv.style.display='block';
-      if(!flightActive){flyStart=performance.now()-Math.log(Math.max(d.multiplier,1.001))/.09*1000;startFlight();}
-      if(Math.abs(d.multiplier-localMulti)>.5)localMulti=d.multiplier;
-      if(prevST==='waiting')updBtns();
-    }else if(ST==='crashed'){
-      if(flightActive)stopFlight();stopJet();
-      if(prevST==='flying')playCrash();
-      mv.className='mval crash';mv.style.display='block';
-      mv.textContent='Flew Away @ '+(d.crashPoint||d.multiplier||localMulti).toFixed(2)+'×';
-      [BET1,BET2].forEach((b,i)=>{if(b&&!b.cashedOut){b.cashedOut=true;showT('💥 Lost KES '+b.stake.toFixed(2),'tl');if(i===0)BET1=null;else BET2=null;}});
-      [1,2].forEach(s=>{if(AUTO[s].on)document.getElementById('ast'+s).textContent='⏳ Next round...';});
+      lastRound=d.roundId;
+      if(ST!=='waiting'){BET1=null;BET2=null;}
       updBtns();
     }
-    fetch('/api/aviator/players').then(r=>r.json()).then(d=>{PLAYERS=d.data||[];document.getElementById('pc').textContent=PLAYERS.length;renderBL();}).catch(()=>{});
+
+    updHist();
+    const wo=document.getElementById('wo');
+    const mv=document.getElementById('mv');
+
+    if(ST==='waiting'){
+      // Stop any ongoing flight
+      if(flightActive){stopFlight(); pathPts=[];}
+      stopJet();
+      document.getElementById('mv').className='mval wait';
+      document.getElementById('mv').style.display='none';
+      document.getElementById('wo').classList.add('on');
+      // Pass roundId — countdown will NOT restart if already running for this round
+      const waitSecs=d.waitSeconds||5;
+      startCountdown(waitSecs, d.roundId||lastRound||'default');
+
+    } else if(ST==='flying'){
+      wo.classList.remove('on');
+      mv.style.display='block';
+      // If rAF flight not started yet (e.g. joining mid-round), start it
+      if(!flightActive){
+        // Estimate elapsed from server multiplier
+        flyStart=performance.now()-Math.log(Math.max(d.multiplier,1.001))/0.09*1000;
+        startFlight();
+      }
+      // Server multiplier takes precedence — sync if needed
+      if(Math.abs(d.multiplier-localMulti)>0.5) localMulti=d.multiplier;
+
+    } else if(ST==='crashed'){
+      if(flightActive) stopFlight();
+      stopJet();
+      if(prevST==='flying') playCrash();
+      mv.className='mval crash';
+      mv.style.display='block';
+      mv.textContent='Flew Away @ '+(d.crashPoint||d.multiplier||localMulti).toFixed(2)+'×';
+      [BET1,BET2].forEach((b,i)=>{
+        if(b&&!b.cashedOut){
+          b.cashedOut=true;
+          showT(`💥 Flew away! Lost KES ${b.stake.toFixed(2)}`,'tl');
+          if(i===0)BET1=null; else BET2=null;
+        }
+      });
+      updBtns();
+    }
+
+    const _pt=localStorage.getItem('token');
+    fetch('/api/aviator/players',{headers:_pt?{'Authorization':'Bearer '+_pt}:{}}).then(r=>r.json()).then(d=>{
+      PLAYERS=d.data||[];
+      document.getElementById('pc').textContent=PLAYERS.length;
+      renderBL();
+    }).catch(()=>{});
   }catch(e){}
 }
 
 function updHist(){
-  const bar=document.getElementById('hbar');if(!HIST.length)return;
-  const c=HIST.slice().reverse().slice(0,14).map(v=>{
-    let cl=v>=10?'p':v>=3?'y':v>=2?'c':'r';
-    return`<span class="hc ${cl}">${v.toFixed(2)}x</span>`;
+  const bar=document.getElementById('hbar');
+  if(!HIST.length) return;
+  const chips=HIST.slice().reverse().slice(0,12).map(v=>{
+    let cl='r';
+    if(v>=10) cl='p'; else if(v>=3) cl='y'; else if(v>=2) cl='b';
+    return `<span class="hc ${cl}">${v.toFixed(2)}x</span>`;
   }).join('');
-  bar.innerHTML=c+`<button class="hmore">•••</button>`;
+  bar.innerHTML=chips+`<button class="hmore">•••</button>`;
 }
 
 function renderBL(){
-  const el=document.getElementById('bl');let tot=0;
-  document.getElementById('bcnt').textContent=`${PLAYERS.length}/${PLAYERS.length} Bets`;
-  if(!PLAYERS.length){el.innerHTML='<div style="text-align:center;padding:12px;color:#1e1e1e;font-size:11px">No bets this round</div>';document.getElementById('tw').textContent='0.00';return;}
-  el.innerHTML=PLAYERS.map(p=>{if(p.cashedOut)tot+=p.won;
-    return`<div class="brow"><span class="u">${p.username}</span><span>${p.stake.toFixed(2)}</span>${p.cashedOut?`<span class="x">${p.cashoutMultiplier.toFixed(2)}x</span><span class="w">${p.won.toFixed(2)}</span>`:`<span class="d">—</span><span class="d">—</span>`}</div>`;
+  const el=document.getElementById('bl'); let tot=0;
+  document.getElementById('bcount').textContent=`${PLAYERS.length}/${PLAYERS.length} Bets`;
+  if(!PLAYERS.length){
+    el.innerHTML='<div style="text-align:center;padding:14px;color:#2a2a2a;font-size:11px">No bets this round</div>';
+    document.getElementById('tw').textContent='0.00'; return;
+  }
+  el.innerHTML=PLAYERS.map(p=>{
+    if(p.cashedOut) tot+=p.won;
+    return `<div class="brow">
+      <span class="un">${p.username}</span>
+      <span>${p.stake.toFixed(2)}</span>
+      ${p.cashedOut
+        ?`<span class="cx">${p.cashoutMultiplier.toFixed(2)}x</span><span class="cw">${p.won.toFixed(2)}</span>`
+        :`<span class="pd">—</span><span class="pd">—</span>`}
+    </div>`;
   }).join('');
   document.getElementById('tw').textContent=tot.toFixed(2);
 }
 
-// ── BETS ──
+// ══════════════════════════════════════
+//  BET ACTIONS
+// ══════════════════════════════════════
 async function hbet(s){
-  gAC();
-  if(!USER){showT('Login to bet','ti');setTimeout(()=>location.href='/pages/login.html',1200);return;}
+  getAC();
+  if(!USER){ showT('Login to bet','ti'); setTimeout(()=>location.href='/pages/login.html',1200); return; }
   const bet=s===1?BET1:BET2;
-  if(flightActive&&bet&&!bet.cashedOut)await doCash(s);
-  else if(!flightActive&&!bet)await doBet(s);
-  else if(!flightActive&&bet)showT('Bet already placed','ti');
+  if(flightActive&&bet&&!bet.cashedOut) await doCash(s);
+  else if(!flightActive&&!bet) await doBet(s);
+  else if(!flightActive&&bet) showT('Bet already placed','ti');
 }
+
 async function doBet(s){
   const stake=parseFloat(document.getElementById('s'+s).value);
-  if(!stake||stake<10)return showT('Min bet KES 10','tl');
-  playBet();const btn=document.getElementById('b'+s);btn.disabled=true;
+  if(!stake||stake<10) return showT('Min bet KES 10','tl');
+  playBet();
+  const btn=document.getElementById('b'+s); btn.disabled=true;
   try{
-    const r=await fetch('/api/aviator/bet',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},body:JSON.stringify({stake})});
+    const r=await fetch('/api/aviator/bet',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
+      body:JSON.stringify({stake})});
     const d=await r.json();
-    if(d.success){if(s===1)BET1={stake,cashedOut:false};else BET2={stake,cashedOut:false};USER.balance=d.newBalance;updBal();showT('✅ Bet KES '+stake.toFixed(2),'ti');updBtns();}
-    else{showT(d.message||'Failed','tl');btn.disabled=false;}
-  }catch(e){showT('Error','tl');btn.disabled=false;}
+    if(d.success){
+      if(s===1) BET1={stake,cashedOut:false}; else BET2={stake,cashedOut:false};
+      USER.balance=d.newBalance; updBal();
+      showT('✅ Bet placed — KES '+stake.toFixed(2),'ti'); updBtns();
+    } else { showT(d.message||'Failed','tl'); btn.disabled=false; }
+  }catch(e){ showT('Error placing bet','tl'); btn.disabled=false; }
 }
+
 async function doCash(s){
-  const btn=document.getElementById('b'+s);btn.disabled=true;
+  const btn=document.getElementById('b'+s); btn.disabled=true;
   try{
-    const r=await fetch('/api/aviator/cashout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')}});
+    const r=await fetch('/api/aviator/cashout',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')}});
     const d=await r.json();
-    if(d.success){if(s===1)BET1=null;else BET2=null;USER.balance=d.newBalance;updBal();playCashout();showT(`💰 ${d.multiplier.toFixed(2)}× Won KES ${d.won.toFixed(2)}`,'tw');updBtns();}
-    else{showT(d.message||'Failed','tl');btn.disabled=false;}
-  }catch(e){showT('Error','tl');btn.disabled=false;}
+    if(d.success){
+      const bet=s===1?BET1:BET2; if(bet) bet.cashedOut=true;
+      USER.balance=d.newBalance; updBal(); playCashout();
+      showT(`💰 ${d.multiplier.toFixed(2)}× — Won KES ${d.won.toFixed(2)}`,'tw'); updBtns();
+    } else { showT(d.message||'Failed','tl'); btn.disabled=false; }
+  }catch(e){ showT('Error','tl'); btn.disabled=false; }
 }
+
 function updBtns(){
   [1,2].forEach(s=>{
     const btn=document.getElementById('b'+s);
     const stake=parseFloat(document.getElementById('s'+s).value)||0;
     const bet=s===1?BET1:BET2;
-    btn.disabled=false;btn.className='bbtn';
+    btn.disabled=false; btn.className='abtn';
     if(flightActive&&bet&&!bet.cashedOut){
-      btn.classList.add('cash');btn.innerHTML=`Cash Out<br><span class="bsub">${localMulti.toFixed(2)}× KES ${(bet.stake*localMulti).toFixed(2)}</span>`;
-    }else if(flightActive){
-      btn.classList.add('wait');btn.innerHTML='Wait<br><span class="bsub">Next round</span>';btn.disabled=true;
-    }else if(!flightActive&&bet){
-      btn.classList.add('placed');btn.innerHTML=`Placed ✓<br><span class="bsub">KES ${bet.stake.toFixed(2)}</span>`;btn.disabled=true;
-    }else{
-      btn.classList.add('bet');btn.innerHTML=`Bet<br><span class="bsub">${stake.toFixed(2)} KES</span>`;
+      btn.classList.add('bcash');
+      btn.innerHTML=`Cash Out<br><span class="sub">${localMulti.toFixed(2)}× — KES ${(bet.stake*localMulti).toFixed(2)}</span>`;
+    } else if(flightActive){
+      btn.classList.add('bwait'); btn.innerHTML='Wait<br><span class="sub">Next round</span>'; btn.disabled=true;
+    } else if(!flightActive&&bet){
+      btn.classList.add('bplaced'); btn.innerHTML=`Placed<br><span class="sub">KES ${bet.stake.toFixed(2)}</span>`; btn.disabled=true;
+    } else if(ST==='crashed'){
+      btn.classList.add('bbet'); btn.innerHTML=`Bet<br><span class="sub">${stake.toFixed(2)} KES</span>`; btn.disabled=true;
+    } else {
+      btn.classList.add('bbet'); btn.innerHTML=`Bet<br><span class="sub">${stake.toFixed(2)} KES</span>`;
     }
   });
 }
-function chg(s,d){const e=document.getElementById('s'+s);e.value=Math.max(10,(parseFloat(e.value)||10)+d);updBtns();}
-function ss(s,v){document.getElementById('s'+s).value=v;updBtns();}
-function chgA(s,d){const e=document.getElementById('as'+s);e.value=Math.max(10,(parseFloat(e.value)||10)+d);}
-function swTab(s,tab,btn){
-  btn.parentElement.querySelectorAll(s===1?'.tab':'.s2tab').forEach(t=>t.classList.remove('on'));btn.classList.add('on');
-  document.getElementById('mp'+s).style.display=tab==='bet'?'':'none';
-  document.getElementById('ap'+s).classList.toggle('on',tab==='auto');
-}
-function togS2(){s2collapsed=!s2collapsed;document.getElementById('s2body').style.display=s2collapsed?'none':'';document.getElementById('s2c').textContent=s2collapsed?'+':'−';}
-function togAuto(s){
-  if(!USER){showT('Login to use Auto','ti');return;}
-  AUTO[s].on=!AUTO[s].on;
-  const btn=document.getElementById('ab'+s),lbl=document.getElementById('ab'+s+'s');
-  if(AUTO[s].on){btn.classList.add('on');lbl.textContent='ON';document.getElementById('ast'+s).textContent='⚡ Active';if(ST==='waiting'||ST==='crashed')aqBet(s);}
-  else{btn.classList.remove('on');lbl.textContent='OFF';document.getElementById('ast'+s).textContent='';}
-}
-async function aqBet(s){
-  if(!AUTO[s].on||flightActive)return;const bet=s===1?BET1:BET2;if(bet)return;
-  const stake=parseFloat(document.getElementById('as'+s).value);if(!stake||stake<10){showT('Auto: min KES 10','tl');return;}
-  document.getElementById('ast'+s).textContent='⏳ Placing...';
-  const btn=document.getElementById('b'+s);btn.disabled=true;
-  try{
-    const r=await fetch('/api/aviator/bet',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},body:JSON.stringify({stake})});
-    const d=await r.json();
-    if(d.success){USER.balance=d.newBalance;updBal();if(s===1)BET1={stake,cashedOut:false};else BET2={stake,cashedOut:false};
-      document.getElementById('ast'+s).textContent='✅ KES '+stake.toFixed(2);showT('⚡ Auto KES '+stake.toFixed(2),'ti');updBtns();}
-    else{document.getElementById('ast'+s).textContent='❌ '+(d.message||'Failed');btn.disabled=false;}
-  }catch(e){document.getElementById('ast'+s).textContent='❌ Error';btn.disabled=false;}
-}
-async function acCheck(s){
-  if(!AUTO[s].on)return;const bet=s===1?BET1:BET2;if(!bet||bet.cashedOut)return;
-  if(localMulti>=(parseFloat(document.getElementById('aco'+s).value)||2)){
-    document.getElementById('ast'+s).textContent=`💰 @${localMulti.toFixed(2)}×`;await doCash(s);}
-}
-function autoTick(){if(flightActive){if(AUTO[1].on)acCheck(1);if(AUTO[2].on)acCheck(2);}}
-function setBT(el){document.querySelectorAll('.btab').forEach(t=>t.classList.remove('on'));el.classList.add('on');}
-function updBal(){if(USER)document.getElementById('bv').textContent=parseFloat(USER.balance||0).toFixed(2);}
-let tTmr=null;
-function showT(msg,cls=''){const el=document.getElementById('tst');el.textContent=msg;el.className='toast on '+cls;clearTimeout(tTmr);tTmr=setTimeout(()=>el.classList.remove('on'),3500);}
+
+function chg(s,d){ const e=document.getElementById('s'+s); e.value=Math.max(10,(parseFloat(e.value)||10)+d); updBtns(); }
+function ss(s,v){ document.getElementById('s'+s).value=v; updBtns(); }
 document.getElementById('s1').addEventListener('input',updBtns);
 document.getElementById('s2').addEventListener('input',updBtns);
+function setBT(el){ document.querySelectorAll('.btab2').forEach(t=>t.classList.remove('on')); el.classList.add('on'); }
+function updBal(){ if(USER) document.getElementById('bv').textContent=parseFloat(USER.balance||0).toFixed(2); }
+function showFair(){ showT('SHA256 seed revealed after each crash 🔒','ti'); }
 
+let tTmr=null;
+function showT(msg,cls=''){
+  const el=document.getElementById('tst');
+  el.textContent=msg; el.className='toast on '+cls;
+  clearTimeout(tTmr); tTmr=setTimeout(()=>el.classList.remove('on'),3500);
+}
+
+// ══════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════
 window.addEventListener('DOMContentLoaded',()=>{
-  const t=localStorage.getItem('token'),u=localStorage.getItem('user');
-  if(t&&u){USER=JSON.parse(u);updBal();}
-  let au=false;
-  function unlock(){if(au)return;au=true;gAC();if(flightActive)startJet(true);}
-  document.addEventListener('touchstart',unlock,{capture:true,once:true});
-  document.addEventListener('click',unlock,{capture:true,once:true});
-  rsz(); // size canvas after layout
+  const t=localStorage.getItem('token'), u=localStorage.getItem('user');
+  if(t&&u){ USER=JSON.parse(u); updBal(); }
+
+  // Unlock audio on first touch anywhere — plays immediately
+  let audioUnlocked=false;
+  function unlockAudio(){
+    if(audioUnlocked) return; audioUnlocked=true;
+    getAC();
+    // If already flying when page opens, start engine immediately
+    if(flightActive) startJet(true);
+  }
+  document.addEventListener('touchstart',unlockAudio,{capture:true,once:true});
+  document.addEventListener('click',unlockAudio,{capture:true,once:true});
+
+  // Start overlay with countdown immediately on page load
   document.getElementById('wo').classList.add('on');
-  startCountdown(5,'init');
-  updBtns();
+  startCountdown(5, 'init');
+
+  // Start animation loop
   requestAnimationFrame(animLoop);
-  poll();setInterval(poll,300);
+
+  // Poll server
+  poll();
+  setInterval(poll,300);
 });
 </script>
+<nav class="bnav">
+  <div class="bni" id="bni-home" onclick="location.href='/'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
+    Home
+  </div>
+  <div class="bni" id="bni-aviator" class="bni on" onclick="location.href='/pages/aviator.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>
+    Aviator
+  </div>
+  <div class="bni" id="bni-bets" onclick="location.href='/pages/my-bets.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>
+    My Bets
+  </div>
+  <div class="bni" id="bni-account" onclick="location.href='/pages/account.html'">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+    Account
+  </div>
+</nav>
 </body>
 </html>

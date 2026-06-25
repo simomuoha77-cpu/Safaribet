@@ -1,99 +1,152 @@
 require('dotenv').config();
-const express    = require('express');
-const mongoose   = require('mongoose');
-const cors       = require('cors');
-const path       = require('path');
-const http       = require('http');
+const express   = require('express');
+const mongoose  = require('mongoose');
+const cors      = require('cors');
+const helmet    = require('helmet');
+const path      = require('path');
+const http      = require('http');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
+const mongoSanitize = require('express-mongo-sanitize');
 
 const authRoutes    = require('./routes/auth');
 const oddsRoutes    = require('./routes/odds');
 const aviatorRoutes = require('./routes/aviator');
 const mpesaRoutes   = require('./routes/mpesa');
 const betsRoutes    = require('./routes/bets');
-const withdrawRoutes = require('./routes/withdraw');
+const withdrawRoutes= require('./routes/withdraw');
 const scheduler     = require('./engine/scheduler');
-const adminRoutes   = require('./routes/admin');
 
 const app    = express();
 const server = http.createServer(app);
 
-// ── WebSocket (Aviator) ──
+// ── WEBSOCKET (Aviator) ──
 try {
   const { WebSocketServer } = require('ws');
   const wss = new WebSocketServer({ server, path: '/ws/aviator' });
   aviatorRoutes.setupWS(wss);
   console.log('✅ WebSocket ready at /ws/aviator');
-} catch(e) {
-  console.warn('⚠️  ws not installed — run: npm install ws');
+} catch (e) {
+  console.warn('⚠️  ws not available:', e.message);
 }
 
-// ── Middleware ──
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+// ── SECURITY ──
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
+      styleSrc:    ["'self'", "'unsafe-inline'", "fonts.googleapis.com", "fonts.gstatic.com"],
+      fontSrc:     ["'self'", "fonts.googleapis.com", "fonts.gstatic.com"],
+      connectSrc:  ["'self'", "wss:", "ws:"],
+      imgSrc:      ["'self'", "data:", "https:"],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+    }
+  },
+  // Prevent source inspection
+  crossOriginEmbedderPolicy: false
+}));
 
-// ── Routes ──
-app.use('/api/auth',    authRoutes);
-app.use('/api/odds',    oddsRoutes);
-app.use('/api/aviator', aviatorRoutes);
-app.use('/api/mpesa',   mpesaRoutes);
-app.use('/api/bets',    betsRoutes);
-app.use('/api/withdraw', withdrawRoutes);
-// Admin — hidden API path
-const ADMIN_PATH     = process.env.ADMIN_PATH      || '/api/xpanel';
-const ADMIN_UI_PATH  = process.env.ADMIN_UI_PATH   || '/xpanel';
-app.use(ADMIN_PATH, adminRoutes);
-console.log(`🔒 Admin panel → UI: ${ADMIN_UI_PATH}  API: ${ADMIN_PATH}`);
+// Disable X-Powered-By (hides Express)
+app.disable('x-powered-by');
 
-// Serve admin panel HTML at hidden UI path
-app.get(ADMIN_UI_PATH, (req, res) => {
-  const fs   = require('fs');
-  const html = fs.readFileSync(path.join(__dirname, '../public/pages/xpanel.html'), 'utf8');
-  // Inject the API path as a meta tag so the frontend knows where to call
-  const patched = html.replace(
-    '<meta charset="UTF-8"/>',
-    `<meta charset="UTF-8"/><meta name="apath" content="${ADMIN_PATH}"/>`
-  );
-  res.send(patched);
+// Remove server header
+app.use((req, res, next) => {
+  res.removeHeader('Server');
+  next();
 });
 
-// ── Health check (used by self-ping) ──
-app.get('/api/health', (req, res) => {
-  res.json({ status:'ok', time: new Date().toISOString(), uptime: process.uptime() });
+// ── RATE LIMITING (global) ──
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max:      parseInt(process.env.MAX_REQUESTS_PER_MIN) || 120,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many requests. Please slow down.' }
 });
+app.use('/api', globalLimiter);
 
-// ── Manual settlement trigger (admin use) ──
-app.post('/api/admin/settle', async (req, res) => {
-  const secret = req.headers['x-admin-secret'];
-  if (secret !== process.env.ADMIN_PASSWORD) {
-    return res.status(401).json({ success:false, message:'Unauthorized' });
+// ── MIDDLEWARE ──
+app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
+app.use(compression());
+app.use(express.json({ limit: '50kb' })); // limit body size
+app.use(mongoSanitize()); // prevent NoSQL injection
+app.use(express.static(path.join(__dirname, '../public'), {
+  // Disable directory listing
+  index: false,
+  setHeaders: (res, filePath) => {
+    // No caching for HTML
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
   }
+}));
+
+// Serve index.html for root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// ── API ROUTES ──
+app.use('/api/auth',     authRoutes);
+app.use('/api/odds',     oddsRoutes);
+app.use('/api/aviator',  aviatorRoutes);
+app.use('/api/mpesa',    mpesaRoutes);
+app.use('/api/bets',     betsRoutes);
+app.use('/api/withdraw', withdrawRoutes);
+
+// ── HEALTH ──
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString(), uptime: Math.floor(process.uptime()) });
+});
+
+// ── ADMIN: settlement trigger ──
+app.post('/api/admin/settle', async (req, res) => {
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
+    return res.status(401).json({ success: false });
   try {
     const { runSettlement } = require('./engine/settlementEngine');
     const result = await runSettlement();
-    res.json({ success:true, result });
-  } catch(e) {
-    res.status(500).json({ success:false, message: e.message });
+    res.json({ success: true, result });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// ── Frontend ──
+// ── SERVE PAGES ──
+app.get('/pages/*', (req, res) => {
+  const page = req.path.split('/').pop();
+  res.sendFile(path.join(__dirname, '../public/pages', page));
+});
+
+// ── 404 → index ──
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// ── Connect DB + Start ──
-mongoose.connect(process.env.MONGO_URI)
+// ── GLOBAL ERROR HANDLER ──
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', err.message);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+});
+
+// ── CONNECT & START ──
+mongoose.connect(process.env.MONGO_URI, {
+  serverSelectionTimeoutMS: 10000
+})
   .then(() => {
     console.log('✅ MongoDB connected');
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
-      console.log(`🚀 Server on port ${PORT}`);
-      // Start background engines
+      console.log(`🚀 BetaKE server running on port ${PORT}`);
       scheduler.start();
     });
   })
   .catch(err => {
-    console.error('❌ MongoDB failed:', err.message);
+    console.error('❌ MongoDB connection failed:', err.message);
     process.exit(1);
   });
+
+// Handle crashes gracefully
+process.on('unhandledRejection', err => { console.error('[Unhandled]', err.message); });
+process.on('uncaughtException',  err => { console.error('[Uncaught]',  err.message); });
