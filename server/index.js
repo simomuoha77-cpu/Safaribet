@@ -32,19 +32,7 @@ try {
 
 // ── SECURITY ──
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc:  ["'self'"],
-      scriptSrc:   ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
-      styleSrc:    ["'self'", "'unsafe-inline'", "fonts.googleapis.com", "fonts.gstatic.com"],
-      fontSrc:     ["'self'", "fonts.googleapis.com", "fonts.gstatic.com"],
-      connectSrc:  ["'self'", "wss:", "ws:"],
-      imgSrc:      ["'self'", "data:", "https:"],
-      frameSrc:    ["'none'"],
-      objectSrc:   ["'none'"],
-    }
-  },
-  // Prevent source inspection
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false
 }));
 
