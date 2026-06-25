@@ -41,13 +41,18 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
     // Kenyan phone: 07XX or 01XX → normalize to 254
     if (phone.startsWith('0')) phone = '254' + phone.slice(1);
+    // Accept any valid Kenyan mobile (07XX, 01XX)
     if (!/^254[0-9]{9}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: 'Invalid Kenyan phone number' });
+      return res.status(400).json({ success: false, message: 'Enter a valid phone: 0712345678' });
     }
 
-    const exists = await User.findOne({ $or: [{ username }, { phone }] });
-    if (exists) {
-      return res.status(400).json({ success: false, message: 'Username or phone already registered' });
+    const existsUsername = await User.findOne({ username });
+    if (existsUsername) {
+      return res.status(400).json({ success: false, message: 'Username already taken. Choose another.' });
+    }
+    const existsPhone = await User.findOne({ phone });
+    if (existsPhone) {
+      return res.status(400).json({ success: false, message: 'Phone number already registered. Try logging in.' });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -69,12 +74,28 @@ router.post('/register', registerLimiter, async (req, res) => {
 // ── LOGIN ──
 router.post('/login', loginLimiter, async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'Username and password required' });
+    // Accept phone or username as identifier
+    const { username, phone, password } = req.body;
+    const identifier = (phone || username || '').trim();
+    if (!identifier || !password) {
+      return res.status(400).json({ success: false, message: 'Phone number and password required' });
     }
 
-    const user = await User.findOne({ username: username.trim().toLowerCase() });
+    // Normalize phone if it looks like a phone number
+    let query;
+    const digitsOnly = identifier.replace(/\D/g,'');
+    if (digitsOnly.length >= 9) {
+      // It's a phone number — normalize and search by phone
+      let normalized = digitsOnly;
+      if (normalized.startsWith('0')) normalized = '254' + normalized.slice(1);
+      if (!normalized.startsWith('254')) normalized = '254' + normalized;
+      query = { phone: normalized };
+    } else {
+      // It's a username
+      query = { username: identifier.toLowerCase() };
+    }
+
+    const user = await User.findOne(query);
     if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     if (!user.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
     if (user.isLocked) return res.status(429).json({ success: false, message: 'Account locked. Try again in 15 minutes.' });
