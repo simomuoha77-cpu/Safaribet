@@ -89,7 +89,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
     Home
   </button>
   <div class="tb-title">My Bets</div>
-  <div class="tb-bal">KES <span id="balTop">0.00</span></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="tb-bal">KES <span id="balTop">0.00</span></div>
+    <button onclick="settleBets()" id="settleBtn" title="Check results & settle pending bets"
+      style="background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.2);color:var(--g);
+             border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">
+      🔄 Settle
+    </button>
+  </div>
 </div>
 
 <div class="ftabs">
@@ -191,6 +198,28 @@ function renderEmpty(){
       <div class="empty-sub">Pick a match and place your first bet to get started!</div>
       <button class="empty-btn" onclick="location.href='/'">Browse Matches</button>
     </div>`;
+}
+
+async function settleBets(){
+  const btn=document.getElementById('settleBtn');
+  btn.textContent='⏳...';btn.disabled=true;
+  try{
+    const r=await fetch('/api/admin/settle',{
+      method:'POST',
+      headers:{'x-admin-secret': prompt('Enter admin password:') || ''}
+    });
+    const d=await r.json();
+    if(d.success){
+      const msg = d.result.settled>0
+        ? `✅ ${d.result.settled} bets settled, ${d.result.paid} paid out!`
+        : '✅ No pending bets to settle right now';
+      alert(msg);
+      location.reload();
+    } else {
+      alert('Failed: '+d.message);
+    }
+  }catch(e){ alert('Error: '+e.message); }
+  btn.textContent='🔄 Settle';btn.disabled=false;
 }
 </script>
 </body>
