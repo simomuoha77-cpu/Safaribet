@@ -690,12 +690,11 @@ function pickSportByKey(key){
 }
 
 function pickSport(el){
-  document.querySelectorAll(".stab").forEach(t=>t.classList.remove("on"));
-  el.classList.add("on");
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
   currentSport=el.dataset.sport;
-  const label=el.textContent.replace(/^[^a-zA-Z0-9\u{1F000}-\u{1FFFF}]+/u,"").trim();
-  document.getElementById("secTtl").textContent=label;
-  if(currentSport==="featured"){ loadFeatured(); } else { loadMatches(currentSport); }
+  document.getElementById('secTtl').textContent=el.textContent.trim();
+  if(currentSport==='featured'){ loadFeatured(); } else { loadMatches(currentSport); }
 }
 
 // ── RENDER MATCHES LIST ──
