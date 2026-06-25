@@ -204,21 +204,23 @@ async function settleBets(){
   const btn=document.getElementById('settleBtn');
   btn.textContent='⏳...';btn.disabled=true;
   try{
-    const r=await fetch('/api/admin/settle',{
+    const token=localStorage.getItem('token');
+    // Try user settle first (no password needed)
+    const r=await fetch('/api/bets/settle',{
       method:'POST',
-      headers:{'x-admin-secret': prompt('Enter admin password:') || ''}
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}
     });
     const d=await r.json();
     if(d.success){
-      const msg = d.result.settled>0
-        ? `✅ ${d.result.settled} bets settled, ${d.result.paid} paid out!`
+      const msg = d.settled>0
+        ? `✅ ${d.settled} bets settled!`
         : '✅ No pending bets to settle right now';
-      alert(msg);
-      location.reload();
+      showToast(msg,'ok');
+      setTimeout(()=>location.reload(),1500);
     } else {
-      alert('Failed: '+d.message);
+      showToast('Could not settle: '+d.message,'err');
     }
-  }catch(e){ alert('Error: '+e.message); }
+  }catch(e){ showToast('Error: '+e.message,'err'); }
   btn.textContent='🔄 Settle';btn.disabled=false;
 }
 </script>

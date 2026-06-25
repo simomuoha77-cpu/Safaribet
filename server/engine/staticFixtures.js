@@ -100,7 +100,20 @@ const FRIENDLIES = [
   mk('fri_03','South Africa','Egypt',           '2026-07-05','15:00','🌐 International Friendlies','soccer_friendlies'),
 ];
 
-const ALL = [...WC2026, ...MLS, ...BRAZIL, ...LIBERTADORES, ...CAF, ...KENYA, ...FRIENDLIES];
+
+// ── WORLD CUP 2026 ROUND OF 16 (approx dates) ──
+const WC_R16 = [
+  mk('wc_r16_01','Winner A','Runner B',   '2026-07-08','22:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_02','Winner C','Runner D',   '2026-07-09','02:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_03','Winner E','Runner F',   '2026-07-09','22:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_04','Winner G','Runner H',   '2026-07-10','02:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_05','USA','Morocco',         '2026-07-10','22:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_06','Germany','Portugal',    '2026-07-11','02:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_07','France','Brazil',       '2026-07-11','22:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+  mk('wc_r16_08','Argentina','Spain',     '2026-07-12','02:00','🏆 FIFA World Cup 2026','soccer_world_cup'),
+];
+
+const ALL = [...WC2026, ...WC_R16, ...MLS, ...BRAZIL, ...LIBERTADORES, ...CAF, ...KENYA, ...FRIENDLIES];
 
 function getFixtures(sport) {
   const now = new Date();
