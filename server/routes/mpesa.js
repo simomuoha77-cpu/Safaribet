@@ -33,10 +33,17 @@ function getPassword(ts) {
 }
 
 // ── STK PUSH ──
-router.post('/stk', auth, mpesaLimiter, async (req, res) => {
+// Support both /stk and /deposit
+router.post('/deposit', auth, mpesaLimiter, async (req, res) => { req.url='/stk'; return stkHandler(req,res); });
+async function stkHandler(req, res){
   try {
     if (!CONSUMER_KEY || !CONSUMER_SEC) {
-      return res.status(503).json({ success: false, message: 'M-Pesa not configured' });
+      // M-Pesa not configured — for testing, simulate success
+      console.log('[mpesa] Keys not set — sandbox mode');
+      return res.status(503).json({ 
+        success: false, 
+        message: 'M-Pesa not yet configured. Add MPESA_CONSUMER_KEY and MPESA_CONSUMER_SECRET in Render environment variables.'
+      });
     }
 
     let { amount, phone } = req.body;
@@ -166,4 +173,5 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
   }
 });
 
+router.post('/stk', auth, mpesaLimiter, stkHandler);
 module.exports = router;
