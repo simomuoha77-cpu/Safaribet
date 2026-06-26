@@ -193,7 +193,8 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .overlay{display:block!important}
 }
-.overlay{display:none;position:fixed;inset:0;background:#00000060;z-index:150}
+.overlay{display:none;position:fixed;inset:0;background:#00000060;z-index:150;pointer-events:none}
+.overlay.on{display:block;pointer-events:auto}
 </style>
 </head>
 <body>
@@ -892,10 +893,12 @@ function nav(name,el){
 
 function toggleSidebar(){
   const sb=document.getElementById('sidebar');
+  const ov=document.getElementById('overlay');
   const isMobile=window.innerWidth<=640;
   if(isMobile){
+    const opening=!sb.classList.contains('open');
     sb.classList.toggle('open');
-    document.getElementById('overlay').style.display=sb.classList.contains('open')?'block':'none';
+    if(opening){ov.classList.add('on');}else{ov.classList.remove('on');}
   } else {
     sidebarOpen=!sidebarOpen;
     if(sidebarOpen){sb.style.transform='';document.getElementById('main').style.marginLeft='200px';}
@@ -904,7 +907,7 @@ function toggleSidebar(){
 }
 function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('overlay').style.display='none';
+  document.getElementById('overlay').classList.remove('on');
 }
 
 // ══ INIT ══
