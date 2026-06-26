@@ -3,335 +3,538 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>BetaKE Admin</title>
+<title>Admin — BetaKE</title>
+<meta name="robots" content="noindex,nofollow"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,sans-serif;min-height:100vh}
-.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
-.login-box{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:16px;padding:32px;width:100%;max-width:360px}
-.logo{text-align:center;margin-bottom:24px}
-.logo h1{font-size:28px;color:#4caf50}
-.logo span{color:#f5c518}
-.logo p{color:#666;font-size:13px;margin-top:4px}
-input{width:100%;background:#111;border:1px solid #333;border-radius:10px;padding:14px;color:#fff;font-size:15px;margin-bottom:12px;outline:none}
-input:focus{border-color:#4caf50}
-.btn{width:100%;background:#4caf50;color:#000;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer}
-.btn:hover{background:#43a047}
-.err{background:#ff1744;color:#fff;padding:10px;border-radius:8px;font-size:13px;margin-bottom:12px;display:none}
+:root{--g:#4caf50;--r:#ff1744;--y:#f5c518;--bg:#080c08;--c1:#111;--c2:#181818;--c3:#222;--tx:#e0e0e0;--mt:#666}
+body{background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
 
-/* Dashboard */
-.dash{display:none;padding:16px;max-width:600px;margin:0 auto}
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-bottom:16px;border-bottom:1px solid #222}
-.topbar h2{color:#4caf50;font-size:18px}
-.logout-btn{background:#ff1744;color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
-.stat{background:#1a1a1a;border-radius:12px;padding:16px;text-align:center}
-.stat-val{font-size:24px;font-weight:700;color:#4caf50}
-.stat-lbl{font-size:12px;color:#666;margin-top:4px}
-.section{background:#1a1a1a;border-radius:12px;padding:16px;margin-bottom:16px}
-.section h3{font-size:15px;color:#4caf50;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-.action-btn{background:#222;border:1px solid #333;color:#e0e0e0;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;width:100%;text-align:left;margin-bottom:8px;display:flex;align-items:center;gap:10px}
-.action-btn:hover{background:#2a2a2a;border-color:#4caf50}
-.action-btn.danger{border-color:#ff1744;color:#ff6b6b}
-.action-btn.danger:hover{background:#ff17441a}
-.input-row{display:flex;gap:8px;margin-bottom:8px}
-.input-row input{margin-bottom:0;flex:1}
-.input-row button{background:#4caf50;color:#000;border:none;border-radius:8px;padding:0 16px;font-weight:700;cursor:pointer;font-size:13px}
-.input-row button.red{background:#ff1744;color:#fff}
-.result{background:#111;border-radius:8px;padding:12px;font-size:13px;color:#aaa;margin-top:8px;display:none;word-break:break-all}
-.result.ok{color:#4caf50;background:#4caf5011}
-.result.err{color:#ff6b6b;background:#ff174411}
-.user-card{background:#111;border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid #222}
-.user-card .uname{font-weight:700;color:#fff;font-size:14px}
-.user-card .uinfo{font-size:12px;color:#666;margin-top:4px}
-.user-card .ubal{color:#4caf50;font-weight:700}
-.user-card .del-btn{background:#ff1744;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;float:right;margin-top:-24px}
-.bet-card{background:#111;border-radius:8px;padding:10px;margin-bottom:6px;border-left:3px solid #333;font-size:12px}
-.bet-card.won{border-color:#4caf50}
-.bet-card.lost{border-color:#ff1744}
-.bet-card.pending{border-color:#f5c518}
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
-.badge.won{background:#4caf5022;color:#4caf50}
-.badge.lost{background:#ff174422;color:#ff6b6b}
-.badge.pending{background:#f5c51822;color:#f5c518}
-.loading{text-align:center;padding:20px;color:#555;font-size:13px}
-.tab-row{display:flex;gap:8px;margin-bottom:14px;overflow-x:auto}
-.tab{background:#111;border:1px solid #333;color:#888;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;white-space:nowrap}
-.tab.on{background:#4caf5022;border-color:#4caf50;color:#4caf50}
+/* LOGIN */
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.lbox{background:var(--c1);border:1px solid #1a2e1a;border-radius:20px;padding:32px 24px;width:100%;max-width:340px}
+.lbox h2{font-size:22px;font-weight:800;color:var(--g);margin-bottom:4px}
+.lbox p{color:var(--mt);font-size:13px;margin-bottom:20px}
+.inp{width:100%;background:#0d0d0d;border:1.5px solid var(--c3);border-radius:10px;padding:14px;color:#fff;font-size:15px;outline:none;margin-bottom:10px}
+.inp:focus{border-color:var(--g)}
+.gbtn{width:100%;background:var(--g);color:#000;border:none;border-radius:10px;padding:14px;font-size:16px;font-weight:800;cursor:pointer}
+.gbtn:disabled{background:#1a3a1a;color:#444}
+.rbtn{background:var(--r)!important;color:#fff!important}
+.err{background:#ff174411;border:1px solid #ff174433;color:#ff6b6b;padding:10px;border-radius:8px;font-size:13px;margin-bottom:10px;display:none}
+
+/* DASHBOARD */
+#dashboard{display:none}
+.topbar{background:var(--c1);border-bottom:1px solid #1a2e1a;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:99}
+.topbar h1{font-size:17px;font-weight:800;color:var(--g)}
+.topbar span{color:var(--mt);font-size:12px}
+.logout{background:none;border:1px solid var(--r);color:var(--r);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+.body{padding:14px;max-width:680px;margin:0 auto}
+
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+.stat{background:var(--c1);border-radius:14px;padding:16px;text-align:center;border:1px solid #1a2e1a}
+.stat-v{font-size:26px;font-weight:800;color:var(--g)}
+.stat-l{font-size:11px;color:var(--mt);margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
+
+/* TABS */
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px}
+.tab{background:var(--c1);border:1px solid var(--c3);color:var(--mt);border-radius:10px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.tab.on{background:#4caf5015;border-color:var(--g);color:var(--g)}
+
+/* PANELS */
+.panel{display:none}
+.panel.on{display:block}
+.card{background:var(--c1);border:1px solid #1a2e1a;border-radius:14px;padding:16px;margin-bottom:12px}
+.card h3{font-size:13px;font-weight:700;color:var(--g);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.row .inp{margin-bottom:0;flex:1}
+.row button{background:var(--g);color:#000;border:none;border-radius:8px;padding:12px 16px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap}
+.row button.red{background:var(--r);color:#fff}
+.row button.yel{background:var(--y);color:#000}
+label{display:block;font-size:11px;color:var(--mt);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+
+/* RESULT BOX */
+.res{background:#0d0d0d;border-radius:8px;padding:10px 12px;font-size:12px;color:var(--mt);margin-top:8px;display:none;word-break:break-all;line-height:1.5}
+.res.ok{color:var(--g);background:#4caf5010;border:1px solid #4caf5020}
+.res.er{color:#ff6b6b;background:#ff174410;border:1px solid #ff174420}
+
+/* USER CARDS */
+.ucard{background:#0d0d0d;border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid var(--c3);display:flex;align-items:center;justify-content:space-between}
+.ucard .info .name{font-weight:700;font-size:14px;color:#fff}
+.ucard .info .sub{font-size:11px;color:var(--mt);margin-top:2px}
+.ucard .right{text-align:right}
+.ucard .bal{font-size:15px;font-weight:700;color:var(--g)}
+.ucard .delbtn{background:none;border:1px solid var(--r);color:var(--r);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-top:4px}
+.ucard .suspbtn{background:none;border:1px solid var(--y);color:var(--y);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-top:4px}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase}
+.b-pending{background:#f5c51820;color:var(--y)}
+.b-won{background:#4caf5020;color:var(--g)}
+.b-lost{background:#ff174420;color:#ff6b6b}
+.b-active{background:#4caf5020;color:var(--g)}
+.b-suspended{background:#ff174420;color:#ff6b6b}
+
+/* BET CARDS */
+.bcard{background:#0d0d0d;border-left:3px solid var(--c3);border-radius:8px;padding:11px;margin-bottom:8px;font-size:12px}
+.bcard.won{border-color:var(--g)}
+.bcard.lost{border-color:var(--r)}
+.bcard.pending{border-color:var(--y)}
+.bcard .bc{font-weight:700;color:#fff;font-size:13px}
+.bcard .bsub{color:var(--mt);margin-top:3px;line-height:1.5}
+.bcard .bamt{margin-top:6px}
+
+/* TX CARDS */
+.txcard{background:#0d0d0d;border-radius:8px;padding:10px;margin-bottom:6px;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.txcard .txl .txtype{font-weight:700;text-transform:capitalize}
+.txcard .txl .txsub{color:var(--mt);font-size:11px;margin-top:2px}
+.txcard .txr{text-align:right}
+.txcard .txamt{font-weight:700;font-size:14px}
+.txcard .txamt.dep{color:var(--g)}
+.txcard .txamt.wd{color:var(--r)}
+.txcard .txamt.win{color:#4fc3f7}
+.txcard .txbal{color:var(--mt);font-size:11px;margin-top:2px}
+
+/* MATCH CARDS */
+.mcard{background:#0d0d0d;border-radius:8px;padding:10px;margin-bottom:6px;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.mcard .ml .mname{font-weight:700;color:#fff}
+.mcard .ml .msub{color:var(--mt);font-size:11px;margin-top:2px}
+.mcard .mr button{background:none;border:1px solid var(--r);color:var(--r);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
+.empty{text-align:center;padding:30px;color:var(--mt);font-size:13px}
+.loading{text-align:center;padding:20px;color:var(--mt);font-size:12px}
+.search-row{display:flex;gap:8px;margin-bottom:12px}
+.search-row .inp{margin-bottom:0}
+select.inp{cursor:pointer}
+.pagination{display:flex;justify-content:center;gap:8px;margin-top:12px}
+.pagination button{background:var(--c2);border:1px solid var(--c3);color:var(--tx);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px}
+.pagination button.on{background:var(--g);color:#000;border-color:var(--g)}
 </style>
 </head>
 <body>
 
 <!-- LOGIN -->
-<div class="login-wrap" id="loginWrap">
-  <div class="login-box">
-    <div class="logo">
-      <h1>Beta<span>KE</span></h1>
-      <p>🔐 Admin Panel</p>
+<div id="loginScreen">
+  <div class="lbox">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:28px;font-weight:900;color:var(--g)">Beta<span style="color:var(--y)">KE</span></div>
+      <div style="font-size:12px;color:var(--mt);margin-top:4px">🔐 Secure Admin Panel</div>
     </div>
     <div class="err" id="loginErr"></div>
-    <input type="password" id="adminPwd" placeholder="Admin password" onkeydown="if(event.key==='Enter')doLogin()"/>
-    <button class="btn" onclick="doLogin()">Enter Admin Panel</button>
+    <input class="inp" type="password" id="adminPwd" placeholder="Enter admin password" autocomplete="off"/>
+    <button class="gbtn" id="loginBtn" onclick="doLogin()">Access Panel</button>
   </div>
 </div>
 
 <!-- DASHBOARD -->
-<div class="dash" id="dash">
+<div id="dashboard">
   <div class="topbar">
-    <h2>🔧 BetaKE Admin</h2>
-    <button class="logout-btn" onclick="logout()">Logout</button>
+    <div>
+      <h1>🔧 BetaKE Admin</h1>
+      <span id="adminTime"></span>
+    </div>
+    <button class="logout" onclick="doLogout()">Logout</button>
   </div>
 
-  <!-- Stats -->
-  <div class="stats" id="statsGrid">
-    <div class="stat"><div class="stat-val" id="statUsers">—</div><div class="stat-lbl">Total Users</div></div>
-    <div class="stat"><div class="stat-val" id="statBets">—</div><div class="stat-lbl">Total Bets</div></div>
-    <div class="stat"><div class="stat-val" id="statPending">—</div><div class="stat-lbl">Pending Bets</div></div>
-    <div class="stat"><div class="stat-val" id="statDeposits">—</div><div class="stat-lbl">Total Deposits</div></div>
-  </div>
+  <div class="body">
+    <!-- STATS -->
+    <div class="stats" id="statsGrid">
+      <div class="stat"><div class="stat-v" id="sUsers">—</div><div class="stat-l">Users</div></div>
+      <div class="stat"><div class="stat-v" id="sBets">—</div><div class="stat-l">Total Bets</div></div>
+      <div class="stat"><div class="stat-v" id="sPending">—</div><div class="stat-l">Pending</div></div>
+      <div class="stat"><div class="stat-v" id="sDeposits">—</div><div class="stat-l">Deposits</div></div>
+    </div>
 
-  <!-- Tabs -->
-  <div class="tab-row">
-    <div class="tab on" onclick="showTab('users',this)">👥 Users</div>
-    <div class="tab" onclick="showTab('bets',this)">🎯 Bets</div>
-    <div class="tab" onclick="showTab('actions',this)">⚙️ Actions</div>
-  </div>
+    <!-- TABS -->
+    <div class="tabs">
+      <div class="tab on" onclick="showPanel('users',this)">👥 Users</div>
+      <div class="tab" onclick="showPanel('bets',this)">🎯 Bets</div>
+      <div class="tab" onclick="showPanel('transactions',this)">💰 Transactions</div>
+      <div class="tab" onclick="showPanel('matches',this)">⚽ Matches</div>
+      <div class="tab" onclick="showPanel('actions',this)">⚙️ Actions</div>
+    </div>
 
-  <!-- USERS TAB -->
-  <div id="tab-users">
-    <div class="section">
-      <h3>🔍 Find & Delete User</h3>
-      <div class="input-row">
-        <input type="text" id="searchUser" placeholder="Phone or username"/>
-        <button onclick="findUser()">Find</button>
-        <button class="red" onclick="deleteUser()">Delete</button>
+    <!-- USERS PANEL -->
+    <div class="panel on" id="panel-users">
+      <div class="card">
+        <h3>🔍 Search User</h3>
+        <div class="row">
+          <input class="inp" id="uSearch" placeholder="Phone, username..."/>
+          <button onclick="searchUser()">Search</button>
+          <button class="red" onclick="deleteSearched()">Delete</button>
+        </div>
+        <div class="res" id="uSearchRes"></div>
       </div>
-      <div class="result" id="findResult"></div>
-    </div>
-    <div class="section">
-      <h3>👥 Recent Users</h3>
-      <div id="userList"><div class="loading">Loading...</div></div>
-    </div>
-  </div>
-
-  <!-- BETS TAB -->
-  <div id="tab-bets" style="display:none">
-    <div class="section">
-      <h3>🎯 Recent Bets</h3>
-      <div class="tab-row" style="margin-bottom:10px">
-        <div class="tab on" onclick="loadBets('all',this)">All</div>
-        <div class="tab" onclick="loadBets('pending',this)">Pending</div>
-        <div class="tab" onclick="loadBets('won',this)">Won</div>
-        <div class="tab" onclick="loadBets('lost',this)">Lost</div>
+      <div class="card">
+        <h3>💰 Adjust Balance</h3>
+        <div style="margin-bottom:8px">
+          <label>User (phone or username)</label>
+          <input class="inp" id="balUser" placeholder="e.g. 0712345678"/>
+        </div>
+        <div class="row">
+          <input class="inp" type="number" id="balAmt" placeholder="Amount (+/-)"/>
+          <button onclick="adjustBal()">Apply</button>
+        </div>
+        <div class="res" id="balRes"></div>
       </div>
-      <div id="betList"><div class="loading">Loading...</div></div>
-    </div>
-  </div>
-
-  <!-- ACTIONS TAB -->
-  <div id="tab-actions" style="display:none">
-    <div class="section">
-      <h3>🔄 Settlement</h3>
-      <button class="action-btn" onclick="runSettle()">
-        🔄 Run Settlement Now — settle all pending bets
-      </button>
-      <div class="result" id="settleResult"></div>
-    </div>
-    <div class="section">
-      <h3>💰 Adjust User Balance</h3>
-      <div class="input-row">
-        <input type="text" id="balPhone" placeholder="Phone or username"/>
-        <input type="number" id="balAmount" placeholder="Amount (+ or -)"/>
-        <button onclick="adjustBalance()">Apply</button>
+      <div class="card">
+        <h3>👥 All Users</h3>
+        <div id="userList"><div class="loading">Loading...</div></div>
       </div>
-      <div class="result" id="balResult"></div>
     </div>
-    <div class="section">
-      <h3>🗑️ Clear API Cache</h3>
-      <button class="action-btn" onclick="clearCache()">
-        🗑️ Clear odds cache — force fresh API fetch
-      </button>
-      <div class="result" id="cacheResult"></div>
+
+    <!-- BETS PANEL -->
+    <div class="panel" id="panel-bets">
+      <div class="card">
+        <h3>🎯 Bets</h3>
+        <div class="search-row">
+          <select class="inp" id="betFilter" onchange="loadBets()">
+            <option value="all">All Bets</option>
+            <option value="pending">Pending</option>
+            <option value="won">Won</option>
+            <option value="lost">Lost</option>
+          </select>
+          <button onclick="loadBets()" style="background:var(--g);color:#000;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:13px">Refresh</button>
+        </div>
+        <div id="betList"><div class="loading">Loading...</div></div>
+      </div>
     </div>
-    <div class="section">
-      <h3>📢 Add Static Match</h3>
-      <input type="text" id="mHome" placeholder="Home team"/>
-      <input type="text" id="mAway" placeholder="Away team"/>
-      <input type="text" id="mLeague" placeholder="League name"/>
-      <input type="datetime-local" id="mDate"/>
-      <button class="action-btn" onclick="addMatch()" style="margin-top:4px">➕ Add Match</button>
-      <div class="result" id="matchResult"></div>
+
+    <!-- TRANSACTIONS PANEL -->
+    <div class="panel" id="panel-transactions">
+      <div class="card">
+        <h3>💰 Transactions</h3>
+        <div class="search-row">
+          <select class="inp" id="txFilter" onchange="loadTx()">
+            <option value="all">All</option>
+            <option value="deposit">Deposits</option>
+            <option value="withdrawal">Withdrawals</option>
+            <option value="win">Winnings</option>
+            <option value="bonus">Bonuses</option>
+          </select>
+          <button onclick="loadTx()" style="background:var(--g);color:#000;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:13px">Refresh</button>
+        </div>
+        <div id="txList"><div class="loading">Loading...</div></div>
+      </div>
     </div>
+
+    <!-- MATCHES PANEL -->
+    <div class="panel" id="panel-matches">
+      <div class="card">
+        <h3>➕ Add Match</h3>
+        <div style="margin-bottom:8px">
+          <label>Home Team</label>
+          <input class="inp" id="mHome" placeholder="e.g. Kenya"/>
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Away Team</label>
+          <input class="inp" id="mAway" placeholder="e.g. Uganda"/>
+        </div>
+        <div style="margin-bottom:8px">
+          <label>League</label>
+          <input class="inp" id="mLeague" placeholder="e.g. 🇰🇪 Kenya Premier League"/>
+        </div>
+        <div style="margin-bottom:8px">
+          <label>Kick-off Date & Time</label>
+          <input class="inp" type="datetime-local" id="mDate"/>
+        </div>
+        <button class="gbtn" onclick="addMatch()">➕ Add Match</button>
+        <div class="res" id="matchRes"></div>
+      </div>
+      <div class="card">
+        <h3>⚽ Upcoming Matches</h3>
+        <div id="matchList"><div class="loading">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- ACTIONS PANEL -->
+    <div class="panel" id="panel-actions">
+      <div class="card">
+        <h3>🔄 Settlement</h3>
+        <p style="font-size:13px;color:var(--mt);margin-bottom:12px">Settle all pending bets against latest match results.</p>
+        <button class="gbtn" onclick="runSettle()">🔄 Run Settlement Now</button>
+        <div class="res" id="settleRes"></div>
+      </div>
+      <div class="card">
+        <h3>🗑️ Clear API Cache</h3>
+        <p style="font-size:13px;color:var(--mt);margin-bottom:12px">Force fresh match data from API on next load.</p>
+        <button class="gbtn" onclick="clearCache()">🗑️ Clear Odds Cache</button>
+        <div class="res" id="cacheRes"></div>
+      </div>
+      <div class="card">
+        <h3>🔧 Fix DB Indexes</h3>
+        <p style="font-size:13px;color:var(--mt);margin-bottom:12px">Run if registration is failing with "already taken" errors.</p>
+        <button class="gbtn" onclick="fixIndexes()">🔧 Fix Indexes</button>
+        <div class="res" id="indexRes"></div>
+      </div>
+      <div class="card">
+        <h3>📊 System Info</h3>
+        <button class="gbtn" onclick="loadHealth()">Check System Health</button>
+        <div class="res" id="healthRes"></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
 <script>
-let PWD = '';
+let PWD='', loginAttempts=0;
 
+// ── AUTH ──
 function doLogin(){
-  const p = document.getElementById('adminPwd').value;
+  const p=document.getElementById('adminPwd').value;
+  const btn=document.getElementById('loginBtn');
   if(!p){ showLoginErr('Enter password'); return; }
-  PWD = p;
-  // Test with a real API call
-  apiFetch('/api/admin/stats')
-    .then(d => {
+  if(loginAttempts>=5){ showLoginErr('Too many attempts. Refresh page.'); return; }
+  loginAttempts++;
+  PWD=p;
+  btn.disabled=true; btn.textContent='Checking...';
+  api('/api/admin/stats')
+    .then(d=>{
       if(d.success){
-        document.getElementById('loginWrap').style.display='none';
-        document.getElementById('dash').style.display='block';
-        loadStats();
-        loadUsers();
-        loadBets('all');
+        document.getElementById('loginScreen').style.display='none';
+        document.getElementById('dashboard').style.display='block';
+        loginAttempts=0;
+        loadAll();
+        setInterval(()=>{ document.getElementById('adminTime').textContent=new Date().toLocaleTimeString(); },1000);
+        setInterval(loadStats,30000);
       } else {
         showLoginErr('Wrong password');
         PWD='';
+        btn.disabled=false; btn.textContent='Access Panel';
       }
     })
-    .catch(()=>{ showLoginErr('Wrong password'); PWD=''; });
+    .catch(()=>{ showLoginErr('Connection error'); PWD=''; btn.disabled=false; btn.textContent='Access Panel'; });
 }
 
-function showLoginErr(msg){
-  const e=document.getElementById('loginErr');
-  e.textContent=msg; e.style.display='block';
-}
-
-function logout(){
+function doLogout(){
   PWD='';
-  document.getElementById('loginWrap').style.display='flex';
-  document.getElementById('dash').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('dashboard').style.display='none';
   document.getElementById('adminPwd').value='';
+  document.getElementById('loginBtn').disabled=false;
+  document.getElementById('loginBtn').textContent='Access Panel';
 }
 
-function apiFetch(url, opts={}){
-  return fetch(url, {
+function showLoginErr(m){
+  const e=document.getElementById('loginErr');
+  e.textContent=m; e.style.display='block';
+  setTimeout(()=>e.style.display='none',3000);
+}
+
+// ── API ──
+function api(url,opts={}){
+  return fetch(url,{
     ...opts,
-    headers: { 'Content-Type':'application/json', 'x-admin-secret': PWD, ...(opts.headers||{}) }
+    headers:{'Content-Type':'application/json','x-admin-secret':PWD,...(opts.headers||{})}
   }).then(r=>r.json());
 }
 
-function showTab(name, el){
-  ['users','bets','actions'].forEach(t=>{
-    document.getElementById('tab-'+t).style.display = t===name?'block':'none';
-  });
-  document.querySelectorAll('.tab-row .tab').forEach(t=>t.classList.remove('on'));
+// ── PANELS ──
+function showPanel(name,el){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.getElementById('panel-'+name).classList.add('on');
   el.classList.add('on');
+  if(name==='bets') loadBets();
+  if(name==='transactions') loadTx();
+  if(name==='matches') loadMatches();
 }
+
+function loadAll(){ loadStats(); loadUsers(); }
 
 // ── STATS ──
 async function loadStats(){
-  const d = await apiFetch('/api/admin/stats');
+  const d=await api('/api/admin/stats');
   if(!d.success) return;
-  document.getElementById('statUsers').textContent    = d.users||0;
-  document.getElementById('statBets').textContent     = d.bets||0;
-  document.getElementById('statPending').textContent  = d.pending||0;
-  document.getElementById('statDeposits').textContent = 'KES '+(d.deposits||0).toLocaleString();
+  document.getElementById('sUsers').textContent=d.users||0;
+  document.getElementById('sBets').textContent=d.bets||0;
+  document.getElementById('sPending').textContent=d.pending||0;
+  document.getElementById('sDeposits').textContent='KES '+(d.deposits||0).toLocaleString();
 }
 
 // ── USERS ──
 async function loadUsers(){
-  const d = await apiFetch('/api/admin/users');
-  const el = document.getElementById('userList');
-  if(!d.success||!d.data.length){ el.innerHTML='<div class="loading">No users found</div>'; return; }
-  el.innerHTML = d.data.map(u=>`
-    <div class="user-card">
-      <button class="del-btn" onclick="deleteByPhone('${u.phone}','${u.username}')">Delete</button>
-      <div class="uname">${u.username}</div>
-      <div class="uinfo">${u.phone} · Joined ${new Date(u.createdAt).toLocaleDateString()} · <span class="ubal">KES ${u.balance}</span></div>
+  const d=await api('/api/admin/users');
+  const el=document.getElementById('userList');
+  if(!d.success||!d.data?.length){ el.innerHTML='<div class="empty">No users yet</div>'; return; }
+  el.innerHTML=d.data.map(u=>`
+    <div class="ucard">
+      <div class="info">
+        <div class="name">${u.username} <span class="badge ${u.isActive?'b-active':'b-suspended'}">${u.isActive?'Active':'Suspended'}</span></div>
+        <div class="sub">${formatPhone(u.phone)} · Joined ${new Date(u.createdAt).toLocaleDateString('en-KE')}</div>
+      </div>
+      <div class="right">
+        <div class="bal">KES ${(u.balance||0).toLocaleString()}</div>
+        <button class="delbtn" onclick="delUser('${u.phone}','${u.username}')">Delete</button>
+        <button class="suspbtn" onclick="toggleUser('${u._id}','${u.isActive}')">${u.isActive?'Suspend':'Unsuspend'}</button>
+      </div>
     </div>`).join('');
 }
 
-async function findUser(){
-  const q = document.getElementById('searchUser').value.trim();
+async function searchUser(){
+  const q=document.getElementById('uSearch').value.trim();
   if(!q) return;
-  const d = await apiFetch(`/api/admin/user/${encodeURIComponent(q)}`);
-  const el = document.getElementById('findResult');
+  const d=await api(`/api/admin/user/${encodeURIComponent(q)}`);
+  const el=document.getElementById('uSearchRes');
   el.style.display='block';
-  if(d.success && d.user){
-    el.className='result ok';
-    el.textContent = `Found: ${d.user.username} | ${d.user.phone} | Balance: KES ${d.user.balance} | Bets: ${d.user.bets}`;
+  if(d.success&&d.user){
+    el.className='res ok';
+    el.innerHTML=`✅ Found: <b>${d.user.username}</b> | ${formatPhone(d.user.phone)} | Balance: <b>KES ${d.user.balance}</b> | Bets: ${d.user.bets}`;
   } else {
-    el.className='result err';
-    el.textContent = d.message||'Not found';
+    el.className='res er';
+    el.textContent='❌ '+(d.message||'Not found');
   }
 }
 
-async function deleteUser(){
-  const q = document.getElementById('searchUser').value.trim();
-  if(!q){ alert('Enter phone or username first'); return; }
+async function deleteSearched(){
+  const q=document.getElementById('uSearch').value.trim();
+  if(!q){ alert('Search for a user first'); return; }
   if(!confirm(`Delete user "${q}"? This cannot be undone.`)) return;
-  const d = await apiFetch(`/api/admin/user/${encodeURIComponent(q)}`, { method:'DELETE' });
-  const el = document.getElementById('findResult');
+  const d=await api(`/api/admin/user/${encodeURIComponent(q)}`,{method:'DELETE'});
+  const el=document.getElementById('uSearchRes');
   el.style.display='block';
-  if(d.success){ el.className='result ok'; el.textContent='✅ '+d.message; loadUsers(); }
-  else { el.className='result err'; el.textContent='❌ '+(d.message||'Failed'); }
+  if(d.success){ el.className='res ok'; el.textContent='✅ '+d.message; loadUsers(); loadStats(); }
+  else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
 }
 
-async function deleteByPhone(phone, username){
-  if(!confirm(`Delete user "${username}"?`)) return;
-  const d = await apiFetch(`/api/admin/user/${encodeURIComponent(phone)}`, { method:'DELETE' });
+async function delUser(phone,name){
+  if(!confirm(`Delete ${name}? Cannot be undone.`)) return;
+  const d=await api(`/api/admin/user/${encodeURIComponent(phone)}`,{method:'DELETE'});
   if(d.success){ loadUsers(); loadStats(); }
   else alert('Failed: '+d.message);
 }
 
+async function toggleUser(id,isActive){
+  const d=await api('/api/admin/user/toggle',{method:'POST',body:JSON.stringify({userId:id,active:isActive==='true'?false:true})});
+  if(d.success) loadUsers();
+  else alert('Failed: '+d.message);
+}
+
+async function adjustBal(){
+  const user=document.getElementById('balUser').value.trim();
+  const amt=parseFloat(document.getElementById('balAmt').value);
+  const el=document.getElementById('balRes');
+  if(!user||isNaN(amt)){ el.style.display='block'; el.className='res er'; el.textContent='Fill both fields'; return; }
+  const d=await api('/api/admin/balance',{method:'POST',body:JSON.stringify({identifier:user,amount:amt})});
+  el.style.display='block';
+  if(d.success){ el.className='res ok'; el.textContent=`✅ New balance: KES ${d.balance}`; loadUsers(); }
+  else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
+}
+
 // ── BETS ──
-async function loadBets(status, el){
-  if(el){ document.querySelectorAll('#tab-bets .tab').forEach(t=>t.classList.remove('on')); el.classList.add('on'); }
-  const d = await apiFetch(`/api/admin/bets?status=${status}`);
-  const list = document.getElementById('betList');
-  if(!d.success||!d.data.length){ list.innerHTML='<div class="loading">No bets found</div>'; return; }
-  list.innerHTML = d.data.map(b=>`
-    <div class="bet-card ${b.status}">
-      <b>${b.betCode}</b> <span class="badge ${b.status}">${b.status.toUpperCase()}</span>
-      <div style="margin-top:4px;color:#aaa">${b.selections.map(s=>`${s.homeTeam} vs ${s.awayTeam} (${s.pick})`).join(' + ')}</div>
-      <div style="margin-top:4px">Stake: <b>KES ${b.stake}</b> · Odds: <b>${b.totalOdds}x</b> · Win: <b style="color:#4caf50">KES ${b.potentialWin}</b></div>
+async function loadBets(){
+  const status=document.getElementById('betFilter').value;
+  const d=await api(`/api/admin/bets?status=${status}`);
+  const el=document.getElementById('betList');
+  if(!d.success||!d.data?.length){ el.innerHTML='<div class="empty">No bets found</div>'; return; }
+  el.innerHTML=d.data.map(b=>`
+    <div class="bcard ${b.status}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="bc">${b.betCode}</span>
+        <span class="badge b-${b.status}">${b.status}</span>
+      </div>
+      <div class="bsub">${b.selections?.map(s=>`${s.homeTeam} vs ${s.awayTeam} → <b>${s.pick}</b>`).join('<br>')}</div>
+      <div class="bamt" style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap">
+        <span>Stake: <b>KES ${b.stake}</b></span>
+        <span>Odds: <b>${b.totalOdds}x</b></span>
+        <span style="color:var(--g)">Win: <b>KES ${b.potentialWin}</b></span>
+        <span style="color:var(--mt);font-size:11px">${new Date(b.createdAt).toLocaleString('en-KE')}</span>
+      </div>
     </div>`).join('');
+}
+
+// ── TRANSACTIONS ──
+async function loadTx(){
+  const type=document.getElementById('txFilter').value;
+  const d=await api(`/api/admin/transactions?type=${type}`);
+  const el=document.getElementById('txList');
+  if(!d.success||!d.data?.length){ el.innerHTML='<div class="empty">No transactions</div>'; return; }
+  const cls={deposit:'dep',withdrawal:'wd',win:'win',bonus:'dep',stake:'wd',refund:'dep'};
+  el.innerHTML=d.data.map(t=>`
+    <div class="txcard">
+      <div class="txl">
+        <div class="txtype">${t.type}</div>
+        <div class="txsub">${t.description||''} · ${new Date(t.createdAt).toLocaleString('en-KE')}</div>
+      </div>
+      <div class="txr">
+        <div class="txamt ${cls[t.type]||''}">${t.amount>0?'+':''}KES ${Math.abs(t.amount).toLocaleString()}</div>
+        <div class="txbal">Bal: KES ${(t.balance||0).toLocaleString()}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── MATCHES ──
+async function loadMatches(){
+  const d=await api('/api/admin/matches');
+  const el=document.getElementById('matchList');
+  if(!d.success||!d.data?.length){ el.innerHTML='<div class="empty">No upcoming matches</div>'; return; }
+  el.innerHTML=d.data.map(m=>`
+    <div class="mcard">
+      <div class="ml">
+        <div class="mname">${m.homeTeam} vs ${m.awayTeam}</div>
+        <div class="msub">${m.league} · ${new Date(m.commenceTime).toLocaleString('en-KE')}</div>
+      </div>
+      <div class="mr">
+        <button onclick="delMatch('${m.matchId}')">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+async function addMatch(){
+  const home=document.getElementById('mHome').value.trim();
+  const away=document.getElementById('mAway').value.trim();
+  const league=document.getElementById('mLeague').value.trim();
+  const date=document.getElementById('mDate').value;
+  const el=document.getElementById('matchRes');
+  if(!home||!away||!league||!date){ el.style.display='block'; el.className='res er'; el.textContent='Fill all fields'; return; }
+  const d=await api('/api/admin/match',{method:'POST',body:JSON.stringify({homeTeam:home,awayTeam:away,league,commenceTime:new Date(date).toISOString()})});
+  el.style.display='block';
+  if(d.success){ el.className='res ok'; el.textContent='✅ Match added! Clear cache to show it.'; loadMatches(); }
+  else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
+}
+
+async function delMatch(matchId){
+  if(!confirm('Delete this match?')) return;
+  const d=await api(`/api/admin/match/${encodeURIComponent(matchId)}`,{method:'DELETE'});
+  if(d.success) loadMatches();
+  else alert('Failed: '+d.message);
 }
 
 // ── ACTIONS ──
 async function runSettle(){
-  const el = document.getElementById('settleResult');
-  el.style.display='block'; el.className='result'; el.textContent='Running...';
-  const d = await apiFetch('/api/admin/settle', { method:'POST' });
-  if(d.success){
-    el.className='result ok';
-    el.textContent = `✅ Settled: ${d.result?.settled||0} bets, Paid: ${d.result?.paid||0} users`;
-    loadStats();
-  } else { el.className='result err'; el.textContent='❌ Failed'; }
-}
-
-async function adjustBalance(){
-  const q      = document.getElementById('balPhone').value.trim();
-  const amount = parseFloat(document.getElementById('balAmount').value);
-  const el     = document.getElementById('balResult');
-  if(!q||isNaN(amount)){ el.style.display='block'; el.className='result err'; el.textContent='Enter phone and amount'; return; }
-  const d = await apiFetch('/api/admin/balance', { method:'POST', body: JSON.stringify({identifier:q, amount}) });
-  el.style.display='block';
-  if(d.success){ el.className='result ok'; el.textContent=`✅ New balance: KES ${d.balance}`; loadUsers(); }
-  else { el.className='result err'; el.textContent='❌ '+(d.message||'Failed'); }
+  const el=document.getElementById('settleRes');
+  el.style.display='block'; el.className='res'; el.textContent='Running settlement...';
+  const d=await api('/api/admin/settle',{method:'POST'});
+  if(d.success){ el.className='res ok'; el.textContent=`✅ Settled: ${d.result?.settled||0} bets · Paid: ${d.result?.paid||0} users`; loadStats(); }
+  else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
 }
 
 async function clearCache(){
-  const el = document.getElementById('cacheResult');
-  el.style.display='block'; el.className='result'; el.textContent='Clearing...';
-  const d = await apiFetch('/api/odds/cache/clear', { method:'POST' });
-  if(d.success){ el.className='result ok'; el.textContent='✅ Cache cleared! Matches will refresh on next load.'; }
-  else { el.className='result err'; el.textContent='❌ Failed'; }
+  const el=document.getElementById('cacheRes');
+  el.style.display='block'; el.className='res'; el.textContent='Clearing...';
+  const d=await api('/api/odds/cache/clear',{method:'POST'});
+  if(d.success){ el.className='res ok'; el.textContent='✅ Cache cleared! Matches will refresh on next load.'; }
+  else { el.className='res er'; el.textContent='❌ Failed'; }
 }
 
-async function addMatch(){
-  const home   = document.getElementById('mHome').value.trim();
-  const away   = document.getElementById('mAway').value.trim();
-  const league = document.getElementById('mLeague').value.trim();
-  const date   = document.getElementById('mDate').value;
-  const el     = document.getElementById('matchResult');
-  if(!home||!away||!league||!date){ el.style.display='block'; el.className='result err'; el.textContent='Fill all fields'; return; }
-  const d = await apiFetch('/api/admin/match', {
-    method:'POST',
-    body: JSON.stringify({ homeTeam:home, awayTeam:away, league, commenceTime:new Date(date).toISOString() })
-  });
-  el.style.display='block';
-  if(d.success){ el.className='result ok'; el.textContent='✅ Match added! Clear cache to show it.'; }
-  else { el.className='result err'; el.textContent='❌ '+(d.message||'Failed'); }
+async function fixIndexes(){
+  const el=document.getElementById('indexRes');
+  el.style.display='block'; el.className='res'; el.textContent='Fixing...';
+  const d=await api('/api/admin/fix-indexes',{method:'POST'});
+  if(d.success){ el.className='res ok'; el.textContent=`✅ ${d.message} · Removed ${d.deletedBadRecords||0} bad records`; }
+  else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
 }
+
+async function loadHealth(){
+  const el=document.getElementById('healthRes');
+  el.style.display='block'; el.className='res'; el.textContent='Checking...';
+  const d=await fetch('/api/health').then(r=>r.json());
+  el.className='res ok';
+  el.textContent=`✅ Server up · Uptime: ${Math.floor(d.uptime/60)}m · Time: ${d.time}`;
+}
+
+// ── HELPERS ──
+function formatPhone(p){ return p?p.replace('254','0'):'—'; }
+
+document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&document.getElementById('loginScreen').style.display!=='none') doLogin(); });
 </script>
 </body>
 </html>
