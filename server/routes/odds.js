@@ -172,14 +172,15 @@ router.get('/featured', async (req, res) => {
   if (cached) return res.json({ success:true, data:cached, count:cached.length });
 
   // Always start with static so page is never empty
-  let all = getAllUpcoming();
+  let all = getAllUpcoming(); // already smartSorted: today first
 
-  // Then try to enrich with live API data
+  // Try to enrich with live API data
   const PRIORITY = ['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores'];
   for (const sport of PRIORITY) {
     try {
       const live = await fetchForSport(sport);
-      // Replace static with live data for this sport
+      if (!live.length) continue;
+      // Merge: replace static matches for this sport with live data
       const liveIds = new Set(live.map(m=>m.matchId));
       all = all.filter(m => m.sport!==sport || liveIds.has(m.matchId));
       for (const m of live) {
@@ -188,8 +189,19 @@ router.get('/featured', async (req, res) => {
     } catch {}
   }
 
-  all.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
-  all = all.slice(0,60);
+  // SmartSort final: today first, then upcoming by time
+  const now = new Date();
+  const today = new Date(now.toDateString());
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+  all = all
+    .filter(m => new Date(m.commenceTime) > new Date(now - 3600000))
+    .sort((a,b) => {
+      const ta=new Date(a.commenceTime), tb=new Date(b.commenceTime);
+      const aT=ta>=today&&ta<tomorrow, bT=tb>=today&&tb<tomorrow;
+      if(aT&&!bT) return -1; if(!aT&&bT) return 1;
+      return ta-tb;
+    });
+  all = all.slice(0,80);
 
   C.set('featured', all);
 
@@ -220,6 +232,13 @@ router.get('/matches/:sport', async (req, res) => {
     ).catch(()=>{}));
   }
 
+  // SmartSort — today first
+  const now2=new Date(), today2=new Date(now2.toDateString()), tmr=new Date(today2);tmr.setDate(tmr.getDate()+1);
+  matches.sort((a,b)=>{
+    const ta=new Date(a.commenceTime),tb=new Date(b.commenceTime);
+    const aT=ta>=today2&&ta<tmr, bT=tb>=today2&&tb<tmr;
+    if(aT&&!bT)return -1; if(!aT&&bT)return 1; return ta-tb;
+  });
   res.json({ success:true, data:matches, count:matches.length });
 });
 

@@ -46,6 +46,25 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── SECURITY: Block parameter pollution & injection ──
+app.use((req, res, next) => {
+  // Block requests trying to set balance/role directly in body
+  const dangerous = ['balance','role','passwordHash','isActive','loginAttempts','_id','__v'];
+  if (req.body && typeof req.body === 'object') {
+    for (const key of dangerous) {
+      if (key in req.body) {
+        console.warn(`[SECURITY] Blocked dangerous field "${key}" from ${req.ip} → ${req.path}`);
+        delete req.body[key];
+      }
+    }
+  }
+  // Block prototype pollution
+  if (req.body && (req.body.__proto__ || req.body.constructor || req.body.prototype)) {
+    return res.status(400).json({ success: false, message: 'Invalid request' });
+  }
+  next();
+});
+
 // ── RATE LIMITING (global) ──
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -83,6 +102,9 @@ app.use('/api/aviator',  aviatorRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);
 app.use('/api/withdraw', withdrawRoutes);
+// B2C callbacks (no auth needed — called by Safaricom)
+app.post('/api/withdraw/b2c/result',  withdrawRoutes);
+app.post('/api/withdraw/b2c/timeout', withdrawRoutes);
 app.use('/api/admin',   adminRoutes);
 
 // ── HEALTH ──

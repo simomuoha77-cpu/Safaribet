@@ -43,4 +43,21 @@ userSchema.methods.toJSON = function() {
   return obj;
 };
 
+// Prevent negative balance
+userSchema.pre('save', function(next) {
+  if (this.balance < 0) this.balance = 0;
+  next();
+});
+
+// Log any direct balance changes (security audit)
+userSchema.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  // Only allow $inc for balance — block $set balance from non-internal sources
+  if (update?.$set?.balance !== undefined) {
+    console.warn('[SECURITY] Direct $set balance attempted — blocked');
+    delete update.$set.balance;
+  }
+  next();
+});
+
 module.exports = mongoose.model('User', userSchema);
