@@ -307,11 +307,11 @@ header{
 <header>
   <div class="logo">Beta<span>KE</span></div>
   <div class="hright">
-    <div class="balpill" id="balpill" onclick="location.href='/pages/deposit.html'">
+    <div class="balpill" id="balpill" onclick="location.href='/deposit'">
       KES <span id="balv">0.00</span> <span class="dep">+Deposit</span>
     </div>
-    <button class="hbtn o" id="loginBtn" onclick="location.href='/pages/login.html'">Login</button>
-    <button class="hbtn g" id="joinBtn"  onclick="location.href='/pages/register.html'">Join</button>
+    <button class="hbtn o" id="loginBtn" onclick="location.href='/login'">Login</button>
+    <button class="hbtn g" id="joinBtn"  onclick="location.href='/register'">Join</button>
     <button class="hbtn o" id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
   </div>
 </header>
@@ -339,7 +339,7 @@ header{
       <div style="font-size:10px;color:var(--g);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">🎁 Welcome Bonus</div>
       <div style="font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1.1;margin-bottom:3px">Bet & <span style="color:var(--g)">Win Big</span></div>
       <div style="font-size:11px;color:var(--mt);margin-bottom:8px">KES 1,000 on first deposit</div>
-      <button onclick="location.href='/pages/register.html'" style="background:var(--g);color:#000;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">Claim →</button>
+      <button onclick="location.href='/register'" style="background:var(--g);color:#000;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">Claim →</button>
     </div>
     <div style="position:absolute;right:118px;top:50%;transform:translateY(-50%);text-align:center;z-index:1">
       <div style="font-family:'Rajdhani',sans-serif;font-size:32px;font-weight:800;color:var(--yl);line-height:1;text-shadow:0 0 20px rgba(255,214,0,0.4)">1,000</div>
@@ -365,7 +365,7 @@ header{
         <div style="font-size:9px;color:var(--g);font-weight:600">Bet Now</div>
       </div>
     </div>
-    <div onclick="location.href='/pages/aviator.html'" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,59,59,0.2);background:linear-gradient(135deg,#1a0505,#0d0505)">
+    <div onclick="location.href='/aviator'" style="flex-shrink:0;width:130px;height:75px;border-radius:10px;overflow:hidden;position:relative;cursor:pointer;border:1px solid rgba(255,59,59,0.2);background:linear-gradient(135deg,#1a0505,#0d0505)">
       <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
         <div style="font-size:26px">✈️</div>
         <div style="font-size:11px;font-weight:700;color:#fff">Aviator</div>
@@ -461,7 +461,7 @@ header{
       </div>
     </div>
     <div id="slipAction">
-      <button class="login-prompt" onclick="location.href='/pages/login.html'">Login to Place Bet</button>
+      <button class="login-prompt" onclick="location.href='/login'">Login to Place Bet</button>
     </div>
   </div>
 </div>
@@ -478,7 +478,7 @@ header{
     <div class="modal-row"><span class="mr-l">Net Payout</span><span class="mr-r" style="color:var(--yl)" id="mPayout">—</span></div>
     <div class="modal-row"><span class="mr-l">New Balance</span><span class="mr-r" style="color:var(--g)" id="mBal">—</span></div>
     <button class="mbtn g" onclick="closeSuccess()">Continue Betting</button>
-    <button class="mbtn o" onclick="location.href='/pages/my-bets.html'">View My Bets</button>
+    <button class="mbtn o" onclick="location.href='/my-bets'">View My Bets</button>
   </div>
 </div>
 
@@ -487,15 +487,15 @@ header{
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
     Home
   </div>
-  <div class="bni" id="bni-aviator" onclick="location.href='/pages/aviator.html'">
+  <div class="bni" id="bni-aviator" onclick="location.href='/aviator'">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>
     Aviator
   </div>
-  <div class="bni" id="bni-bets" onclick="location.href='/pages/my-bets.html'">
+  <div class="bni" id="bni-bets" onclick="location.href='/my-bets'">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>
     My Bets
   </div>
-  <div class="bni" id="bni-account" onclick="location.href='/pages/account.html'">
+  <div class="bni" id="bni-account" onclick="location.href='/account'">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
     Account
   </div>
@@ -583,9 +583,13 @@ async function loadAvailableSports(){
       soccer_wc_qual_conmebol:    '🏆 WC Qual SA',
       soccer_wc_qual_africa:      '🌍 WC Qual AF',
       soccer_wc_qual_asia:        '🌏 WC Qual AS',
-      // Off-season (show graceful empty state when clicked)
-      soccer_epl:                 '⚽ Premier League',
-      soccer_uefa_champs_league:  '🏆 UCL',
+      soccer_epl:                 '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League',
+      soccer_ucl:                 '🏆 UCL',
+      soccer_bundesliga:          '🇩🇪 Bundesliga',
+      soccer_la_liga:             '🇪🇸 La Liga',
+      soccer_serie_a:             '🇮🇹 Serie A',
+      soccer_ligue_1:             '🇫🇷 Ligue 1',
+      soccer_copa_libertadores:   '🌎 Libertadores',
     };
 
     const nav=document.getElementById('stabs');
@@ -617,10 +621,11 @@ async function loadFirstWithMatches(sports){
     const d = await r.json();
 
     if(d.success && d.data && d.data.length > 0){
-      // Show "Upcoming Matches" heading — tab stays on World Cup but data is multi-league
-      document.getElementById('secTtl').textContent = 'Upcoming Matches';
-      // Mark no tab as selected — this is the combined view
+      document.getElementById('secTtl').textContent = 'World Cup 2026';
+      // Keep World Cup tab active
       document.querySelectorAll('.stab').forEach(t => t.classList.remove('on'));
+      const wcTab = document.querySelector('.stab[data-sport="soccer_world_cup"]');
+      if(wcTab) wcTab.classList.add('on');
       currentSport = 'featured';
       renderMatches(d.data);
       return;
@@ -628,8 +633,7 @@ async function loadFirstWithMatches(sports){
   } catch(e){ console.warn('Featured fetch failed:', e.message); }
 
   // Fallback: try each sport sequentially (old behaviour)
-  const preferredOrder=['soccer_mls','soccer_brazil_serie_a','soccer_world_cup',
-                        'soccer_friendlies','soccer_kenya_premier_league'];
+  const preferredOrder=['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_epl','soccer_ucl','soccer_bundesliga','soccer_la_liga','soccer_serie_a','soccer_ligue_1','soccer_copa_libertadores','soccer_friendlies','soccer_kenya_premier_league','soccer_caf_champions_league','soccer_copa_america'];
   const sorted=[
     ...preferredOrder.map(k=>sports.find(s=>s.key===k)).filter(Boolean),
     ...sports.filter(s=>s.key!=='live'&&!preferredOrder.includes(s.key))
@@ -811,7 +815,7 @@ function togOdd(matchId, homeTeam, awayTeam, league, sport, pick, pickLabel, odd
   }
 
   updateSlip();
-  if(slip.length===1&&!same) openSlip();
+  if(!same) openSlip();
 }
 
 // ── SLIP UI ──
@@ -888,7 +892,7 @@ function closeSlip(){
 
 // ── PLACE BET ──
 async function placeBet(){
-  if(!USER){ location.href='/pages/login.html'; return; }
+  if(!USER){ location.href='/login'; return; }
   if(!slip.length) return showT('Add selections first','err');
 
   const stake=parseFloat(document.getElementById('stakeInp').value);

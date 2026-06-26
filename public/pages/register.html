@@ -2,129 +2,157 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Register – BetaKE</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
-:root{--g:#00c853;--g2:#00e65c;--bg:#080c08;--s1:#0d120d;--s3:#192019;--bd:rgba(0,200,83,0.12);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden}
-body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at 70% 20%,rgba(0,200,83,0.06) 0%,transparent 50%);pointer-events:none}
-
-.logo-wrap{text-align:center;margin-bottom:24px}
-.logo{font-family:'Rajdhani',sans-serif;font-size:38px;font-weight:700;color:var(--g);letter-spacing:2px;line-height:1}
-.logo span{color:var(--yl)}
-.tagline{font-size:13px;color:var(--mt);margin-top:5px}
-
-/* Bonus banner */
-.bonus-banner{background:linear-gradient(135deg,rgba(0,200,83,0.12),rgba(0,100,40,0.08));border:1px solid rgba(0,200,83,0.2);border-radius:12px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px}
-.bonus-icon{font-size:24px;flex-shrink:0}
-.bonus-text{font-size:13px;color:var(--tx)}
-.bonus-text strong{color:var(--yl);font-size:15px}
-
-.card{background:rgba(13,18,13,0.95);border:1px solid var(--bd);border-radius:20px;padding:28px 24px;width:100%;max-width:400px;backdrop-filter:blur(10px);box-shadow:0 8px 40px rgba(0,0,0,0.4)}
-.card-title{font-family:'Rajdhani',sans-serif;font-size:24px;font-weight:700;margin-bottom:4px}
-.card-sub{font-size:13px;color:var(--mt);margin-bottom:24px}
-
-.field{margin-bottom:14px}
-.field label{display:block;font-size:12px;color:var(--mt);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
-.field input{width:100%;background:rgba(19,26,19,0.8);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:13px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;transition:all 0.2s;font-family:'Inter',sans-serif}
-.field input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(0,200,83,0.08)}
-.field input::placeholder{color:var(--mt);font-weight:400}
-.field .hint{font-size:11px;color:var(--mt);margin-top:5px}
-
-.submit-btn{width:100%;padding:15px;background:linear-gradient(135deg,#00e65c,#00c853);color:#000;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer;margin-top:6px;box-shadow:0 4px 20px rgba(0,200,83,0.3);transition:all 0.2s;font-family:'Inter',sans-serif}
-.submit-btn:hover{box-shadow:0 6px 28px rgba(0,200,83,0.5);transform:translateY(-1px)}
-.submit-btn:disabled{background:#1a2a1a;color:var(--mt);cursor:not-allowed;box-shadow:none;transform:none}
-
-.terms{font-size:11px;color:var(--mt);text-align:center;margin-top:14px;line-height:1.5}
-.divider{display:flex;align-items:center;gap:12px;margin:18px 0;color:var(--mt);font-size:12px}
-.divider::before,.divider::after{content:'';flex:1;height:1px;background:rgba(0,200,83,0.08)}
-.alt-link{text-align:center;font-size:14px;color:var(--mt)}
-.alt-link a{color:var(--g);text-decoration:none;font-weight:700}
-.err-msg{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.25);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--rd);margin-bottom:14px;display:none}
-.ok-msg{background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.25);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--g);margin-bottom:14px;display:none}
-.back-link{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mt);cursor:pointer;margin-bottom:20px;font-weight:600}
-.back-link svg{width:16px;height:16px;fill:currentColor}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1f0f;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.logo{text-align:center;margin-bottom:28px}
+.logo h1{font-size:32px;font-weight:900;color:#4caf50}
+.logo h1 span{color:#f5c518}
+.logo p{color:#4caf50aa;font-size:13px;margin-top:4px}
+.bonus-bar{background:#1a2e1a;border:1px solid #4caf5044;border-radius:12px;padding:12px 16px;margin-bottom:20px;width:100%;max-width:380px;display:flex;align-items:center;gap:10px;font-size:13px;color:#ccc}
+.bonus-bar span{color:#f5c518;font-weight:700}
+.card{background:#111;border-radius:20px;padding:28px 24px;width:100%;max-width:380px;border:1px solid #1e3a1e}
+.err{background:#ff17441a;border:1px solid #ff174444;color:#ff6b6b;padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+.ok{background:#4caf5011;border:1px solid #4caf5044;color:#4caf50;padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+label{display:block;font-size:11px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px;margin-top:16px}
+input{width:100%;background:#1a1a1a;border:1.5px solid #2a2a2a;border-radius:12px;padding:15px;color:#fff;font-size:16px;outline:none;transition:border .2s}
+input:focus{border-color:#4caf50}
+.hint{font-size:11px;color:#555;margin-top:5px}
+.btn{width:100%;background:#4caf50;color:#000;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:800;cursor:pointer;margin-top:20px;transition:background .2s}
+.btn:hover{background:#43a047}
+.btn:disabled{background:#2a4a2a;color:#555;cursor:not-allowed}
+.footer{text-align:center;margin-top:16px;font-size:13px;color:#555}
+.footer a{color:#4caf50;text-decoration:none;font-weight:600}
+.back{display:flex;align-items:center;gap:6px;color:#555;font-size:13px;margin-bottom:20px;cursor:pointer}
+.back:hover{color:#4caf50}
+h2{font-size:22px;font-weight:800;color:#fff;margin-bottom:4px}
+.sub{font-size:13px;color:#555;margin-bottom:4px}
 </style>
 </head>
 <body>
 
-<div class="logo-wrap">
-  <div class="logo">Beta<span>KE</span></div>
-  <div class="tagline">Join thousands of winners today</div>
+<div class="logo">
+  <h1>Beta<span>KE</span></h1>
+  <p>Kenya's Premier Betting Platform</p>
 </div>
 
-<div class="bonus-banner">
-  <div class="bonus-icon">🎁</div>
-  <div class="bonus-text">Register now and get <strong>KES 1,000</strong> welcome bonus on first deposit!</div>
+<div class="bonus-bar">
+  🎁 Register now and get <span>KES 20</span> welcome bonus on first deposit!
 </div>
 
 <div class="card">
-  <div class="back-link" onclick="location.href='/'">
-    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-    Back to Home
-  </div>
-  <div class="card-title">Create Account</div>
-  <div class="card-sub">Free to join, takes 30 seconds</div>
+  <div class="back" onclick="location.href='/'">← Back to Home</div>
+  <h2>Create Account</h2>
+  <p class="sub">Free to join, takes 30 seconds</p>
 
-  <div class="err-msg" id="errMsg"></div>
-  <div class="ok-msg" id="okMsg"></div>
+  <div class="err" id="err"></div>
+  <div class="ok" id="ok"></div>
 
-  <div class="field">
-    <label>Username</label>
-    <input type="text" id="username" placeholder="e.g. JohnKe" maxlength="20"/>
-    <div class="hint">3–20 characters</div>
-  </div>
-  <div class="field">
-    <label>M-Pesa Phone Number</label>
-    <input type="tel" id="phone" placeholder="0712 345 678"/>
-    <div class="hint">Used for deposits & withdrawals</div>
-  </div>
-  <div class="field">
-    <label>Password</label>
-    <input type="password" id="password" placeholder="Minimum 6 characters"/>
-  </div>
-  <div class="field">
-    <label>Confirm Password</label>
-    <input type="password" id="confirmPw" placeholder="Repeat password" onkeydown="if(event.key==='Enter')register()"/>
-  </div>
+  <label>USERNAME</label>
+  <input type="text" id="username" placeholder="e.g. john123" maxlength="24" autocomplete="new-password"/>
+  <div class="hint">3–24 characters, letters and numbers only</div>
 
-  <button class="submit-btn" id="regBtn" onclick="register()">Create Free Account</button>
+  <label>M-PESA PHONE NUMBER</label>
+  <input type="tel" id="phone" placeholder="e.g. 0712345678" autocomplete="new-password"/>
+  <div class="hint">Used for deposits & withdrawals</div>
 
-  <div class="terms">By registering you confirm you are 18+ and agree to our Terms & Conditions</div>
-  <div class="divider">or</div>
-  <div class="alt-link">Already have an account? <a href="/pages/login.html">Sign in</a></div>
+  <label>PASSWORD</label>
+  <input type="password" id="password" placeholder="Min 6 characters" autocomplete="new-password"/>
+
+  <label>CONFIRM PASSWORD</label>
+  <input type="password" id="confirm" placeholder="Repeat password" autocomplete="new-password"/>
+
+  <button class="btn" id="btn" onclick="doRegister()">Create Free Account</button>
+
+  <div class="footer" style="margin-top:12px;font-size:11px;color:#444">
+    By registering you confirm you are 18+ and agree to our Terms
+  </div>
+</div>
+
+<div class="footer">
+  Already have an account? <a href="/login">Sign in</a>
 </div>
 
 <script>
-if(localStorage.getItem('token')) location.href='/';
+async function doRegister(){
+  const btn      = document.getElementById('btn');
+  const errEl    = document.getElementById('err');
+  const okEl     = document.getElementById('ok');
+  const username = document.getElementById('username').value.trim();
+  const phone    = document.getElementById('phone').value.trim();
+  const password = document.getElementById('password').value;
+  const confirm  = document.getElementById('confirm').value;
 
-async function register(){
-  const username=document.getElementById('username').value.trim();
-  const phone=document.getElementById('phone').value.trim();
-  const password=document.getElementById('password').value;
-  const confirm=document.getElementById('confirmPw').value;
-  const btn=document.getElementById('regBtn');
-  const err=document.getElementById('errMsg');
-  const ok=document.getElementById('okMsg');
-  err.style.display='none';ok.style.display='none';
-  if(!username||!phone||!password||!confirm){err.textContent='Please fill in all fields';err.style.display='block';return}
-  if(username.length<3){err.textContent='Username must be at least 3 characters';err.style.display='block';return}
-  if(!/^(\+254|0)[17]\d{8}$/.test(phone)){err.textContent='Enter a valid Kenyan number (e.g. 0712345678)';err.style.display='block';return}
-  if(password.length<6){err.textContent='Password must be at least 6 characters';err.style.display='block';return}
-  if(password!==confirm){err.textContent='Passwords do not match';err.style.display='block';return}
-  btn.disabled=true;btn.textContent='Creating account...';
-  try{
-    const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,phone,password})});
-    const d=await r.json();
-    if(d.success){
-      localStorage.setItem('token',d.token);localStorage.setItem('user',JSON.stringify(d.user));
-      ok.textContent='Account created! Welcome to BetaKE 🎉';ok.style.display='block';
-      setTimeout(()=>location.href='/',1000);
-    } else{err.textContent=d.message||'Registration failed';err.style.display='block';btn.disabled=false;btn.textContent='Create Free Account'}
-  }catch{err.textContent='Connection error. Try again.';err.style.display='block';btn.disabled=false;btn.textContent='Create Free Account'}
+  // Hide messages
+  errEl.style.display='none';
+  okEl.style.display='none';
+
+  // Client-side validation
+  if(!username || !phone || !password || !confirm){
+    return showErr('Please fill in all fields');
+  }
+  if(username.length < 3){
+    return showErr('Username must be at least 3 characters');
+  }
+  if(!/^[a-zA-Z0-9_]+$/.test(username)){
+    return showErr('Username: letters, numbers, underscore only');
+  }
+  if(password.length < 6){
+    return showErr('Password must be at least 6 characters');
+  }
+  if(password !== confirm){
+    return showErr('Passwords do not match');
+  }
+
+  // Clean phone
+  const cleanPhone = phone.replace(/\D/g,'');
+  if(cleanPhone.length < 9 || cleanPhone.length > 12){
+    return showErr('Enter a valid phone number e.g. 0712345678');
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Creating account...';
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, phone: cleanPhone, password })
+    });
+
+    const data = await res.json();
+
+    if(data.success){
+      // Save token and redirect
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      okEl.textContent = '✅ Account created! Redirecting...';
+      okEl.style.display = 'block';
+      setTimeout(()=> location.href = '/', 1200);
+    } else {
+      showErr(data.message || 'Registration failed');
+      btn.disabled = false;
+      btn.textContent = 'Create Free Account';
+    }
+  } catch(e) {
+    showErr('Network error. Check connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Create Free Account';
+  }
 }
+
+function showErr(msg){
+  const el = document.getElementById('err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// Allow Enter key
+document.addEventListener('keydown', e => {
+  if(e.key === 'Enter') doRegister();
+});
 </script>
 </body>
 </html>
