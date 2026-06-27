@@ -1,54 +1,37 @@
 const express = require('express');
 const axios   = require('axios');
 const Match   = require('../models/Match');
+const { smartSort } = require('../engine/staticFixtures');
 const router  = express.Router();
 
-// ── API KEYS ──
 const APIF_KEY  = () => process.env.APIFOOTBALL_KEY;
-const ODDS_KEY  = () => process.env.ODDS_API_KEY;  // theoddsapi.com — free 500/month
+const ODDS_KEY  = () => process.env.ODDS_API_KEY;
 const APIF_BASE = 'https://v3.football.api-sports.io';
 const ODDS_BASE = 'https://api.the-odds-api.com/v4';
 const TSDB      = 'https://www.thesportsdb.com/api/v1/json/3';
 
-// 2-min cache — fresh data
+// 2-min cache
 const cache = {};
-const TTL   = 2 * 60 * 1000;
 const C = {
-  get: (k, ttl=TTL) => { const c=cache[k]; return (c && Date.now()-c.ts < ttl) ? c.data : null; },
-  set: (k, d)       => { cache[k]={data:d,ts:Date.now()}; }
+  get: (k, ttl=120000) => { const c=cache[k]; return (c && Date.now()-c.ts<ttl) ? c.data : null; },
+  set: (k, d) => { cache[k]={data:d,ts:Date.now()}; }
 };
 
 function genOdds(home, away) {
   const h = s => (s||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-  const seed = (h(home)*7+h(away)*3)%100;
-  return {
-    home: +(1.40+(seed%30)/20).toFixed(2),
-    draw: +(2.80+(seed%20)/15).toFixed(2),
-    away: +(1.70+(seed%35)/18).toFixed(2)
-  };
+  const seed=(h(home)*7+h(away)*3)%100;
+  return { home:+(1.40+(seed%30)/20).toFixed(2), draw:+(2.80+(seed%20)/15).toFixed(2), away:+(1.70+(seed%35)/18).toFixed(2) };
 }
 
-// EAT-aware smart sort: live → today → upcoming
-function smartSort(matches) {
-  const now  = new Date();
-  const cutoff = new Date(now - 3*3600000); // include started <3h ago
-  const todayUTC = now.toISOString().slice(0,10);
-  return matches
-    .filter(m => new Date(m.commenceTime) > cutoff)
-    .sort((a,b) => {
-      const ta=new Date(a.commenceTime), tb=new Date(b.commenceTime);
-      if(a.status==='live'&&b.status!=='live') return -1;
-      if(b.status==='live'&&a.status!=='live') return 1;
-      const aToday=a.commenceTime.toString().slice(0,10)===todayUTC;
-      const bToday=b.commenceTime.toString().slice(0,10)===todayUTC;
-      if(aToday&&!bToday) return -1;
-      if(!aToday&&bToday) return 1;
-      return ta-tb;
-    });
+function persist(matches) {
+  matches.forEach(m => Match.findOneAndUpdate(
+    {matchId:m.matchId},
+    {$set:{...m,commenceTime:new Date(m.commenceTime)}},
+    {upsert:true}
+  ).catch(()=>{}));
 }
 
-// ── THE ODDS API (real odds — free 500 req/month) ──
-// Sports keys: soccer_fifa_world_cup, soccer_brazil_serie_a, soccer_usa_mls etc
+// ── THE ODDS API — real odds, no fake data ──
 const ODDS_SPORT_MAP = {
   soccer_world_cup:            'soccer_fifa_world_cup',
   soccer_mls:                  'soccer_usa_mls',
@@ -61,41 +44,37 @@ const ODDS_SPORT_MAP = {
   soccer_ligue_1:              'soccer_france_ligue_one',
   soccer_copa_libertadores:    'soccer_conmebol_copa_libertadores',
   soccer_caf_champions_league: 'soccer_africa_confederation_cup',
+  soccer_friendlies:           'soccer_finland_veikkausliiga', // closest available
 };
 
 async function fetchOddsAPI(sport) {
   if (!ODDS_KEY()) return [];
-  const oddsKey = ODDS_SPORT_MAP[sport];
-  if (!oddsKey) return [];
+  const key = ODDS_SPORT_MAP[sport];
+  if (!key) return [];
   try {
-    const r = await axios.get(`${ODDS_BASE}/sports/${oddsKey}/odds`, {
-      params: {
-        apiKey: ODDS_KEY(),
-        regions: 'eu',
-        markets: 'h2h',
-        oddsFormat: 'decimal',
-        dateFormat: 'iso'
-      },
+    const r = await axios.get(`${ODDS_BASE}/sports/${key}/odds`, {
+      params: { apiKey:ODDS_KEY(), regions:'eu', markets:'h2h', oddsFormat:'decimal', dateFormat:'iso' },
       timeout: 12000
     });
-    const today = new Date().toISOString().slice(0,10);
+    console.log(`[odds-api] ${sport}: ${r.data?.length||0} events`);
     return (r.data||[]).map(ev => {
-      const bm = ev.bookmakers?.[0];
+      const home=ev.home_team, away=ev.away_team;
+      const bm  = ev.bookmakers?.[0];
       const mkt = bm?.markets?.find(m=>m.key==='h2h');
-      const outs = mkt?.outcomes||[];
-      const home = ev.home_team, away = ev.away_team;
-      const homeOdd = outs.find(o=>o.name===home)?.price || genOdds(home,away).home;
-      const awayOdd = outs.find(o=>o.name===away)?.price || genOdds(home,away).away;
-      const drawOdd = outs.find(o=>o.name==='Draw')?.price  || genOdds(home,away).draw;
+      const outs= mkt?.outcomes||[];
+      const ho  = outs.find(o=>o.name===home)?.price;
+      const ao  = outs.find(o=>o.name===away)?.price;
+      const dr  = outs.find(o=>o.name==='Draw')?.price;
+      const fallback = genOdds(home,away);
       return {
         matchId:      `odds_${ev.id}`,
         sport,
-        league:       ev.sport_title || sport,
+        league:       ev.sport_title||sport.replace('soccer_','').replace(/_/g,' '),
         homeTeam:     home,
         awayTeam:     away,
         commenceTime: new Date(ev.commence_time),
         status:       'upcoming',
-        odds:         { home:+homeOdd.toFixed(2), draw:+drawOdd.toFixed(2), away:+awayOdd.toFixed(2) },
+        odds:         { home:+(ho||fallback.home).toFixed(2), draw:+(dr||fallback.draw).toFixed(2), away:+(ao||fallback.away).toFixed(2) },
         score:        {home:null,away:null,minute:null,period:null},
         result:       null,
         isStatic:     false,
@@ -108,147 +87,156 @@ async function fetchOddsAPI(sport) {
   }
 }
 
-// ── API-FOOTBALL (if key set) ──
-async function fetchAPIFootball(leagueId, season) {
+// ── API-FOOTBALL — real fixtures ──
+const APIF_LEAGUES = {
+  soccer_world_cup:            [{id:1,  season:2026, name:'🏆 FIFA World Cup 2026'}],
+  soccer_mls:                  [{id:253,season:2026, name:'🇺🇸 MLS'}],
+  soccer_brazil_serie_a:       [{id:71, season:2026, name:'🇧🇷 Brazilian Série A'}],
+  soccer_kenya_premier_league: [{id:239,season:2025, name:'🇰🇪 Kenya Premier League'}],
+  soccer_caf_champions_league: [{id:169,season:2024, name:'🌍 CAF Champions League'}],
+  soccer_copa_libertadores:    [{id:13, season:2025, name:'🌎 Copa Libertadores'}],
+  soccer_friendlies:           [{id:667,season:2026, name:'🌐 International Friendlies'},{id:10,season:2026,name:'🌐 International Friendlies'}],
+  soccer_epl:                  [{id:39, season:2025, name:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League'}],
+  soccer_ucl:                  [{id:2,  season:2025, name:'🏆 Champions League'}],
+  soccer_bundesliga:           [{id:78, season:2025, name:'🇩🇪 Bundesliga'}],
+  soccer_la_liga:              [{id:140,season:2025, name:'🇪🇸 La Liga'}],
+  soccer_serie_a:              [{id:135,season:2025, name:'🇮🇹 Serie A'}],
+  soccer_ligue_1:              [{id:61, season:2025, name:'🇫🇷 Ligue 1'}],
+};
+
+async function fetchAPIFootball(sport) {
   if (!APIF_KEY()) return [];
-  try {
-    const r = await axios.get(`${APIF_BASE}/fixtures`, {
-      headers: { 'x-rapidapi-key': APIF_KEY(), 'x-rapidapi-host': 'v3.football.api-sports.io' },
-      params:  { league:leagueId, season, next:30 },
-      timeout: 12000
-    });
-    return r.data?.response||[];
-  } catch(e) {
-    console.error(`[apif] ${leagueId}/${season}: ${e?.response?.status||e.message}`);
-    return [];
-  }
-}
-
-function buildApifMatch(fix, sport, leagueName) {
-  const f=fix.fixture, teams=fix.teams, goals=fix.goals;
-  const home=teams?.home?.name, away=teams?.away?.name;
-  if(!home||!away) return null;
-  const s=f.status?.short;
-  const status=['1H','2H','HT','ET','P'].includes(s)?'live':['FT','AET','PEN'].includes(s)?'finished':['CANC','PST','ABD'].includes(s)?'cancelled':'upcoming';
-  return {
-    matchId:`apif_${f.id}`, sport, league:leagueName,
-    homeTeam:home, awayTeam:away,
-    commenceTime: new Date(f.date), status,
-    odds: genOdds(home,away),
-    score:{home:goals?.home??null,away:goals?.away??null,minute:f.status?.elapsed||null,period:s||null},
-    result: status==='finished'?(goals?.home>goals?.away?'home':goals?.away>goals?.home?'away':'draw'):null,
-    isStatic:false, source:'apif'
-  };
-}
-
-// ── TSDB (totally free, no key needed) ──
-async function fetchTSDB(leagueId, season, sport, leagueName, useSeason) {
-  const today = new Date().toISOString().slice(0,10);
-  try {
-    let events = [];
-    if (useSeason && season) {
-      const r = await axios.get(`${TSDB}/eventsseason.php`, { params:{id:leagueId,s:season}, timeout:15000 });
-      events = (r.data?.events||[]).filter(e=>e.dateEvent>=today);
-    } else {
-      const r = await axios.get(`${TSDB}/eventsnextleague.php`, { params:{id:leagueId}, timeout:10000 });
-      events = r.data?.events||[];
-    }
-    return events
-      .filter(ev=>ev.strHomeTeam&&ev.strAwayTeam&&ev.dateEvent>=today)
-      .filter(ev=>!ev.strSport||ev.strSport.toLowerCase()==='soccer')
-      .map(ev=>{
-        const home=ev.strHomeTeam, away=ev.strAwayTeam;
-        const dt = `${ev.dateEvent}T${ev.strTime||'18:00:00'}`;
-        const commence = new Date(dt.includes('+') ? dt : dt+'Z');
-        return {
-          matchId:`tsdb_${ev.idEvent}`, sport, league:leagueName,
+  const leagues = APIF_LEAGUES[sport]||[];
+  const seen = new Set(), all = [];
+  for (const lg of leagues) {
+    try {
+      // Fetch NEXT 30 fixtures
+      const r = await axios.get(`${APIF_BASE}/fixtures`, {
+        headers: {'x-rapidapi-key':APIF_KEY(),'x-rapidapi-host':'v3.football.api-sports.io'},
+        params:  {league:lg.id, season:lg.season, next:30},
+        timeout: 12000
+      });
+      const fixtures = r.data?.response||[];
+      console.log(`[apif] ${lg.name}: ${fixtures.length} fixtures`);
+      for (const fix of fixtures) {
+        const f=fix.fixture, teams=fix.teams, goals=fix.goals;
+        const home=teams?.home?.name, away=teams?.away?.name;
+        if (!home||!away||seen.has(`apif_${f.id}`)) continue;
+        seen.add(`apif_${f.id}`);
+        const s=f.status?.short;
+        const status=['1H','2H','HT','ET','P'].includes(s)?'live':['FT','AET','PEN'].includes(s)?'finished':['CANC','PST','ABD'].includes(s)?'cancelled':'upcoming';
+        if (status==='finished'||status==='cancelled') continue;
+        all.push({
+          matchId:`apif_${f.id}`, sport, league:lg.name,
           homeTeam:home, awayTeam:away,
-          commenceTime: isNaN(commence.getTime()) ? new Date(`${ev.dateEvent}T18:00:00Z`) : commence,
+          commenceTime:new Date(f.date), status,
+          odds:genOdds(home,away),
+          score:{home:goals?.home??null,away:goals?.away??null,minute:f.status?.elapsed||null,period:s||null},
+          result:null, isStatic:false, source:'apif'
+        });
+      }
+      if (all.length) break; // got data, stop
+    } catch(e) { console.error(`[apif] ${lg.name}: ${e?.response?.status||e.message}`); }
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return all;
+}
+
+// ── TSDB — completely free, no key ──
+const TSDB_LEAGUES = {
+  soccer_world_cup:      [{id:'4429',season:'2026',useSeason:true, name:'🏆 FIFA World Cup 2026'}],
+  soccer_mls:            [{id:'4346',season:'2026',useSeason:true, name:'🇺🇸 MLS'}],
+  soccer_brazil_serie_a: [{id:'4768',season:'2025',useSeason:true, name:'🇧🇷 Brazilian Série A'}],
+  soccer_epl:            [{id:'4328',useSeason:false,name:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League'}],
+  soccer_ucl:            [{id:'4480',useSeason:false,name:'🏆 Champions League'}],
+  soccer_bundesliga:     [{id:'4331',useSeason:false,name:'🇩🇪 Bundesliga'}],
+  soccer_la_liga:        [{id:'4335',useSeason:false,name:'🇪🇸 La Liga'}],
+  soccer_serie_a:        [{id:'4332',useSeason:false,name:'🇮🇹 Serie A'}],
+  soccer_ligue_1:        [{id:'4334',useSeason:false,name:'🇫🇷 Ligue 1'}],
+  soccer_copa_libertadores:[{id:'4399',useSeason:false,name:'🌎 Copa Libertadores'}],
+};
+
+async function fetchTSDB(sport) {
+  const leagues = TSDB_LEAGUES[sport]||[];
+  const today   = new Date().toISOString().slice(0,10);
+  const all     = [];
+  for (const lg of leagues) {
+    try {
+      let events=[];
+      if (lg.useSeason && lg.season) {
+        const r=await axios.get(`${TSDB}/eventsseason.php`,{params:{id:lg.id,s:lg.season},timeout:15000});
+        events=(r.data?.events||[]).filter(e=>e.dateEvent>=today);
+      } else {
+        const r=await axios.get(`${TSDB}/eventsnextleague.php`,{params:{id:lg.id},timeout:10000});
+        events=r.data?.events||[];
+      }
+      console.log(`[tsdb] ${lg.name}: ${events.length} events`);
+      for (const ev of events) {
+        if (!ev.strHomeTeam||!ev.strAwayTeam||!ev.dateEvent) continue;
+        if (ev.strSport && ev.strSport.toLowerCase()!=='soccer') continue;
+        if (ev.dateEvent<today) continue;
+        const home=ev.strHomeTeam, away=ev.strAwayTeam;
+        const dt=`${ev.dateEvent}T${ev.strTime||'18:00:00'}Z`;
+        const commence=new Date(dt);
+        all.push({
+          matchId:`tsdb_${ev.idEvent}`, sport, league:lg.name,
+          homeTeam:home, awayTeam:away,
+          commenceTime:isNaN(commence.getTime())?new Date(`${ev.dateEvent}T18:00:00Z`):commence,
           status:'upcoming',
           odds:genOdds(home,away),
           score:{home:null,away:null,minute:null,period:null},
           result:null, isStatic:false, source:'tsdb'
-        };
-      });
-  } catch(e) {
-    console.error(`[tsdb] ${leagueName}: ${e.message}`);
-    return [];
+        });
+      }
+      if (all.length) break;
+    } catch(e) { console.error(`[tsdb] ${lg.name}: ${e.message}`); }
   }
+  return all;
 }
 
-// ── LIVE via API-Football ──
-async function fetchLive() {
-  if (!APIF_KEY()) return [];
-  try {
-    const r = await axios.get(`${APIF_BASE}/fixtures`, {
-      headers: { 'x-rapidapi-key': APIF_KEY(), 'x-rapidapi-host': 'v3.football.api-sports.io' },
-      params:  { live:'all' }, timeout:10000
-    });
-    return (r.data?.response||[])
-      .filter(f=>f.teams?.home?.name&&f.teams?.away?.name)
-      .map(f=>({
-        matchId:`apif_${f.fixture.id}`,
-        homeTeam:f.teams.home.name, awayTeam:f.teams.away.name,
-        league:f.league?.name||'Live', sport:'live', status:'live',
-        commenceTime:new Date(f.fixture.date),
-        score:{home:f.goals?.home??0,away:f.goals?.away??0,minute:f.fixture?.status?.elapsed||0},
-        odds:genOdds(f.teams.home.name,f.teams.away.name)
-      }));
-  } catch { return []; }
-}
-
-// ── LEAGUE CONFIG ──
-const LEAGUE_CFG = {
-  soccer_world_cup:            { apif:[{id:1,season:2026}],   tsdb:{id:'4429',season:'2026',useSeason:true, name:'🏆 FIFA World Cup 2026'} },
-  soccer_mls:                  { apif:[{id:253,season:2026}],  tsdb:{id:'4346',season:'2026',useSeason:true, name:'🇺🇸 MLS'} },
-  soccer_brazil_serie_a:       { apif:[{id:71,season:2026}],   tsdb:{id:'4768',season:'2025',useSeason:true, name:'🇧🇷 Brazilian Série A'} },
-  soccer_kenya_premier_league: { apif:[{id:239,season:2025}],  tsdb:null },
-  soccer_caf_champions_league: { apif:[{id:169,season:2024}],  tsdb:{id:'4399',useSeason:false,name:'🌍 CAF CL'} },
-  soccer_copa_libertadores:    { apif:[{id:13,season:2025}],   tsdb:{id:'4399',useSeason:false,name:'🌎 Libertadores'} },
-  soccer_friendlies:           { apif:[{id:667,season:2026}],  tsdb:null },
-  soccer_epl:                  { apif:[{id:39,season:2025}],   tsdb:{id:'4328',useSeason:false,name:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League'} },
-  soccer_ucl:                  { apif:[{id:2,season:2025}],    tsdb:{id:'4480',useSeason:false,name:'🏆 UCL'} },
-  soccer_bundesliga:           { apif:[{id:78,season:2025}],   tsdb:{id:'4331',useSeason:false,name:'🇩🇪 Bundesliga'} },
-  soccer_la_liga:              { apif:[{id:140,season:2025}],  tsdb:{id:'4335',useSeason:false,name:'🇪🇸 La Liga'} },
-  soccer_serie_a:              { apif:[{id:135,season:2025}],  tsdb:{id:'4332',useSeason:false,name:'🇮🇹 Serie A'} },
-  soccer_ligue_1:              { apif:[{id:61,season:2025}],   tsdb:{id:'4334',useSeason:false,name:'🇫🇷 Ligue 1'} },
-};
-
+// ── MAIN FETCH — try all APIs in order ──
 async function fetchSport(sport) {
-  const cfg = LEAGUE_CFG[sport];
-  // 1. The Odds API — real odds
+  // 1. The Odds API (real odds, real games)
   const oddsData = await fetchOddsAPI(sport);
-  if (oddsData.length) {
-    console.log(`[odds-api] ${sport}: ${oddsData.length} matches`);
-    return oddsData;
-  }
-  // 2. API-Football
-  if (APIF_KEY() && cfg?.apif?.length) {
-    for (const l of cfg.apif) {
-      const fixtures = await fetchAPIFootball(l.id, l.season);
-      const matches  = fixtures.map(f=>buildApifMatch(f,sport,cfg.tsdb?.name||sport)).filter(Boolean);
-      if (matches.length) { console.log(`[apif] ${sport}: ${matches.length}`); return matches; }
-    }
-  }
-  // 3. TheSportsDB — free, no key
-  if (cfg?.tsdb) {
-    const rows = await fetchTSDB(cfg.tsdb.id, cfg.tsdb.season, sport, cfg.tsdb.name, cfg.tsdb.useSeason);
-    if (rows.length) { console.log(`[tsdb] ${sport}: ${rows.length}`); return rows; }
-  }
-  // 4. DB cache
+  if (oddsData.length) return oddsData;
+  // 2. API-Football (real fixtures)
+  const apifData = await fetchAPIFootball(sport);
+  if (apifData.length) return apifData;
+  // 3. TheSportsDB (free, real games)
+  const tsdbData = await fetchTSDB(sport);
+  if (tsdbData.length) return tsdbData;
+  // 4. DB cache (last known real data)
   try {
-    const db = await Match.find({sport,status:{$in:['upcoming','live']},commenceTime:{$gte:new Date(Date.now()-3600000)}}).sort({commenceTime:1}).limit(40).lean();
+    const db=await Match.find({sport,status:{$in:['upcoming','live']},commenceTime:{$gte:new Date(Date.now()-3600000)}}).sort({commenceTime:1}).limit(40).lean();
     if (db.length) { console.log(`[db] ${sport}: ${db.length}`); return db; }
   } catch {}
+  console.log(`⚠️ [${sport}] No data from any API`);
   return [];
 }
 
-function persist(matches) {
-  matches.forEach(m => Match.findOneAndUpdate({matchId:m.matchId},{$set:{...m,commenceTime:new Date(m.commenceTime)}},{upsert:true}).catch(()=>{}));
+// ── LIVE ──
+async function fetchLive() {
+  if (!APIF_KEY()) return [];
+  try {
+    const r=await axios.get(`${APIF_BASE}/fixtures`,{
+      headers:{'x-rapidapi-key':APIF_KEY(),'x-rapidapi-host':'v3.football.api-sports.io'},
+      params:{live:'all'}, timeout:10000
+    });
+    const live=(r.data?.response||[]).filter(f=>f.teams?.home?.name&&f.teams?.away?.name);
+    console.log(`[apif-live] ${live.length} live matches`);
+    return live.map(f=>({
+      matchId:`apif_${f.fixture.id}`,
+      homeTeam:f.teams.home.name, awayTeam:f.teams.away.name,
+      league:f.league?.name||'Live', sport:'live', status:'live',
+      commenceTime:new Date(f.fixture.date),
+      score:{home:f.goals?.home??0,away:f.goals?.away??0,minute:f.fixture?.status?.elapsed||0},
+      odds:genOdds(f.teams.home.name,f.teams.away.name)
+    }));
+  } catch(e) { console.error('[live]',e.message); return []; }
 }
 
 // ── AVAILABLE ──
-router.get('/available', (req, res) => res.json({ success:true, data:[
+router.get('/available',(req,res)=>res.json({success:true,data:[
   {key:'soccer_world_cup',title:'🏆 World Cup 2026'},
   {key:'soccer_mls',title:'🇺🇸 MLS'},
   {key:'soccer_brazil_serie_a',title:'🇧🇷 Brazil Série A'},
@@ -265,80 +253,69 @@ router.get('/available', (req, res) => res.json({ success:true, data:[
   {key:'live',title:'🔴 LIVE'},
 ]}));
 
-// ── FEATURED — real data from APIs, today first ──
-router.get('/featured', async (req, res) => {
-  const cached = C.get('featured');
-  if (cached) return res.json({success:true, data:cached, count:cached.length});
-
-  console.log('📡 [featured] fetching all sports...');
-  const SPORTS = ['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores','soccer_friendlies'];
-  const seen   = new Set();
-  let all      = [];
-
-  await Promise.allSettled(SPORTS.map(async sport => {
+// ── FEATURED ──
+router.get('/featured', async (req,res) => {
+  const cached=C.get('featured');
+  if (cached) return res.json({success:true,data:cached,count:cached.length});
+  console.log('📡 Fetching featured matches...');
+  const SPORTS=['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores','soccer_friendlies'];
+  const seen=new Set(), all=[];
+  for (const sport of SPORTS) {
     try {
-      const matches = await fetchSport(sport);
-      for (const m of matches) {
-        if (!seen.has(m.matchId)) { seen.add(m.matchId); all.push(m); }
-      }
+      const matches=await fetchSport(sport);
+      for (const m of matches) if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
     } catch {}
-  }));
-
-  // If APIs returned nothing — try TheSportsDB directly for World Cup
-  if (!all.length) {
-    console.log('[featured] All APIs failed — trying TSDB World Cup...');
-    const wc = await fetchTSDB('4429','2026','soccer_world_cup','🏆 FIFA World Cup 2026',true);
-    all = wc;
   }
-
-  all = smartSort(all).slice(0,80);
-  console.log(`✅ [featured] ${all.length} matches`);
-
-  if (all.length) { C.set('featured', all); persist(all); }
-  res.json({success:true, data:all, count:all.length});
+  const sorted=smartSort(all).slice(0,80);
+  console.log(`✅ Featured: ${sorted.length} real matches`);
+  if (sorted.length) { C.set('featured',sorted); persist(sorted); }
+  res.json({success:true,data:sorted,count:sorted.length});
 });
 
-// ── MATCHES BY SPORT ──
-router.get('/matches/:sport', async (req, res) => {
-  const sport = req.params.sport;
-  const cached = C.get(sport);
-  if (cached) return res.json({success:true, data:cached, count:cached.length});
-
-  const matches = await fetchSport(sport);
-  const sorted  = smartSort(matches);
-  if (sorted.length) { C.set(sport, sorted); persist(sorted); }
-  res.json({success:true, data:sorted, count:sorted.length});
+// ── BY SPORT ──
+router.get('/matches/:sport', async (req,res) => {
+  const sport=req.params.sport;
+  const cached=C.get(sport);
+  if (cached) return res.json({success:true,data:cached,count:cached.length});
+  const matches=smartSort(await fetchSport(sport));
+  if (matches.length){C.set(sport,matches);persist(matches);}
+  res.json({success:true,data:matches,count:matches.length});
 });
 
 // ── LIVE ──
-router.get('/live', async (req, res) => {
-  const cached = C.get('live', 60000);
-  if (cached) return res.json({success:true, data:cached});
-  const live = await fetchLive();
-  if (live.length) C.set('live', live);
+router.get('/live', async (req,res) => {
+  const cached=C.get('live',60000);
+  if (cached) return res.json({success:true,data:cached});
+  const live=await fetchLive();
+  if (live.length) C.set('live',live);
   else {
-    const db = await Match.find({status:'live'}).sort({commenceTime:1}).limit(20).lean().catch(()=>[]);
-    return res.json({success:true, data:db});
+    const db=await Match.find({status:'live'}).sort({commenceTime:1}).limit(20).lean().catch(()=>[]);
+    return res.json({success:true,data:db});
   }
-  res.json({success:true, data:live});
+  res.json({success:true,data:live});
 });
 
 // ── CACHE CLEAR ──
-router.post('/cache/clear', (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({success:false});
+router.post('/cache/clear',(req,res)=>{
+  if(req.headers['x-admin-secret']!==process.env.ADMIN_PASSWORD)return res.status(401).json({success:false});
   Object.keys(cache).forEach(k=>delete cache[k]);
-  res.json({success:true, message:'Cache cleared'});
+  res.json({success:true,message:'Cache cleared'});
 });
 
 // ── DEBUG ──
-router.get('/debug', async (req, res) => {
+router.get('/debug',async (req,res)=>{
   res.json({
     time:       new Date().toISOString(),
-    apifKey:    APIF_KEY() ? `SET (${APIF_KEY().slice(0,6)}...)` : 'NOT SET',
-    oddsApiKey: ODDS_KEY() ? `SET (${ODDS_KEY().slice(0,6)}...)` : 'NOT SET — get free key at the-odds-api.com',
+    apifKey:    APIF_KEY()?`SET (${APIF_KEY().slice(0,6)}...)`:'NOT SET',
+    oddsKey:    ODDS_KEY()?`SET (${ODDS_KEY().slice(0,6)}...)`:'NOT SET — register free at the-odds-api.com',
     cacheKeys:  Object.keys(cache),
-    tip:        'Add ODDS_API_KEY to Render env for real live odds from all leagues'
+    instructions: {
+      step1: 'Go to the-odds-api.com — register free — get ODDS_API_KEY',
+      step2: 'Add ODDS_API_KEY to Render environment variables',
+      step3: 'Visit /api/odds/cache/clear to refresh data',
+      note:  'API-Football also works — add APIFOOTBALL_KEY from rapidapi.com'
+    }
   });
 });
 
-module.exports = router;
+module.exports=router;
