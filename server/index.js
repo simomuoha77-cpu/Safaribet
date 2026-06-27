@@ -174,6 +174,18 @@ mongoose.connect(process.env.MONGO_URI, {
 })
   .then(() => {
     console.log('✅ MongoDB connected');
+
+    // Clean fake/static games from DB on every startup
+    (async () => {
+      try {
+        const Match = require('./models/Match');
+        const del = await Match.deleteMany({
+          $or: [{ source:'static' }, { source:'manual' }, { matchId:/^static_/ }, { isStatic:true }]
+        });
+        if (del.deletedCount) console.log(`🗑️ Removed ${del.deletedCount} fake matches from DB`);
+      } catch(e) { console.error('[startup cleanup]', e.message); }
+    })();
+
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`🚀 BetaKE server running on port ${PORT}`);

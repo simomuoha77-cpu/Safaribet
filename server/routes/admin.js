@@ -441,6 +441,25 @@ router.post('/test-stk', async (req, res) => {
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
 
+// ── CLEAN FAKE MATCHES ──
+router.post('/clean-matches', async (req, res) => {
+  try {
+    const Match = require('../models/Match');
+    const del = await Match.deleteMany({
+      $or: [
+        { source: 'static' },
+        { source: 'manual' },
+        { matchId: { $regex: /^static_/ } },
+        { isStatic: true }
+      ]
+    });
+    // Also trigger a fresh sync
+    const { syncFixtures } = require('../engine/apifootball');
+    syncFixtures().catch(console.error);
+    res.json({ success:true, message:`Deleted ${del.deletedCount} fake matches. Syncing real data...` });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
 // ── FIX INDEXES ──
 router.post('/fix-indexes', async (req, res) => {
   try {
