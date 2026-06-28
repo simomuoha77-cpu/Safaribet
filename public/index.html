@@ -317,7 +317,8 @@ header{
 </header>
 
 <nav class="stabs" id="stabs">
-  <div class="stab on" data-sport="soccer_world_cup" onclick="pickSport(this)">🏆 World Cup</div>
+  <div class="stab on" data-sport="featured" onclick="pickSport(this)">⚽ All Matches</div>
+  <div class="stab" data-sport="soccer_world_cup" onclick="pickSport(this)">🏆 World Cup</div>
   <div class="stab" data-sport="soccer_kenya_premier_league" onclick="pickSport(this)">🇰🇪 Kenya Premier</div>
   <div class="stab" data-sport="soccer_mls" onclick="pickSport(this)">🇺🇸 MLS</div>
   <div class="stab" data-sport="soccer_brazil_serie_a" onclick="pickSport(this)">🇧🇷 Brazil</div>
@@ -505,7 +506,7 @@ header{
 
 <script>
 // ── STATE ──
-let USER=null, slip=[], currentSport='soccer_world_cup';
+let USER=null, slip=[], currentSport='featured';
 let oddsRefresh=null;
 
 // ── INIT ──
