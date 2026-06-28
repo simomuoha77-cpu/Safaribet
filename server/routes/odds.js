@@ -258,17 +258,136 @@ router.get('/featured', async (req,res) => {
   const cached=C.get('featured');
   if (cached) return res.json({success:true,data:cached,count:cached.length});
 
-  const TOP=['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores','soccer_epl','soccer_friendlies'];
+  console.log('📡 Fetching featured...');
   const seen=new Set(), all=[];
 
-  // Fetch all in parallel
-  const results=await Promise.allSettled(TOP.map(s=>fetchSport(s)));
-  results.forEach(r=>{
-    if(r.status==='fulfilled') r.value.forEach(m=>{if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}});
-  });
+  // Strategy 1: Odds API — fetch ALL soccer sports dynamically (gets whatever is live/upcoming)
+  if (ODDS_KEY()) {
+    try {
+      // Get list of available sports
+      const sportsR = await axios.get('https://api.the-odds-api.com/v4/sports',{
+        params:{apiKey:ODDS_KEY(),all:false}, timeout:10000
+      });
+      const soccerSports = (sportsR.data||[]).filter(s=>
+        s.group==='Soccer' && s.active && !s.key.includes('corner') && !s.key.includes('booking')
+      ).slice(0,12); // top 12 active soccer leagues
+      console.log(`[odds-api] ${soccerSports.length} active soccer sports`);
+
+      await Promise.allSettled(soccerSports.map(async sport=>{
+        try {
+          const r=await axios.get(`https://api.the-odds-api.com/v4/sports/${sport.key}/odds`,{
+            params:{apiKey:ODDS_KEY(),regions:'eu',markets:'h2h',oddsFormat:'decimal',dateFormat:'iso'},
+            timeout:12000
+          });
+          const events=r.data||[];
+          for (const ev of events) {
+            const home=ev.home_team,away=ev.away_team;
+            const bm=ev.bookmakers?.[0];
+            const mkt=bm?.markets?.find(m=>m.key==='h2h');
+            const outs=mkt?.outcomes||[];
+            const ho=outs.find(o=>o.name===home)?.price;
+            const ao=outs.find(o=>o.name===away)?.price;
+            const dr=outs.find(o=>o.name==='Draw')?.price;
+            const fb=genOdds(home,away);
+            const m={
+              matchId:`odds_${ev.id}`,
+              sport:sport.key.includes('world_cup')?'soccer_world_cup':
+                    sport.key.includes('mls')?'soccer_mls':
+                    sport.key.includes('epl')?'soccer_epl':
+                    sport.key.includes('bundesliga')?'soccer_bundesliga':
+                    sport.key.includes('la_liga')?'soccer_la_liga':
+                    sport.key.includes('serie_a')?'soccer_serie_a':
+                    sport.key.includes('ligue')?'soccer_ligue_1':
+                    sport.key.includes('brazil')?'soccer_brazil_serie_a':
+                    sport.key.includes('libertadores')?'soccer_copa_libertadores':
+                    sport.key.includes('champions')?'soccer_ucl':'soccer_other',
+              league:sport.title||sport.key,
+              homeTeam:home, awayTeam:away,
+              commenceTime:new Date(ev.commence_time), status:'upcoming',
+              odds:{home:+(ho||fb.home).toFixed(2),draw:+(dr||fb.draw).toFixed(2),away:+(ao||fb.away).toFixed(2)},
+              score:{home:null,away:null,minute:null,period:null},
+              result:null, isStatic:false, source:'oddsapi'
+            };
+            if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
+          }
+        } catch {}
+      }));
+      console.log(`[odds-api] total events: ${all.length}`);
+    } catch(e) { console.error('[odds-api sports list]',e.message); }
+  }
+
+  // Strategy 2: API-Football — fetch from all leagues
+  if (all.length < 5 && APIF_KEY()) {
+    const APIF_ALL=[
+      {id:1,s:2026,n:'🏆 FIFA World Cup 2026',k:'soccer_world_cup'},
+      {id:253,s:2026,n:'🇺🇸 MLS',k:'soccer_mls'},
+      {id:71,s:2026,n:'🇧🇷 Brazilian Série A',k:'soccer_brazil_serie_a'},
+      {id:2,s:2025,n:'🏆 UCL',k:'soccer_ucl'},
+      {id:39,s:2025,n:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 EPL',k:'soccer_epl'},
+      {id:78,s:2025,n:'🇩🇪 Bundesliga',k:'soccer_bundesliga'},
+      {id:140,s:2025,n:'🇪🇸 La Liga',k:'soccer_la_liga'},
+      {id:135,s:2025,n:'🇮🇹 Serie A',k:'soccer_serie_a'},
+      {id:61,s:2025,n:'🇫🇷 Ligue 1',k:'soccer_ligue_1'},
+      {id:13,s:2025,n:'🌎 Libertadores',k:'soccer_copa_libertadores'},
+      {id:667,s:2026,n:'🌐 Friendlies',k:'soccer_friendlies'},
+    ];
+    await Promise.allSettled(APIF_ALL.map(async lg=>{
+      try {
+        const r=await axios.get('https://v3.football.api-sports.io/fixtures',{
+          headers:{'x-rapidapi-key':APIF_KEY(),'x-rapidapi-host':'v3.football.api-sports.io'},
+          params:{league:lg.id,season:lg.s,next:20},timeout:12000
+        });
+        for (const fix of r.data?.response||[]) {
+          const f=fix.fixture,teams=fix.teams,goals=fix.goals;
+          const home=teams?.home?.name,away=teams?.away?.name;
+          if(!home||!away) continue;
+          const s=f.status?.short;
+          const status=['1H','2H','HT','ET','P','BT'].includes(s)?'live':['FT','AET','PEN'].includes(s)?'finished':['CANC','PST','ABD'].includes(s)?'cancelled':'upcoming';
+          if(status==='finished'||status==='cancelled') continue;
+          const m={matchId:`apif_${f.id}`,sport:lg.k,league:lg.n,homeTeam:home,awayTeam:away,
+            commenceTime:new Date(f.date),status,odds:genOdds(home,away),
+            score:{home:goals?.home??null,away:goals?.away??null,minute:f.status?.elapsed||null,period:s||null},
+            result:null,isStatic:false,source:'apif'};
+          if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
+        }
+      } catch {}
+    }));
+    console.log(`[apif] total after: ${all.length}`);
+  }
+
+  // Strategy 3: TheSportsDB — try multiple leagues
+  if (all.length < 5) {
+    const TSDB_ALL=[
+      {id:'4346',s:'2026',n:'🇺🇸 MLS',k:'soccer_mls'},
+      {id:'4768',s:'2025',n:'🇧🇷 Brazilian Série A',k:'soccer_brazil_serie_a'},
+      {id:'4399',s:null,n:'🌎 Copa Libertadores',k:'soccer_copa_libertadores'},
+      {id:'4328',s:null,n:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League',k:'soccer_epl'},
+      {id:'4335',s:null,n:'🇪🇸 La Liga',k:'soccer_la_liga'},
+    ];
+    const today=new Date().toISOString().slice(0,10);
+    await Promise.allSettled(TSDB_ALL.map(async lg=>{
+      try {
+        let events=[];
+        if(lg.s){const r=await axios.get(`https://www.thesportsdb.com/api/v1/json/3/eventsseason.php`,{params:{id:lg.id,s:lg.s},timeout:12000});events=(r.data?.events||[]).filter(e=>e.dateEvent>=today);}
+        else{const r=await axios.get(`https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php`,{params:{id:lg.id},timeout:10000});events=r.data?.events||[];}
+        for(const ev of events){
+          if(!ev.strHomeTeam||!ev.strAwayTeam||ev.dateEvent<today) continue;
+          if(ev.strSport&&ev.strSport.toLowerCase()!=='soccer') continue;
+          const home=ev.strHomeTeam,away=ev.strAwayTeam;
+          const commence=new Date(`${ev.dateEvent}T${ev.strTime||'18:00:00'}Z`);
+          const m={matchId:`tsdb_${ev.idEvent}`,sport:lg.k,league:lg.n,homeTeam:home,awayTeam:away,
+            commenceTime:isNaN(commence.getTime())?new Date(`${ev.dateEvent}T18:00:00Z`):commence,
+            status:'upcoming',odds:genOdds(home,away),score:{home:null,away:null,minute:null,period:null},
+            result:null,isStatic:false,source:'tsdb'};
+          if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
+        }
+      } catch {}
+    }));
+    console.log(`[tsdb] total after: ${all.length}`);
+  }
 
   const sorted=smartSort(all).slice(0,80);
-  console.log(`✅ Featured: ${sorted.length} matches`);
+  console.log(`✅ Featured final: ${sorted.length} matches`);
   if(sorted.length){C.set('featured',sorted);persist(sorted);}
   res.json({success:true,data:sorted,count:sorted.length});
 });
@@ -340,9 +459,10 @@ router.get('/debug', async (req,res) => {
   // Test Odds API
   if(ODDS_KEY()) {
     try {
-      const r=await axios.get('https://api.the-odds-api.com/v4/sports',{params:{apiKey:ODDS_KEY()},timeout:10000});
-      const wc=r.data?.find(s=>s.key==='soccer_fifa_world_cup');
-      result.tests.odds_api=`✅ ${r.data?.length} sports available. World Cup: ${wc?'✅ available':'❌ not found'}`;
+      const r=await axios.get('https://api.the-odds-api.com/v4/sports',{params:{apiKey:ODDS_KEY(),all:false},timeout:10000});
+      const soccer=(r.data||[]).filter(s=>s.group==='Soccer'&&s.active);
+      result.tests.odds_api=`✅ ${r.data?.length} total sports, ${soccer.length} active soccer`;
+      result.tests.odds_active_soccer=soccer.map(s=>s.key).join(', ');
       result.tests.odds_remaining=r.headers?.['x-requests-remaining']||'unknown';
     } catch(e) { result.tests.odds_api=`❌ ${e?.response?.status} ${e.message}`; }
   }
