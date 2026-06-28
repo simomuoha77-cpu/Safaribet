@@ -257,19 +257,63 @@ router.get('/available',(req,res)=>res.json({success:true,data:[
 router.get('/featured', async (req,res) => {
   const cached=C.get('featured');
   if (cached) return res.json({success:true,data:cached,count:cached.length});
+
   console.log('📡 Fetching featured matches...');
-  const SPORTS=['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores','soccer_friendlies'];
+  const SPORTS=['soccer_world_cup','soccer_mls','soccer_brazil_serie_a','soccer_copa_libertadores','soccer_friendlies','soccer_epl','soccer_bundesliga'];
   const seen=new Set(), all=[];
-  for (const sport of SPORTS) {
+
+  // Run all sports in parallel for speed
+  await Promise.allSettled(SPORTS.map(async sport => {
     try {
-      const matches=await fetchSport(sport);
-      for (const m of matches) if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
-    } catch {}
+      const matches = await fetchSport(sport);
+      console.log(`  [featured] ${sport}: ${matches.length}`);
+      for (const m of matches) {
+        if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
+      }
+    } catch(e) { console.error(`  [featured] ${sport} error:`, e.message); }
+  }));
+
+  // If still empty — try TSDB World Cup directly as last resort
+  if (!all.length) {
+    console.log('  [featured] All failed — direct TSDB World Cup attempt...');
+    try {
+      const today = new Date().toISOString().slice(0,10);
+      const r = await axios.get(`${TSDB}/eventsseason.php`, {params:{id:'4429',s:'2026'},timeout:15000});
+      const events = (r.data?.events||[]).filter(e=>e.dateEvent>=today&&e.strHomeTeam&&e.strAwayTeam);
+      console.log(`  [tsdb-direct] World Cup events: ${events.length}`);
+      for (const ev of events) {
+        const home=ev.strHomeTeam, away=ev.strAwayTeam;
+        const commence=new Date(`${ev.dateEvent}T${ev.strTime||'18:00:00'}Z`);
+        all.push({
+          matchId:`tsdb_${ev.idEvent}`, sport:'soccer_world_cup',
+          league:'🏆 FIFA World Cup 2026', homeTeam:home, awayTeam:away,
+          commenceTime:isNaN(commence.getTime())?new Date(`${ev.dateDate}T18:00:00Z`):commence,
+          status:'upcoming', odds:genOdds(home,away),
+          score:{home:null,away:null,minute:null,period:null},
+          result:null, isStatic:false, source:'tsdb'
+        });
+      }
+    } catch(e) { console.error('  [tsdb-direct] failed:', e.message); }
   }
+
+  // Also check DB for any previously synced real matches
+  if (!all.length) {
+    try {
+      const db = await Match.find({
+        source:{$in:['apif','tsdb','oddsapi']},
+        status:{$in:['upcoming','live']},
+        commenceTime:{$gte:new Date(Date.now()-3600000)}
+      }).sort({commenceTime:1}).limit(80).lean();
+      console.log(`  [db-fallback] ${db.length} matches`);
+      for (const m of db) if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);}
+    } catch(e) { console.error('  [db-fallback]', e.message); }
+  }
+
   const sorted=smartSort(all).slice(0,80);
-  console.log(`✅ Featured: ${sorted.length} real matches`);
+  console.log(`✅ Featured total: ${sorted.length} matches`);
   if (sorted.length) { C.set('featured',sorted); persist(sorted); }
-  res.json({success:true,data:sorted,count:sorted.length});
+  res.json({success:true,data:sorted,count:sorted.length,
+    debug:{apifKey:!!APIF_KEY(),oddsKey:!!ODDS_KEY(),total:sorted.length}});
 });
 
 // ── BY SPORT ──
