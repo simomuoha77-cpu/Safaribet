@@ -21,59 +21,103 @@ function genOdds(home,away) {
   return {home:+(1.40+(s%30)/20).toFixed(2),draw:+(2.80+(s%20)/15).toFixed(2),away:+(1.70+(s%35)/18).toFixed(2)};
 }
 
-// ── JUAN FOOTBALL API (primary source) ──
+// ── JUAN FOOTBALL API — log raw response to understand structure ──
+function extractString(val) {
+  if (!val) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    return val.name || val.shortName || val.title || val.label || val.value || JSON.stringify(val);
+  }
+  return String(val);
+}
+
+function extractNumber(val, fallback=0) {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') return parseFloat(val)||fallback;
+  if (typeof val === 'object' && val!==null) return parseFloat(Object.values(val)[0])||fallback;
+  return fallback;
+}
+
 async function fromJuanAPI() {
   try {
     const r = await axios.get(`${JUAN_API}/odds`, {
-      headers: {
-        'x-api-key': JUAN_KEY(),
-        'Content-Type': 'application/json'
-      },
+      headers: {'x-api-key': JUAN_KEY(), 'Content-Type': 'application/json'},
       timeout: 15000
     });
-    const matches = r.data || [];
-    console.log(`[juan-api] ${matches.length} matches`);
-    return matches.map(m => ({
-      matchId:      `juan_${m.matchId||m.id||Math.random()}`,
-      sport:        m.sport || 'soccer_world_cup',
-      league:       m.league || m.competition || 'Football',
-      homeTeam:     m.homeTeam || m.home || m.teams?.home,
-      awayTeam:     m.awayTeam || m.away || m.teams?.away,
-      commenceTime: new Date(m.kickoffTimestamp || m.commenceTime || m.date),
-      status:       m.status === 'LIVE' ? 'live' : m.status === 'FT' ? 'finished' : 'upcoming',
-      odds: {
-        home: +(m.fairOdds?.home || m.odds?.home || genOdds(m.homeTeam||'',m.awayTeam||'').home).toFixed(2),
-        draw: +(m.fairOdds?.draw || m.odds?.draw || genOdds(m.homeTeam||'',m.awayTeam||'').draw).toFixed(2),
-        away: +(m.fairOdds?.away || m.odds?.away || genOdds(m.homeTeam||'',m.awayTeam||'').away).toFixed(2),
-      },
-      score:  { home: m.score?.home||null, away: m.score?.away||null, minute: m.minute||null, period: m.status||null },
-      result: null, isStatic: false, source: 'juan'
-    })).filter(m => m.homeTeam && m.awayTeam);
+    const raw = r.data || [];
+    // Log first item to understand structure
+    if (raw[0]) console.log('[juan-api] Sample:', JSON.stringify(raw[0]).slice(0,300));
+    console.log(`[juan-api] ${raw.length} matches`);
+    
+    return raw.map(m => {
+      const home = extractString(m.homeTeam || m.home || m.teams?.home || m.home_team || m.team1);
+      const away = extractString(m.awayTeam || m.away || m.teams?.away || m.away_team || m.team2);
+      if (!home || !away) return null;
+      
+      const homeOdds = extractNumber(m.fairOdds?.home || m.odds?.home || m.odds?.['1'] || m['1']);
+      const drawOdds = extractNumber(m.fairOdds?.draw || m.odds?.draw || m.odds?.X || m['X']);
+      const awayOdds = extractNumber(m.fairOdds?.away || m.odds?.away || m.odds?.['2'] || m['2']);
+      const fb = genOdds(home, away);
+      
+      const ts = m.kickoffTimestamp || m.commenceTime || m.date || m.kickoff || m.time;
+      const commence = ts ? new Date(typeof ts === 'number' ? ts*1000 : ts) : new Date();
+      
+      const statusRaw = extractString(m.status || '');
+      const status = statusRaw==='LIVE'||statusRaw==='live'||statusRaw==='1H'||statusRaw==='2H' ? 'live' :
+                     statusRaw==='FT'||statusRaw==='finished' ? 'finished' : 'upcoming';
+      
+      return {
+        matchId:      `juan_${m.matchId||m.id||m._id||Math.random().toString(36).slice(2)}`,
+        sport:        extractString(m.sport||m.league?.sport||'soccer_world_cup'),
+        league:       extractString(m.league||m.competition||m.leagueName||'Football'),
+        homeTeam:     home,
+        awayTeam:     away,
+        commenceTime: isNaN(commence.getTime()) ? new Date() : commence,
+        status,
+        odds: {
+          home: +(homeOdds||fb.home).toFixed(2),
+          draw: +(drawOdds||fb.draw).toFixed(2),
+          away: +(awayOdds||fb.away).toFixed(2)
+        },
+        score: {
+          home: extractNumber(m.score?.home||m.scoreHome||null),
+          away: extractNumber(m.score?.away||m.scoreAway||null),
+          minute: extractNumber(m.minute||m.elapsed||null),
+          period: statusRaw||null
+        },
+        result: null, isStatic: false, source: 'juan'
+      };
+    }).filter(Boolean);
   } catch(e) {
     console.error('[juan-api]', e?.response?.status, e.message);
     return [];
   }
 }
 
-// ── JUAN LIVE STREAM (WebSocket → polling fallback) ──
 async function fromJuanLive() {
   try {
     const r = await axios.get(`${JUAN_API}/live`, {
       headers: {'x-api-key': JUAN_KEY()},
       timeout: 10000
     });
-    return (r.data || []).map(m => ({
-      matchId:      `juan_live_${m.matchId||m.id}`,
-      sport:        'live',
-      league:       m.league || m.competition || 'Live',
-      homeTeam:     m.homeTeam || m.home || m.teams?.home,
-      awayTeam:     m.awayTeam || m.away || m.teams?.away,
-      commenceTime: new Date(m.kickoffTimestamp || m.date || Date.now()),
-      status:       'live',
-      score:        { home: m.score?.home||0, away: m.score?.away||0, minute: m.minute||0, period: m.status||'LIVE' },
-      odds:         { home: +(m.fairOdds?.home||1.9).toFixed(2), draw: +(m.fairOdds?.draw||3.2).toFixed(2), away: +(m.fairOdds?.away||2.1).toFixed(2) },
-      result: null, isStatic: false, source: 'juan'
-    })).filter(m => m.homeTeam && m.awayTeam);
+    const raw = r.data || [];
+    if (raw[0]) console.log('[juan-live] Sample:', JSON.stringify(raw[0]).slice(0,300));
+    return raw.map(m => {
+      const home = extractString(m.homeTeam||m.home||m.teams?.home||m.team1);
+      const away = extractString(m.awayTeam||m.away||m.teams?.away||m.team2);
+      if (!home||!away) return null;
+      return {
+        matchId:      `juan_live_${m.matchId||m.id||Math.random().toString(36).slice(2)}`,
+        sport:        'live',
+        league:       extractString(m.league||m.competition||'Live'),
+        homeTeam:     home, awayTeam: away,
+        commenceTime: new Date(m.kickoffTimestamp||m.date||Date.now()),
+        status:       'live',
+        score: { home: extractNumber(m.score?.home||0), away: extractNumber(m.score?.away||0), minute: extractNumber(m.minute||0), period: 'LIVE' },
+        odds: { home: +(extractNumber(m.fairOdds?.home||m.odds?.home||1.9)).toFixed(2), draw: +(extractNumber(m.fairOdds?.draw||m.odds?.draw||3.2)).toFixed(2), away: +(extractNumber(m.fairOdds?.away||m.odds?.away||2.1)).toFixed(2) },
+        result: null, isStatic: false, source: 'juan'
+      };
+    }).filter(Boolean);
   } catch(e) {
     console.error('[juan-live]', e.message);
     return [];
