@@ -30,7 +30,7 @@ async function fromJuanAPI() {
       timeout: 15000
     });
     const raw = Array.isArray(r.data) ? r.data : (r.data?.matches || r.data?.data || []);
-    if (raw[0]) console.log('[juan-api] Sample:', JSON.stringify(raw[0]).slice(0,250));
+    if (raw[0]) console.log('[juan-api] FULL Sample:', JSON.stringify(raw[0]));
     console.log(`[juan-api] ${raw.length} matches`);
 
     return raw.map(m => {
@@ -362,11 +362,14 @@ router.get('/debug',async(req,res)=>{
     ODDS_API_KEY:ODDS_KEY()?`✅ SET (${ODDS_KEY().slice(0,8)}...)`:'❌ NOT SET',
     tests:{}
   };
-  // Test Juan API
+  // Test Juan API — dump RAW structure
   try{
-    const j=await axios.get(`${JUAN_API}/odds`,{headers:{'x-api-key':JUAN_KEY()},timeout:8000});
-    r.tests.juan_api=`✅ ${(j.data||[]).length} matches`;
-    r.tests.juan_sample=(j.data||[]).slice(0,2).map(m=>`${m.homeTeam||m.home} vs ${m.awayTeam||m.away}`);
+    const j=await axios.get('https://juan-football-api.onrender.com/odds',{headers:{'x-api-key':JUAN_KEY()},timeout:10000});
+    const raw=Array.isArray(j.data)?j.data:(j.data?.matches||j.data?.data||[]);
+    r.tests.juan_api=`✅ ${raw.length} matches`;
+    r.tests.juan_raw_keys=raw[0]?Object.keys(raw[0]):[];
+    r.tests.juan_raw_first_item=raw[0]||null;
+    r.tests.juan_response_top_level_keys=j.data?(Array.isArray(j.data)?'array':Object.keys(j.data)):'empty';
   }catch(e){r.tests.juan_api=`❌ ${e?.response?.status} ${e.message}`;}
 
   if(ODDS_KEY()){
