@@ -6,14 +6,17 @@ function start() {
   if (started) return;
   started = true;
 
-  const { syncFixtures, updateLive } = require('./apifootball');
+  const { syncFixtures, updateLive } = require('./footballSync');
   const { runSettlement }            = require('./settlementEngine');
 
-  // Sync fixtures every 6 hours
-  cron.schedule('0 */6 * * *', () => { syncFixtures().catch(console.error); });
+  // Sync fixtures/odds every 5 minutes — keeps the DB mirror aligned
+  // with the API without hammering it for data that rarely changes.
+  cron.schedule('*/5 * * * *', () => { syncFixtures().catch(console.error); });
 
-  // Update live scores every 2 minutes
-  cron.schedule('*/2 * * * *', () => { updateLive().catch(console.error); });
+  // Poll live scores frequently so the site reflects real-time state.
+  // Interval is configurable via env (ms) — default 20s.
+  const liveIntervalMs = parseInt(process.env.LIVE_POLL_MS) || 20000;
+  setInterval(() => { updateLive().catch(console.error); }, liveIntervalMs);
 
   // Run settlement every 15 minutes
   cron.schedule('*/15 * * * *', () => { runSettlement().catch(console.error); });
@@ -28,10 +31,11 @@ function start() {
     });
   }
 
-  console.log('✅ Scheduler started (fixtures 6h, live 2m, settlement 15m)');
+  console.log(`✅ Scheduler started (fixtures 5m, live ${liveIntervalMs / 1000}s, settlement 15m)`);
 
-  // Run sync on startup after 10s
-  setTimeout(() => syncFixtures().catch(console.error), 10000);
+  // Run an initial sync + live poll shortly after startup
+  setTimeout(() => syncFixtures().catch(console.error), 5000);
+  setTimeout(() => updateLive().catch(console.error), 8000);
 }
 
 module.exports = { start };

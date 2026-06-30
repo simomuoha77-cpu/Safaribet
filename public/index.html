@@ -527,8 +527,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // Initial load handled inside loadAvailableSports → loadFirstWithMatches
   // (tries each league in order until one returns real fixtures)
   loadLiveTicker();
+  connectFootballWS();
 
-  // Refresh odds every 60s
+  // Refresh odds every 60s (fallback path — WS push is primary)
   oddsRefresh=setInterval(()=>{
     if(currentSport==='featured'){
       // Invalidate featured cache and reload
@@ -539,9 +540,80 @@ window.addEventListener('DOMContentLoaded', ()=>{
       loadMatches(currentSport, true);
     }
   }, 60000);
-  // Refresh live ticker every 30s
+  // Refresh live ticker every 30s as a polling fallback in case the
+  // WebSocket connection drops
   setInterval(loadLiveTicker, 30000);
 });
+
+// ── LIVE WEBSOCKET (primary refresh mechanism for live scores) ──
+let footballWS=null, footballWSRetry=1000;
+function connectFootballWS(){
+  try{
+    const proto = location.protocol==='https:' ? 'wss:' : 'ws:';
+    footballWS = new WebSocket(`${proto}//${location.host}/ws/football`);
+    footballWS.onopen = ()=>{ footballWSRetry=1000; };
+    footballWS.onmessage = (ev)=>{
+      try{
+        const msg = JSON.parse(ev.data);
+        if(msg.type==='live'){
+          applyLiveUpdate(msg.data||[]);
+        }
+      }catch(e){}
+    };
+    footballWS.onclose = ()=>{
+      // Fall back to the 30s polling loop above; try to reconnect with backoff
+      setTimeout(connectFootballWS, footballWSRetry);
+      footballWSRetry = Math.min(footballWSRetry*2, 30000);
+    };
+    footballWS.onerror = ()=>{ try{footballWS.close();}catch(e){} };
+  }catch(e){
+    // WebSocket unsupported/blocked — polling fallback above still covers us
+  }
+}
+
+// Applies a fresh live snapshot pushed from the server. If the API
+// reports zero live matches, this clears any stale "LIVE" state
+// instead of leaving old scores on screen.
+function applyLiveUpdate(liveMatches){
+  // Ticker
+  if(!liveMatches.length){
+    document.getElementById('liveTicker').style.display='none';
+  } else {
+    document.getElementById('liveTicker').style.display='flex';
+    document.getElementById('tickerItems').innerHTML=liveMatches.map(m=>`
+      <div class="ticker-item">
+        <span class="tick-teams">${m.homeTeam} vs ${m.awayTeam}</span>
+        <span class="tick-score">${m.score?.home??0} - ${m.score?.away??0}</span>
+        <span class="tick-min">${m.score?.minute??''}′</span>
+      </div>`).join('');
+  }
+
+  // If the LIVE tab is currently open, re-render it directly from
+  // this push so it never shows stale matches once the API says
+  // there are none.
+  if(currentSport==='live'){
+    if(!liveMatches.length){
+      document.getElementById('matchList').innerHTML=`<div class="empty" style="padding:40px 20px">
+  <div style="font-size:36px;margin-bottom:12px">🔴</div>
+  <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No live matches</div>
+  <div style="font-size:13px;color:var(--mt);line-height:1.6">Live matches will appear here automatically when games kick off.</div>
+</div>`;
+    } else {
+      renderMatches(liveMatches);
+    }
+  } else {
+    // Otherwise, just patch the live score/minute on any visible card
+    // for these matches without a full re-render.
+    liveMatches.forEach(m=>{
+      const card=document.getElementById(`mc_${m.matchId}`);
+      if(!card) return;
+      const scoreEl=card.querySelector('.live-score');
+      if(scoreEl && m.score?.home!=null) scoreEl.textContent=`${m.score.home} - ${m.score.away}`;
+      const timeEl=card.querySelector('.mtime');
+      if(timeEl && m.score?.minute!=null) timeEl.textContent=`${m.score.minute}′`;
+    });
+  }
+}
 
 function logout(){
   localStorage.removeItem('token'); localStorage.removeItem('user'); location.reload();

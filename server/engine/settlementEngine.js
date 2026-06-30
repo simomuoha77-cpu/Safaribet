@@ -1,12 +1,8 @@
-const axios       = require('axios');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const User        = require('../models/User');
 const Transaction = require('../models/Transaction');
-
-const KEY  = () => process.env.APIFOOTBALL_KEY;
-const BASE = 'https://v3.football.api-sports.io';
-const HDR  = () => ({ 'x-rapidapi-key': KEY(), 'x-rapidapi-host': 'v3.football.api-sports.io' });
+const footballApi = require('./footballApi');
 
 function getResult(h, a) {
   if (h === null || h === undefined || a === null || a === undefined) return null;
@@ -100,37 +96,25 @@ async function settleSelection(sel, result, homeScore, awayScore) {
   return { settled, paid };
 }
 
-// Fetch finished matches from API-Football
+// Fetch finished matches from the Football API (single source of truth)
 async function fetchFinishedFromAPI() {
-  if (!KEY()) return [];
-  const yesterday = new Date(Date.now()-24*3600000).toISOString().split('T')[0];
-  const today     = new Date().toISOString().split('T')[0];
-  const LEAGUES   = [1,2,3,6,8,9,10,13,39,61,71,78,135,140,169,239,253,292,399,667];
-  const results   = [];
-  const year      = new Date().getFullYear();
-
-  for (const id of LEAGUES) {
-    try {
-      const r = await axios.get(`${BASE}/fixtures`, {
-        headers: HDR(),
-        params:  { league:id, season:year, from:yesterday, to:today, status:'FT-AET-PEN' },
-        timeout: 10000
+  try {
+    const matches = await footballApi.fetchOdds(); // includes finished matches the API still reports
+    const results = [];
+    for (const m of matches) {
+      if (m.status !== 'finished') continue;
+      const result = getResult(m.score?.home, m.score?.away);
+      if (!result) continue;
+      results.push({
+        matchId: m.matchId, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
+        home: m.score.home, away: m.score.away, result
       });
-      for (const fix of r.data?.response||[]) {
-        const result = getResult(fix.goals?.home, fix.goals?.away);
-        if (result) results.push({
-          matchId:  `apif_${fix.fixture.id}`,
-          homeTeam: fix.teams?.home?.name,
-          awayTeam: fix.teams?.away?.name,
-          home:     fix.goals.home,
-          away:     fix.goals.away,
-          result
-        });
-      }
-    } catch {}
-    await new Promise(r=>setTimeout(r,100));
+    }
+    return results;
+  } catch (e) {
+    console.error('[settlement] fetchFinishedFromAPI failed:', e.message);
+    return [];
   }
-  return results;
 }
 
 // Also settle bets on matches that are overdue (past kick-off by 2+ hours, still pending)
@@ -208,15 +192,13 @@ async function runSettlement() {
 
   let totalSettled=0, totalPaid=0;
 
-  // 1. API-Football results
-  if (KEY()) {
-    const results = await fetchFinishedFromAPI();
-    console.log(`  Fetched ${results.length} finished matches from API`);
-    for (const r of results) {
-      const { settled, paid } = await settleSelection(r, r.result, r.home, r.away);
-      totalSettled += settled;
-      totalPaid    += paid;
-    }
+  // 1. Football API results
+  const results = await fetchFinishedFromAPI();
+  console.log(`  Fetched ${results.length} finished matches from API`);
+  for (const r of results) {
+    const { settled, paid } = await settleSelection(r, r.result, r.home, r.away);
+    totalSettled += settled;
+    totalPaid    += paid;
   }
 
   // 2. DB matches marked finished

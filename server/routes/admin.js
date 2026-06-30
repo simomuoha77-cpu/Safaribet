@@ -205,17 +205,10 @@ router.get('/matches', async (req, res) => {
 });
 
 router.post('/match', async (req, res) => {
-  try {
-    const { homeTeam, awayTeam, league, commenceTime, sport, customOdds } = req.body;
-    if (!homeTeam||!awayTeam||!league||!commenceTime) return res.status(400).json({ success:false, message:'All fields required' });
-    const h = s => (s||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-    const seed = (h(homeTeam)*7+h(awayTeam)*3)%100;
-    const autoOdds = { home:+(1.4+(seed%30)/20).toFixed(2), draw:+(2.8+(seed%20)/15).toFixed(2), away:+(1.7+(seed%35)/18).toFixed(2) };
-    const odds = customOdds || autoOdds;
-    const match = await Match.create({ matchId:`manual_${Date.now()}`, sport:sport||'soccer_friendlies', league, homeTeam, awayTeam, commenceTime:new Date(commenceTime), status:'upcoming', odds, isStatic:true, source:'manual' });
-    audit('ADD_MATCH', { homeTeam, awayTeam, league });
-    res.json({ success:true, match });
-  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+  // Disabled by design: all football data must come from the Football
+  // API (single source of truth). Manually-created matches/odds are
+  // not permitted, even by admins.
+  res.status(410).json({ success:false, message:'Manual match creation is disabled. All matches must come from the Football API.' });
 });
 
 router.delete('/match/:matchId', async (req, res) => {
@@ -228,18 +221,8 @@ router.delete('/match/:matchId', async (req, res) => {
 
 // ── ODDS UPDATE ──
 router.post('/odds', async (req, res) => {
-  try {
-    const { matchId, home, draw, away } = req.body;
-    if (!matchId||!home||!draw||!away) return res.status(400).json({ success:false, message:'All fields required' });
-    const match = await Match.findOneAndUpdate(
-      { matchId },
-      { $set:{ 'odds.home':home, 'odds.draw':draw, 'odds.away':away, 'odds.updatedAt':new Date() } },
-      { new:true }
-    );
-    if (!match) return res.status(404).json({ success:false, message:'Match not found' });
-    audit('UPDATE_ODDS', { matchId, home, draw, away });
-    res.json({ success:true });
-  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+  // Disabled by design: odds must only come from the Football API.
+  res.status(410).json({ success:false, message:'Manual odds overrides are disabled. Odds are sourced live from the Football API.' });
 });
 
 // ── TRANSACTIONS ──
@@ -445,16 +428,9 @@ router.post('/test-stk', async (req, res) => {
 router.post('/clean-matches', async (req, res) => {
   try {
     const Match = require('../models/Match');
-    const del = await Match.deleteMany({
-      $or: [
-        { source: 'static' },
-        { source: 'manual' },
-        { matchId: { $regex: /^static_/ } },
-        { isStatic: true }
-      ]
-    });
+    const del = await Match.deleteMany({ source: { $ne: 'juan' } });
     // Also trigger a fresh sync
-    const { syncFixtures } = require('../engine/apifootball');
+    const { syncFixtures } = require('../engine/footballSync');
     syncFixtures().catch(console.error);
     res.json({ success:true, message:`Deleted ${del.deletedCount} fake matches. Syncing real data...` });
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
