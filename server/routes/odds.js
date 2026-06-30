@@ -23,62 +23,141 @@ function genOdds(home,away) {
 
 // ── JUAN FOOTBALL API ──
 // Uses match.matchName and match.timelineGroup per API docs
+// ── JUAN FOOTBALL API — bulletproof field extraction ──
+// Tries every reasonable field name/path so it works regardless of exact API shape
+function deepGet(obj, paths) {
+  for (const path of paths) {
+    const val = path.split('.').reduce((o,k)=> (o&&o[k]!==undefined) ? o[k] : undefined, obj);
+    if (val !== undefined && val !== null && val !== '') return val;
+  }
+  return undefined;
+}
+
+function asString(v) {
+  if (v === undefined || v === null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'object') return v.name || v.title || v.shortName || v.short || '';
+  return String(v);
+}
+
+function extractTeams(m) {
+  // Try matchName "A vs B" first
+  const matchName = asString(deepGet(m, ['matchName','name','title','fixtureName','match','eventName']));
+  if (matchName && /\bvs\b|\bv\b|–|-/.test(matchName)) {
+    const parts = matchName.split(/\s+(?:vs\.?|v\.?|–|-)\s+/i);
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      return { home: parts[0].trim(), away: parts[1].trim() };
+    }
+  }
+  // Try direct fields
+  const home = asString(deepGet(m, [
+    'homeTeam','home_team','home','teams.home','teams.home.name','team1','homeName',
+    'homeTeamName','localTeam','localTeam.name','participants.0.name','participants.0'
+  ]));
+  const away = asString(deepGet(m, [
+    'awayTeam','away_team','away','teams.away','teams.away.name','team2','awayName',
+    'awayTeamName','visitorTeam','visitorTeam.name','participants.1.name','participants.1'
+  ]));
+  return { home, away };
+}
+
+function extractOdds(m, home, away) {
+  const fb = genOdds(home, away);
+  const h = parseFloat(deepGet(m, [
+    'odds.1','odds.home','odds.h','fairOdds.home','homeOdds','odds.homeWin','markets.h2h.home'
+  ])) || 0;
+  const d = parseFloat(deepGet(m, [
+    'odds.X','odds.x','odds.draw','odds.d','fairOdds.draw','drawOdds','markets.h2h.draw'
+  ])) || 0;
+  const a = parseFloat(deepGet(m, [
+    'odds.2','odds.away','odds.a','fairOdds.away','awayOdds','odds.awayWin','markets.h2h.away'
+  ])) || 0;
+  return {
+    home: +(h||fb.home).toFixed(2),
+    draw: +(d||fb.draw).toFixed(2),
+    away: +(a||fb.away).toFixed(2)
+  };
+}
+
+function extractTime(m) {
+  const ts = deepGet(m, [
+    'kickoffTimestamp','commenceTime','date','kickoff','startTime','matchTime',
+    'fixture.date','utcDate','eventDate'
+  ]);
+  if (!ts) return new Date(Date.now()+86400000);
+  if (typeof ts === 'number') return new Date(ts < 1e12 ? ts*1000 : ts);
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? new Date(Date.now()+86400000) : d;
+}
+
+function extractLeague(m) {
+  const lg = deepGet(m, ['league','competition','leagueName','tournamentName','league.name','competition.name']);
+  return asString(lg) || 'Football';
+}
+
+function mapToSport(leagueName) {
+  const ll = leagueName.toLowerCase();
+  if (ll.includes('world cup')||ll.includes('fifa')) return 'soccer_world_cup';
+  if (ll.includes('mls')) return 'soccer_mls';
+  if (ll.includes('premier league')&&!ll.includes('kenya')) return 'soccer_epl';
+  if (ll.includes('bundesliga')) return 'soccer_bundesliga';
+  if (ll.includes('la liga')) return 'soccer_la_liga';
+  if (ll.includes('serie a')&&!ll.includes('brazil')) return 'soccer_serie_a';
+  if (ll.includes('ligue')) return 'soccer_ligue_1';
+  if (ll.includes('brazil')||ll.includes('brasileirao')) return 'soccer_brazil_serie_a';
+  if (ll.includes('libertadores')) return 'soccer_copa_libertadores';
+  if (ll.includes('champions')) return 'soccer_ucl';
+  if (ll.includes('caf')||ll.includes('africa')) return 'soccer_caf_champions_league';
+  if (ll.includes('kenya')) return 'soccer_kenya_premier_league';
+  if (ll.includes('friendly')||ll.includes('friendlies')) return 'soccer_friendlies';
+  return 'soccer_other';
+}
+
+function extractStatus(m) {
+  const tg = asString(deepGet(m, ['timelineGroup','timeline','group','status','matchStatus'])).toUpperCase();
+  if (tg === 'LIVE' || tg.includes('LIVE') || tg==='1H' || tg==='2H' || tg==='HT') return 'live';
+  if (tg === 'FT' || tg === 'FINISHED' || tg === 'ENDED') return 'finished';
+  return 'upcoming';
+}
+
+function parseJuanMatch(m, sourcePrefix='juan') {
+  const { home, away } = extractTeams(m);
+  if (!home || !away) return null;
+  const league = extractLeague(m);
+  const status = extractStatus(m);
+  return {
+    matchId: `${sourcePrefix}_${deepGet(m,['matchId','id','_id','eventId'])||Math.random().toString(36).slice(2)}`,
+    sport:   mapToSport(league),
+    league,
+    homeTeam: home,
+    awayTeam: away,
+    commenceTime: extractTime(m),
+    status,
+    odds: extractOdds(m, home, away),
+    score: {
+      home:   deepGet(m,['score.home','scoreHome','homeScore']) ?? null,
+      away:   deepGet(m,['score.away','scoreAway','awayScore']) ?? null,
+      minute: deepGet(m,['minute','elapsed','clock']) ?? null,
+      period: asString(deepGet(m,['timelineGroup','status'])) || null
+    },
+    result: null, isStatic: false, source: sourcePrefix
+  };
+}
+
 async function fromJuanAPI() {
   try {
     const r = await axios.get('https://juan-football-api.onrender.com/odds', {
       headers: { 'x-api-key': JUAN_KEY() },
       timeout: 15000
     });
-    const raw = Array.isArray(r.data) ? r.data : (r.data?.matches || r.data?.data || []);
+    const raw = Array.isArray(r.data) ? r.data : (r.data?.matches || r.data?.data || r.data?.results || []);
     if (raw[0]) console.log('[juan-api] FULL Sample:', JSON.stringify(raw[0]));
-    console.log(`[juan-api] ${raw.length} matches`);
-
-    return raw.map(m => {
-      const matchName = m.matchName || m.name || '';
-      const parts = matchName.split(/\s+vs\.?\s+/i);
-      const home = (parts[0]||'').trim() || m.homeTeam || m.home || '';
-      const away = (parts[1]||'').trim() || m.awayTeam || m.away || '';
-      if (!home || !away) return null;
-
-      const tg = (m.timelineGroup || m.timeline || m.group || '').toString().toUpperCase();
-      const status = tg === 'LIVE' ? 'live' : 'upcoming';
-
-      const odds1 = parseFloat(m.odds?.['1'] || m.odds?.home || m.homeOdds || 0);
-      const oddsX = parseFloat(m.odds?.X || m.odds?.draw || m.drawOdds || 0);
-      const odds2 = parseFloat(m.odds?.['2'] || m.odds?.away || m.awayOdds || 0);
-      const fb = genOdds(home, away);
-
-      const ts = m.kickoffTimestamp || m.commenceTime || m.date || m.kickoff;
-      const commence = ts ? new Date(typeof ts==='number' && ts<1e12 ? ts*1000 : ts) : new Date(Date.now()+86400000);
-
-      const league = m.league || m.competition || m.leagueName || 'Football';
-      const ll = (typeof league==='string'?league:JSON.stringify(league)).toLowerCase();
-      const sport =
-        ll.includes('world cup')||ll.includes('fifa') ? 'soccer_world_cup' :
-        ll.includes('mls') ? 'soccer_mls' :
-        ll.includes('premier league') ? 'soccer_epl' :
-        ll.includes('bundesliga') ? 'soccer_bundesliga' :
-        ll.includes('la liga') ? 'soccer_la_liga' :
-        ll.includes('serie a') ? 'soccer_serie_a' :
-        ll.includes('ligue') ? 'soccer_ligue_1' :
-        ll.includes('brazil')||ll.includes('brasileirao') ? 'soccer_brazil_serie_a' :
-        ll.includes('libertadores') ? 'soccer_copa_libertadores' :
-        ll.includes('champions') ? 'soccer_ucl' :
-        ll.includes('caf')||ll.includes('africa') ? 'soccer_caf_champions_league' :
-        ll.includes('kenya') ? 'soccer_kenya_premier_league' :
-        ll.includes('friendly') ? 'soccer_friendlies' : 'soccer_other';
-
-      return {
-        matchId: `juan_${m.matchId||m.id||m._id||Math.random().toString(36).slice(2)}`,
-        sport, league: typeof league==='string'?league:JSON.stringify(league),
-        homeTeam: home, awayTeam: away,
-        commenceTime: isNaN(commence.getTime())?new Date(Date.now()+86400000):commence,
-        status,
-        odds: { home:+((odds1||fb.home)).toFixed(2), draw:+((oddsX||fb.draw)).toFixed(2), away:+((odds2||fb.away)).toFixed(2) },
-        score: { home: m.score?.home??null, away: m.score?.away??null, minute: m.minute||null, period: tg||null },
-        result: null, isStatic: false, source: 'juan'
-      };
-    }).filter(Boolean);
+    console.log(`[juan-api] ${raw.length} raw matches`);
+    const parsed = raw.map(m => parseJuanMatch(m,'juan')).filter(Boolean);
+    console.log(`[juan-api] ${parsed.length} parsed successfully`);
+    if (parsed[0]) console.log('[juan-api] First parsed:', JSON.stringify(parsed[0]));
+    return parsed;
   } catch(e) {
     console.error('[juan-api]', e?.response?.status, e.message);
     return [];
@@ -93,22 +172,9 @@ async function fromJuanLive() {
     });
     const raw = Array.isArray(r.data) ? r.data : (r.data?.matches || r.data?.data || []);
     return raw.map(m => {
-      const matchName = m.matchName || m.name || '';
-      const parts = matchName.split(/\s+vs\.?\s+/i);
-      const home = (parts[0]||'').trim() || m.homeTeam || m.home || '';
-      const away = (parts[1]||'').trim() || m.awayTeam || m.away || '';
-      if (!home||!away) return null;
-      return {
-        matchId: `juan_live_${m.matchId||m.id||Math.random().toString(36).slice(2)}`,
-        sport: 'live',
-        league: typeof m.league==='string'?m.league:(m.league?.name||m.competition||'Live'),
-        homeTeam: home, awayTeam: away,
-        commenceTime: new Date(m.kickoffTimestamp||m.date||Date.now()),
-        status: 'live',
-        score: { home: m.score?.home??0, away: m.score?.away??0, minute: m.minute||0, period: 'LIVE' },
-        odds: { home:+(parseFloat(m.odds?.['1']||1.9)).toFixed(2), draw:+(parseFloat(m.odds?.X||3.2)).toFixed(2), away:+(parseFloat(m.odds?.['2']||2.1)).toFixed(2) },
-        result: null, isStatic: false, source: 'juan'
-      };
+      const parsed = parseJuanMatch(m,'juan_live');
+      if (parsed) parsed.status = 'live';
+      return parsed;
     }).filter(Boolean);
   } catch(e) {
     console.error('[juan-live]', e.message);
@@ -362,7 +428,7 @@ router.get('/debug',async(req,res)=>{
     ODDS_API_KEY:ODDS_KEY()?`✅ SET (${ODDS_KEY().slice(0,8)}...)`:'❌ NOT SET',
     tests:{}
   };
-  // Test Juan API — dump RAW structure
+  // Test Juan API — dump RAW structure AND parsed result
   try{
     const j=await axios.get('https://juan-football-api.onrender.com/odds',{headers:{'x-api-key':JUAN_KEY()},timeout:10000});
     const raw=Array.isArray(j.data)?j.data:(j.data?.matches||j.data?.data||[]);
@@ -370,6 +436,9 @@ router.get('/debug',async(req,res)=>{
     r.tests.juan_raw_keys=raw[0]?Object.keys(raw[0]):[];
     r.tests.juan_raw_first_item=raw[0]||null;
     r.tests.juan_response_top_level_keys=j.data?(Array.isArray(j.data)?'array':Object.keys(j.data)):'empty';
+    // Show what our parser extracts
+    const parsed = raw.slice(0,3).map(m=>parseJuanMatch(m,'juan'));
+    r.tests.juan_parsed_sample = parsed;
   }catch(e){r.tests.juan_api=`❌ ${e?.response?.status} ${e.message}`;}
 
   if(ODDS_KEY()){
