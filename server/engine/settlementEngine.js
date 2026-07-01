@@ -1,8 +1,12 @@
+const axios       = require('axios');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const User        = require('../models/User');
 const Transaction = require('../models/Transaction');
-const footballApi = require('./footballApi');
+
+const KEY  = () => process.env.APIFOOTBALL_KEY;
+const BASE = 'https://v3.football.api-sports.io';
+const HDR  = () => ({ 'x-rapidapi-key': KEY(), 'x-rapidapi-host': 'v3.football.api-sports.io' });
 
 function getResult(h, a) {
   if (h === null || h === undefined || a === null || a === undefined) return null;
@@ -76,45 +80,66 @@ async function settleSelection(sel, result, homeScore, awayScore) {
     settled++;
 
     if (grade?.status === 'won' && grade.netPayout > 0) {
+      const walletService = require('../services/walletService');
+      const wallet = await walletService.payoutWin(bet.userId, grade.netPayout, bet.betCode, { matchId: sel.matchId });
       const user = await User.findByIdAndUpdate(
-        bet.userId, { $inc: { balance: grade.netPayout } }, { new: true }
+        bet.userId, { $inc: { balance: grade.netPayout } }, { new: true } // keep legacy field in sync
       );
       if (user) {
         await Transaction.create({
           userId:      bet.userId,
           type:        'win',
           amount:      grade.netPayout,
-          balance:     user.balance,
+          balance:     wallet.main,
           reference:   bet.betCode,
           description: `Win: ${bet.betCode} — KES ${grade.netPayout}`
         }).catch(()=>{});
         paid++;
         console.log(`  💰 Paid KES ${grade.netPayout} → ${user.username} [${bet.betCode}]`);
+        require('../services/notificationService')
+          .notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: grade.netPayout })
+          .catch(()=>{});
       }
+    } else if (grade?.status === 'lost') {
+      require('../services/notificationService')
+        .notify(bet.userId, 'bet_lost', { betCode: bet.betCode })
+        .catch(()=>{});
     }
   }
   return { settled, paid };
 }
 
-// Fetch finished matches from the Football API (single source of truth)
+// Fetch finished matches from API-Football
 async function fetchFinishedFromAPI() {
-  try {
-    const matches = await footballApi.fetchOdds(); // includes finished matches the API still reports
-    const results = [];
-    for (const m of matches) {
-      if (m.status !== 'finished') continue;
-      const result = getResult(m.score?.home, m.score?.away);
-      if (!result) continue;
-      results.push({
-        matchId: m.matchId, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
-        home: m.score.home, away: m.score.away, result
+  if (!KEY()) return [];
+  const yesterday = new Date(Date.now()-24*3600000).toISOString().split('T')[0];
+  const today     = new Date().toISOString().split('T')[0];
+  const LEAGUES   = [1,2,3,6,8,9,10,13,39,61,71,78,135,140,169,239,253,292,399,667];
+  const results   = [];
+  const year      = new Date().getFullYear();
+
+  for (const id of LEAGUES) {
+    try {
+      const r = await axios.get(`${BASE}/fixtures`, {
+        headers: HDR(),
+        params:  { league:id, season:year, from:yesterday, to:today, status:'FT-AET-PEN' },
+        timeout: 10000
       });
-    }
-    return results;
-  } catch (e) {
-    console.error('[settlement] fetchFinishedFromAPI failed:', e.message);
-    return [];
+      for (const fix of r.data?.response||[]) {
+        const result = getResult(fix.goals?.home, fix.goals?.away);
+        if (result) results.push({
+          matchId:  `apif_${fix.fixture.id}`,
+          homeTeam: fix.teams?.home?.name,
+          awayTeam: fix.teams?.away?.name,
+          home:     fix.goals.home,
+          away:     fix.goals.away,
+          result
+        });
+      }
+    } catch {}
+    await new Promise(r=>setTimeout(r,100));
   }
+  return results;
 }
 
 // Also settle bets on matches that are overdue (past kick-off by 2+ hours, still pending)
@@ -166,17 +191,26 @@ async function settleOverdueBets() {
         voided++;
 
         if (grade.status === 'won' && grade.netPayout > 0) {
+          const walletService = require('../services/walletService');
+          const wallet = await walletService.payoutWin(bet.userId, grade.netPayout, bet.betCode, { lateSettle: true });
           const user = await User.findByIdAndUpdate(
             bet.userId, { $inc: { balance: grade.netPayout } }, { new: true }
           );
           if (user) {
             await Transaction.create({
               userId: bet.userId, type:'win', amount:grade.netPayout,
-              balance:user.balance, reference:bet.betCode,
+              balance:wallet.main, reference:bet.betCode,
               description:`Win: ${bet.betCode} — KES ${grade.netPayout}`
             }).catch(()=>{});
             console.log(`  💰 Late-settle paid KES ${grade.netPayout} → ${user.username}`);
+            require('../services/notificationService')
+              .notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: grade.netPayout })
+              .catch(()=>{});
           }
+        } else if (grade.status === 'lost') {
+          require('../services/notificationService')
+            .notify(bet.userId, 'bet_lost', { betCode: bet.betCode })
+            .catch(()=>{});
         }
       }
     }
@@ -192,13 +226,15 @@ async function runSettlement() {
 
   let totalSettled=0, totalPaid=0;
 
-  // 1. Football API results
-  const results = await fetchFinishedFromAPI();
-  console.log(`  Fetched ${results.length} finished matches from API`);
-  for (const r of results) {
-    const { settled, paid } = await settleSelection(r, r.result, r.home, r.away);
-    totalSettled += settled;
-    totalPaid    += paid;
+  // 1. API-Football results
+  if (KEY()) {
+    const results = await fetchFinishedFromAPI();
+    console.log(`  Fetched ${results.length} finished matches from API`);
+    for (const r of results) {
+      const { settled, paid } = await settleSelection(r, r.result, r.home, r.away);
+      totalSettled += settled;
+      totalPaid    += paid;
+    }
   }
 
   // 2. DB matches marked finished

@@ -30,8 +30,8 @@ function audit(action, data) {
   if (store.auditLog.length > 500) store.auditLog.pop();
 }
 
-// Expose store for other routes
-module.exports.getStore = () => store;
+// Expose store for other routes (attached to router since module.exports = router happens once, at file end)
+router.getStore = () => store;
 
 // ── STATS ──
 router.get('/stats', async (req, res) => {
@@ -145,15 +145,24 @@ router.post('/balance', async (req, res) => {
     if (!identifier || isNaN(amount)) return res.status(400).json({ success:false, message:'identifier and amount required' });
     let phone = identifier.replace(/\D/g,'');
     if (phone.startsWith('0')) phone = '254'+phone.slice(1);
-    const user = await User.findOneAndUpdate(
-      { $or:[{phone},{username:identifier.toLowerCase()}] },
-      { $inc:{ balance:parseFloat(amount) } },
-      { new:true }
-    );
+    const user = await User.findOne({ $or:[{phone},{username:identifier.toLowerCase()}] });
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
-    await Transaction.create({ userId:user._id, type:amount>0?'bonus':'withdrawal', amount:parseFloat(amount), balance:user.balance, description:note||`Admin adjustment KES ${amount}` });
-    audit('ADJUST_BALANCE', { username:user.username, amount, note });
-    res.json({ success:true, balance:user.balance });
+
+    const walletService = require('../services/walletService');
+    const amt = parseFloat(amount);
+    let wallet;
+    if (amt >= 0) {
+      wallet = await walletService.credit(user._id, 'main', amt, 'admin_adjustment', null, { note, admin: true });
+    } else {
+      wallet = await walletService.debit(user._id, 'main', Math.abs(amt), 'admin_adjustment', null, { note, admin: true });
+      if (!wallet) return res.status(400).json({ success:false, message:'User has insufficient main balance for this deduction' });
+    }
+    await User.findByIdAndUpdate(user._id, { $inc:{ balance: amt } }).catch(()=>{}); // keep legacy field in sync
+
+    await Transaction.create({ userId:user._id, type:amt>0?'bonus':'withdrawal', amount:amt, balance:wallet.main, description:note||`Admin adjustment KES ${amt}` });
+    audit('ADJUST_BALANCE', { username:user.username, amount:amt, note });
+    require('../services/auditService').log('admin.balance.adjust', { targetType:'User', targetId:user._id.toString(), meta:{ amount:amt, note } });
+    res.json({ success:true, balance:wallet.main });
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
 
@@ -205,10 +214,17 @@ router.get('/matches', async (req, res) => {
 });
 
 router.post('/match', async (req, res) => {
-  // Disabled by design: all football data must come from the Football
-  // API (single source of truth). Manually-created matches/odds are
-  // not permitted, even by admins.
-  res.status(410).json({ success:false, message:'Manual match creation is disabled. All matches must come from the Football API.' });
+  try {
+    const { homeTeam, awayTeam, league, commenceTime, sport, customOdds } = req.body;
+    if (!homeTeam||!awayTeam||!league||!commenceTime) return res.status(400).json({ success:false, message:'All fields required' });
+    const h = s => (s||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const seed = (h(homeTeam)*7+h(awayTeam)*3)%100;
+    const autoOdds = { home:+(1.4+(seed%30)/20).toFixed(2), draw:+(2.8+(seed%20)/15).toFixed(2), away:+(1.7+(seed%35)/18).toFixed(2) };
+    const odds = customOdds || autoOdds;
+    const match = await Match.create({ matchId:`manual_${Date.now()}`, sport:sport||'soccer_friendlies', league, homeTeam, awayTeam, commenceTime:new Date(commenceTime), status:'upcoming', odds, isStatic:true, source:'manual' });
+    audit('ADD_MATCH', { homeTeam, awayTeam, league });
+    res.json({ success:true, match });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
 
 router.delete('/match/:matchId', async (req, res) => {
@@ -221,8 +237,18 @@ router.delete('/match/:matchId', async (req, res) => {
 
 // ── ODDS UPDATE ──
 router.post('/odds', async (req, res) => {
-  // Disabled by design: odds must only come from the Football API.
-  res.status(410).json({ success:false, message:'Manual odds overrides are disabled. Odds are sourced live from the Football API.' });
+  try {
+    const { matchId, home, draw, away } = req.body;
+    if (!matchId||!home||!draw||!away) return res.status(400).json({ success:false, message:'All fields required' });
+    const match = await Match.findOneAndUpdate(
+      { matchId },
+      { $set:{ 'odds.home':home, 'odds.draw':draw, 'odds.away':away, 'odds.updatedAt':new Date() } },
+      { new:true }
+    );
+    if (!match) return res.status(404).json({ success:false, message:'Match not found' });
+    audit('UPDATE_ODDS', { matchId, home, draw, away });
+    res.json({ success:true });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
 
 // ── TRANSACTIONS ──
@@ -240,9 +266,17 @@ router.get('/transactions', async (req, res) => {
 router.post('/withdrawal/approve', async (req, res) => {
   try {
     const { txId } = req.body;
-    const tx = await Transaction.findByIdAndUpdate(txId, { $set:{ status:'completed' } }, { new:true });
+    const tx = await Transaction.findById(txId);
     if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
+
+    const walletService = require('../services/walletService');
+    await walletService.finalizeWithdrawal(tx.userId, Math.abs(tx.amount), tx.reference);
+    await Transaction.findByIdAndUpdate(txId, { $set:{ status:'completed' } });
+
+    require('../services/notificationService').notify(tx.userId, 'withdrawal_success', { amount: Math.abs(tx.amount) }).catch(()=>{});
     audit('APPROVE_WITHDRAWAL', { txId, amount: tx.amount });
+    require('../services/auditService').log('admin.withdrawal.approve', { targetType:'Transaction', targetId:txId, meta:{ amount: tx.amount } });
     res.json({ success:true, message:'Withdrawal approved' });
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
@@ -252,11 +286,20 @@ router.post('/withdrawal/reject', async (req, res) => {
     const { txId, reason } = req.body;
     const tx = await Transaction.findById(txId);
     if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
-    // Refund user
-    await User.findByIdAndUpdate(tx.userId, { $inc:{ balance: Math.abs(tx.amount) } });
+    if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
+
+    const walletService = require('../services/walletService');
+    const amount = Math.abs(tx.amount);
+    // Release funds from locked back to main (this withdrawal was locked, not yet debited from main permanently)
+    await walletService.releaseLock(tx.userId, amount, tx.reference);
+    await User.findByIdAndUpdate(tx.userId, { $inc:{ balance: amount } }).catch(()=>{});
+
     await Transaction.findByIdAndUpdate(txId, { $set:{ status:'failed', description:(tx.description||'')+ ' — Rejected: '+(reason||'Admin') } });
-    await Transaction.create({ userId:tx.userId, type:'refund', amount:Math.abs(tx.amount), balance:0, description:`Withdrawal rejected: ${reason||'Admin'}` });
+    await Transaction.create({ userId:tx.userId, type:'refund', amount, balance:(await walletService.getBalance(tx.userId)).main, description:`Withdrawal rejected: ${reason||'Admin'}` });
+
+    require('../services/notificationService').notify(tx.userId, 'withdrawal_failed', { amount }).catch(()=>{});
     audit('REJECT_WITHDRAWAL', { txId, reason });
+    require('../services/auditService').log('admin.withdrawal.reject', { targetType:'Transaction', targetId:txId, meta:{ reason, amount } });
     res.json({ success:true, message:'Rejected and refunded' });
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
 });
@@ -348,7 +391,7 @@ router.get('/login-activity', (req, res) => {
 });
 
 // Called by auth route on login
-module.exports.logLogin = (userId, username, ip, success) => {
+router.logLogin = (userId, username, ip, success) => {
   store.loginLog.unshift({ userId, username, ip, success, createdAt: new Date() });
   if (store.loginLog.length > 1000) store.loginLog.pop();
 };
@@ -428,9 +471,16 @@ router.post('/test-stk', async (req, res) => {
 router.post('/clean-matches', async (req, res) => {
   try {
     const Match = require('../models/Match');
-    const del = await Match.deleteMany({ source: { $ne: 'juan' } });
+    const del = await Match.deleteMany({
+      $or: [
+        { source: 'static' },
+        { source: 'manual' },
+        { matchId: { $regex: /^static_/ } },
+        { isStatic: true }
+      ]
+    });
     // Also trigger a fresh sync
-    const { syncFixtures } = require('../engine/footballSync');
+    const { syncFixtures } = require('../engine/apifootball');
     syncFixtures().catch(console.error);
     res.json({ success:true, message:`Deleted ${del.deletedCount} fake matches. Syncing real data...` });
   } catch(e) { res.status(500).json({ success:false, message:e.message }); }
@@ -445,6 +495,226 @@ router.post('/fix-indexes', async (req, res) => {
     audit('FIX_INDEXES', { deletedBadRecords: bad.deletedCount });
     res.json({ success:true, message:'Indexes rebuilt successfully', deletedBadRecords: bad.deletedCount });
   } catch(e) { res.status(500).json({ success:false, message:'Failed: '+e.message }); }
+});
+
+// ── WALLET MANAGEMENT (full bucket view) ──
+router.get('/wallets', async (req, res) => {
+  try {
+    const Wallet = require('../models/Wallet');
+    const { page = 1, limit = 50, search } = req.query;
+    let userFilter = {};
+    if (search) {
+      let phone = search.replace(/\D/g,''); if (phone.startsWith('0')) phone = '254'+phone.slice(1);
+      userFilter = { $or: [{ phone }, { username: new RegExp(search, 'i') }] };
+    }
+    const users = search ? await User.find(userFilter).select('_id').lean() : null;
+    const filter = users ? { userId: { $in: users.map(u=>u._id) } } : {};
+    const skip = (parseInt(page)-1) * limit;
+    const [wallets, total] = await Promise.all([
+      Wallet.find(filter).populate('userId', 'username phone').sort({ main: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      Wallet.countDocuments(filter)
+    ]);
+    res.json({ success:true, data: wallets, total, page: parseInt(page), pages: Math.ceil(total/limit) });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+router.get('/wallets/:userId/history', async (req, res) => {
+  try {
+    const walletService = require('../services/walletService');
+    const result = await walletService.getHistory(req.params.userId, { page: parseInt(req.query.page)||1, limit: 50 });
+    res.json({ success:true, ...result });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── PROMOTION MANAGEMENT ──
+router.get('/promotions', async (req, res) => {
+  try {
+    const Promotion = require('../models/Promotion');
+    const promos = await Promotion.find().sort({ createdAt:-1 }).lean();
+    res.json({ success:true, data: promos });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+router.post('/promotions', async (req, res) => {
+  try {
+    const Promotion = require('../models/Promotion');
+    const promo = await Promotion.create(req.body);
+    audit('CREATE_PROMOTION', { name: promo.name, type: promo.type });
+    require('../services/auditService').log('admin.promotion.create', { targetType:'Promotion', targetId:promo._id.toString() });
+    res.json({ success:true, data: promo });
+  } catch(e) { res.status(400).json({ success:false, message:e.message }); }
+});
+
+router.patch('/promotions/:id', async (req, res) => {
+  try {
+    const Promotion = require('../models/Promotion');
+    const promo = await Promotion.findByIdAndUpdate(req.params.id, { $set: req.body }, { new:true });
+    if (!promo) return res.status(404).json({ success:false, message:'Promotion not found' });
+    audit('UPDATE_PROMOTION', { id: req.params.id });
+    res.json({ success:true, data: promo });
+  } catch(e) { res.status(400).json({ success:false, message:e.message }); }
+});
+
+router.delete('/promotions/:id', async (req, res) => {
+  try {
+    const Promotion = require('../models/Promotion');
+    await Promotion.findByIdAndDelete(req.params.id);
+    audit('DELETE_PROMOTION', { id: req.params.id });
+    res.json({ success:true });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── REFERRAL MANAGEMENT ──
+router.get('/referrals', async (req, res) => {
+  try {
+    const topReferrers = await User.aggregate([
+      { $match: { referredBy: { $ne: null } } },
+      { $group: { _id: '$referredBy', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }, { $limit: 20 },
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'referrer' } },
+      { $unwind: '$referrer' },
+      { $project: { username: '$referrer.username', phone: '$referrer.phone', referralCode: '$referrer.referralCode', count: 1 } }
+    ]);
+    const totalReferred = await User.countDocuments({ referredBy: { $ne: null } });
+    res.json({ success:true, data: topReferrers, totalReferred });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── AFFILIATE MANAGEMENT (basic — treats top referrers as affiliates; extend with dedicated model if formal affiliate program is needed) ──
+router.get('/affiliates', async (req, res) => {
+  try {
+    const affiliates = await User.aggregate([
+      { $match: { referredBy: { $ne: null } } },
+      { $group: { _id: '$referredBy', referredCount: { $sum: 1 } } },
+      { $match: { referredCount: { $gte: 3 } } }, // threshold to be considered an "affiliate" tier referrer
+      { $sort: { referredCount: -1 } },
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+      { $unwind: '$user' },
+      { $project: { username: '$user.username', phone: '$user.phone', referralCode: '$user.referralCode', referredCount: 1 } }
+    ]);
+    res.json({ success:true, data: affiliates });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── ROLES & PERMISSIONS ──
+router.get('/roles', async (req, res) => {
+  try {
+    const counts = await User.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]);
+    res.json({ success:true, data: counts, availableRoles: ['user', 'admin', 'support'] });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+router.post('/roles/set', async (req, res) => {
+  try {
+    const { userId, role } = req.body;
+    if (!['user','admin','support'].includes(role)) return res.status(400).json({ success:false, message:'Invalid role' });
+    const user = await User.findByIdAndUpdate(userId, { $set:{ role } }, { new:true }).select('username role');
+    if (!user) return res.status(404).json({ success:false, message:'User not found' });
+    audit('SET_ROLE', { username: user.username, role });
+    require('../services/auditService').log('admin.role.set', { targetType:'User', targetId:userId, meta:{ role } });
+    res.json({ success:true, data: user });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── REAL AUDIT LOGS (DB-backed, persists across restarts — complements the in-memory quick log above) ──
+router.get('/audit-logs', async (req, res) => {
+  try {
+    const auditService = require('../services/auditService');
+    const result = await auditService.query({ action: req.query.action, page: parseInt(req.query.page)||1, limit: 50 });
+    res.json({ success:true, ...result });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── KYC REVIEW QUEUE ──
+router.get('/kyc/pending', async (req, res) => {
+  try {
+    const users = await User.find({ kycStatus: 'pending' }).select('username phone kycDocType kycSubmittedAt').sort({ kycSubmittedAt: 1 }).lean();
+    res.json({ success:true, data: users });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+router.post('/kyc/review', async (req, res) => {
+  try {
+    const { userId, approve, reason } = req.body;
+    const update = approve
+      ? { kycStatus: 'verified', kycReviewedAt: new Date(), kycRejectReason: null }
+      : { kycStatus: 'rejected', kycReviewedAt: new Date(), kycRejectReason: reason || 'Not specified' };
+    const user = await User.findByIdAndUpdate(userId, { $set: update }, { new:true }).select('username kycStatus');
+    if (!user) return res.status(404).json({ success:false, message:'User not found' });
+    require('../services/notificationService').notify(userId, 'system', {
+      title: approve ? 'KYC Approved' : 'KYC Rejected',
+      message: approve ? 'Your identity verification was approved.' : `Your KYC was rejected: ${reason || 'contact support'}`
+    }).catch(()=>{});
+    audit('KYC_REVIEW', { username: user.username, approve, reason });
+    require('../services/auditService').log('admin.kyc.review', { targetType:'User', targetId:userId, meta:{ approve, reason } });
+    res.json({ success:true, data: user });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── API MONITORING (Football API / Odds API health) ──
+router.get('/api-monitoring', async (req, res) => {
+  try {
+    const Match = require('../models/Match');
+    const [totalMatches, withOdds, bySource, lastSync] = await Promise.all([
+      Match.countDocuments(),
+      Match.countDocuments({ hasOdds: true }),
+      Match.aggregate([{ $group: { _id: '$source', count: { $sum: 1 } } }]),
+      Match.findOne().sort({ updatedAt: -1 }).select('updatedAt').lean()
+    ]);
+    res.json({
+      success: true,
+      data: {
+        totalMatches, withOdds, withoutOdds: totalMatches - withOdds,
+        bySource, lastSyncAt: lastSync?.updatedAt || null,
+        keysConfigured: {
+          footballApi: !!process.env.APIFOOTBALL_KEY,
+          oddsApi: !!process.env.ODDS_API_KEY
+        }
+      }
+    });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── PAYMENT MONITORING (M-Pesa health) ──
+router.get('/payment-monitoring', async (req, res) => {
+  try {
+    const since24h = new Date(Date.now() - 24*3600*1000);
+    const [depositsPending, depositsFailed, depositsOk, wdPending, wdFailed, wdOk] = await Promise.all([
+      Transaction.countDocuments({ type:'deposit', status:'pending', createdAt:{ $gte: since24h } }),
+      Transaction.countDocuments({ type:'deposit', status:'failed', createdAt:{ $gte: since24h } }),
+      Transaction.countDocuments({ type:'deposit', status:'completed', createdAt:{ $gte: since24h } }),
+      Transaction.countDocuments({ type:'withdrawal', status:'pending', createdAt:{ $gte: since24h } }),
+      Transaction.countDocuments({ type:'withdrawal', status:'failed', createdAt:{ $gte: since24h } }),
+      Transaction.countDocuments({ type:'withdrawal', status:'completed', createdAt:{ $gte: since24h } })
+    ]);
+    res.json({
+      success: true,
+      data: {
+        deposits: { pending: depositsPending, failed: depositsFailed, completed: depositsOk },
+        withdrawals: { pending: wdPending, failed: wdFailed, completed: wdOk },
+        keysConfigured: {
+          mpesaConsumerKey: !!process.env.MPESA_CONSUMER_KEY,
+          mpesaConsumerSecret: !!process.env.MPESA_CONSUMER_SECRET,
+          mpesaShortcode: !!process.env.MPESA_SHORTCODE
+        }
+      }
+    });
+  } catch(e) { res.status(500).json({ success:false, message:e.message }); }
+});
+
+// ── HEALTH CHECK (for uptime monitoring / load balancers) ──
+router.get('/health', async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const dbState = mongoose.connection.readyState; // 1 = connected
+    res.json({
+      success: true,
+      status: dbState === 1 ? 'healthy' : 'degraded',
+      db: dbState === 1 ? 'connected' : 'disconnected',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
+    });
+  } catch(e) { res.status(500).json({ success:false, status:'unhealthy', message:e.message }); }
 });
 
 module.exports = router;

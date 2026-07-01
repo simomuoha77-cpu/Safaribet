@@ -22,7 +22,10 @@
     "ws": "^8.16.0",
     "axios": "^1.6.2",
     "uuid": "^9.0.0",
-    "xss": "^1.0.15"
+    "xss": "^1.0.15",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.3",
+    "ua-parser-js": "^1.0.37"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

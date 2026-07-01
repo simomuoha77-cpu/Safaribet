@@ -115,25 +115,30 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       return res.status(403).json({ success: false, message: secError });
     }
 
-    // Atomic balance deduction — ONLY if balance is sufficient
-    // Uses findOneAndUpdate with condition to prevent race conditions
-    const user = await User.findOneAndUpdate(
-      {
-        _id:     req.user._id,
-        balance: { $gte: amount },
-        isActive: true
-      },
-      { $inc: { balance: -amount } },
-      { new: true }
-    );
+    // Atomic balance lock — moves funds from main -> locked (prevents double-spend
+    // while the M-Pesa B2C payout is in flight). Falls back to a clear error if
+    // the user account is suspended or insufficient funds.
+    const walletService = require('../services/walletService');
 
-    if (!user) {
-      // Re-check what went wrong
-      const u = await User.findById(req.user._id);
-      if (!u) return res.status(404).json({ success: false, message: 'Account not found' });
-      if (!u.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
-      return res.status(400).json({ success: false, message: `Insufficient balance. Available: KES ${u.balance}` });
+    const u = await User.findById(req.user._id);
+    if (!u) return res.status(404).json({ success: false, message: 'Account not found' });
+    if (!u.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
+
+    const locked = await walletService.lockForWithdrawal(req.user._id, amount, null);
+    if (!locked) {
+      const bal = await walletService.getBalance(req.user._id);
+      return res.status(400).json({ success: false, message: `Insufficient balance. Available: KES ${bal.main}` });
     }
+
+    // Fraud signal — logged for admin review, never blocks (avoids costly false positives on real customers)
+    require('../services/fraudService').assessWithdrawal(req.user._id, amount)
+      .then(result => { if (result.risk !== 'normal') console.warn(`[FRAUD] Withdrawal flagged: user ${req.user._id} — ${result.flags.join('; ')}`); })
+      .catch(() => {});
+
+    // Keep legacy User.balance in sync
+    await User.findByIdAndUpdate(req.user._id, { $inc: { balance: -amount } }).catch(() => {});
+
+    const user = { balance: locked.main, username: u.username };
 
     const ref = 'WD' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(3).toString('hex').toUpperCase();
 
@@ -165,7 +170,17 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       } catch(e) {
         b2cError = e.message;
         console.error('[B2C error]', e.message);
-        // Don't refund — admin can retry or approve manually
+        // The B2C request never reached Safaricom — release the lock so the user
+        // isn't stuck with funds frozen indefinitely. Admin can see the failed tx and retry manually.
+        await walletService.releaseLock(req.user._id, amount, ref).catch(() => {});
+        await User.findByIdAndUpdate(req.user._id, { $inc: { balance: amount } }).catch(() => {});
+        await Transaction.findByIdAndUpdate(tx._id, {
+          $set: { status: 'failed', description: `${tx.description} — B2C send failed: ${b2cError}` }
+        });
+        return res.status(502).json({
+          success: false,
+          message: 'Withdrawal could not be processed right now. Your balance has been restored — please try again shortly.'
+        });
       }
     }
 
@@ -196,23 +211,31 @@ router.post('/b2c/result', async (req, res) => {
     const tx = await Transaction.findOne({ reference: ref });
     if (!tx) return;
 
+    const walletService = require('../services/walletService');
+    const amount = Math.abs(tx.amount);
+
     if (code === 0) {
-      // Success
+      // Success — money has left the platform; remove from locked permanently
+      await walletService.finalizeWithdrawal(tx.userId, amount, ref);
       await Transaction.findByIdAndUpdate(tx._id, {
         $set: { status: 'completed', description: tx.description + ' — Paid' }
       });
       console.log(`✅ B2C success: ${ref}`);
+      require('../services/notificationService').notify(tx.userId, 'withdrawal_success', { amount }).catch(()=>{});
     } else {
-      // Failed — refund user
+      // Failed — release the lock back to main (refund) and sync legacy balance
+      await walletService.releaseLock(tx.userId, amount, ref);
+      await User.findByIdAndUpdate(tx.userId, { $inc: { balance: amount } }).catch(() => {});
       await Transaction.findByIdAndUpdate(tx._id, {
         $set: { status: 'failed', description: tx.description + ` — Failed: ${result.ResultDesc}` }
       });
-      await User.findByIdAndUpdate(tx.userId, { $inc: { balance: Math.abs(tx.amount) } });
       await Transaction.create({
-        userId: tx.userId, type: 'refund', amount: Math.abs(tx.amount),
-        balance: 0, description: `Refund: withdrawal ${ref} failed`
+        userId: tx.userId, type: 'refund', amount,
+        balance: (await walletService.getBalance(tx.userId)).main,
+        description: `Refund: withdrawal ${ref} failed`
       });
       console.log(`❌ B2C failed: ${ref} — ${result.ResultDesc} — refunded`);
+      require('../services/notificationService').notify(tx.userId, 'withdrawal_failed', { amount }).catch(()=>{});
     }
   } catch(e) {
     console.error('[b2c/result]', e.message);
@@ -227,9 +250,12 @@ router.post('/b2c/timeout', async (req, res) => {
     if (!ref) return;
     const tx = await Transaction.findOne({ reference: ref, status: 'pending' });
     if (!tx) return;
-    // Timeout — refund
+    // Timeout — release the lock back to main
+    const walletService = require('../services/walletService');
+    const amount = Math.abs(tx.amount);
+    await walletService.releaseLock(tx.userId, amount, ref);
+    await User.findByIdAndUpdate(tx.userId, { $inc: { balance: amount } }).catch(() => {});
     await Transaction.findByIdAndUpdate(tx._id, { $set: { status: 'failed', description: tx.description + ' — Timeout' } });
-    await User.findByIdAndUpdate(tx.userId, { $inc: { balance: Math.abs(tx.amount) } });
     console.log(`⏰ B2C timeout: ${ref} — refunded`);
   } catch(e) {
     console.error('[b2c/timeout]', e.message);

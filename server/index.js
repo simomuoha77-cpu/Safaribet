@@ -16,39 +16,35 @@ const mpesaRoutes   = require('./routes/mpesa');
 const betsRoutes    = require('./routes/bets');
 const withdrawRoutes= require('./routes/withdraw');
 const adminRoutes   = require('./routes/admin');
+const walletRoutes      = require('./routes/wallet');
+const promotionsRoutes  = require('./routes/promotions');
+const notificationsRoutes = require('./routes/notifications');
+const accountRoutes     = require('./routes/account');
 const scheduler     = require('./engine/scheduler');
 
 const app    = express();
 const server = http.createServer(app);
 
-// ── WEBSOCKET (Aviator + Football live updates) ──
+// ── WEBSOCKET (Aviator) ──
 try {
   const { WebSocketServer } = require('ws');
   const wss = new WebSocketServer({ server, path: '/ws/aviator' });
   aviatorRoutes.setupWS(wss);
   console.log('✅ WebSocket ready at /ws/aviator');
-
-  // Football live feed — pushes the Football API's live snapshot to
-  // every connected client whenever the scheduler polls it. Clients
-  // that can't use WebSockets fall back to polling /api/odds/live.
-  const footballWss = new WebSocketServer({ server, path: '/ws/football' });
-  let lastFootballPayload = null;
-  footballWss.on('connection', (ws) => {
-    if (lastFootballPayload) {
-      try { ws.send(JSON.stringify(lastFootballPayload)); } catch (_) {}
-    }
-  });
-  const { setBroadcaster } = require('./engine/footballSync');
-  setBroadcaster((payload) => {
-    lastFootballPayload = payload;
-    const msg = JSON.stringify(payload);
-    footballWss.clients.forEach(client => {
-      if (client.readyState === 1) { try { client.send(msg); } catch (_) {} }
-    });
-  });
-  console.log('✅ WebSocket ready at /ws/football');
 } catch (e) {
   console.warn('⚠️  ws not available:', e.message);
+}
+
+// ── WEBSOCKET (Live Notifications) ──
+try {
+  const { WebSocketServer } = require('ws');
+  const notificationsWS = require('./engine/notificationsWS');
+  const notifyWss = new WebSocketServer({ server, path: '/ws/notifications' });
+  notificationsWS.setupWS(notifyWss);
+  require('./services/notificationService').setBroadcaster(notificationsWS.broadcastToUser);
+  console.log('✅ WebSocket ready at /ws/notifications');
+} catch (e) {
+  console.warn('⚠️  notifications ws not available:', e.message);
 }
 
 // ── SECURITY ──
@@ -122,6 +118,10 @@ app.use('/api/aviator',  aviatorRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);
 app.use('/api/withdraw', withdrawRoutes);
+app.use('/api/wallet',       walletRoutes);
+app.use('/api/promotions',   promotionsRoutes);
+app.use('/api/notifications',notificationsRoutes);
+app.use('/api/account',      accountRoutes);
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);
@@ -195,14 +195,14 @@ mongoose.connect(process.env.MONGO_URI, {
   .then(() => {
     console.log('✅ MongoDB connected');
 
-    // Clean any non-API matches from DB on every startup (defense in
-    // depth — the admin manual-match endpoints are disabled, but this
-    // guards against any pre-existing rows from before this change).
+    // Clean fake/static games from DB on every startup
     (async () => {
       try {
         const Match = require('./models/Match');
-        const del = await Match.deleteMany({ source: { $ne: 'juan' } });
-        if (del.deletedCount) console.log(`🗑️ Removed ${del.deletedCount} non-API matches from DB`);
+        const del = await Match.deleteMany({
+          $or: [{ source:'static' }, { source:'manual' }, { matchId:/^static_/ }, { isStatic:true }]
+        });
+        if (del.deletedCount) console.log(`🗑️ Removed ${del.deletedCount} fake matches from DB`);
       } catch(e) { console.error('[startup cleanup]', e.message); }
     })();
 

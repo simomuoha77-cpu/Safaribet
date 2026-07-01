@@ -22,16 +22,11 @@ const LEAGUES = [
   { id: 2,   key: 'soccer_ucl',                  name: '🏆 Champions League',        season: 2025 },
 ];
 
-function genOdds(home, away) {
-  const h = s => (s||'').split('').reduce((a,c) => a + c.charCodeAt(0), 0);
-  const seed = (h(home)*7+h(away)*3)%100;
-  return {
-    home: +(1.40+(seed%30)/20).toFixed(2),
-    draw: +(2.80+(seed%20)/15).toFixed(2),
-    away: +(1.70+(seed%35)/18).toFixed(2),
-    updatedAt: new Date()
-  };
-}
+// NOTE: API-Football and TheSportsDB do NOT provide betting odds — only fixtures/scores.
+// Real odds come exclusively from The Odds API (see server/routes/odds.js, which merges
+// odds onto matches synced here). Matches synced from this file get hasOdds:false and
+// odds:null until a real odds feed populates them; the bet placement route already
+// rejects any selection lacking real server-side odds, so these are display-only until then.
 
 async function cleanFakeMatches() {
   // Delete all static/fake matches from DB — only keep real API matches
@@ -85,7 +80,6 @@ async function syncFixtures() {
             awayTeam:     away,
             commenceTime: new Date(f.date),
             status,
-            odds:         genOdds(home, away),
             score: {
               home:   goals?.home ?? null,
               away:   goals?.away ?? null,
@@ -98,6 +92,13 @@ async function syncFixtures() {
             isStatic: false,
             source: 'apif'
           };
+          // Only touch odds if we don't already have real odds for this match (from Odds API sync).
+          // $set on the whole doc would otherwise clobber real odds with nulls on every 6h fixture sync.
+          const existing = await Match.findOne({ matchId: doc.matchId }).select('hasOdds').lean();
+          if (!existing?.hasOdds) {
+            doc.odds = { home: null, draw: null, away: null, updatedAt: new Date() };
+            doc.hasOdds = false;
+          }
           await Match.findOneAndUpdate(
             { matchId: doc.matchId },
             { $set: doc },
@@ -146,12 +147,16 @@ async function syncFixtures() {
             awayTeam:     away,
             commenceTime: isNaN(commence.getTime()) ? new Date(`${ev.dateEvent}T18:00:00Z`) : commence,
             status:       'upcoming',
-            odds:         genOdds(home, away),
             score:        { home:null, away:null, minute:null, period:null },
             result:       null,
             isStatic:     false,
             source:       'tsdb'
           };
+          const existing = await Match.findOne({ matchId: doc.matchId }).select('hasOdds').lean();
+          if (!existing?.hasOdds) {
+            doc.odds = { home: null, draw: null, away: null, updatedAt: new Date() };
+            doc.hasOdds = false;
+          }
           await Match.findOneAndUpdate({ matchId: doc.matchId }, { $set: doc }, { upsert: true });
           total++;
         }

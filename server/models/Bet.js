@@ -21,16 +21,28 @@ const selectionSchema = new mongoose.Schema({
 const betSchema = new mongoose.Schema({
   userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   betCode:     { type: String, unique: true, default: genCode },
+  betType:     { type: String, enum: ['single', 'multi', 'system'], default: 'multi' },
+  // System bets: e.g. "2/3" = any 2 winning out of 3 selections forms a winning combo
+  systemConfig: {
+    pick: { type: Number },   // how many selections must win
+    of:   { type: Number }    // out of how many total selections
+  },
   selections:  { type: [selectionSchema], required: true },
   stake:       { type: Number, required: true, min: 10 },
+  stakeFromBonus: { type: Number, default: 0 },
+  stakeFromMain:  { type: Number, default: 0 },
   totalOdds:   { type: Number, required: true },
   potentialWin:{ type: Number, required: true },
   payout:      { type: Number, default: 0 },
   netPayout:   { type: Number, default: 0 },
   tax:         { type: Number, default: 0 },
-  status:      { type: String, enum: ['pending','won','lost','void','cancelled'], default: 'pending', index: true },
+  status:      { type: String, enum: ['pending','won','lost','void','cancelled','cashed_out'], default: 'pending', index: true },
   settledAt:   { type: Date },
-  ipAddress:   { type: String }
+  ipAddress:   { type: String },
+  // Cash Out
+  cashedOut:        { type: Boolean, default: false },
+  cashOutAmount:    { type: Number },
+  cashOutAt:        { type: Date }
 }, { timestamps: true });
 
 betSchema.index({ userId: 1, createdAt: -1 });

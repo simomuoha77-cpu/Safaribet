@@ -54,6 +54,14 @@ router.post('/stk', auth, mpesaLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
 
+    try {
+      const rg = require('../services/responsibleGamingService');
+      await rg.checkSelfExclusion(req.user._id);
+      await rg.checkDepositLimit(req.user._id, amount);
+    } catch (rgErr) {
+      return res.status(403).json({ success: false, message: rgErr.message });
+    }
+
     const token = await getToken();
     const ts    = getTimestamp();
 
@@ -115,27 +123,27 @@ router.post('/callback', async (req, res) => {
     const tx = await Transaction.findOne({ reference: ref, status: 'pending' }).lean();
     if (!tx) return;
 
-    const prevDeposits = await Transaction.countDocuments({ userId: tx.userId, type: 'deposit', status: 'completed' });
-    const isFirst      = prevDeposits === 0;
-    const bonus        = isFirst ? 20 : 0;
-    const total        = amount + bonus;
+    const walletService = require('../services/walletService');
+    const promotionService = require('../services/promotionService');
 
-    const user = await User.findByIdAndUpdate(tx.userId, { $inc: { balance: total } }, { new: true });
-    if (!user) return;
+    // Credit real cash to main wallet balance (atomic, auditable)
+    const wallet = await walletService.confirmDeposit(tx.userId, amount, mpRef, { checkoutId: ref });
+
+    // Keep legacy User.balance in sync for any UI still reading it directly
+    await User.findByIdAndUpdate(tx.userId, { $inc: { balance: amount } }).catch(() => {});
 
     await Transaction.findByIdAndUpdate(tx._id, {
-      status: 'completed', mpesaRef: mpRef, balance: user.balance,
+      status: 'completed', mpesaRef: mpRef, balance: wallet.main,
       description: `Deposit KES ${amount} — M-Pesa ${mpRef}`
     });
 
-    if (isFirst) {
-      await Transaction.create({
-        userId: tx.userId, type: 'bonus', amount: bonus,
-        balance: user.balance, description: `Welcome bonus KES ${bonus}`
-      }).catch(() => {});
-    }
+    console.log(`✅ Deposit: user ${tx.userId} +KES ${amount} (${mpRef})`);
+    require('../services/notificationService').notify(tx.userId, 'deposit_success', { amount }).catch(()=>{});
 
-    console.log(`✅ Deposit: ${user.username} +KES ${total} (${mpRef})`);
+    // Welcome bonus (one-time, rule-driven via Promotion model) — non-blocking
+    promotionService.tryGrantWelcomeBonus(tx.userId, amount).catch(e => console.error('[welcome bonus]', e.message));
+    // Referral bonus for whoever referred this user, if any — non-blocking
+    promotionService.tryGrantReferralBonus(tx.userId, amount).catch(e => console.error('[referral bonus]', e.message));
   } catch (e) {
     console.error('[mpesa/callback]', e.message);
   }
@@ -146,8 +154,8 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
   try {
     const tx = await Transaction.findOne({ reference: req.params.checkoutId, userId: req.user._id }).lean();
     if (!tx) return res.json({ success: false, message: 'Transaction not found' });
-    const user = await User.findById(req.user._id).select('balance');
-    res.json({ success: true, status: tx.status, balance: user.balance });
+    const balance = await require('../services/walletService').getBalance(req.user._id);
+    res.json({ success: true, status: tx.status, balance: balance.spendable, wallet: balance });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Check failed' });
   }
