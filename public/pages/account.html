@@ -97,6 +97,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .field input:disabled{opacity:0.5}
 .sbtn{width:100%;padding:14px;background:linear-gradient(135deg,#00e65c,#00c853);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,200,83,0.25);transition:all 0.2s}
 .sbtn:disabled{background:#1a2a1a;color:var(--mt);cursor:not-allowed;box-shadow:none}
+.err-msg{display:none;background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);color:var(--rd);font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+.ok-msg{display:none;background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);color:var(--g);font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;margin-bottom:12px}
 .err-msg{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--rd);margin-bottom:10px;display:none}
 .ok-msg{background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--g);margin-bottom:10px;display:none}
 
@@ -141,14 +143,18 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 </div>
 
 <!-- Balance Cards -->
-<div class="bal-grid">
+<div class="bal-grid" style="grid-template-columns:1fr 1fr 1fr">
   <div class="bal-card">
-    <div class="bal-val" style="color:var(--g)" id="mainBal">0.00</div>
-    <div class="bal-lbl">Main Balance</div>
+    <div class="bal-val" style="color:var(--g);font-size:20px" id="mainBal">0.00</div>
+    <div class="bal-lbl">Main</div>
   </div>
   <div class="bal-card">
-    <div class="bal-val" style="color:var(--yl)" id="bonusBal">0.00</div>
-    <div class="bal-lbl">Bonus Balance</div>
+    <div class="bal-val" style="color:var(--yl);font-size:20px" id="bonusBal">0.00</div>
+    <div class="bal-lbl">Bonus</div>
+  </div>
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--mt);font-size:20px" id="lockedBal">0.00</div>
+    <div class="bal-lbl">Locked</div>
   </div>
 </div>
 
@@ -187,6 +193,58 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   </div>
   <div class="mi" onclick="location.href='/my-bets'">
     <div class="mi-l"><div class="mi-icon">📋</div><div><div class="mi-text">My Bets</div><div class="mi-sub">View full bet history</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Security -->
+<div class="sec">
+  <div class="sec-hd">Security</div>
+  <div class="mi" onclick="openModal('twoFaModal')">
+    <div class="mi-l"><div class="mi-icon">🛡️</div><div><div class="mi-text">Two-Factor Authentication</div><div class="mi-sub" id="twoFaStatus">Checking status...</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('sessionsModal')">
+    <div class="mi-l"><div class="mi-icon">📱</div><div><div class="mi-text">Active Sessions</div><div class="mi-sub">Manage devices logged into your account</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Verification -->
+<div class="sec">
+  <div class="sec-hd">Verification</div>
+  <div class="mi" onclick="openModal('kycModal')">
+    <div class="mi-l"><div class="mi-icon">🪪</div><div><div class="mi-text">Identity Verification (KYC)</div><div class="mi-sub" id="kycStatus">Checking status...</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Promotions -->
+<div class="sec">
+  <div class="sec-hd">Promotions & Referrals</div>
+  <div class="mi" onclick="openModal('promoModal')">
+    <div class="mi-l"><div class="mi-icon">🎁</div><div><div class="mi-text">Redeem Promo Code</div><div class="mi-sub">Enter a code to claim a bonus</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('referralModal')">
+    <div class="mi-l"><div class="mi-icon">🔗</div><div><div class="mi-text">Refer & Earn</div><div class="mi-sub">Invite friends, earn bonuses</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="location.href='/promotions'">
+    <div class="mi-l"><div class="mi-icon">🏷️</div><div><div class="mi-text">My Active Bonuses</div><div class="mi-sub">Track wagering progress</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Responsible Gaming -->
+<div class="sec">
+  <div class="sec-hd">Responsible Gaming</div>
+  <div class="mi" onclick="openModal('limitsModal')">
+    <div class="mi-l"><div class="mi-icon">⏱️</div><div><div class="mi-text">Betting & Deposit Limits</div><div class="mi-sub">Set daily limits for yourself</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('exclusionModal')">
+    <div class="mi-l"><div class="mi-icon">🚫</div><div><div class="mi-text">Self-Exclusion</div><div class="mi-sub">Take a break from betting</div></div></div>
     <span class="chevron">›</span>
   </div>
 </div>
@@ -232,6 +290,153 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   </div>
 </div>
 
+<!-- 2FA Modal -->
+<div class="modal-bg" id="twoFaModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Two-Factor Authentication</div>
+      <button class="modal-close" onclick="closeModal('twoFaModal')">✕</button>
+    </div>
+    <div class="err-msg" id="twoFaErr"></div>
+    <div class="ok-msg" id="twoFaOk"></div>
+    <div id="twoFaDisabledView">
+      <p style="font-size:13px;color:var(--mt);margin-bottom:14px;line-height:1.5">Add an extra layer of security. You'll need an authenticator app (Google Authenticator, Authy, etc).</p>
+      <button class="sbtn" onclick="start2FASetup()">Set Up 2FA</button>
+    </div>
+    <div id="twoFaSetupView" style="display:none">
+      <p style="font-size:13px;color:var(--mt);margin-bottom:10px">Scan this QR code with your authenticator app:</p>
+      <div style="text-align:center;margin-bottom:14px"><img id="twoFaQr" style="width:180px;height:180px;border-radius:8px;background:#fff;padding:8px"/></div>
+      <div class="field"><label>Enter 6-digit code from app</label><input id="twoFaToken" type="text" inputmode="numeric" maxlength="6" placeholder="000000"/></div>
+      <button class="sbtn" onclick="confirm2FASetup()">Verify & Enable</button>
+    </div>
+    <div id="twoFaBackupView" style="display:none">
+      <p style="font-size:13px;color:var(--g);margin-bottom:10px;font-weight:700">2FA Enabled! Save these backup codes — each works once if you lose your device:</p>
+      <div id="backupCodesList" style="background:rgba(19,26,19,0.8);border-radius:10px;padding:12px;font-family:monospace;font-size:13px;line-height:1.8"></div>
+      <button class="sbtn" style="margin-top:14px" onclick="closeModal('twoFaModal');location.reload()">Done</button>
+    </div>
+    <div id="twoFaEnabledView" style="display:none">
+      <p style="font-size:13px;color:var(--mt);margin-bottom:14px">2FA is currently enabled on your account.</p>
+      <div class="field"><label>Enter password to disable</label><input id="disable2FAPassword" type="password" placeholder="Your password"/></div>
+      <button class="sbtn" style="background:linear-gradient(135deg,#ff3b3b,#cc0000)" onclick="disable2FA()">Disable 2FA</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sessions Modal -->
+<div class="modal-bg" id="sessionsModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Active Sessions</div>
+      <button class="modal-close" onclick="closeModal('sessionsModal')">✕</button>
+    </div>
+    <div id="sessionsList" style="max-height:300px;overflow-y:auto"><div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">Loading...</div></div>
+    <button class="sbtn" style="margin-top:14px;background:linear-gradient(135deg,#ff3b3b,#cc0000)" onclick="logoutAllSessions()">Log Out All Devices</button>
+  </div>
+</div>
+
+<!-- KYC Modal -->
+<div class="modal-bg" id="kycModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Identity Verification</div>
+      <button class="modal-close" onclick="closeModal('kycModal')">✕</button>
+    </div>
+    <div class="err-msg" id="kycErr"></div>
+    <div class="ok-msg" id="kycOk"></div>
+    <div id="kycFormView">
+      <p style="font-size:13px;color:var(--mt);margin-bottom:14px;line-height:1.5">Verify your identity to unlock withdrawals and higher limits.</p>
+      <div class="field"><label>Document Type</label>
+        <select id="kycDocType" style="width:100%;background:rgba(19,26,19,0.8);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:12px 14px;color:var(--tx);font-size:15px;font-weight:600">
+          <option value="national_id">National ID</option>
+          <option value="passport">Passport</option>
+        </select>
+      </div>
+      <div class="field"><label>Document Number</label><input id="kycDocNumber" type="text" placeholder="e.g. 12345678"/></div>
+      <button class="sbtn" onclick="submitKyc()">Submit for Review</button>
+    </div>
+    <div id="kycPendingView" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:40px;margin-bottom:10px">⏳</div>
+      <p style="font-size:14px;font-weight:700;color:var(--yl)">Under Review</p>
+      <p style="font-size:12px;color:var(--mt);margin-top:6px">We'll notify you once it's reviewed.</p>
+    </div>
+    <div id="kycVerifiedView" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:40px;margin-bottom:10px">✅</div>
+      <p style="font-size:14px;font-weight:700;color:var(--g)">Verified</p>
+    </div>
+    <div id="kycRejectedView" style="display:none">
+      <div style="text-align:center;padding:10px 0">
+        <div style="font-size:40px;margin-bottom:10px">❌</div>
+        <p style="font-size:14px;font-weight:700;color:var(--rd)">Rejected</p>
+        <p style="font-size:12px;color:var(--mt);margin-top:6px" id="kycRejectReason"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Promo Code Modal -->
+<div class="modal-bg" id="promoModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Redeem Promo Code</div>
+      <button class="modal-close" onclick="closeModal('promoModal')">✕</button>
+    </div>
+    <div class="err-msg" id="promoErr"></div>
+    <div class="ok-msg" id="promoOk"></div>
+    <div class="field"><label>Promo Code</label><input id="promoCode" type="text" placeholder="e.g. WELCOME50" style="text-transform:uppercase"/></div>
+    <button class="sbtn" onclick="redeemPromo()">Redeem</button>
+  </div>
+</div>
+
+<!-- Referral Modal -->
+<div class="modal-bg" id="referralModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Refer & Earn</div>
+      <button class="modal-close" onclick="closeModal('referralModal')">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--mt);margin-bottom:14px">Share your code — you earn a bonus when friends make their first deposit.</p>
+    <div class="field">
+      <label>Your Referral Code</label>
+      <div style="display:flex;gap:8px">
+        <input id="referralCodeDisplay" type="text" readonly style="flex:1"/>
+        <button class="sbtn" style="width:auto;padding:12px 16px" onclick="copyReferralCode()">Copy</button>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mt)">Friends referred: <span id="referredCount" style="color:var(--g);font-weight:700">0</span></div>
+  </div>
+</div>
+
+<!-- Limits Modal -->
+<div class="modal-bg" id="limitsModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Betting & Deposit Limits</div>
+      <button class="modal-close" onclick="closeModal('limitsModal')">✕</button>
+    </div>
+    <div class="err-msg" id="limitsErr"></div>
+    <div class="ok-msg" id="limitsOk"></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:14px">Leave blank for no limit. These help you stay in control.</p>
+    <div class="field"><label>Daily Deposit Limit (KES)</label><input id="depositLimit" type="number" placeholder="No limit set"/></div>
+    <div class="field"><label>Daily Stake Limit (KES)</label><input id="stakeLimit" type="number" placeholder="No limit set"/></div>
+    <button class="sbtn" onclick="saveLimits()">Save Limits</button>
+  </div>
+</div>
+
+<!-- Self-Exclusion Modal -->
+<div class="modal-bg" id="exclusionModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Self-Exclusion</div>
+      <button class="modal-close" onclick="closeModal('exclusionModal')">✕</button>
+    </div>
+    <div class="err-msg" id="exclErr"></div>
+    <div class="ok-msg" id="exclOk"></div>
+    <p style="font-size:13px;color:var(--mt);margin-bottom:14px;line-height:1.5">This will block betting and depositing for the period you choose, and log you out of all devices. This cannot be undone early — please only proceed if you're sure.</p>
+    <div class="field"><label>Exclude for how many days?</label><input id="exclusionDays" type="number" placeholder="e.g. 30"/></div>
+    <button class="sbtn" style="background:linear-gradient(135deg,#ff3b3b,#cc0000)" onclick="confirmSelfExclude()">Confirm Self-Exclusion</button>
+  </div>
+</div>
+
 <nav class="bnav">
   <div class="bni" onclick="location.href='/'"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>Home</div>
   <div class="bni" onclick="location.href='/aviator'"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>Aviator</div>
@@ -248,25 +453,37 @@ window.addEventListener('DOMContentLoaded',async()=>{
   if(!t||!u){location.href='/login';return}
   USER=JSON.parse(u);
   renderProfile();
-  await Promise.all([loadStats(),loadTx()]);
+  await Promise.all([loadWallet(),loadStats(),loadTx(),load2FAStatus(),loadKycStatus()]);
 });
+
+function authHeaders(){return {Authorization:'Bearer '+localStorage.getItem('token')}}
+function authHeadersJson(){return {'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')}}
 
 function renderProfile(){
   document.getElementById('avatarLetter').textContent=USER.username?.[0]?.toUpperCase()||'?';
   document.getElementById('profileName').textContent=USER.username||'—';
   document.getElementById('profileHandle').textContent='@'+(USER.username||'—');
   document.getElementById('profilePhone').textContent=USER.phone||'—';
-  const bal=parseFloat(USER.balance||0).toFixed(2);
-  document.getElementById('balTop').textContent=bal;
-  document.getElementById('mainBal').textContent=bal;
-  document.getElementById('bonusBal').textContent=parseFloat(USER.bonus||0).toFixed(2);
   document.getElementById('editUsername').value=USER.username||'';
   document.getElementById('editEmail').value=USER.email||'';
 }
 
+// Wallet: main/bonus/locked balances from the real wallet endpoint (not USER.balance)
+async function loadWallet(){
+  try{
+    const r=await fetch('/api/wallet/balance',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    document.getElementById('balTop').textContent=d.data.spendable.toFixed(2);
+    document.getElementById('mainBal').textContent=d.data.main.toFixed(2);
+    document.getElementById('bonusBal').textContent=d.data.bonus.toFixed(2);
+    document.getElementById('lockedBal').textContent=d.data.locked.toFixed(2);
+  }catch{}
+}
+
 async function loadStats(){
   try{
-    const r=await fetch('/api/bets/my?limit=1',{headers:{Authorization:'Bearer '+localStorage.getItem('token')}});
+    const r=await fetch('/api/bets/my?limit=1',{headers:authHeaders()});
     const d=await r.json();
     if(!d.success) return;
     const s=d.stats||{};
@@ -281,7 +498,7 @@ async function loadStats(){
 
 async function loadTx(){
   try{
-    const r=await fetch('/api/bets/transactions/history',{headers:{Authorization:'Bearer '+localStorage.getItem('token')}});
+    const r=await fetch('/api/bets/transactions/history',{headers:authHeaders()});
     const d=await r.json();
     const el=document.getElementById('txList');
     if(!d.success||!d.data.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No transactions yet</div>';return}
@@ -302,16 +519,15 @@ async function loadTx(){
 
 async function saveProfile(){
   const username=document.getElementById('editUsername').value.trim();
-  const email=document.getElementById('editEmail').value.trim();
   const err=document.getElementById('profileErr');
   const ok=document.getElementById('profileOk');
   err.style.display='none';ok.style.display='none';
   if(!username||username.length<3){err.textContent='Username must be at least 3 chars';err.style.display='block';return}
   try{
-    const r=await fetch('/api/auth/update-profile',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')},body:JSON.stringify({username,email})});
-    const d=await r.json();
-    if(d.success){USER.username=username;USER.email=email;localStorage.setItem('user',JSON.stringify(USER));renderProfile();ok.textContent='Profile updated!';ok.style.display='block';}
-    else{err.textContent=d.message||'Failed';err.style.display='block'}
+    // Note: username changes aren't supported by the backend yet — only favouriteTeams is editable there.
+    // Keeping this limited to avoid promising something the server can't do.
+    err.textContent='Username editing is not available yet — contact support to change your username.';
+    err.style.display='block';
   }catch{err.textContent='Connection error';err.style.display='block'}
 }
 
@@ -326,15 +542,200 @@ async function changePassword(){
   if(newPw.length<6){err.textContent='Min 6 characters';err.style.display='block';return}
   if(newPw!==confirm){err.textContent='Passwords do not match';err.style.display='block';return}
   try{
-    const r=await fetch('/api/auth/change-password',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')},body:JSON.stringify({currentPassword:current,newPassword:newPw})});
+    const r=await fetch('/api/account/password',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({currentPassword:current,newPassword:newPw})});
     const d=await r.json();
     if(d.success){ok.textContent='Password changed! Logging out...';ok.style.display='block';setTimeout(logout,2000);}
     else{err.textContent=d.message||'Failed';err.style.display='block'}
   }catch{err.textContent='Connection error';err.style.display='block'}
 }
 
+// ── 2FA ──
+async function load2FAStatus(){
+  try{
+    const r=await fetch('/api/account/profile',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    const enabled=d.data.twoFactorEnabled;
+    document.getElementById('twoFaStatus').textContent=enabled?'Enabled':'Not enabled — tap to set up';
+    window.__twoFaEnabled=enabled;
+  }catch{}
+}
+function resetTwoFaViews(){
+  ['twoFaDisabledView','twoFaSetupView','twoFaBackupView','twoFaEnabledView'].forEach(id=>document.getElementById(id).style.display='none');
+}
+async function start2FASetup(){
+  resetTwoFaViews();
+  if(window.__twoFaEnabled){document.getElementById('twoFaEnabledView').style.display='block';return}
+  try{
+    const r=await fetch('/api/auth/2fa/setup',{method:'POST',headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success){document.getElementById('twoFaErr').textContent=d.message||'Setup failed';document.getElementById('twoFaErr').style.display='block';return}
+    document.getElementById('twoFaQr').src=d.qrCode;
+    document.getElementById('twoFaSetupView').style.display='block';
+  }catch{document.getElementById('twoFaErr').textContent='Connection error';document.getElementById('twoFaErr').style.display='block'}
+}
+async function confirm2FASetup(){
+  const token=document.getElementById('twoFaToken').value.trim();
+  const err=document.getElementById('twoFaErr');err.style.display='none';
+  if(!/^\d{6}$/.test(token)){err.textContent='Enter the 6-digit code';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/auth/2fa/verify',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({token})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Invalid code';err.style.display='block';return}
+    resetTwoFaViews();
+    document.getElementById('backupCodesList').innerHTML=d.backupCodes.map(c=>`<div>${c}</div>`).join('');
+    document.getElementById('twoFaBackupView').style.display='block';
+    window.__twoFaEnabled=true;
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+async function disable2FA(){
+  const password=document.getElementById('disable2FAPassword').value;
+  const err=document.getElementById('twoFaErr');err.style.display='none';
+  try{
+    const r=await fetch('/api/auth/2fa/disable',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({password})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Failed';err.style.display='block';return}
+    showT('2FA disabled','ok');closeModal('twoFaModal');window.__twoFaEnabled=false;load2FAStatus();
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Sessions ──
+async function loadSessions(){
+  try{
+    const r=await fetch('/api/auth/sessions',{headers:authHeaders()});
+    const d=await r.json();
+    const el=document.getElementById('sessionsList');
+    if(!d.success||!d.data.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No active sessions found</div>';return}
+    el.innerHTML=d.data.map(s=>{
+      const date=new Date(s.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      return `<div class="tx"><div class="tx-l"><div class="tx-icon dep">📱</div><div><div class="tx-desc">${s.ip||'Unknown IP'}</div><div class="tx-date">${date}</div></div></div></div>`;
+    }).join('');
+  }catch{}
+}
+async function logoutAllSessions(){
+  try{
+    await fetch('/api/auth/logout-all',{method:'POST',headers:authHeaders()});
+    showT('All devices logged out','ok');
+    setTimeout(logout,1500);
+  }catch{showT('Failed to log out devices','err')}
+}
+
+// ── KYC ──
+async function loadKycStatus(){
+  try{
+    const r=await fetch('/api/account/kyc/status',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    const status=d.data.kycStatus;
+    const labels={not_started:'Not started — tap to verify',pending:'Under review',verified:'Verified ✓',rejected:'Rejected — tap to retry'};
+    document.getElementById('kycStatus').textContent=labels[status]||status;
+    window.__kycStatus=status;
+    window.__kycRejectReason=d.data.kycRejectReason;
+  }catch{}
+}
+function showKycView(){
+  ['kycFormView','kycPendingView','kycVerifiedView','kycRejectedView'].forEach(id=>document.getElementById(id).style.display='none');
+  const status=window.__kycStatus;
+  if(status==='pending'){document.getElementById('kycPendingView').style.display='block'}
+  else if(status==='verified'){document.getElementById('kycVerifiedView').style.display='block'}
+  else if(status==='rejected'){document.getElementById('kycRejectedView').style.display='block';document.getElementById('kycRejectReason').textContent=window.__kycRejectReason||'';}
+  else{document.getElementById('kycFormView').style.display='block'}
+}
+async function submitKyc(){
+  const docType=document.getElementById('kycDocType').value;
+  const docNumber=document.getElementById('kycDocNumber').value.trim();
+  const err=document.getElementById('kycErr');const ok=document.getElementById('kycOk');
+  err.style.display='none';ok.style.display='none';
+  if(docNumber.length<4){err.textContent='Enter a valid document number';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/account/kyc/submit',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({docType,docNumber})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Submission failed';err.style.display='block';return}
+    ok.textContent='Submitted for review!';ok.style.display='block';
+    window.__kycStatus='pending';
+    setTimeout(showKycView,1200);
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Promo Code ──
+async function redeemPromo(){
+  const code=document.getElementById('promoCode').value.trim();
+  const err=document.getElementById('promoErr');const ok=document.getElementById('promoOk');
+  err.style.display='none';ok.style.display='none';
+  if(!code){err.textContent='Enter a promo code';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/promotions/redeem',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({code})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Invalid code';err.style.display='block';return}
+    ok.textContent=d.message||'Bonus credited!';ok.style.display='block';
+    loadWallet();
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Referral ──
+async function loadReferral(){
+  try{
+    const r=await fetch('/api/promotions/referral',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    document.getElementById('referralCodeDisplay').value=d.data.referralCode||'';
+    document.getElementById('referredCount').textContent=d.data.referredCount||0;
+  }catch{}
+}
+function copyReferralCode(){
+  const el=document.getElementById('referralCodeDisplay');
+  el.select();document.execCommand('copy');
+  showT('Referral code copied!','ok');
+}
+
+// ── Responsible Gaming: Limits ──
+async function loadLimits(){
+  try{
+    const r=await fetch('/api/account/responsible-gaming',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    if(d.data.dailyDepositLimit) document.getElementById('depositLimit').value=d.data.dailyDepositLimit;
+    if(d.data.dailyStakeLimit) document.getElementById('stakeLimit').value=d.data.dailyStakeLimit;
+  }catch{}
+}
+async function saveLimits(){
+  const dailyDepositLimit=document.getElementById('depositLimit').value?parseFloat(document.getElementById('depositLimit').value):null;
+  const dailyStakeLimit=document.getElementById('stakeLimit').value?parseFloat(document.getElementById('stakeLimit').value):null;
+  const err=document.getElementById('limitsErr');const ok=document.getElementById('limitsOk');
+  err.style.display='none';ok.style.display='none';
+  try{
+    const r=await fetch('/api/account/responsible-gaming/limits',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({dailyDepositLimit,dailyStakeLimit})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Failed to save';err.style.display='block';return}
+    ok.textContent='Limits saved';ok.style.display='block';
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Self-Exclusion ──
+async function confirmSelfExclude(){
+  const days=parseInt(document.getElementById('exclusionDays').value);
+  const err=document.getElementById('exclErr');const ok=document.getElementById('exclOk');
+  err.style.display='none';ok.style.display='none';
+  if(!days||days<1){err.textContent='Enter a valid number of days';err.style.display='block';return}
+  if(!confirm(`This will lock you out of betting and depositing for ${days} day(s) and cannot be undone early. Continue?`)) return;
+  try{
+    const r=await fetch('/api/account/responsible-gaming/self-exclude',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({days})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Failed';err.style.display='block';return}
+    ok.textContent=d.message;ok.style.display='block';
+    setTimeout(logout,2500);
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
 function logout(){localStorage.removeItem('token');localStorage.removeItem('user');location.href='/login'}
-function openModal(id){document.getElementById(id).classList.add('on')}
+function openModal(id){
+  document.getElementById(id).classList.add('on');
+  if(id==='sessionsModal') loadSessions();
+  if(id==='kycModal') showKycView();
+  if(id==='referralModal') loadReferral();
+  if(id==='limitsModal') loadLimits();
+  if(id==='twoFaModal'){resetTwoFaViews();document.getElementById(window.__twoFaEnabled?'twoFaEnabledView':'twoFaDisabledView').style.display='block';}
+}
 function closeModal(id){document.getElementById(id).classList.remove('on')}
 
 let tTmr=null;

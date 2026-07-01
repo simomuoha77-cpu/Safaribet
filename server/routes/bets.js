@@ -172,29 +172,53 @@ router.get('/my', auth, async (req, res) => {
       Bet.countDocuments(filter)
     ]);
 
-    res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit) });
+    // Aggregate stats across ALL of the user's bets (not just this page) — used by
+    // the account summary cards. Computed here rather than a separate endpoint to
+    // avoid an extra round trip on every account page load.
+    const statsAgg = await Bet.aggregate([
+      { $match: { userId: req.user._id } },
+      { $group: {
+        _id: null,
+        totalBets: { $sum: 1 },
+        wonCount: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, 1, 0] } },
+        lostCount: { $sum: { $cond: [{ $eq: ['$status', 'lost'] }, 1, 0] } },
+        pendingCount: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+        totalStake: { $sum: '$stake' },
+        totalWon: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, { $ifNull: ['$netPayout', '$cashOutAmount'] }, 0] } }
+      } }
+    ]);
+    const stats = statsAgg[0] || { totalBets:0, wonCount:0, lostCount:0, pendingCount:0, totalStake:0, totalWon:0 };
+    delete stats._id;
+
+    res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Failed to load bets' });
   }
 });
 
-// ── BET DETAIL ──
-router.get('/:code', auth, async (req, res) => {
+// ── TRANSACTION HISTORY (deposits, withdrawals, stakes, wins, bonuses, refunds) ──
+// Lives under /bets for backward-compat with the existing account.html frontend,
+// which already calls this exact path.
+router.get('/transactions/history', auth, async (req, res) => {
   try {
-    const bet = await Bet.findOne({ betCode: req.params.code.toUpperCase(), userId: req.user._id }).lean();
-    if (!bet) return res.status(404).json({ success: false, message: 'Bet not found' });
-    res.json({ success: true, data: bet });
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * limit;
+    const [items, total] = await Promise.all([
+      Transaction.find({ userId: req.user._id }).sort({ createdAt: -1 }).skip(skip).limit(Math.min(parseInt(limit)||20, 100)).lean(),
+      Transaction.countDocuments({ userId: req.user._id })
+    ]);
+    res.json({ success: true, data: items, total, page: parseInt(page), pages: Math.ceil(total / limit) });
   } catch (e) {
-    res.status(500).json({ success: false, message: 'Failed to load bet' });
+    res.status(500).json({ success: false, message: 'Failed to load transaction history' });
   }
 });
 
-// ── STATS ──
+// ── STATS SUMMARY (standalone endpoint — /my also returns inline stats for convenience) ──
 router.get('/stats/summary', auth, async (req, res) => {
   try {
     const [all, won, pending] = await Promise.all([
       Bet.countDocuments({ userId: req.user._id }),
-      Bet.countDocuments({ userId: req.user._id, status: 'won' }),
+      Bet.countDocuments({ userId: req.user._id, status: { $in: ['won','cashed_out'] } }),
       Bet.countDocuments({ userId: req.user._id, status: 'pending' })
     ]);
     const totalStaked = await Bet.aggregate([
@@ -202,8 +226,8 @@ router.get('/stats/summary', auth, async (req, res) => {
       { $group: { _id: null, total: { $sum: '$stake' } } }
     ]);
     const totalWon = await Bet.aggregate([
-      { $match: { userId: req.user._id, status: 'won' } },
-      { $group: { _id: null, total: { $sum: '$netPayout' } } }
+      { $match: { userId: req.user._id, status: { $in: ['won','cashed_out'] } } },
+      { $group: { _id: null, total: { $sum: { $ifNull: ['$netPayout', '$cashOutAmount'] } } } }
     ]);
     res.json({
       success: true,
@@ -218,6 +242,17 @@ router.get('/stats/summary', auth, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Failed to load stats' });
+  }
+});
+
+// ── BET DETAIL ──
+router.get('/:code', auth, async (req, res) => {
+  try {
+    const bet = await Bet.findOne({ betCode: req.params.code.toUpperCase(), userId: req.user._id }).lean();
+    if (!bet) return res.status(404).json({ success: false, message: 'Bet not found' });
+    res.json({ success: true, data: bet });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Failed to load bet' });
   }
 });
 

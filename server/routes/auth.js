@@ -104,7 +104,7 @@ router.post('/register', async (req, res) => {
       token: makeToken(user), // legacy field — kept for backward compatibility
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
-      user: { id: user._id, username: user.username, balance: user.balance, referralCode: user.referralCode }
+      user: { id: user._id, username: user.username, phone: user.phone, balance: user.balance, referralCode: user.referralCode }
     });
 
   } catch (e) {
@@ -200,7 +200,7 @@ router.post('/login', async (req, res) => {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       newDevice: isNewDevice,
-      user: { id: user._id, username: user.username, balance: user.balance }
+      user: { id: user._id, username: user.username, phone: user.phone, balance: user.balance }
     });
 
   } catch (e) {
@@ -326,7 +326,7 @@ router.post('/2fa/disable', auth, twoFaLimiter, async (req, res) => {
 
 // ── ME ──
 router.get('/me', auth, async (req, res) => {
-  res.json({ success: true, user: { id: req.user._id, username: req.user.username, balance: req.user.balance } });
+  res.json({ success: true, user: { id: req.user._id, username: req.user.username, phone: req.user.phone, balance: req.user.balance } });
 });
 
 // ── BALANCE ──

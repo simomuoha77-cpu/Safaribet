@@ -25,7 +25,7 @@ const matchSchema = new mongoose.Schema({
   settled:    { type: Boolean, default: false },
   settledAt:  { type: Date },
   isStatic:   { type: Boolean, default: false },
-  source:     { type: String, enum: ['apif','tsdb','manual','oddsapi'], default: 'apif' }
+  source:     { type: String, enum: ['apif','tsdb','manual','oddsapi','footballdata'], default: 'apif' }
 }, { timestamps: true });
 
 matchSchema.index({ status: 1, commenceTime: 1 });

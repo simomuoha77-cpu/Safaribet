@@ -5,13 +5,55 @@ const router  = express.Router();
 
 const APIF_KEY = () => process.env.APIFOOTBALL_KEY;
 const ODDS_KEY = () => process.env.ODDS_API_KEY;
+const FOOTBALLDATA_KEY = () => process.env.FOOTBALLDATA_API_KEY;
 
 // 2-min cache
 const cache = {};
 const C = {
-  get: (k,ttl=120000) => { const c=cache[k]; return (c&&Date.now()-c.ts<ttl)?c.data:null; },
+  get: (k,ttl=600000) => { const c=cache[k]; return (c&&Date.now()-c.ts<ttl)?c.data:null; },
   set: (k,d) => { cache[k]={data:d,ts:Date.now()}; }
 };
+
+// Tracks whether Odds API is currently known to be exhausted/unauthorized (401, or
+// a response confirming 0 requests remaining). While true, we skip calling it
+// entirely for a cool-down period instead of hammering a dead key on every request —
+// this is what actually protects your monthly quota during normal browsing/testing.
+let oddsApiDead = { until: 0, reason: null };
+const ODDS_DEAD_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes before retrying after a 401/quota error
+
+function markOddsApiDead(reason) {
+  oddsApiDead = { until: Date.now() + ODDS_DEAD_COOLDOWN_MS, reason };
+  console.warn(`[odds-api] Marked unavailable for ${ODDS_DEAD_COOLDOWN_MS/60000}min — ${reason}`);
+}
+function isOddsApiDead() {
+  return Date.now() < oddsApiDead.until;
+}
+
+// Same idea for API-Football — but a plan restriction (wrong season/league) won't
+// change until you upgrade, so use a much longer cooldown (6h, matching the fixture
+// sync interval) rather than repeatedly probing a limit that isn't going to lift itself.
+let apifDead = { until: 0, reason: null };
+const APIF_DEAD_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+function markApifDead(reason) {
+  apifDead = { until: Date.now() + APIF_DEAD_COOLDOWN_MS, reason };
+  console.warn(`[apif] Marked unavailable for ${APIF_DEAD_COOLDOWN_MS/3600000}h — ${reason}`);
+}
+function isApifDead() {
+  return Date.now() < apifDead.until;
+}
+
+// football-data.org: free tier is rate-limited to ~10 requests/minute (not a monthly
+// quota like Odds API), so a 429 here means "slow down", not "wait until next month".
+// Short cooldown is appropriate.
+let footballDataDead = { until: 0, reason: null };
+const FOOTBALLDATA_DEAD_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+function markFootballDataDead(reason) {
+  footballDataDead = { until: Date.now() + FOOTBALLDATA_DEAD_COOLDOWN_MS, reason };
+  console.warn(`[football-data] Marked unavailable for ${FOOTBALLDATA_DEAD_COOLDOWN_MS/60000}min — ${reason}`);
+}
+function isFootballDataDead() {
+  return Date.now() < footballDataDead.until;
+}
 
 // NOTE: Odds must always come from a real source (The Odds API). API-Football and
 // TheSportsDB do not provide betting odds, so matches from those sources are returned
@@ -56,6 +98,10 @@ function persist(arr) {
 // ── ODDS API: fetch all active soccer sports dynamically ──
 async function fetchAllFromOddsAPI() {
   if (!ODDS_KEY()) return [];
+  if (isOddsApiDead()) {
+    console.log(`[odds-api] Skipping — marked unavailable (${oddsApiDead.reason}), retry after ${new Date(oddsApiDead.until).toLocaleTimeString()}`);
+    return [];
+  }
   const all = [];
   try {
     // Step 1: get list of active sports
@@ -134,7 +180,11 @@ async function fetchAllFromOddsAPI() {
       }
     }
   } catch(e) {
-    console.error('[odds-api]', e?.response?.status, e.message);
+    const status = e?.response?.status;
+    console.error('[odds-api]', status, e.message);
+    if (status === 401 || status === 429) {
+      markOddsApiDead(status === 401 ? 'quota exhausted (401)' : 'rate limited (429)');
+    }
   }
   console.log(`[odds-api] Total: ${all.length} events`);
   return all;
@@ -143,6 +193,10 @@ async function fetchAllFromOddsAPI() {
 // ── API-FOOTBALL: fetch from all leagues ──
 async function fetchAllFromAPIFootball() {
   if (!APIF_KEY()) return [];
+  if (isApifDead()) {
+    console.log(`[apif] Skipping — marked unavailable (${apifDead.reason}), retry after ${new Date(apifDead.until).toLocaleTimeString()}`);
+    return [];
+  }
   const all  = [];
   const seen = new Set();
   const LEAGUES = [
@@ -166,9 +220,20 @@ async function fetchAllFromAPIFootball() {
         headers: {'x-rapidapi-key':APIF_KEY(),'x-rapidapi-host':'v3.football.api-sports.io'},
         params:  {league:lg.id, season:lg.s, next:50},
         timeout: 15000
-      }).then(r=>({lg, fixtures:r.data?.response||[]}))
+      }).then(r=>({lg, fixtures:r.data?.response||[], errors:r.data?.errors}))
     )
   );
+  // API-Football returns 200 OK with an empty response[] + a plan-restriction message
+  // in .errors when the season/league isn't covered by the current plan — this is NOT
+  // an exception, so we can't rely on the catch block below to detect it. If EVERY
+  // league in this batch came back plan-restricted, remember that and stop retrying
+  // for a while instead of burning the 100/day quota on calls we already know will fail.
+  const planErrors = results
+    .filter(r => r.status === 'fulfilled' && r.value.errors && Object.keys(r.value.errors).length)
+    .map(r => r.value.errors.plan || JSON.stringify(r.value.errors));
+  if (planErrors.length && planErrors.length === results.filter(r=>r.status==='fulfilled').length) {
+    markApifDead(planErrors[0]);
+  }
   for (const result of results) {
     if (result.status!=='fulfilled') continue;
     const {lg, fixtures} = result.value;
@@ -248,6 +313,87 @@ async function fetchAllFromTSDB() {
   return all;
 }
 
+// ── FOOTBALL-DATA.ORG: fixtures/scores only (no odds on free tier) ──
+// Uses competition CODES (e.g. 'PL', 'CL'), not numeric IDs like API-Football.
+// Docs: https://docs.football-data.org/general/v4/competitions.html
+async function fetchAllFromFootballData() {
+  if (!FOOTBALLDATA_KEY()) return [];
+  if (isFootballDataDead()) {
+    console.log(`[football-data] Skipping — marked unavailable (${footballDataDead.reason}), retry after ${new Date(footballDataDead.until).toLocaleTimeString()}`);
+    return [];
+  }
+  const all = [];
+  const seen = new Set();
+  // Free-tier competitions confirmed available on your account (see "Available
+  // competitions" in the football-data.org dashboard) — mapped to our internal sport keys.
+  const COMPETITIONS = [
+    {code:'WC',  n:'🏆 FIFA World Cup',        k:'soccer_world_cup'},
+    {code:'CL',  n:'🏆 UCL',                    k:'soccer_ucl'},
+    {code:'BL1', n:'🇩🇪 Bundesliga',            k:'soccer_bundesliga'},
+    {code:'PD',  n:'🇪🇸 La Liga',               k:'soccer_la_liga'},
+    {code:'FL1', n:'🇫🇷 Ligue 1',              k:'soccer_ligue_1'},
+    {code:'PPL', n:'🇵🇹 Primeira Liga',         k:'soccer_primeira_liga'},
+    {code:'SA',  n:'🇮🇹 Serie A',               k:'soccer_serie_a'},
+    {code:'PL',  n:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League',   k:'soccer_epl'},
+    {code:'BSA', n:'🇧🇷 Brazilian Série A',     k:'soccer_brazil_serie_a'},
+    {code:'ELC', n:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship',      k:'soccer_championship'},
+  ];
+
+  const results = await Promise.allSettled(
+    COMPETITIONS.map(c =>
+      axios.get(`https://api.football-data.org/v4/competitions/${c.code}/matches`, {
+        headers: { 'X-Auth-Token': FOOTBALLDATA_KEY() },
+        params:  { status: 'SCHEDULED,LIVE,IN_PLAY,PAUSED' },
+        timeout: 12000
+      }).then(r => ({ c, matches: r.data?.matches || [], errorCode: null }))
+        .catch(e => ({ c, matches: [], errorCode: e?.response?.status }))
+    )
+  );
+
+  // If every competition came back 429, we've hit the per-minute rate limit —
+  // back off briefly rather than retry immediately on the next request.
+  const fulfilled = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const rateLimited = fulfilled.filter(r => r.errorCode === 429);
+  if (fulfilled.length && rateLimited.length === fulfilled.length) {
+    markFootballDataDead('rate limited (429) — free tier is ~10 req/min');
+  }
+
+  for (const { c, matches } of fulfilled) {
+    console.log(`[football-data] ${c.n}: ${matches.length}`);
+    for (const m of matches) {
+      const home = m.homeTeam?.name, away = m.awayTeam?.name;
+      if (!home || !away) continue;
+      const id = `fd_${m.id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const status =
+        ['IN_PLAY','PAUSED'].includes(m.status) ? 'live' :
+        ['FINISHED','AWARDED'].includes(m.status) ? 'finished' :
+        ['CANCELLED','POSTPONED','SUSPENDED'].includes(m.status) ? 'cancelled' : 'upcoming';
+      if (status === 'finished' || status === 'cancelled') continue;
+      all.push({
+        matchId: id, sport: c.k, league: c.n,
+        homeTeam: home, awayTeam: away,
+        commenceTime: new Date(m.utcDate),
+        status,
+        odds: null, hasOdds: false, // free tier has no odds — same discipline as every other fixtures-only source
+        score: {
+          home: m.score?.fullTime?.home ?? null,
+          away: m.score?.fullTime?.away ?? null,
+          minute: m.minute || null,
+          period: m.status || null
+        },
+        result: status === 'finished'
+          ? (m.score?.winner === 'HOME_TEAM' ? 'home' : m.score?.winner === 'AWAY_TEAM' ? 'away' : 'draw')
+          : null,
+        isStatic: false, source: 'footballdata'
+      });
+    }
+  }
+  console.log(`[football-data] Total: ${all.length}`);
+  return all;
+}
+
 // ── AVAILABLE ──
 router.get('/available',(req,res)=>res.json({success:true,data:[
   {key:'soccer_world_cup',title:'🏆 World Cup 2026'},
@@ -263,6 +409,8 @@ router.get('/available',(req,res)=>res.json({success:true,data:[
   {key:'soccer_kenya_premier_league',title:'🇰🇪 Kenya Premier'},
   {key:'soccer_caf_champions_league',title:'🌍 CAF CL'},
   {key:'soccer_friendlies',title:'🌐 Friendlies'},
+  {key:'soccer_primeira_liga',title:'🇵🇹 Primeira Liga'},
+  {key:'soccer_championship',title:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship'},
   {key:'live',title:'🔴 LIVE'},
 ]}));
 
@@ -284,6 +432,13 @@ router.get('/featured', async (req,res) => {
     apifData.forEach(m=>{ if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);} });
   }
 
+  // Still too few? Try football-data.org (good current-season coverage on free tier)
+  if (all.length < 10) {
+    const fdData = await fetchAllFromFootballData();
+    const seen = new Set(all.map(m=>m.matchId));
+    fdData.forEach(m=>{ if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);} });
+  }
+
   // Still too few? Try TheSportsDB
   if (all.length < 5) {
     const tsdbData = await fetchAllFromTSDB();
@@ -295,7 +450,7 @@ router.get('/featured', async (req,res) => {
   if (all.length < 3) {
     try {
       const db=await Match.find({
-        source:{$in:['apif','tsdb','oddsapi']},
+        source:{$in:['apif','tsdb','oddsapi','footballdata']},
         status:{$in:['upcoming','live']},
         commenceTime:{$gte:new Date(Date.now()-3600000)}
       }).sort({commenceTime:1}).limit(80).lean();
@@ -325,13 +480,14 @@ router.get('/matches/:sport', async (req,res) => {
 
   // Try all APIs and filter by sport
   let all=[];
-  const [oddsData,apifData,tsdbData]=await Promise.allSettled([
+  const [oddsData,apifData,fdData,tsdbData]=await Promise.allSettled([
     fetchAllFromOddsAPI(),
     fetchAllFromAPIFootball(),
+    fetchAllFromFootballData(),
     fetchAllFromTSDB()
   ]);
   const seen=new Set();
-  [oddsData,apifData,tsdbData].forEach(r=>{
+  [oddsData,apifData,fdData,tsdbData].forEach(r=>{
     if(r.status==='fulfilled') r.value
       .filter(m=>m.sport===sport)
       .forEach(m=>{ if(!seen.has(m.matchId)){seen.add(m.matchId);all.push(m);} });
@@ -400,6 +556,11 @@ router.get('/debug', async (req,res) => {
   const result={time:new Date().toISOString(),env:{
     APIFOOTBALL_KEY: APIF_KEY()?`✅ SET (${APIF_KEY().slice(0,8)}...)`:'❌ NOT SET',
     ODDS_API_KEY:    ODDS_KEY()?`✅ SET (${ODDS_KEY().slice(0,8)}...)`:'❌ NOT SET',
+    FOOTBALLDATA_API_KEY: FOOTBALLDATA_KEY()?`✅ SET (${FOOTBALLDATA_KEY().slice(0,8)}...)`:'❌ NOT SET',
+  },quotaProtection:{
+    odds_api: isOddsApiDead() ? `🛑 Paused until ${new Date(oddsApiDead.until).toLocaleString()} — ${oddsApiDead.reason}` : '✅ Active (will call normally)',
+    api_football: isApifDead() ? `🛑 Paused until ${new Date(apifDead.until).toLocaleString()} — ${apifDead.reason}` : '✅ Active (will call normally)',
+    football_data: isFootballDataDead() ? `🛑 Paused until ${new Date(footballDataDead.until).toLocaleString()} — ${footballDataDead.reason}` : '✅ Active (will call normally)',
   },tests:{}};
 
   if(APIF_KEY()){
@@ -457,6 +618,19 @@ router.get('/debug', async (req,res) => {
       result.tests.odds_worldcup_events=r.data?.length||0;
       if(r.data?.[0]) result.tests.odds_worldcup_sample=`${r.data[0].home_team} vs ${r.data[0].away_team} @ ${r.data[0].commence_time}`;
     }catch(e){result.tests.odds_worldcup=`ERROR: ${e?.response?.status} ${e.message}`;}
+  }
+
+  if(FOOTBALLDATA_KEY()){
+    try{
+      const r=await axios.get('https://api.football-data.org/v4/competitions/PL/matches',{
+        headers:{'X-Auth-Token':FOOTBALLDATA_KEY()},
+        params:{status:'SCHEDULED'},timeout:10000
+      });
+      const matches=r.data?.matches||[];
+      result.tests.footballdata_epl=`${matches.length} scheduled matches`;
+      if(matches[0]) result.tests.footballdata_epl_sample=`${matches[0].homeTeam?.name} vs ${matches[0].awayTeam?.name} on ${matches[0].utcDate}`;
+      result.tests.footballdata_requests_remaining=r.headers?.['x-requests-available-minute']||'unknown';
+    }catch(e){result.tests.footballdata_epl=`ERROR: ${e?.response?.status} ${e.message}`;}
   }
 
   // TSDB
