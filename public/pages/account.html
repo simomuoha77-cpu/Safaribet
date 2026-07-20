@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Account – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--g2:#00e65c;--bg:#080c08;--s1:#0d120d;--s2:#131a13;--s3:#192019;--bd:rgba(0,200,83,0.08);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b;--bn:62px;--hdr:rgba(8,12,8,0.98)}
+html[data-theme="light"]{--g:#00a844;--g2:#00c853;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--yl:#b8860b;--rd:#d32f2f;--hdr:rgba(255,255,255,0.98)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:calc(var(--bn)+16px);transition:background 0.2s,color 0.2s}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--hdr);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:50;backdrop-filter:blur(20px)}
+.tb-back{font-size:14px;color:var(--mt);background:none;border:none;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:4px}
+.tb-back svg{width:16px;height:16px;fill:currentColor}
+.tb-title{font-family:'Rajdhani',sans-serif;font-size:19px;font-weight:700}
+.tb-bal{font-size:13px;font-weight:800;color:var(--g)}
+
+/* PROFILE HERO */
+.profile-hero{margin:14px 12px;background:linear-gradient(135deg,#003d1a 0%,#001a0d 60%,#080c08 100%);border:1px solid rgba(0,200,83,0.15);border-radius:16px;padding:20px;display:flex;align-items:center;gap:16px;position:relative;overflow:hidden}
+.profile-hero::after{content:'';position:absolute;right:-20px;top:-20px;width:120px;height:120px;background:radial-gradient(circle,rgba(0,200,83,0.1) 0%,transparent 70%);border-radius:50%}
+.avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#00e65c,#00c853);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#000;flex-shrink:0;box-shadow:0 0 20px rgba(0,200,83,0.3)}
+.profile-info h2{font-family:'Rajdhani',sans-serif;font-size:22px;font-weight:700;line-height:1}
+.profile-info .handle{font-size:13px;color:var(--mt);margin-top:3px}
+.profile-info .phone{font-size:12px;color:var(--mt);margin-top:5px;display:flex;align-items:center;gap:6px}
+.verified{background:rgba(0,200,83,0.12);color:var(--g);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,200,83,0.2)}
+
+/* BALANCE CARDS */
+.bal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px;margin-bottom:10px}
+.bal-card{background:linear-gradient(135deg,var(--s2),var(--s1));border:1px solid var(--bd);border-radius:12px;padding:14px;text-align:center}
+.bal-val{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;line-height:1}
+.bal-lbl{font-size:11px;color:var(--mt);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px}
+
+/* ACTION BUTTONS */
+.action-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px;margin-bottom:16px}
+.act-btn{padding:14px;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;border:none;display:flex;flex-direction:column;align-items:center;gap:4px;transition:all 0.2s}
+.act-btn-icon{font-size:22px}
+.act-btn.deposit{background:linear-gradient(135deg,#00e65c,#00c853);color:#000;box-shadow:0 4px 16px rgba(0,200,83,0.25)}
+.act-btn.deposit:hover{box-shadow:0 6px 24px rgba(0,200,83,0.4)}
+.act-btn.withdraw{background:var(--s2);border:1.5px solid rgba(0,200,83,0.2);color:var(--tx)}
+.act-btn.withdraw:hover{background:rgba(0,200,83,0.06)}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(0,200,83,0.06);border-radius:12px;overflow:hidden;margin:0 12px 16px}
+.sg{background:var(--s1);padding:14px 8px;text-align:center}
+.sg-val{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;line-height:1}
+.sg-lbl{font-size:10px;color:var(--mt);margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px}
+
+/* SECTION */
+.sec{margin:0 12px 12px;background:linear-gradient(135deg,var(--s2),var(--s1));border:1px solid var(--bd);border-radius:14px;overflow:hidden}
+.sec-hd{font-size:11px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.8px;padding:12px 16px 8px;border-bottom:1px solid rgba(0,200,83,0.05)}
+
+/* MENU ITEMS */
+.mi{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(0,200,83,0.04);cursor:pointer;transition:background 0.15s}
+.mi:last-child{border:none}
+.mi:hover{background:rgba(0,200,83,0.04)}
+.mi:active{background:rgba(0,200,83,0.08)}
+.mi-l{display:flex;align-items:center;gap:12px}
+.mi-icon{width:38px;height:38px;border-radius:10px;background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.1);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.theme-switch{width:48px;height:28px;border-radius:14px;background:var(--s3);border:1.5px solid var(--bd);position:relative;cursor:pointer;flex-shrink:0;padding:0;transition:background 0.2s}
+.theme-switch-knob{position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;background:var(--mt);transition:transform 0.25s ease,background 0.25s ease}
+html[data-theme="light"] .theme-switch{background:var(--g)}
+html[data-theme="light"] .theme-switch-knob{transform:translateX(20px);background:#fff}
+.mi-text{font-size:14px;font-weight:600}
+.mi-sub{font-size:12px;color:var(--mt);margin-top:1px}
+.chevron{color:var(--mt);font-size:20px;line-height:1}
+
+/* TX LIST */
+.tx-list{max-height:280px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s3) transparent}
+.tx{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(0,200,83,0.04)}
+.tx:last-child{border:none}
+.tx-l{display:flex;align-items:center;gap:10px}
+.tx-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.tx-icon.dep{background:rgba(0,200,83,0.1)}
+.tx-icon.win{background:rgba(255,214,0,0.1)}
+.tx-icon.bet{background:rgba(255,59,59,0.07)}
+.tx-icon.ref{background:rgba(100,100,255,0.1)}
+.tx-icon.withdrawal{background:rgba(255,100,0,0.1)}
+.tx-desc{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.tx-date{font-size:11px;color:var(--mt);margin-top:1px}
+.tx-amt{font-size:14px;font-weight:800;flex-shrink:0}
+.tx-amt.pos{color:var(--g)}
+.tx-amt.neg{color:var(--rd)}
+
+/* LOGOUT */
+.logout-btn{display:block;width:calc(100% - 24px);margin:0 12px 14px;padding:14px;background:rgba(255,59,59,0.06);border:1.5px solid rgba(255,59,59,0.15);color:var(--rd);border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;text-align:center;transition:all 0.2s}
+.logout-btn:hover{background:rgba(255,59,59,0.12)}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;display:none;align-items:flex-end;justify-content:center;padding:0}
+.modal-bg.on{display:flex}
+.modal{background:var(--s1);border-top:2px solid var(--g);border-radius:20px 20px 0 0;padding:24px 18px;width:100%;max-width:480px;backdrop-filter:blur(20px)}
+.modal-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.modal-ttl{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700}
+.modal-close{background:var(--s2);border:none;border-radius:8px;color:var(--mt);font-size:18px;cursor:pointer;width:32px;height:32px;display:flex;align-items:center;justify-content:center}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:11px;color:var(--mt);font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px}
+.field input{width:100%;background:var(--s2);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:12px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;transition:all 0.2s;font-family:'Inter',sans-serif}
+.field input:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(0,200,83,0.08)}
+.field input::placeholder{color:var(--mt);font-weight:400}
+.field input:disabled{opacity:0.5}
+.sbtn{width:100%;padding:14px;background:linear-gradient(135deg,#00e65c,#00c853);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,200,83,0.25);transition:all 0.2s}
+.sbtn:disabled{background:var(--s2);color:var(--mt);cursor:not-allowed;box-shadow:none}
+.err-msg{display:none;background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);color:var(--rd);font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+.ok-msg{display:none;background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);color:var(--g);font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+.err-msg{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--rd);margin-bottom:10px;display:none}
+.ok-msg{background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.2);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--g);margin-bottom:10px;display:none}
+
+/* BNAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:199;background:var(--hdr);border-top:1px solid var(--bd);display:flex;height:var(--bn);backdrop-filter:blur(20px);padding-bottom:env(safe-area-inset-bottom)}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--mt);cursor:pointer;gap:2px;transition:all 0.2s;position:relative;padding:6px 0;text-transform:uppercase;letter-spacing:0.3px}
+.bni.on{color:var(--g)}
+.bni.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:var(--g);border-radius:0 0 3px 3px}
+.bni-ic{width:26px;height:26px;display:flex;align-items:center;justify-content:center}
+.bni.on .bni-ic{transform:scale(1.1)}
+.bni svg{width:22px;height:22px;fill:currentColor}
+.bni.on svg{filter:drop-shadow(0 0 6px rgba(0,200,83,0.5))}
+
+.toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:var(--s2);border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap;backdrop-filter:blur(10px)}
+.toast.on{opacity:1}
+.toast.ok{border:1px solid var(--g);color:var(--g)}
+.toast.err{border:1px solid var(--rd);color:var(--rd)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="tb-back" onclick="location.href='/'">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    Home
+  </button>
+  <div class="tb-title">My Account</div>
+  <div class="tb-bal">KES <span id="balTop">0.00</span></div>
+</div>
+
+<!-- Profile Hero -->
+<div class="profile-hero" style="margin-top:14px">
+  <div class="avatar" id="avatarLetter">?</div>
+  <div class="profile-info">
+    <h2 id="profileName">Loading...</h2>
+    <div class="handle" id="profileHandle">@username</div>
+    <div class="phone">
+      <span id="profilePhone">—</span>
+      <span class="verified">✓ Verified</span>
+    </div>
+  </div>
+</div>
+
+<!-- Balance Cards -->
+<div class="bal-grid" style="grid-template-columns:1fr 1fr 1fr">
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--g);font-size:20px" id="mainBal">0.00</div>
+    <div class="bal-lbl">Main</div>
+  </div>
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--yl);font-size:20px" id="bonusBal">0.00</div>
+    <div class="bal-lbl">Bonus</div>
+  </div>
+  <div class="bal-card">
+    <div class="bal-val" style="color:var(--mt);font-size:20px" id="lockedBal">0.00</div>
+    <div class="bal-lbl">Locked</div>
+  </div>
+</div>
+
+<!-- Action Buttons -->
+<div class="action-row">
+  <button class="act-btn deposit" onclick="location.href='/deposit'">
+    <span class="act-btn-icon">💰</span>
+    Deposit
+  </button>
+  <button class="act-btn withdraw" onclick="location.href='/withdraw'">
+    <span class="act-btn-icon">💸</span>
+    Withdraw
+  </button>
+</div>
+
+<!-- Betting Stats -->
+<div class="stats-grid">
+  <div class="sg"><div class="sg-val" id="sTot">0</div><div class="sg-lbl">Total Bets</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--g)" id="sWon">0</div><div class="sg-lbl">Won</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--rd)" id="sLost">0</div><div class="sg-lbl">Lost</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--yl)" id="sPend">0</div><div class="sg-lbl">Pending</div></div>
+  <div class="sg"><div class="sg-val" id="sStake">0</div><div class="sg-lbl">Staked KES</div></div>
+  <div class="sg"><div class="sg-val" style="color:var(--g)" id="sEarn">0</div><div class="sg-lbl">Won KES</div></div>
+</div>
+
+<!-- Account Menu -->
+<div class="sec">
+  <div class="sec-hd">Account Settings</div>
+  <div class="mi" onclick="openModal('profileModal')">
+    <div class="mi-l"><div class="mi-icon">👤</div><div><div class="mi-text">Edit Profile</div><div class="mi-sub">Update your name and email</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('passwordModal')">
+    <div class="mi-l"><div class="mi-icon">🔒</div><div><div class="mi-text">Change Password</div><div class="mi-sub">Handled via support</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="location.href='/my-bets'">
+    <div class="mi-l"><div class="mi-icon">📋</div><div><div class="mi-text">My Bets</div><div class="mi-sub">View full bet history</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" style="cursor:default">
+    <div class="mi-l"><div class="mi-icon" id="themeIcon">🌙</div><div><div class="mi-text">Dark Mode</div><div class="mi-sub" id="themeSub">Currently using dark theme</div></div></div>
+    <button class="theme-switch" id="themeSwitch" onclick="handleThemeToggle()" role="switch" aria-label="Toggle dark mode">
+      <span class="theme-switch-knob"></span>
+    </button>
+  </div>
+</div>
+
+<!-- Security -->
+<div class="sec">
+  <div class="sec-hd">Security</div>
+  <div class="mi" onclick="openModal('sessionsModal')">
+    <div class="mi-l"><div class="mi-icon">📱</div><div><div class="mi-text">Active Sessions</div><div class="mi-sub">Manage devices logged into your account</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Verification -->
+<div class="sec">
+  <div class="sec-hd">Verification</div>
+  <div class="mi" onclick="openModal('kycModal')">
+    <div class="mi-l"><div class="mi-icon">🪪</div><div><div class="mi-text">Identity Verification (KYC)</div><div class="mi-sub" id="kycStatus">Checking status...</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Promotions -->
+<div class="sec">
+  <div class="sec-hd">Promotions & Referrals</div>
+  <div class="mi" onclick="openModal('loyaltyModal')">
+    <div class="mi-l"><div class="mi-icon">💎</div><div><div class="mi-text">Loyalty Status</div><div class="mi-sub" id="loyaltyMiSub">Checking your tier...</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('promoModal')">
+    <div class="mi-l"><div class="mi-icon">🎁</div><div><div class="mi-text">Redeem Promo Code</div><div class="mi-sub">Enter a code to claim a bonus</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="location.href='/referral'">
+    <div class="mi-l"><div class="mi-icon">🔗</div><div><div class="mi-text">Refer & Earn</div><div class="mi-sub">Invite friends — earn KES 5 per referral</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="location.href='/promotions'">
+    <div class="mi-l"><div class="mi-icon">🏷️</div><div><div class="mi-text">My Active Bonuses</div><div class="mi-sub">Track wagering progress</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Responsible Gaming -->
+<div class="sec">
+  <div class="sec-hd">Responsible Gaming</div>
+  <div class="mi" onclick="openModal('limitsModal')">
+    <div class="mi-l"><div class="mi-icon">⏱️</div><div><div class="mi-text">Betting & Deposit Limits</div><div class="mi-sub">Set daily limits for yourself</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+  <div class="mi" onclick="openModal('exclusionModal')">
+    <div class="mi-l"><div class="mi-icon">🚫</div><div><div class="mi-text">Self-Exclusion</div><div class="mi-sub">Take a break from betting</div></div></div>
+    <span class="chevron">›</span>
+  </div>
+</div>
+
+<!-- Transaction History -->
+<div class="sec">
+  <div class="sec-hd">Transaction History</div>
+  <div class="tx-list" id="txList">
+    <div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">Loading...</div>
+  </div>
+</div>
+
+  <div class="sec-hd">Support & Legal</div>
+  <div class="mi" onclick="location.href='/contact'">
+    <div class="mi-l"><div class="mi-icon">📞</div><div><div class="mi-text">Contact Us</div><div class="mi-sub">Email, phone and social media</div></div></div>
+    <div class="mi-arrow">›</div>
+  </div>
+  <div class="mi" onclick="location.href='/terms'">
+    <div class="mi-l"><div class="mi-icon">📋</div><div><div class="mi-text">Terms & Conditions</div><div class="mi-sub">Rules and policies</div></div></div>
+    <div class="mi-arrow">›</div>
+  </div>
+  <div class="mi" onclick="location.href='/privacy'">
+    <div class="mi-l"><div class="mi-icon">🔒</div><div><div class="mi-text">Privacy Policy</div><div class="mi-sub">How we handle your data</div></div></div>
+    <div class="mi-arrow">›</div>
+  </div>
+  <div class="mi" onclick="location.href='/responsible'">
+    <div class="mi-l"><div class="mi-icon">🎯</div><div><div class="mi-text">Responsible Gaming</div><div class="mi-sub">Bet safely — know your limits</div></div></div>
+    <div class="mi-arrow">›</div>
+  </div>
+</div>
+
+<button class="logout-btn" onclick="logout()">🚪 Logout</button>
+
+<!-- Edit Profile Modal -->
+<div class="modal-bg" id="profileModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Edit Profile</div>
+      <button class="modal-close" onclick="closeModal('profileModal')">✕</button>
+    </div>
+    <div class="err-msg" id="profileErr"></div>
+    <div class="ok-msg" id="profileOk"></div>
+    <div class="field"><label>Username</label><input id="editUsername" type="text" placeholder="Username"/></div>
+    <div class="field"><label>Email (optional)</label><input id="editEmail" type="email" placeholder="your@email.com"/></div>
+    <button class="sbtn" onclick="saveProfile()">Save Changes</button>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div class="modal-bg" id="passwordModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Change Password</div>
+      <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--mt);line-height:1.6;margin-bottom:16px">
+      For your account's security, password changes are handled by our support team rather than done in-app.
+      Please reach out via WhatsApp or the contact details in the footer, and our team will help you securely.
+    </p>
+    <a href="/#footer" onclick="closeModal('passwordModal')" class="sbtn" style="display:block;text-align:center;text-decoration:none">Contact Support</a>
+  </div>
+</div>
+
+<!-- Sessions Modal -->
+<div class="modal-bg" id="sessionsModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Active Sessions</div>
+      <button class="modal-close" onclick="closeModal('sessionsModal')">✕</button>
+    </div>
+    <div id="sessionsList" style="max-height:300px;overflow-y:auto"><div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">Loading...</div></div>
+    <button class="sbtn" style="margin-top:14px;background:linear-gradient(135deg,#ff3b3b,#cc0000)" onclick="logoutAllSessions()">Log Out All Devices</button>
+  </div>
+</div>
+
+<!-- KYC Modal -->
+<div class="modal-bg" id="kycModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Identity Verification</div>
+      <button class="modal-close" onclick="closeModal('kycModal')">✕</button>
+    </div>
+    <div class="err-msg" id="kycErr"></div>
+    <div class="ok-msg" id="kycOk"></div>
+    <div id="kycFormView">
+      <p style="font-size:13px;color:var(--mt);margin-bottom:14px;line-height:1.5">Verify your identity to unlock withdrawals and higher limits.</p>
+      <div class="field"><label>Document Type</label>
+        <select id="kycDocType" style="width:100%;background:var(--s2);border:1.5px solid rgba(0,200,83,0.1);border-radius:10px;padding:12px 14px;color:var(--tx);font-size:15px;font-weight:600">
+          <option value="national_id">National ID</option>
+          <option value="passport">Passport</option>
+        </select>
+      </div>
+      <div class="field"><label>Document Number</label><input id="kycDocNumber" type="text" placeholder="e.g. 12345678"/></div>
+      <button class="sbtn" onclick="submitKyc()">Submit for Review</button>
+    </div>
+    <div id="kycPendingView" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:40px;margin-bottom:10px">⏳</div>
+      <p style="font-size:14px;font-weight:700;color:var(--yl)">Under Review</p>
+      <p style="font-size:12px;color:var(--mt);margin-top:6px">We'll notify you once it's reviewed.</p>
+    </div>
+    <div id="kycVerifiedView" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:40px;margin-bottom:10px">✅</div>
+      <p style="font-size:14px;font-weight:700;color:var(--g)">Verified</p>
+    </div>
+    <div id="kycRejectedView" style="display:none">
+      <div style="text-align:center;padding:10px 0">
+        <div style="font-size:40px;margin-bottom:10px">❌</div>
+        <p style="font-size:14px;font-weight:700;color:var(--rd)">Rejected</p>
+        <p style="font-size:12px;color:var(--mt);margin-top:6px" id="kycRejectReason"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loyalty Status Modal -->
+<div class="modal-bg" id="loyaltyModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Loyalty Status</div>
+      <button class="modal-close" onclick="closeModal('loyaltyModal')">✕</button>
+    </div>
+    <div id="loyaltyModalBody" style="text-align:center;padding:10px 0">
+      <div style="color:var(--mt);font-size:13px">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Promo Code Modal -->
+<div class="modal-bg" id="promoModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Redeem Promo Code</div>
+      <button class="modal-close" onclick="closeModal('promoModal')">✕</button>
+    </div>
+    <div class="err-msg" id="promoErr"></div>
+    <div class="ok-msg" id="promoOk"></div>
+    <div class="field"><label>Promo Code</label><input id="promoCode" type="text" placeholder="e.g. WELCOME50" style="text-transform:uppercase"/></div>
+    <button class="sbtn" onclick="redeemPromo()">Redeem</button>
+  </div>
+</div>
+
+<!-- Referral Modal -->
+<div class="modal-bg" id="referralModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Refer & Earn</div>
+      <button class="modal-close" onclick="closeModal('referralModal')">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--mt);margin-bottom:14px">Share your code — you earn a bonus when friends make their first deposit.</p>
+    <div class="field">
+      <label>Your Referral Code</label>
+      <div style="display:flex;gap:8px">
+        <input id="referralCodeDisplay" type="text" readonly style="flex:1"/>
+        <button class="sbtn" style="width:auto;padding:12px 16px" onclick="copyReferralCode()">Copy</button>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mt)">Friends referred: <span id="referredCount" style="color:var(--g);font-weight:700">0</span></div>
+  </div>
+</div>
+
+<!-- Limits Modal -->
+<div class="modal-bg" id="limitsModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Betting & Deposit Limits</div>
+      <button class="modal-close" onclick="closeModal('limitsModal')">✕</button>
+    </div>
+    <div class="err-msg" id="limitsErr"></div>
+    <div class="ok-msg" id="limitsOk"></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:14px">Leave blank for no limit. These help you stay in control.</p>
+    <div class="field"><label>Daily Deposit Limit (KES)</label><input id="depositLimit" type="number" placeholder="No limit set"/></div>
+    <div class="field"><label>Daily Stake Limit (KES)</label><input id="stakeLimit" type="number" placeholder="No limit set"/></div>
+    <button class="sbtn" onclick="saveLimits()">Save Limits</button>
+  </div>
+</div>
+
+<!-- Self-Exclusion Modal -->
+<div class="modal-bg" id="exclusionModal">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl">Self-Exclusion</div>
+      <button class="modal-close" onclick="closeModal('exclusionModal')">✕</button>
+    </div>
+    <div class="err-msg" id="exclErr"></div>
+    <div class="ok-msg" id="exclOk"></div>
+    <p style="font-size:13px;color:var(--mt);margin-bottom:14px;line-height:1.5">This will block betting and depositing for the period you choose, and log you out of all devices. This cannot be undone early — please only proceed if you're sure.</p>
+    <div class="field"><label>Exclude for how many days?</label><input id="exclusionDays" type="number" placeholder="e.g. 30"/></div>
+    <button class="sbtn" style="background:linear-gradient(135deg,#ff3b3b,#cc0000)" onclick="confirmSelfExclude()">Confirm Self-Exclusion</button>
+  </div>
+</div>
+
+<nav class="bnav">
+  <div class="bni" onclick="location.href='/'"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>Home</div>
+  <div class="bni" onclick="location.href='/casino'"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4V4zm4 4v2h2V8H8zm6 0v2h2V8h-2zm-6 6v2h2v-2H8zm6 0v2h2v-2h-2zm-3-3v2h2v-2h-2z"/></svg></div>Casino</div>
+  <div class="bni" onclick="location.href='/my-bets'"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>My Bets</div>
+  <div class="bni on"><div class="bni-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>Account</div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let USER=null;
+window.addEventListener('DOMContentLoaded',async()=>{
+  const t=localStorage.getItem('token'),u=localStorage.getItem('user');
+  if(!t||!u){location.href='/login';return}
+  USER=JSON.parse(u);
+  renderProfile();
+  syncThemeUI();
+  await Promise.all([loadWallet(),loadStats(),loadTx(),loadKycStatus(),loadLoyaltyStatus()]);
+});
+
+function authHeaders(){return {Authorization:'Bearer '+localStorage.getItem('token')}}
+function authHeadersJson(){return {'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('token')}}
+
+// ── THEME TOGGLE ──
+function syncThemeUI(){
+  const isLight = window.SBTheme.get()==='light';
+  document.getElementById('themeIcon').textContent = isLight ? '☀️' : '🌙';
+  document.getElementById('themeSub').textContent = isLight ? 'Currently using light theme' : 'Currently using dark theme';
+}
+function handleThemeToggle(){
+  window.SBTheme.toggle();
+  syncThemeUI();
+}
+
+function renderProfile(){
+  document.getElementById('avatarLetter').textContent=USER.username?.[0]?.toUpperCase()||'?';
+  document.getElementById('profileName').textContent=USER.username||'—';
+  document.getElementById('profileHandle').textContent='@'+(USER.username||'—');
+  document.getElementById('profilePhone').textContent=USER.phone||'—';
+  document.getElementById('editUsername').value=USER.username||'';
+  document.getElementById('editEmail').value=USER.email||'';
+}
+
+// Wallet: main/bonus/locked balances from the real wallet endpoint (not USER.balance)
+async function loadWallet(){
+  try{
+    const r=await fetch('/api/wallet/balance',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    document.getElementById('balTop').textContent=d.data.spendable.toFixed(2);
+    document.getElementById('mainBal').textContent=d.data.main.toFixed(2);
+    document.getElementById('bonusBal').textContent=d.data.bonus.toFixed(2);
+    document.getElementById('lockedBal').textContent=d.data.locked.toFixed(2);
+  }catch{}
+}
+
+async function loadStats(){
+  try{
+    const r=await fetch('/api/bets/my?limit=1',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    const s=d.stats||{};
+    document.getElementById('sTot').textContent=s.totalBets||0;
+    document.getElementById('sWon').textContent=s.wonCount||0;
+    document.getElementById('sLost').textContent=s.lostCount||0;
+    document.getElementById('sPend').textContent=s.pendingCount||0;
+    document.getElementById('sStake').textContent=parseFloat(s.totalStake||0).toFixed(0);
+    document.getElementById('sEarn').textContent=parseFloat(s.totalWon||0).toFixed(0);
+  }catch{}
+}
+
+async function loadTx(){
+  try{
+    const r=await fetch('/api/bets/transactions/history',{headers:authHeaders()});
+    const d=await r.json();
+    const el=document.getElementById('txList');
+    if(!d.success||!d.data.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No transactions yet</div>';return}
+    const icons={deposit:'💰',win:'🏆',bet:'🎯',refund:'↩️',withdrawal:'📤',bonus:'🎁'};
+    el.innerHTML=d.data.map(tx=>{
+      const pos=['deposit','win','refund','bonus'].includes(tx.type);
+      const date=new Date(tx.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      return `<div class="tx">
+        <div class="tx-l">
+          <div class="tx-icon ${tx.type}">${icons[tx.type]||'💳'}</div>
+          <div><div class="tx-desc">${tx.description||tx.type}</div><div class="tx-date">${date}</div></div>
+        </div>
+        <div class="tx-amt ${pos?'pos':'neg'}">${pos?'+':'-'}KES ${Math.abs(tx.amount).toFixed(2)}</div>
+      </div>`;
+    }).join('');
+  }catch{}
+}
+
+async function saveProfile(){
+  const username=document.getElementById('editUsername').value.trim();
+  const err=document.getElementById('profileErr');
+  const ok=document.getElementById('profileOk');
+  err.style.display='none';ok.style.display='none';
+  if(!username||username.length<3){err.textContent='Username must be at least 3 chars';err.style.display='block';return}
+  try{
+    // Note: username changes aren't supported by the backend yet — only favouriteTeams is editable there.
+    // Keeping this limited to avoid promising something the server can't do.
+    err.textContent='Username editing is not available yet — contact support to change your username.';
+    err.style.display='block';
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// Password changes are now handled by support (see passwordModal) — self-service
+// changePassword() removed. If re-enabling later, restore the form fields in
+// passwordModal and the corresponding /api/account/password route in account.js.
+
+// 2FA self-service UI removed. Login-time verification for any already-enrolled
+// account still works server-side; use the admin panel's "Reset 2FA" tool
+// (/api/admin/2fa/reset) if a user gets stuck.
+
+// ── Sessions ──
+async function loadSessions(){
+  try{
+    const r=await fetch('/api/auth/sessions',{headers:authHeaders()});
+    const d=await r.json();
+    const el=document.getElementById('sessionsList');
+    if(!d.success||!d.data.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--mt);font-size:13px">No active sessions found</div>';return}
+    el.innerHTML=d.data.map(s=>{
+      const date=new Date(s.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      return `<div class="tx"><div class="tx-l"><div class="tx-icon dep">📱</div><div><div class="tx-desc">${s.ip||'Unknown IP'}</div><div class="tx-date">${date}</div></div></div></div>`;
+    }).join('');
+  }catch{}
+}
+async function logoutAllSessions(){
+  try{
+    await fetch('/api/auth/logout-all',{method:'POST',headers:authHeaders()});
+    showT('All devices logged out','ok');
+    setTimeout(logout,1500);
+  }catch{showT('Failed to log out devices','err')}
+}
+
+// ── LOYALTY ──
+async function loadLoyaltyStatus(){
+  try{
+    const r = await fetch('/api/loyalty/me', { headers: authHeaders() });
+    const d = await r.json();
+    if (!d.success) return;
+    const sub = document.getElementById('loyaltyMiSub');
+    const body = document.getElementById('loyaltyModalBody');
+    if (!d.currentTier) {
+      sub.textContent = `${d.points.toLocaleString()} points · Not yet in a tier`;
+      body.innerHTML = `<div style="font-size:13px;color:var(--mt)">You have ${d.points.toLocaleString()} points from wagering. Keep betting to unlock your first tier!</div>`;
+      return;
+    }
+    sub.textContent = `${d.currentTier.badgeIcon} ${d.currentTier.name} · ${d.points.toLocaleString()} points`;
+    body.innerHTML = `
+      <div style="font-size:40px;margin-bottom:6px">${d.currentTier.badgeIcon}</div>
+      <div style="font-weight:700;font-size:16px">${d.currentTier.name} Tier</div>
+      <div style="font-size:12px;color:var(--mt);margin:4px 0 14px">${d.points.toLocaleString()} loyalty points</div>
+      ${d.currentTier.cashbackPercent > 0 ? `<div style="font-size:13px;color:var(--g);margin-bottom:10px">💰 ${d.currentTier.cashbackPercent}% weekly cashback on net losses</div>` : ''}
+      ${d.nextTier ? `<div style="font-size:12px;color:var(--mt)">${d.nextTier.pointsNeeded.toLocaleString()} more points to reach ${d.nextTier.name}</div>` : '<div style="font-size:12px;color:var(--g)">🎉 You\\'re at the top tier!</div>'}
+      <div style="font-size:11px;color:var(--mt);margin-top:14px;line-height:1.5">Points are earned automatically from real bets you place — 1 point per KES wagered. Cashback requires wagering before withdrawal, same as other bonuses.</div>
+    `;
+  }catch(e){ /* non-critical */ }
+}
+
+// ── KYC ──
+async function loadKycStatus(){
+  try{
+    const r=await fetch('/api/account/kyc/status',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    const status=d.data.kycStatus;
+    const labels={not_started:'Not started — tap to verify',pending:'Under review',verified:'Verified ✓',rejected:'Rejected — tap to retry'};
+    document.getElementById('kycStatus').textContent=labels[status]||status;
+    window.__kycStatus=status;
+    window.__kycRejectReason=d.data.kycRejectReason;
+  }catch{}
+}
+function showKycView(){
+  ['kycFormView','kycPendingView','kycVerifiedView','kycRejectedView'].forEach(id=>document.getElementById(id).style.display='none');
+  const status=window.__kycStatus;
+  if(status==='pending'){document.getElementById('kycPendingView').style.display='block'}
+  else if(status==='verified'){document.getElementById('kycVerifiedView').style.display='block'}
+  else if(status==='rejected'){document.getElementById('kycRejectedView').style.display='block';document.getElementById('kycRejectReason').textContent=window.__kycRejectReason||'';}
+  else{document.getElementById('kycFormView').style.display='block'}
+}
+async function submitKyc(){
+  const docType=document.getElementById('kycDocType').value;
+  const docNumber=document.getElementById('kycDocNumber').value.trim();
+  const err=document.getElementById('kycErr');const ok=document.getElementById('kycOk');
+  err.style.display='none';ok.style.display='none';
+  if(docNumber.length<4){err.textContent='Enter a valid document number';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/account/kyc/submit',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({docType,docNumber})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Submission failed';err.style.display='block';return}
+    ok.textContent='Submitted for review!';ok.style.display='block';
+    window.__kycStatus='pending';
+    setTimeout(showKycView,1200);
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Promo Code ──
+async function redeemPromo(){
+  const code=document.getElementById('promoCode').value.trim();
+  const err=document.getElementById('promoErr');const ok=document.getElementById('promoOk');
+  err.style.display='none';ok.style.display='none';
+  if(!code){err.textContent='Enter a promo code';err.style.display='block';return}
+  try{
+    const r=await fetch('/api/promotions/redeem',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({code})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Invalid code';err.style.display='block';return}
+    ok.textContent=d.message||'Bonus credited!';ok.style.display='block';
+    loadWallet();
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Referral ──
+async function loadReferral(){
+  try{
+    const r=await fetch('/api/promotions/referral',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    document.getElementById('referralCodeDisplay').value=d.data.referralCode||'';
+    document.getElementById('referredCount').textContent=d.data.referredCount||0;
+  }catch{}
+}
+function copyReferralCode(){
+  const el=document.getElementById('referralCodeDisplay');
+  el.select();document.execCommand('copy');
+  showT('Referral code copied!','ok');
+}
+
+// ── Responsible Gaming: Limits ──
+async function loadLimits(){
+  try{
+    const r=await fetch('/api/account/responsible-gaming',{headers:authHeaders()});
+    const d=await r.json();
+    if(!d.success) return;
+    if(d.data.dailyDepositLimit) document.getElementById('depositLimit').value=d.data.dailyDepositLimit;
+    if(d.data.dailyStakeLimit) document.getElementById('stakeLimit').value=d.data.dailyStakeLimit;
+  }catch{}
+}
+async function saveLimits(){
+  const dailyDepositLimit=document.getElementById('depositLimit').value?parseFloat(document.getElementById('depositLimit').value):null;
+  const dailyStakeLimit=document.getElementById('stakeLimit').value?parseFloat(document.getElementById('stakeLimit').value):null;
+  const err=document.getElementById('limitsErr');const ok=document.getElementById('limitsOk');
+  err.style.display='none';ok.style.display='none';
+  try{
+    const r=await fetch('/api/account/responsible-gaming/limits',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({dailyDepositLimit,dailyStakeLimit})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Failed to save';err.style.display='block';return}
+    ok.textContent='Limits saved';ok.style.display='block';
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+// ── Self-Exclusion ──
+async function confirmSelfExclude(){
+  const days=parseInt(document.getElementById('exclusionDays').value);
+  const err=document.getElementById('exclErr');const ok=document.getElementById('exclOk');
+  err.style.display='none';ok.style.display='none';
+  if(!days||days<1){err.textContent='Enter a valid number of days';err.style.display='block';return}
+  if(!confirm(`This will lock you out of betting and depositing for ${days} day(s) and cannot be undone early. Continue?`)) return;
+  try{
+    const r=await fetch('/api/account/responsible-gaming/self-exclude',{method:'POST',headers:authHeadersJson(),body:JSON.stringify({days})});
+    const d=await r.json();
+    if(!d.success){err.textContent=d.message||'Failed';err.style.display='block';return}
+    ok.textContent=d.message;ok.style.display='block';
+    setTimeout(logout,2500);
+  }catch{err.textContent='Connection error';err.style.display='block'}
+}
+
+function logout(){localStorage.removeItem('token');localStorage.removeItem('user');location.href='/login'}
+function openModal(id){
+  document.getElementById(id).classList.add('on');
+  if(id==='sessionsModal') loadSessions();
+  if(id==='kycModal') showKycView();
+  if(id==='referralModal') loadReferral();
+  if(id==='limitsModal') loadLimits();
+}
+function closeModal(id){document.getElementById(id).classList.remove('on')}
+
+let tTmr=null;
+function showT(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className=`toast on ${type}`;
+  clearTimeout(tTmr);tTmr=setTimeout(()=>el.classList.remove('on'),3500);
+}
+</script>
+</body>
+</html>

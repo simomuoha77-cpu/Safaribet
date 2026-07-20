@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Match – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--yl:#b8860b;--rd:#d32f2f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:90px;transition:background 0.2s,color 0.2s}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
+.back{font-size:20px;color:var(--tx);background:none;border:none;cursor:pointer;padding:4px}
+.topbar-ttl{font-size:13px;color:var(--mt);flex:1}
+
+.mh{padding:18px 16px;background:var(--s1);border-bottom:1px solid var(--bd)}
+.mh-teams{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mh-team{flex:1;text-align:center;font-weight:700;font-size:15px}
+.mh-mid{text-align:center;min-width:70px}
+.mh-score{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;color:var(--g)}
+.mh-vs{font-size:12px;color:var(--mt);font-weight:700}
+.mh-status{text-align:center;font-size:11px;margin-top:6px;color:var(--mt)}
+.mh-status.live{color:var(--rd);font-weight:700}
+.mh-league{text-align:center;font-size:11px;color:var(--mt);margin-top:8px;text-transform:uppercase;letter-spacing:0.5px}
+
+.main{padding:12px}
+.market-card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.market-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s2)}
+.suspended-tag{font-size:10px;background:rgba(255,59,59,0.15);color:var(--rd);padding:2px 7px;border-radius:6px;font-weight:700;letter-spacing:0.3px}
+.suspended-note{padding:12px 14px;font-size:11px;color:var(--mt);line-height:1.5;background:rgba(255,59,59,0.03)}
+.odd-btn.boosted{border-color:var(--yl);position:relative}
+.boost-flag{position:absolute;top:-8px;left:6px;background:var(--yl);color:#2a2000;font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px}
+.odd-val-old{font-size:11px;color:var(--mt);text-decoration:line-through}
+.boosted-val{color:var(--yl)!important}
+.boost-note{margin:0 12px 12px;padding:8px 10px;background:rgba(255,214,0,0.06);border:1px solid rgba(255,214,0,0.2);border-radius:8px;font-size:10px;color:var(--mt);line-height:1.4}
+.market-name{font-weight:700;font-size:14px}
+.synth-tag{font-size:10px;background:rgba(255,214,0,0.15);color:var(--yl);padding:2px 7px;border-radius:6px;font-weight:700;letter-spacing:0.3px}
+.market-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;padding:12px 14px}
+.odd-btn{background:var(--s2);border:1.5px solid var(--bd);border-radius:8px;padding:10px 6px;text-align:center;cursor:pointer;transition:all 0.15s}
+.odd-btn:active{transform:scale(0.96)}
+.odd-btn.sel{background:var(--g);border-color:var(--g)}
+.odd-btn.sel .odd-lbl,.odd-btn.sel .odd-val{color:#04140a}
+.odd-lbl{font-size:11px;color:var(--mt);margin-bottom:3px;line-height:1.2}
+.odd-val{font-size:15px;font-weight:800;color:var(--g)}
+.odd-btn.sel .odd-val{color:#04140a}
+
+.synth-note{margin:0 12px 14px;padding:10px 12px;background:rgba(255,214,0,0.06);border:1px solid rgba(255,214,0,0.2);border-radius:10px;font-size:11px;color:var(--mt);line-height:1.5}
+
+.loading{text-align:center;padding:60px 20px;color:var(--mt);font-size:13px}
+
+.slip-bar{position:fixed;bottom:0;left:0;right:0;background:var(--g);color:#04140a;padding:14px 16px;display:none;align-items:center;justify-content:space-between;font-weight:700;cursor:pointer;z-index:20}
+
+.mode-toggle{display:flex;gap:8px;padding:10px 12px;background:var(--s1);border-bottom:1px solid var(--bd)}
+.mode-btn{flex:1;padding:9px;border-radius:8px;border:1px solid var(--bd);background:var(--s2);color:var(--mt);font-weight:700;font-size:12px;cursor:pointer}
+.mode-btn.active{background:var(--g);color:#04140a;border-color:var(--g)}
+
+.builder-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);padding:12px 16px;z-index:20;box-shadow:0 -4px 16px rgba(0,0,0,0.3)}
+.builder-bar-top{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-bottom:6px}
+.builder-note{font-size:10px;color:var(--mt);line-height:1.4;margin-bottom:10px}
+.field-row{display:flex;gap:8px}
+.field-row input{flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:10px;color:var(--tx);font-size:13px}
+.builder-place-btn{background:var(--g);color:#04140a;border:none;border-radius:8px;padding:10px 18px;font-weight:800;font-size:13px;cursor:pointer}
+.res{margin-top:8px;font-size:12px;text-align:center}
+.res.ok{color:var(--g)}
+.res.er{color:var(--rd)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="history.back()">←</button>
+  <div class="topbar-ttl" id="topLeague">Loading…</div>
+</div>
+
+<div class="mh" id="matchHeader">
+  <div class="loading">Loading match…</div>
+</div>
+
+<div class="mode-toggle" id="modeToggle" style="display:none">
+  <button class="mode-btn active" id="modeBtnSlip" onclick="setMode('slip')">Quick Pick</button>
+  <button class="mode-btn" id="modeBtnBuilder" onclick="setMode('builder')">🧩 Bet Builder</button>
+</div>
+
+<div class="main" id="marketsContainer"></div>
+
+<div class="slip-bar" id="slipBar" onclick="location.href='/?openSlip=1'">
+  <span id="slipCount">0 selections</span>
+  <span id="slipOdds">View Slip on Home →</span>
+</div>
+
+<div class="builder-bar" id="builderBar">
+  <div class="builder-bar-top">
+    <span id="builderLegCount">0 markets selected</span>
+    <span id="builderOdds">Odds: —</span>
+  </div>
+  <div class="builder-note">Combines multiple markets on THIS match into one bet. Odds are adjusted down from simple multiplication since these outcomes aren't fully independent — standard practice for same-match combo bets.</div>
+  <div class="field-row">
+    <input type="number" id="builderStake" placeholder="Stake (KES min. 10)" min="10"/>
+    <button class="builder-place-btn" onclick="placeBetBuilder()">Place Bet</button>
+  </div>
+  <div class="res" id="builderRes"></div>
+</div>
+
+<script>
+// Prefer sessionStorage (keeps the URL clean, no vendor-identifying matchId
+// visible in the address bar) — fall back to the old ?id= query string only
+// for backward compatibility with any links already shared before this change.
+const matchId = sessionStorage.getItem('currentMatchId') || new URLSearchParams(location.search).get('id');
+let matchData = null;
+let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
+
+if (!matchId) {
+  document.getElementById('matchHeader').innerHTML = '<div class="loading">No match specified. <a href="/" style="color:var(--g)">Go back home</a></div>';
+} else {
+  // Clean up the URL if we got here via the old query-string method
+  if (location.search.includes('id=')) history.replaceState(null, '', '/match');
+  loadMatch();
+}
+
+async function loadMatch(){
+  try {
+    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}`);
+    const d = await r.json();
+    if (!d.success) {
+      document.getElementById('matchHeader').innerHTML = `<div class="loading">${d.message || 'Match not found'}</div>`;
+      return;
+    }
+    matchData = d.data;
+    renderHeader();
+    renderMarkets();
+    updateSlipBar();
+  } catch(e) {
+    document.getElementById('matchHeader').innerHTML = '<div class="loading">Failed to load match — check connection.</div>';
+  }
+}
+
+function renderHeader(){
+  const m = matchData;
+  document.getElementById('topLeague').textContent = m.league || 'Football';
+  const isLive = m.status === 'live';
+  const statusText = isLive
+    ? `<span class="mh-status live">● LIVE ${m.score?.minute!=null ? m.score.minute+"'" : ''}</span>`
+    : m.status === 'finished'
+      ? `<span class="mh-status">Full Time</span>`
+      : `<span class="mh-status">${new Date(m.commenceTime).toLocaleString([], {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</span>`;
+
+  document.getElementById('matchHeader').innerHTML = `
+    <div class="mh-teams">
+      <div class="mh-team">${m.homeTeam}</div>
+      <div class="mh-mid">
+        <div class="mh-score">${m.score?.home ?? '-'} : ${m.score?.away ?? '-'}</div>
+      </div>
+      <div class="mh-team">${m.awayTeam}</div>
+    </div>
+    ${statusText}
+    <div class="mh-league">${m.league || ''}</div>
+  `;
+}
+
+function renderMarkets(){
+  const markets = matchData.markets || [];
+  const container = document.getElementById('marketsContainer');
+  if (!markets.length) {
+    container.innerHTML = '<div class="loading">No odds available for this match right now.</div>';
+    document.getElementById('modeToggle').style.display = 'none';
+    return;
+  }
+  document.getElementById('modeToggle').style.display = markets.length >= 2 ? 'flex' : 'none';
+
+  container.innerHTML = markets.map(mk => {
+    const openOptions = mk.options.filter(o => !o.suspended);
+    const hasSuspended = mk.options.some(o => o.suspended);
+    return `
+    <div class="market-card">
+      <div class="market-hd">
+        <span class="market-name">${mk.label}</span>
+      </div>
+      ${openOptions.length ? `
+      <div class="market-body">
+        ${openOptions.map(opt => `
+          <div class="odd-btn ${opt.boostedOdds?'boosted':''}" id="mkt_${mk.market}_${opt.pick}" onclick="toggleMarketPick('${mk.market}','${opt.pick}',${opt.boostedOdds||opt.odds},'${escapeAttr(pickLabel(mk.market,opt.pick))}')">
+            ${opt.boostedOdds ? '<div class="boost-flag">⚡ BOOST</div>' : ''}
+            <div class="odd-lbl">${pickLabel(mk.market, opt.pick)}</div>
+            ${opt.boostedOdds
+              ? `<div class="odd-val-old">${opt.odds.toFixed(2)}</div><div class="odd-val boosted-val">${opt.boostedOdds.toFixed(2)}</div>`
+              : `<div class="odd-val">${opt.odds.toFixed(2)}</div>`}
+          </div>
+        `).join('')}
+      </div>
+      ${hasSuspended ? `<div class="suspended-note">Some options on this market are no longer available — that outcome is already effectively decided.</div>` : ''}
+      ${openOptions.some(o=>o.boostedOdds) ? `<div class="boost-note">⚡ Boosted odds apply to stakes up to KES ${openOptions.find(o=>o.boostedOdds).maxQualifyingStake.toLocaleString()} on that selection — normal odds apply beyond that.</div>` : ''}
+      ` : `<div class="suspended-note">Betting closed on this market — the outcome is already effectively decided.</div>`}
+    </div>
+  `;}).join('');
+
+  // Restore selection highlighting if this match/market/pick is already in the slip
+  slip.forEach(s => {
+    if (s.matchId === matchId) {
+      const el = document.getElementById(`mkt_${s.market}_${s.pick}`);
+      if (el) el.classList.add('sel');
+    }
+  });
+}
+
+function pickLabel(market, pick){
+  const h = matchData.homeTeam, a = matchData.awayTeam;
+  const LABELS = {
+    '1x2':      { home: h, draw: 'Draw', away: a },
+    'ou25':     { over25: 'Over 2.5', under25: 'Under 2.5' },
+    'btts':     { btts: 'Yes', btts_no: 'No' },
+    'dc':       { dc_1x: `${h} or Draw`, dc_x2: `Draw or ${a}`, dc_12: `${h} or ${a}` },
+    'handicap': { handicap_home: h, handicap_away: a }
+  };
+  return LABELS[market]?.[pick] || pick;
+}
+
+function escapeAttr(s){ return String(s).replace(/'/g, "\\'"); }
+
+let mode = 'slip';
+let builderLegs = [];
+
+function setMode(m){
+  mode = m;
+  document.getElementById('modeBtnSlip').classList.toggle('active', m==='slip');
+  document.getElementById('modeBtnBuilder').classList.toggle('active', m==='builder');
+  document.getElementById('slipBar').style.display = (m==='slip' && slip.length) ? 'flex' : 'none';
+  document.getElementById('builderBar').style.display = (m==='builder') ? 'block' : 'none';
+  // Clear visual selection state and re-apply for the active mode only
+  document.querySelectorAll('.odd-btn').forEach(el => el.classList.remove('sel'));
+  if (m === 'slip') {
+    slip.forEach(s => { if (s.matchId===matchId) document.getElementById(`mkt_${s.market}_${s.pick}`)?.classList.add('sel'); });
+  } else {
+    builderLegs.forEach(l => document.getElementById(`mkt_${l.market}_${l.pick}`)?.classList.add('sel'));
+  }
+  updateBuilderBar();
+}
+
+function toggleMarketPick(market, pick, odds, pickLabelText){
+  if (mode === 'builder') { toggleBuilderLeg(market, pick, odds, pickLabelText); return; }
+
+  // Quick Pick allows only ONE selection per MATCH (any market), not one per
+  // market — picking, say, "Home Win" and "Home or Draw" (Double Chance) on
+  // the same match and multiplying their odds together in a regular multi-bet
+  // massively overpays, since the second pick is nearly guaranteed once the
+  // first is true (they're not independent risks). Combining multiple markets
+  // on one match is exactly what Bet Builder mode is for, where a correlation
+  // discount is correctly applied — so Quick Pick deliberately restricts to
+  // one pick per match, same as the homepage's slip always has.
+  const existIdx = slip.findIndex(s => s.matchId === matchId);
+  const same = existIdx !== -1 && slip[existIdx].market === market && slip[existIdx].pick === pick;
+
+  // Deselect ANY previously selected market/pick for this match, not just this one
+  if (matchData.markets) {
+    matchData.markets.forEach(mk => mk.options.forEach(opt => {
+      document.getElementById(`mkt_${mk.market}_${opt.pick}`)?.classList.remove('sel');
+    }));
+  }
+
+  if (same) {
+    slip.splice(existIdx, 1);
+  } else {
+    if (existIdx !== -1) slip.splice(existIdx, 1);
+    slip.push({
+      matchId, market, pick,
+      homeTeam: matchData.homeTeam, awayTeam: matchData.awayTeam,
+      league: matchData.league, sport: matchData.sport,
+      pickLabel: pickLabelText, odds: parseFloat(odds),
+      commenceTime: matchData.commenceTime
+    });
+    document.getElementById(`mkt_${market}_${pick}`)?.classList.add('sel');
+  }
+
+  localStorage.setItem('betslip', JSON.stringify(slip));
+  updateSlipBar();
+}
+
+// ── BET BUILDER (multiple markets, same match, combined into one bet) ──
+function toggleBuilderLeg(market, pick, odds, pickLabelText){
+  const existIdx = builderLegs.findIndex(l => l.market === market);
+  const same = existIdx !== -1 && builderLegs[existIdx].pick === pick;
+
+  if (matchData.markets) {
+    const mk = matchData.markets.find(m => m.market === market);
+    if (mk) mk.options.forEach(opt => {
+      document.getElementById(`mkt_${market}_${opt.pick}`)?.classList.remove('sel');
+    });
+  }
+
+  if (same) {
+    builderLegs.splice(existIdx, 1);
+  } else {
+    if (existIdx !== -1) builderLegs.splice(existIdx, 1);
+    builderLegs.push({ matchId, market, pick, pickLabel: pickLabelText, odds: parseFloat(odds) });
+    document.getElementById(`mkt_${market}_${pick}`)?.classList.add('sel');
+  }
+  updateBuilderBar();
+}
+
+function updateBuilderBar(){
+  document.getElementById('builderLegCount').textContent = `${builderLegs.length} market${builderLegs.length===1?'':'s'} selected`;
+  if (builderLegs.length < 2) {
+    document.getElementById('builderOdds').textContent = 'Odds: — (pick 2+)';
+    return;
+  }
+  // Same correlation-discount formula as the server (server re-verifies and is authoritative)
+  let combined = builderLegs[0].odds;
+  for (let i = 1; i < builderLegs.length; i++) combined = combined * builderLegs[i].odds * 0.90;
+  document.getElementById('builderOdds').textContent = `Odds: ${combined.toFixed(2)}`;
+}
+
+async function placeBetBuilder(){
+  const el = document.getElementById('builderRes');
+  if (builderLegs.length < 2) { el.className='res er'; el.textContent='Pick at least 2 markets'; return; }
+  const stake = parseFloat(document.getElementById('builderStake').value);
+  if (!stake || stake < 10) { el.className='res er'; el.textContent='Enter a stake (min KES 10)'; return; }
+
+  const token = localStorage.getItem('token');
+  if (!token) { location.href = '/login'; return; }
+
+  el.className='res'; el.textContent='Placing bet...';
+  try{
+    const r = await fetch('/api/bets/place-builder', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body: JSON.stringify({ legs: builderLegs, stake })
+    });
+    const d = await r.json();
+    if (d.success) {
+      el.className='res ok'; el.textContent=`✅ Bet placed! Code: ${d.betCode}`;
+      builderLegs = [];
+      document.getElementById('builderStake').value = '';
+      document.querySelectorAll('.odd-btn.sel').forEach(b=>b.classList.remove('sel'));
+      updateBuilderBar();
+      setTimeout(() => location.href = '/my-bets', 1200);
+    } else {
+      el.className='res er'; el.textContent = '❌ ' + (d.message || 'Failed to place bet');
+    }
+  }catch(e){
+    el.className='res er'; el.textContent='❌ Failed — check connection';
+  }
+}
+
+function updateSlipBar(){
+  const bar = document.getElementById('slipBar');
+  if (!slip.length || mode !== 'slip') { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  document.getElementById('slipCount').textContent = `${slip.length} selection${slip.length>1?'s':''}`;
+  const totalOdds = slip.reduce((acc,s)=>acc*s.odds, 1);
+  document.getElementById('slipOdds').textContent = `Odds ${totalOdds.toFixed(2)} · View Slip →`;
+}
+
+// Refresh live score/minute periodically without losing selections
+setInterval(() => { if (matchData?.status === 'live') loadMatch(); }, 20000);
+</script>
+</body>
+</html>

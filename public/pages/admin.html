@@ -1,0 +1,2398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SafariBet Admin</title>
+<meta name="robots" content="noindex,nofollow,noarchive"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --g:#00c853;--g2:#00e676;--gd:#004d1a;
+  --r:#ff1744;--y:#f5c518;--b:#2979ff;--o:#ff6d00;
+  --bg:#151d15;--c1:#1c261c;--c2:#243024;--c3:#2e3c2e;--c4:#3a4a3a;
+  --tx:#f4faf4;--mt:#9db89d;--bd:#3a4a3a;
+  --fn:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;overflow-x:hidden}
+
+/* ── LOGIN ── */
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:radial-gradient(ellipse at 50% 0%,#003d1a22 0%,transparent 70%)}
+.lbox{background:var(--c1);border:1px solid var(--bd);border-radius:24px;padding:36px 28px;width:100%;max-width:360px;box-shadow:0 20px 60px #00000060}
+.llogo{text-align:center;margin-bottom:28px}
+.llogo h1{font-size:30px;font-weight:900;color:var(--g);letter-spacing:-1px}
+.llogo h1 span{color:var(--y)}
+.llogo p{color:var(--mt);font-size:12px;margin-top:6px;letter-spacing:1px;text-transform:uppercase}
+.linp{width:100%;background:#0a100a;border:1.5px solid var(--c3);border-radius:12px;padding:15px 16px;color:var(--tx);font-size:15px;outline:none;transition:border .2s;margin-bottom:10px}
+.linp:focus{border-color:var(--g)}
+.lbtn{width:100%;background:var(--g);color:#000;border:none;border-radius:12px;padding:15px;font-size:16px;font-weight:800;cursor:pointer;transition:background .15s;letter-spacing:.3px}
+.lbtn:hover{background:var(--g2)}
+.lbtn:disabled{background:var(--gd);color:#1a3a1a;cursor:not-allowed}
+.lerr{background:#ff174415;border:1px solid #ff174430;color:#ff6b6b;padding:11px 14px;border-radius:10px;font-size:13px;margin-bottom:12px;display:none;text-align:center}
+
+/* ── DASHBOARD ── */
+#dashboard{display:none;min-height:100vh}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:200px;background:var(--c1);border-right:1px solid var(--bd);overflow-y:auto;z-index:100;transition:transform .3s}
+.sidebar.hidden{transform:translateX(-200px)}
+.sb-logo{padding:18px 16px;border-bottom:1px solid var(--bd)}
+.sb-logo h2{font-size:18px;font-weight:900;color:var(--g)}
+.sb-logo h2 span{color:var(--y)}
+.sb-logo p{font-size:10px;color:var(--mt);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+.sb-section{padding:10px 0}
+.sb-label{font-size:9px;color:var(--mt);text-transform:uppercase;letter-spacing:1px;padding:6px 16px 4px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;font-size:13px;color:#6a8a6a;transition:all .15s;border-left:2px solid transparent}
+.sb-item:hover{color:var(--tx);background:var(--c2)}
+.sb-item.on{color:var(--g);background:#00c85310;border-left-color:var(--g);font-weight:600}
+.sb-item .ic{width:16px;text-align:center;font-size:14px;flex-shrink:0}
+.sb-badge{background:var(--r);color:#fff;border-radius:10px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:auto}
+
+.main{margin-left:200px;min-height:100vh;transition:margin .3s}
+.main.full{margin-left:0}
+.topbar{background:var(--c1);border-bottom:1px solid var(--bd);padding:12px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:99}
+.menu-btn{background:none;border:none;color:var(--mt);font-size:20px;cursor:pointer;padding:4px}
+.topbar-title{font-size:16px;font-weight:700;color:var(--tx);flex:1}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.tb-time{font-size:11px;color:var(--mt)}
+.logout-btn{background:none;border:1px solid var(--r);color:var(--r);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600}
+.logout-btn:hover{background:#ff174415}
+
+.content{padding:16px 20px}
+
+/* ── PANELS ── */
+.panel{display:none}
+.panel.on{display:block}
+
+/* ── STATS GRID ── */
+.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+.stat-card{background:var(--c1);border:1px solid var(--bd);border-radius:16px;padding:16px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent,var(--g))}
+.stat-card .sv{font-size:24px;font-weight:800;color:var(--tx);margin-bottom:2px}
+.stat-card .sl{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.5px}
+.stat-card .si{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:28px;opacity:.15}
+.stat-card .schange{font-size:10px;margin-top:4px}
+.schange.up{color:var(--g)}
+.schange.dn{color:var(--r)}
+
+/* ── SECTION CARDS ── */
+.sec{background:var(--c1);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:12px}
+.sec-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.sec-hdr h3{font-size:12px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:.8px}
+.sec-hdr .hdr-btn{background:var(--g);color:#000;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+
+/* ── INPUTS ── */
+.inp{width:100%;background:#0a100a;border:1.5px solid var(--c3);border-radius:10px;padding:12px 14px;color:var(--tx);font-size:14px;outline:none;transition:border .2s;margin-bottom:8px}
+.inp:focus{border-color:var(--g)}
+.inp-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}
+.inp-row .inp{margin-bottom:0;flex:1}
+select.inp{cursor:pointer}
+label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:8px}
+
+/* ── BUTTONS ── */
+.btn{border:none;border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-g{background:var(--g);color:#000}
+.btn-g:hover{background:var(--g2)}
+.btn-r{background:var(--r);color:#fff}
+.btn-r:hover{background:#ff4569}
+.btn-y{background:var(--y);color:#000}
+.btn-b{background:var(--b);color:#fff}
+.btn-o{background:var(--o);color:#fff}
+.btn-ghost{background:none;border:1px solid var(--bd);color:var(--mt)}
+.btn-ghost:hover{border-color:var(--g);color:var(--g)}
+.btn-sm{padding:6px 10px;font-size:11px;border-radius:7px}
+.btn-full{width:100%;margin-top:4px}
+
+/* ── RESULT BOX ── */
+.res{background:#0a100a;border-radius:8px;padding:10px 12px;font-size:12px;color:var(--mt);margin-top:8px;display:none;line-height:1.6}
+.res.ok{color:var(--g);background:#00c85310;border:1px solid #00c85320}
+.res.er{color:#ff6b6b;background:#ff174410;border:1px solid #ff174420}
+.res.inf{color:#4fc3f7;background:#2979ff10;border:1px solid #2979ff20}
+
+/* ── TABLE ── */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;padding:9px 10px;color:var(--mt);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px;border-bottom:1px solid var(--bd)}
+.tbl td{padding:9px 10px;border-bottom:1px solid #0d130d;vertical-align:middle}
+.tbl tr:hover td{background:var(--c2)}
+.tbl-wrap{overflow-x:auto;margin:-4px}
+
+/* ── BADGES ── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase}
+.bg-g{background:#00c85320;color:var(--g)}
+.bg-r{background:#ff174420;color:#ff6b6b}
+.bg-y{background:#f5c51820;color:var(--y)}
+.bg-b{background:#2979ff20;color:#82b1ff}
+.bg-o{background:#ff6d0020;color:#ffab40}
+.bg-mt{background:var(--c3);color:var(--mt)}
+
+/* ── USER ROW ── */
+.u-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)}
+.u-row:last-child{border:none}
+.u-info .u-name{font-size:13px;font-weight:700;color:var(--tx)}
+.u-info .u-sub{font-size:11px;color:var(--mt);margin-top:2px}
+.u-right{text-align:right;flex-shrink:0}
+.u-bal{font-size:14px;font-weight:700;color:var(--g)}
+.u-actions{display:flex;gap:4px;margin-top:4px;justify-content:flex-end;flex-wrap:wrap}
+
+/* ── BET ROW ── */
+.b-row{background:#0a100a;border-left:3px solid var(--c3);border-radius:8px;padding:11px;margin-bottom:7px}
+.b-row.won{border-color:var(--g)}
+.b-row.lost{border-color:var(--r)}
+.b-row.pending{border-color:var(--y)}
+.b-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.b-code{font-weight:700;font-size:13px}
+.b-sels{color:var(--mt);font-size:11px;line-height:1.6;margin-bottom:5px}
+.b-foot{display:flex;gap:12px;flex-wrap:wrap;font-size:11px}
+.b-foot span b{color:var(--tx)}
+
+/* ── TX ROW ── */
+.tx-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--bd)}
+.tx-row:last-child{border:none}
+.tx-l .tx-type{font-size:12px;font-weight:700;text-transform:capitalize}
+.tx-l .tx-sub{font-size:10px;color:var(--mt);margin-top:2px}
+.tx-r{text-align:right}
+.tx-amt{font-size:14px;font-weight:700}
+.tx-amt.pos{color:var(--g)}
+.tx-amt.neg{color:var(--r)}
+.tx-bal{font-size:10px;color:var(--mt);margin-top:2px}
+
+/* ── TOGGLE ── */
+.toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--c3);border-radius:24px;transition:.2s}
+.toggle-slider:before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#666;border-radius:50%;transition:.2s}
+.toggle input:checked+.toggle-slider{background:var(--g)}
+.toggle input:checked+.toggle-slider:before{transform:translateX(20px);background:#000}
+
+/* ── CHART BAR ── */
+.chart-bar{display:flex;align-items:flex-end;gap:4px;height:80px;padding-top:8px}
+.bar{flex:1;background:var(--g);border-radius:4px 4px 0 0;opacity:.7;transition:all .3s;min-height:4px;position:relative;cursor:pointer}
+.bar:hover{opacity:1}
+.bar-lbl{font-size:9px;color:var(--mt);text-align:center;margin-top:4px}
+
+/* ── EMPTY ── */
+.empty{text-align:center;padding:30px;color:var(--mt);font-size:13px}
+.loading{text-align:center;padding:20px;color:var(--mt);font-size:12px}
+
+/* ── NOTIFICATION TOAST ── */
+.toast{position:fixed;top:20px;right:20px;background:var(--c1);border:1px solid var(--bd);border-radius:12px;padding:12px 16px;font-size:13px;z-index:9999;display:none;max-width:300px;box-shadow:0 8px 24px #00000060;animation:slideIn .2s ease}
+@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ── MODAL ── */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-bg.on{display:flex}
+.modal{background:var(--c1);border:1px solid var(--bd);border-radius:20px;padding:24px;width:100%;max-width:400px}
+.modal h3{font-size:16px;font-weight:800;margin-bottom:16px;color:var(--tx)}
+.modal-close{float:right;background:none;border:none;color:var(--mt);font-size:20px;cursor:pointer;margin-top:-4px}
+
+/* ── MAINTENANCE BANNER ── */
+.maint-banner{background:#ff6d0022;border:1px solid #ff6d0040;border-radius:10px;padding:10px 14px;font-size:12px;color:#ffab40;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+
+@media(max-width:640px){
+  .sidebar{transform:translateX(-200px);z-index:200}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0!important}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .overlay{display:block!important}
+}
+.overlay{display:none;position:fixed;inset:0;background:#00000060;z-index:150;pointer-events:none}
+.overlay.on{display:block;pointer-events:auto}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+
+<!-- ══ LOGIN ══ -->
+<div id="loginScreen">
+  <div class="lbox">
+    <div class="llogo">
+      <h1>Safari<span>Bet</span></h1>
+      <p>Admin Control Panel</p>
+    </div>
+    <div class="lerr" id="lerr"></div>
+    <input class="linp" type="password" id="apwd" placeholder="Admin password" autocomplete="new-password"/>
+    <button class="lbtn" id="lbtn" onclick="doLogin()">Access Panel</button>
+  </div>
+</div>
+
+<!-- ══ DASHBOARD ══ -->
+<div id="dashboard">
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-logo">
+      <h2>Safari<span>Bet</span></h2>
+      <p>Admin v2.0</p>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Overview</div>
+      <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ic">📊</span>Dashboard</div>
+      <div class="sb-item" onclick="nav('revenue',this)"><span class="ic">💹</span>Revenue & Profit</div>
+      <div class="sb-item" onclick="nav('live',this)"><span class="ic">🔴</span>Live Stats</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Users</div>
+      <div class="sb-item" onclick="nav('users',this)"><span class="ic">👥</span>User Management</div>
+      <div class="sb-item" onclick="nav('blacklist',this)"><span class="ic">🚫</span>Blacklist</div>
+      <div class="sb-item" onclick="nav('referrals',this)"><span class="ic">🔗</span>Referrals</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Betting</div>
+      <div class="sb-item" onclick="nav('bets',this)"><span class="ic">🎯</span>Bet Management</div>
+      <div class="sb-item" onclick="nav('matches',this)"><span class="ic">⚽</span>Match Management</div>
+      <div class="sb-item" id="nav-odds" onclick="nav('odds',this)"><span class="ic">📈</span>Odds Management</div>
+      <div class="sb-item" onclick="nav('limits',this)"><span class="ic">⚖️</span>Betting Limits</div>
+      <div class="sb-item" onclick="nav('jackpot',this)"><span class="ic">🏆</span>Jackpot Management</div>
+      <div class="sb-item" onclick="nav('loyalty',this)"><span class="ic">💎</span>Loyalty Tiers</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Finance</div>
+      <div class="sb-item" onclick="nav('deposits',this)"><span class="ic">💰</span>Deposits</div>
+      <div class="sb-item" onclick="nav('withdrawals',this)"><span class="ic">💸</span>Withdrawals <span class="sb-badge" id="pendingWdBadge">0</span></div>
+      <div class="sb-item" onclick="nav('wallet',this)"><span class="ic">👛</span>Wallet Management</div>
+      <div class="sb-item" onclick="nav('transactions',this)"><span class="ic">📋</span>Transaction Logs</div>
+      <div class="sb-item" onclick="nav('payment',this)"><span class="ic">🔌</span>Payment Gateway</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Promotions</div>
+      <div class="sb-item" onclick="nav('bonus',this)"><span class="ic">🎁</span>Bonus & Promos</div>
+      <div class="sb-item" onclick="nav('notifications',this)"><span class="ic">📢</span>Notifications</div>
+      <div class="sb-item" onclick="nav('content',this)"><span class="ic">🖼️</span>Content / Banners</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Security</div>
+      <div class="sb-item" onclick="nav('fraud',this)"><span class="ic">🔍</span>Fraud Detection</div>
+      <div class="sb-item" onclick="nav('logins',this)"><span class="ic">🔐</span>Login Activity</div>
+      <div class="sb-item" onclick="nav('audit',this)"><span class="ic">📜</span>Audit Logs</div>
+      <div class="sb-item" onclick="nav('security',this)"><span class="ic">🛡️</span>Security Settings</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Support</div>
+      <div class="sb-item" onclick="nav('tickets',this)"><span class="ic">🎫</span>Support Tickets <span class="sb-badge" id="ticketBadge">0</span></div>
+      <div class="sb-item" onclick="nav('reports',this)"><span class="ic">📊</span>Reports</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">System</div>
+      <div class="sb-item" onclick="nav('settings',this)"><span class="ic">⚙️</span>Site Settings</div>
+      <div class="sb-item" onclick="nav('admins',this)"><span class="ic">👑</span>Admin Roles</div>
+      <div class="sb-item" onclick="nav('api',this)"><span class="ic">🔗</span>API Management</div>
+      <div class="sb-item" onclick="nav('maintenance',this)"><span class="ic">🔧</span>Maintenance</div>
+      <div class="sb-item" onclick="nav('backup',this)"><span class="ic">💾</span>Backup & Restore</div>
+      <div class="sb-item" onclick="nav('logs',this)"><span class="ic">📝</span>System Logs</div>
+    </div>
+  </nav>
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+
+  <!-- MAIN -->
+  <div class="main" id="main">
+    <div class="topbar">
+      <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title" id="pageTitle">Dashboard</div>
+      <div class="topbar-right">
+        <span class="tb-time" id="clock"></span>
+        <button class="logout-btn" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+<!-- ══════════════════ PANELS ══════════════════ -->
+
+<!-- 1. DASHBOARD -->
+<div class="panel on" id="panel-dashboard">
+  <div id="maintBanner" style="display:none" class="maint-banner">⚠️ Site is in <b>Maintenance Mode</b> — users see maintenance page</div>
+  <div class="stats-grid" id="mainStats">
+    <div class="stat-card" style="--accent:var(--g)"><div class="si">👥</div><div class="sv" id="ds-users">—</div><div class="sl">Total Users</div></div>
+    <div class="stat-card" style="--accent:var(--b)"><div class="si">🎯</div><div class="sv" id="ds-bets">—</div><div class="sl">Total Bets</div></div>
+    <div class="stat-card" style="--accent:var(--y)"><div class="si">⏳</div><div class="sv" id="ds-pending">—</div><div class="sl">Pending Bets</div></div>
+    <div class="stat-card" style="--accent:var(--o)"><div class="si">💰</div><div class="sv" id="ds-deposits">—</div><div class="sl">Total Deposits</div></div>
+    <div class="stat-card" style="--accent:var(--r)"><div class="si">💸</div><div class="sv" id="ds-withdrawals">—</div><div class="sl">Withdrawals</div></div>
+    <div class="stat-card" style="--accent:var(--g)"><div class="si">💹</div><div class="sv" id="ds-revenue">—</div><div class="sl">Net Revenue</div></div>
+    <div class="stat-card" style="--accent:#9c27b0"><div class="si">🔴</div><div class="sv" id="ds-live">—</div><div class="sl">Live Matches</div></div>
+    <div class="stat-card" style="--accent:var(--b)"><div class="si">⚽</div><div class="sv" id="ds-matches">—</div><div class="sl">Upcoming Matches</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📉 Recent Activity</h3><button class="btn btn-g btn-sm" onclick="loadDashboard()">Refresh</button></div>
+    <div id="recentActivity"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 2. REVENUE -->
+<div class="panel" id="panel-revenue">
+  <div class="stats-grid">
+    <div class="stat-card" style="--accent:var(--g)"><div class="sv" id="rev-gross">—</div><div class="sl">Gross Revenue</div></div>
+    <div class="stat-card" style="--accent:var(--r)"><div class="sv" id="rev-paid">—</div><div class="sl">Paid Out (Winnings)</div></div>
+    <div class="stat-card" style="--accent:var(--y)"><div class="sv" id="rev-tax">—</div><div class="sl">Excise Tax Collected</div></div>
+    <div class="stat-card" style="--accent:var(--g2)"><div class="sv" id="rev-net">—</div><div class="sl">Net Profit</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📊 Revenue Breakdown</h3></div>
+    <div id="revChart"><div class="loading">Loading chart...</div></div>
+  </div>
+</div>
+
+<!-- 3. LIVE STATS -->
+<div class="panel" id="panel-live">
+  <div class="stats-grid">
+    <div class="stat-card" style="--accent:var(--r)"><div class="sv" id="live-online">—</div><div class="sl">Active Sessions</div></div>
+    <div class="stat-card" style="--accent:var(--g)"><div class="sv" id="live-bets">—</div><div class="sl">Bets Last Hour</div></div>
+    <div class="stat-card" style="--accent:var(--b)"><div class="sv" id="live-deposits">—</div><div class="sl">Deposits Today</div></div>
+    <div class="stat-card" style="--accent:var(--y)"><div class="sv" id="live-pending">—</div><div class="sl">Pending Withdrawals</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔴 Live Matches</h3><button class="btn btn-g btn-sm" onclick="loadLiveMatches()">Refresh</button></div>
+    <div id="liveMatchList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 4. USERS -->
+<div class="panel" id="panel-users">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔍 Search & Manage</h3></div>
+    <div class="inp-row">
+      <input class="inp" id="uSearch" placeholder="Phone, username, or ID..."/>
+      <button class="btn btn-g" onclick="searchUser()">Search</button>
+      <button class="btn btn-r" onclick="deleteSearched()">Delete</button>
+    </div>
+    <div class="res" id="uRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>💰 Adjust Balance</h3></div>
+    <label class="lbl">User</label>
+    <input class="inp" id="balUser" placeholder="Phone or username"/>
+    <label class="lbl">Amount (use - to deduct)</label>
+    <div class="inp-row">
+      <input class="inp" type="number" id="balAmt" placeholder="e.g. 500 or -100"/>
+      <input class="inp" id="balNote" placeholder="Reason (optional)"/>
+      <button class="btn btn-g" onclick="adjustBal()">Apply</button>
+    </div>
+    <div class="res" id="balRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>👥 All Users</h3><button class="btn btn-ghost btn-sm" onclick="loadUsers()">↻ Refresh</button></div>
+    <div class="tbl-wrap"><div id="userList"><div class="loading">Loading...</div></div></div>
+  </div>
+</div>
+
+<!-- 5. BLACKLIST -->
+<div class="panel" id="panel-blacklist">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🚫 Blacklist User / IP</h3></div>
+    <label class="lbl">Phone or IP address</label>
+    <div class="inp-row">
+      <input class="inp" id="blTarget" placeholder="0712345678 or 192.168.x.x"/>
+      <input class="inp" id="blReason" placeholder="Reason"/>
+      <button class="btn btn-r" onclick="addBlacklist()">Blacklist</button>
+    </div>
+    <div class="res" id="blRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🚫 Blacklisted</h3></div>
+    <div id="blList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 6. REFERRALS -->
+<div class="panel" id="panel-referrals">
+
+  <!-- CONFIG CARD -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>⚙️ Referral Config</h3></div>
+    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:4px">
+
+      <!-- Toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-size:14px;font-weight:700">Referral Program</div>
+          <div style="font-size:12px;color:var(--mt);margin-top:2px">Enable or disable the referral bonus for all users</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:48px;height:26px;flex-shrink:0">
+          <input type="checkbox" id="refEnabledToggle" style="opacity:0;width:0;height:0" onchange="updateRefConfig()"/>
+          <span id="refToggleTrack" style="position:absolute;cursor:pointer;inset:0;background:#333;border-radius:13px;transition:0.3s">
+            <span id="refToggleThumb" style="position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:0.3s"></span>
+          </span>
+        </label>
+      </div>
+
+      <!-- Amount -->
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;color:var(--mt);font-weight:600;display:block;margin-bottom:6px">Bonus Amount per Referral (KES)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="refAmountInp" min="0" step="1" placeholder="e.g. 5"
+            style="flex:1;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
+          <button class="btn btn-g btn-sm" onclick="saveRefAmount()">Save</button>
+        </div>
+        <div style="font-size:11px;color:var(--mt);margin-top:5px">Set to 0 to disable the bonus while keeping referral tracking active</div>
+      </div>
+
+      <!-- Live status -->
+      <div id="refConfigStatus" style="font-size:12px;padding:8px 12px;border-radius:8px;background:var(--s3);color:var(--mt)">Loading...</div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>📊 Referral Stats</h3></div>
+    <div class="stats-grid">
+      <div class="stat-card" style="--accent:var(--g)"><div class="sv" id="ref-total">—</div><div class="sl">Total Referrals</div></div>
+      <div class="stat-card" style="--accent:var(--y)"><div class="sv" id="ref-bonus">—</div><div class="sl">Bonus Paid (KES)</div></div>
+    </div>
+  </div>
+
+  <!-- TOP REFERRERS -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>🏆 Top Referrers</h3></div>
+    <div id="refList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 7. BETS -->
+<div class="panel" id="panel-bets">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🎯 Bet Management</h3><button class="btn btn-y btn-sm" onclick="runSettle()" style="background:linear-gradient(135deg,#ff9800,#f57c00);color:#000">⚡ Force Settle Now</button></div>
+    <div class="inp-row">
+      <select class="inp" id="betFilter" onchange="loadBets()">
+        <option value="all">All Bets</option>
+        <option value="pending">Pending</option>
+        <option value="won">Won</option>
+        <option value="lost">Lost</option>
+      </select>
+      <input class="inp" id="betSearch" placeholder="Search bet code..."/>
+      <button class="btn btn-g btn-sm" onclick="loadBets()">Filter</button>
+    </div>
+    <div id="betList"><div class="loading">Loading...</div></div>
+    <div class="res" id="settleRes"></div>
+  </div>
+</div>
+
+<!-- 8. MATCHES -->
+<div class="panel" id="panel-matches">
+  <div class="sec">
+    <div class="sec-hdr"><h3>➕ Add Match</h3></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label class="lbl">Home Team</label><input class="inp" id="mHome" placeholder="e.g. Kenya"/></div>
+      <div><label class="lbl">Away Team</label><input class="inp" id="mAway" placeholder="e.g. Uganda"/></div>
+    </div>
+    <label class="lbl">League</label>
+    <input class="inp" id="mLeague" placeholder="e.g. 🇰🇪 Kenya Premier League"/>
+    <label class="lbl">Kick-off</label>
+    <input class="inp" type="datetime-local" id="mDate"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px">
+      <div><label class="lbl">Home Odds</label><input class="inp" type="number" step="0.01" id="mOH" placeholder="1.85"/></div>
+      <div><label class="lbl">Draw Odds</label><input class="inp" type="number" step="0.01" id="mOD" placeholder="3.20"/></div>
+      <div><label class="lbl">Away Odds</label><input class="inp" type="number" step="0.01" id="mOA" placeholder="2.10"/></div>
+    </div>
+    <button class="btn btn-g btn-full" onclick="addMatch()">➕ Add Match</button>
+    <div class="res" id="matchRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>⚽ All Matches</h3><button class="btn btn-ghost btn-sm" onclick="loadAdminMatches()">↻ Refresh</button></div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <select class="inp" id="matchStatusFilter" style="flex:1" onchange="loadAdminMatches()">
+        <option value="">All statuses (upcoming, live, finished, cancelled)</option>
+        <option value="upcoming">Upcoming only</option>
+        <option value="live">Live only</option>
+        <option value="upcoming,live">Upcoming + Live</option>
+        <option value="finished">Finished only</option>
+        <option value="cancelled">Cancelled only</option>
+      </select>
+      <input class="inp" id="matchSearchFilter" placeholder="Search team/league..." style="flex:1" oninput="loadAdminMatches()"/>
+    </div>
+    <div id="matchList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 9. ODDS -->
+<div class="panel" id="panel-odds">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📈 Update Match Odds</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:8px">Works for ANY game — manually added or pulled from an API (API-Football, Odds API, football-data.org, odds-api.io, TheSportsDB). Once you set odds here, they're locked and auto-sync will never overwrite them.</p>
+    <label class="lbl">Match ID</label>
+    <input class="inp" id="oddsMatchId" placeholder="e.g. apif_123456 or static_wc_r32_01"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div><label class="lbl">Home</label><input class="inp" type="number" step="0.01" id="oddsH" placeholder="1.85"/></div>
+      <div><label class="lbl">Draw</label><input class="inp" type="number" step="0.01" id="oddsD" placeholder="3.20"/></div>
+      <div><label class="lbl">Away</label><input class="inp" type="number" step="0.01" id="oddsA" placeholder="2.10"/></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-g" style="flex:1" onclick="updateOdds()">🔒 Set &amp; Lock Odds</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="unlockOdds()">🔓 Unlock (resume auto)</button>
+    </div>
+    <div class="res" id="oddsRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔎 Find a Game to Edit</h3><button class="btn btn-ghost btn-sm" onclick="loadOddsGameList()">↻ Refresh</button></div>
+    <input class="inp" id="oddsSearch" placeholder="Search by team or league..." oninput="loadOddsGameList()"/>
+    <div id="oddsGameList" style="margin-top:10px"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🗑️ Clear API Cache</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:10px">Force fresh match data from API on next page load.</p>
+    <button class="btn btn-y btn-full" onclick="clearCache()">🗑️ Clear Odds Cache</button>
+    <div class="res" id="cacheRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>⚡ Odds Boost</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:10px">
+      Promotional odds above the real price, capped at a maximum stake so exposure stays controlled. Stakes above the cap use normal odds automatically.
+    </p>
+    <label class="lbl">Match ID</label>
+    <input class="inp" id="boostMatchId" placeholder="e.g. juanai_oaio_72322560"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label class="lbl">Market</label>
+        <select class="inp" id="boostMarket">
+          <option value="1x2">1X2</option><option value="ou25">Over/Under 2.5</option>
+          <option value="btts">Both Teams to Score</option><option value="dc">Double Chance</option>
+          <option value="handicap">Handicap</option>
+        </select>
+      </div>
+      <div><label class="lbl">Pick</label>
+        <input class="inp" id="boostPick" placeholder="e.g. home, over25, btts"/>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+      <div><label class="lbl">Boosted Odds</label><input class="inp" type="number" step="0.01" id="boostOdds" placeholder="e.g. 2.50"/></div>
+      <div><label class="lbl">Max Stake (KES)</label><input class="inp" type="number" id="boostMaxStake" placeholder="e.g. 500"/></div>
+    </div>
+    <button class="btn btn-g btn-full" style="margin-top:10px" onclick="createOddsBoost()">Create Boost</button>
+    <div class="res" id="boostCreateRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 Active & Past Boosts</h3><button class="btn btn-ghost btn-sm" onclick="loadOddsBoosts()">↻ Refresh</button></div>
+    <div id="boostsList" style="font-size:12px;color:var(--mt)">Loading...</div>
+  </div>
+</div>
+
+<!-- JACKPOT -->
+<div class="panel" id="panel-jackpot">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🏆 Create Jackpot Round</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Search and pick real upcoming fixtures below (same data as Match Management — never fabricated). Users predict 1X2 for every fixture selected; entry fees build the pool.
+    </div>
+    <label class="lbl">Round Name</label>
+    <input class="inp" id="jpName" placeholder="e.g. Midweek Jackpot"/>
+    <label class="lbl">Entry Fee (KES)</label>
+    <input class="inp" id="jpFee" type="number" placeholder="e.g. 50"/>
+    <label class="lbl">Search Fixtures</label>
+    <input class="inp" id="jpSearch" placeholder="Type team or league name..." oninput="searchJpFixtures()"/>
+    <div id="jpSearchResults" style="max-height:240px;overflow-y:auto;margin:8px 0"></div>
+    <div class="mt" style="font-size:12px;margin:10px 0 4px;color:var(--mt)">Selected fixtures (<span id="jpSelectedCount">0</span>):</div>
+    <div id="jpSelectedList" style="margin-bottom:12px"></div>
+    <button class="btn btn-g btn-full" onclick="createJackpotRound()">Create Jackpot Round</button>
+    <div class="res" id="jpCreateRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 Recent Rounds</h3><button class="btn btn-ghost btn-sm" onclick="loadJpRounds()">↻ Refresh</button></div>
+    <div id="jpRoundsList" style="font-size:12px;color:var(--mt)">Loading...</div>
+  </div>
+</div>
+
+<!-- LOYALTY -->
+<div class="panel" id="panel-loyalty">
+  <div class="sec">
+    <div class="sec-hdr"><h3>💎 Create Loyalty Tier</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Points are earned automatically — 1 point per KES 1 a user genuinely wagers. Cashback is paid from real weekly net losses only, and always requires re-wagering before it's withdrawable (same protection as promo codes) — this can't be farmed for free money.
+    </div>
+    <label class="lbl">Tier Name</label>
+    <input class="inp" id="loyName" placeholder="e.g. Gold"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label class="lbl">Min Points</label><input class="inp" type="number" id="loyMinPoints" placeholder="e.g. 5000"/></div>
+      <div><label class="lbl">Display Order</label><input class="inp" type="number" id="loyOrder" placeholder="e.g. 3"/></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+      <div><label class="lbl">Cashback % (weekly, max 50)</label><input class="inp" type="number" id="loyCashback" placeholder="e.g. 5"/></div>
+      <div><label class="lbl">Wagering Multiplier</label><input class="inp" type="number" id="loyWagering" placeholder="e.g. 3" value="3"/></div>
+    </div>
+    <label class="lbl">Badge Icon (emoji)</label>
+    <input class="inp" id="loyIcon" placeholder="🥉 🥈 🥇 💎" value="🥉"/>
+    <button class="btn btn-g btn-full" style="margin-top:10px" onclick="createLoyaltyTier()">Create Tier</button>
+    <div class="res" id="loyCreateRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 Current Tiers</h3><button class="btn btn-ghost btn-sm" onclick="loadLoyaltyTiers()">↻ Refresh</button></div>
+    <div id="loyTiersList" style="font-size:12px;color:var(--mt)">Loading...</div>
+  </div>
+</div>
+
+<!-- 10. LIMITS -->
+<div class="panel" id="panel-limits">
+  <div class="sec">
+    <div class="sec-hdr"><h3>⚖️ Betting Limits</h3></div>
+    <label class="lbl">Min Stake (KES)</label><input class="inp" type="number" id="limMinBet" value="10"/>
+    <label class="lbl">Max Stake (KES)</label><input class="inp" type="number" id="limMaxBet" value="500000"/>
+    <label class="lbl">Max Selections per Bet</label><input class="inp" type="number" id="limMaxSel" value="20"/>
+    <label class="lbl">Max Payout (KES)</label><input class="inp" type="number" id="limMaxPayout" value="1000000"/>
+    <button class="btn btn-g btn-full" onclick="saveLimits('bet')">Save Betting Limits</button>
+    <div class="res" id="limBetRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📊 Platform Margin</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Juan AI's odds already include their own bookmaker margin (typically ~5-8%). This is a SEPARATE, additional discount you control directly — shaves this extra percentage off the winnings portion of every real-market price (1X2, Double Chance, Over/Under, Both Teams to Score) before it's shown or bet against. Higher = safer for the platform, lower payouts for users. 0% = trust Juan AI's price as-is.
+    </div>
+    <label class="lbl">Extra Platform Margin (%)</label>
+    <input class="inp" type="number" step="0.5" min="0" max="20" id="limPlatformMargin" value="0" placeholder="e.g. 3"/>
+    <div class="mt" style="font-size:11px;margin:6px 0 12px;color:var(--mt)">Recommended: 0-5%. Anything above 10% will look obviously worse than competitors and may push users away.</div>
+    <button class="btn btn-g btn-full" onclick="saveLimits('margin')">Save Margin</button>
+    <div class="res" id="limMarginRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>💰 Deposit Limits</h3></div>
+    <label class="lbl">Min Deposit (KES)</label><input class="inp" type="number" id="limMinDep" value="10"/>
+    <label class="lbl">Max Deposit (KES)</label><input class="inp" type="number" id="limMaxDep" value="150000"/>
+    <button class="btn btn-g btn-full" onclick="saveLimits('deposit')">Save Deposit Limits</button>
+    <div class="res" id="limDepRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>💸 Withdrawal Limits</h3></div>
+    <label class="lbl">Min Withdrawal (KES)</label><input class="inp" type="number" id="limMinWd" value="100"/>
+    <label class="lbl">Max Withdrawal (KES)</label><input class="inp" type="number" id="limMaxWd" value="70000"/>
+    <label class="lbl">Max Withdrawals per Day</label><input class="inp" type="number" id="limWdPerDay" value="3"/>
+    <button class="btn btn-g btn-full" onclick="saveLimits('withdrawal')">Save Withdrawal Limits</button>
+    <div class="res" id="limWdRes"></div>
+  </div>
+</div>
+
+<!-- 11. DEPOSITS -->
+<div class="panel" id="panel-deposits">
+  <div class="stats-grid">
+    <div class="stat-card" style="--accent:var(--g)"><div class="sv" id="dep-today">—</div><div class="sl">Today</div></div>
+    <div class="stat-card" style="--accent:var(--b)"><div class="sv" id="dep-total">—</div><div class="sl">All Time</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>💰 Deposit History</h3><button class="btn btn-ghost btn-sm" onclick="loadDeposits()">↻ Refresh</button></div>
+    <div id="depList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 12. WITHDRAWALS -->
+<div class="panel" id="panel-withdrawals">
+  <div class="sec">
+    <div class="sec-hdr"><h3>⏳ Pending Approvals</h3></div>
+    <div id="wdPending"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 All Withdrawals</h3><button class="btn btn-ghost btn-sm" onclick="loadWithdrawals()">↻ Refresh</button></div>
+    <div id="wdList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 13. WALLET -->
+<div class="panel" id="panel-wallet">
+  <div class="stats-grid">
+    <div class="stat-card" style="--accent:var(--g)"><div class="sv" id="wal-total">—</div><div class="sl">Total Wallet Balance</div></div>
+    <div class="stat-card" style="--accent:var(--b)"><div class="sv" id="wal-users">—</div><div class="sl">Funded Accounts</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>💳 Wallet Overview</h3></div>
+    <div id="walletList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 14. TRANSACTIONS -->
+<div class="panel" id="panel-transactions">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 Transaction Logs</h3><button class="btn btn-ghost btn-sm" onclick="loadTx()">↻ Refresh</button></div>
+    <select class="inp" id="txFilter" onchange="loadTx()" style="margin-bottom:10px">
+      <option value="all">All Transactions</option>
+      <option value="deposit">Deposits</option>
+      <option value="withdrawal">Withdrawals</option>
+      <option value="win">Winnings</option>
+      <option value="stake">Stakes</option>
+      <option value="bonus">Bonuses</option>
+    </select>
+    <div id="txList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 15. PAYMENT GATEWAY -->
+<div class="panel" id="panel-payment">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔌 M-Pesa Daraja Settings</h3></div>
+    <label class="lbl">Environment</label>
+    <select class="inp" id="mpEnv"><option>sandbox</option><option>production</option></select>
+    <label class="lbl">Consumer Key</label>
+    <input class="inp" id="mpKey" placeholder="From developer.safaricom.co.ke"/>
+    <label class="lbl">Consumer Secret</label>
+    <input class="inp" type="password" id="mpSec" placeholder="Consumer secret"/>
+    <label class="lbl">Shortcode / Paybill</label>
+    <input class="inp" id="mpShort" placeholder="174379"/>
+    <label class="lbl">Callback URL</label>
+    <input class="inp" id="mpCb" placeholder="https://safaribet.onrender.com/api/mpesa/callback"/>
+    <button class="btn btn-g btn-full" onclick="saveMpesa()">Save M-Pesa Settings</button>
+    <div class="res" id="mpRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🧪 Test STK Push</h3></div>
+    <label class="lbl">Test Phone</label>
+    <div class="inp-row">
+      <input class="inp" id="testPhone" placeholder="0712345678"/>
+      <button class="btn btn-y" onclick="testStk()">Send Test KES 1</button>
+    </div>
+    <div class="res" id="stkRes"></div>
+  </div>
+</div>
+
+<!-- 16. BONUS & PROMOS -->
+<div class="panel" id="panel-bonus">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🎁 Welcome Bonus Settings</h3></div>
+    <label class="lbl">First Deposit Bonus (KES)</label>
+    <input class="inp" type="number" id="welcomeBonus" value="20"/>
+    <label class="lbl">Min Deposit to Trigger Bonus (KES)</label>
+    <input class="inp" type="number" id="minBonusDep" value="0"/>
+    <button class="btn btn-g btn-full" onclick="saveBonus()">Save Bonus Settings</button>
+    <div class="res" id="bonusRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🎉 Manual Bonus</h3></div>
+    <label class="lbl">Give bonus to user</label>
+    <input class="inp" id="bonusUser" placeholder="Phone or username"/>
+    <label class="lbl">Bonus Amount (KES)</label>
+    <div class="inp-row">
+      <input class="inp" type="number" id="bonusAmt" placeholder="e.g. 100"/>
+      <input class="inp" id="bonusNote" placeholder="Reason e.g. Promo"/>
+      <button class="btn btn-g" onclick="giveBonus()">Give Bonus</button>
+    </div>
+    <div class="res" id="bonusGiveRes"></div>
+  </div>
+</div>
+
+<!-- 17. NOTIFICATIONS -->
+<div class="panel" id="panel-notifications">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📢 Broadcast to All Users</h3></div>
+    <label class="lbl">Title</label>
+    <input class="inp" id="notifTitle" placeholder="e.g. New Feature!"/>
+    <label class="lbl">Message</label>
+    <textarea class="inp" id="notifMsg" rows="3" placeholder="Your message here..."></textarea>
+    <label class="lbl">Target</label>
+    <select class="inp" id="notifTarget">
+      <option value="all">All Users</option>
+      <option value="active">Active Bettors Only</option>
+      <option value="inactive">Inactive Users</option>
+    </select>
+    <button class="btn btn-g btn-full" onclick="sendNotif()">📢 Send Broadcast</button>
+    <div class="res" id="notifRes"></div>
+  </div>
+</div>
+
+<!-- 18. CONTENT -->
+<div class="panel" id="panel-content">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🖼️ Banners / Notices</h3></div>
+    <label class="lbl">Banner Image</label>
+    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="bannerImageFile" class="inp" style="padding:8px" onchange="previewBannerImage()"/>
+    <div class="mt" style="font-size:12px;margin:4px 0 12px;color:var(--mt)">
+      PNG, JPG, WEBP or GIF, max 4MB. Recommended size: 1200×400px. Uploads directly — no external site needed.
+    </div>
+    <img id="bannerImagePreview" style="display:none;width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:12px;border:1px solid var(--bd)"/>
+    <label class="lbl">Banner Text (used as image alt-text)</label>
+    <input class="inp" id="bannerText" placeholder="e.g. 🏆 World Cup Special — Bet Now!"/>
+    <label class="lbl">Banner Link (optional — where tapping the banner goes)</label>
+    <input class="inp" id="bannerLink" placeholder="e.g. /my-bets"/>
+    <button class="btn btn-g btn-full" onclick="saveBanner()">Update Banner</button>
+    <div class="res" id="bannerRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📣 Popup Ad (full-screen, like Betika)</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Shows once per visit as a dismissible full-screen popup when a user opens the site — separate from the banner strip above.
+    </div>
+    <label class="lbl">Popup Image</label>
+    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="popupImageFile" class="inp" style="padding:8px" onchange="previewPopupImage()"/>
+    <div class="mt" style="font-size:12px;margin:4px 0 12px;color:var(--mt)">
+      PNG, JPG, WEBP or GIF, max 4MB. Recommended size: portrait or square, e.g. 600×800px.
+    </div>
+    <img id="popupImagePreview" style="display:none;width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin-bottom:12px;border:1px solid var(--bd);background:var(--c1)"/>
+    <label class="lbl">Popup Link (optional — where tapping the image goes)</label>
+    <input class="inp" id="popupLink" placeholder="e.g. /promotions"/>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
+      <label class="lbl" style="margin:0">Show popup to users</label>
+      <input type="checkbox" id="popupEnabled" onchange="togglePopup()" style="width:20px;height:20px"/>
+    </div>
+    <button class="btn btn-g btn-full" onclick="savePopup()">Update Popup Ad</button>
+    <div class="res" id="popupRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>✈️ Aviator Thumbnail</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      The game card image shown on the Casino page. Stored in the database, so it survives redeploys — unlike files copied manually onto the server.
+    </div>
+    <label class="lbl">Thumbnail Image (GIF works for animation)</label>
+    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="aviatorImageFile" class="inp" style="padding:8px" onchange="previewAviatorImage()"/>
+    <img id="aviatorImagePreview" style="display:none;width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin:12px 0;border:1px solid var(--bd)"/>
+    <button class="btn btn-g btn-full" onclick="saveAviatorImage()">Update Thumbnail</button>
+    <div class="res" id="aviatorImgRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📲 App (APK)</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Users tap "Download App" on the site, then open the downloaded file. Android will show its own one-time install confirmation — this is a standard OS security step for any app installed outside the Play Store and can't be skipped by us or anyone else.
+    </div>
+    <div id="apkCurrentInfo" style="font-size:12px;color:var(--mt);margin-bottom:12px">Checking current version...</div>
+    <label class="lbl">APK File</label>
+    <input type="file" accept=".apk" id="apkFile" class="inp" style="padding:8px"/>
+    <label class="lbl">Version Label (optional, e.g. 1.2.0)</label>
+    <input class="inp" id="apkVersion" placeholder="e.g. 1.2.0"/>
+    <button class="btn btn-g btn-full" onclick="uploadApk()">Upload APK</button>
+    <div class="res" id="apkRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>📝 FAQs & Site Notice</h3></div>
+    <label class="lbl">Site Notice (shows on home page)</label>
+    <textarea class="inp" id="siteNotice" rows="3" placeholder="e.g. Site will be under maintenance on Saturday 10PM-12AM"></textarea>
+    <button class="btn btn-g btn-full" onclick="saveSiteNotice()">Update Notice</button>
+    <div class="res" id="noticeRes"></div>
+  </div>
+</div>
+
+<!-- 19. FRAUD -->
+<div class="panel" id="panel-fraud">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔍 Fraud Alerts</h3><button class="btn btn-ghost btn-sm" onclick="loadFraud()">↻ Scan</button></div>
+    <div id="fraudList"><div class="empty">Click Scan to check for suspicious activity</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🚩 Suspicious Patterns Detected</h3></div>
+    <div id="fraudPatterns"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 20. LOGIN ACTIVITY -->
+<div class="panel" id="panel-logins">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔐 Recent Logins</h3><button class="btn btn-ghost btn-sm" onclick="loadLogins()">↻ Refresh</button></div>
+    <div id="loginList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 21. AUDIT LOGS -->
+<div class="panel" id="panel-audit">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📜 Admin Audit Trail</h3></div>
+    <div id="auditList"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- 22. SECURITY -->
+<div class="panel" id="panel-security">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🛡️ Security Settings</h3></div>
+    <label class="lbl">Max Login Attempts Before Lock</label>
+    <input class="inp" type="number" id="secMaxAttempts" value="5"/>
+    <label class="lbl">Account Lock Duration (minutes)</label>
+    <input class="inp" type="number" id="secLockMin" value="15"/>
+    <label class="lbl">Session Timeout (hours)</label>
+    <input class="inp" type="number" id="secSessionHrs" value="720"/>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+      Require 2FA for Admin
+      <label class="toggle"><input type="checkbox" id="sec2fa"/><span class="toggle-slider"></span></label>
+    </label>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+      Block VPN / Tor Access
+      <label class="toggle"><input type="checkbox" id="secBlockVpn"/><span class="toggle-slider"></span></label>
+    </label>
+    <button class="btn btn-g btn-full" onclick="saveSecurity()">Save Security Settings</button>
+    <div class="res" id="secRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔧 Fix Database</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:10px">Run if registration fails with "already taken" errors.</p>
+    <button class="btn btn-y btn-full" onclick="fixIndexes()">🔧 Rebuild DB Indexes</button>
+    <div class="res" id="idxRes"></div>
+  </div>
+</div>
+
+<!-- 23. SUPPORT TICKETS -->
+<div class="panel" id="panel-tickets">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🎫 Open Tickets</h3></div>
+    <div id="ticketList"><div class="empty">No support tickets yet</div></div>
+  </div>
+</div>
+
+<!-- 24. REPORTS -->
+<div class="panel" id="panel-reports">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📊 Generate Report</h3></div>
+    <label class="lbl">Report Type</label>
+    <select class="inp" id="reportType">
+      <option value="daily">Daily Summary</option>
+      <option value="users">User Report</option>
+      <option value="bets">Betting Report</option>
+      <option value="revenue">Revenue Report</option>
+    </select>
+    <label class="lbl">Date Range</label>
+    <div class="inp-row">
+      <input class="inp" type="date" id="reportFrom"/>
+      <input class="inp" type="date" id="reportTo"/>
+    </div>
+    <button class="btn btn-g btn-full" onclick="genReport()">Generate Report</button>
+    <div class="res" id="reportRes"></div>
+  </div>
+</div>
+
+<!-- 25. SETTINGS -->
+<div class="panel" id="panel-settings">
+
+  <!-- CONTACT INFO -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>📞 Contact & Site Info</h3></div>
+    <label class="lbl">Site Name</label>
+    <input class="inp" id="siteName" value="SafariBet"/>
+    <label class="lbl">Support Email</label>
+    <input class="inp" id="cfg_site_email" type="email" placeholder="support@safaribet.co.ke"/>
+    <label class="lbl">Support Phone (with country code e.g. +254712345678)</label>
+    <input class="inp" id="cfg_site_phone" placeholder="+254712345678"/>
+    <label class="lbl">WhatsApp Number</label>
+    <input class="inp" id="cfg_site_whatsapp" placeholder="+254712345678"/>
+    <label class="lbl">License Info (shown in footer)</label>
+    <textarea class="inp" id="cfg_site_license" rows="2" placeholder="Licensed under Betting Control and Licensing Board of Kenya..."></textarea>
+    <button class="btn btn-g btn-sm" style="margin-top:8px" onclick="saveSiteContact()">💾 Save Contact Info</button>
+    <div class="res" id="contactRes"></div>
+  </div>
+
+  <!-- SOCIAL MEDIA -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>📱 Social Media Links</h3></div>
+    <label class="lbl">Twitter / X URL</label>
+    <input class="inp" id="cfg_social_twitter" placeholder="https://twitter.com/safaribet"/>
+    <label class="lbl">Facebook URL</label>
+    <input class="inp" id="cfg_social_facebook" placeholder="https://facebook.com/safaribet"/>
+    <label class="lbl">Instagram URL</label>
+    <input class="inp" id="cfg_social_instagram" placeholder="https://instagram.com/safaribet"/>
+    <label class="lbl">Telegram URL</label>
+    <input class="inp" id="cfg_social_telegram" placeholder="https://t.me/safaribet"/>
+    <label class="lbl">WhatsApp URL</label>
+    <input class="inp" id="cfg_social_whatsapp" placeholder="https://wa.me/254712345678"/>
+    <label class="lbl">TikTok URL</label>
+    <input class="inp" id="cfg_social_tiktok" placeholder="https://tiktok.com/@safaribet"/>
+    <button class="btn btn-g btn-sm" style="margin-top:8px" onclick="saveSiteSocial()">💾 Save Social Links</button>
+    <div class="res" id="socialRes"></div>
+  </div>
+
+  <!-- LEGAL CONTENT -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>📋 Legal Content</h3></div>
+    <label class="lbl">Terms & Conditions (HTML allowed)</label>
+    <textarea class="inp" id="cfg_terms_content" rows="6" placeholder="Enter terms content..."></textarea>
+    <label class="lbl" style="margin-top:10px">Privacy Policy (HTML allowed)</label>
+    <textarea class="inp" id="cfg_privacy_content" rows="6" placeholder="Enter privacy content..."></textarea>
+    <label class="lbl" style="margin-top:10px">Responsible Gaming (HTML allowed)</label>
+    <textarea class="inp" id="cfg_responsible_content" rows="6" placeholder="Enter responsible gaming content..."></textarea>
+    <button class="btn btn-g btn-sm" style="margin-top:8px" onclick="saveSiteLegal()">💾 Save Legal Content</button>
+    <div class="res" id="legalRes"></div>
+  </div>
+
+  <!-- TOGGLES -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>⚙️ Platform Controls</h3></div>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+      Allow New Registrations
+      <label class="toggle"><input type="checkbox" id="allowReg" checked/><span class="toggle-slider"></span></label>
+    </label>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+      Allow Deposits
+      <label class="toggle"><input type="checkbox" id="allowDep" checked/><span class="toggle-slider"></span></label>
+    </label>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+      Allow Withdrawals
+      <label class="toggle"><input type="checkbox" id="allowWd" checked/><span class="toggle-slider"></span></label>
+    </label>
+    <button class="btn btn-g btn-full" onclick="saveSettings()">Save Platform Settings</button>
+    <div class="res" id="settingsRes"></div>
+  </div>
+</div>
+
+<!-- 26. ADMIN ROLES -->
+<div class="panel" id="panel-admins">
+  <div class="sec">
+    <div class="sec-hdr"><h3>👑 Admin Users</h3></div>
+    <div class="empty">Super admin only — sub-admin management coming soon</div>
+  </div>
+</div>
+
+<!-- 27. API MANAGEMENT -->
+<div class="panel" id="panel-api">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔗 API Keys</h3></div>
+    <label class="lbl">API-Football Key (for live odds)</label>
+    <input class="inp" id="apifKey" placeholder="Your API-Football key"/>
+    <button class="btn btn-g btn-full" onclick="saveApiKeys()">Save API Keys</button>
+    <div class="res" id="apiRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🧪 Test APIs</h3></div>
+    <button class="btn btn-b btn-full" onclick="testApi()">Test API Connections</button>
+    <div class="res" id="apiTestRes"></div>
+  </div>
+</div>
+
+<!-- 28. MAINTENANCE -->
+<div class="panel" id="panel-maintenance">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔧 Maintenance Mode</h3></div>
+    <p style="font-size:13px;color:var(--mt);margin-bottom:12px">When enabled, users see a maintenance page. Admin can still access everything.</p>
+    <label class="lbl" style="display:flex;align-items:center;justify-content:space-between">
+      Maintenance Mode
+      <label class="toggle"><input type="checkbox" id="maintToggle" onchange="toggleMaint()"/><span class="toggle-slider"></span></label>
+    </label>
+    <label class="lbl" style="margin-top:12px">Maintenance Message</label>
+    <textarea class="inp" id="maintMsg" rows="3" placeholder="We are upgrading our systems. Back in 30 minutes."></textarea>
+    <button class="btn btn-y btn-full" onclick="saveMaint()">Update Message</button>
+    <div class="res" id="maintRes"></div>
+  </div>
+</div>
+
+<!-- 29. BACKUP -->
+<div class="panel" id="panel-backup">
+  <div class="sec">
+    <div class="sec-hdr"><h3>💾 Backup & Restore</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:12px">Export user and bet data as JSON for manual backup.</p>
+    <button class="btn btn-g btn-full" onclick="exportData('users')">⬇️ Export Users JSON</button>
+    <button class="btn btn-b btn-full" style="margin-top:8px" onclick="exportData('bets')">⬇️ Export Bets JSON</button>
+    <div class="res" id="backupRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🗄️ Storage Usage (MongoDB free tier)</h3><button class="btn btn-ghost btn-sm" onclick="loadStorageStats()">↻ Refresh</button></div>
+    <div id="storageUsageBar" style="margin-bottom:10px"></div>
+    <div id="storageBreakdown" style="font-size:12px;color:var(--mt)">Loading...</div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🧹 Storage Cleanup</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin-bottom:14px">
+      Deletes old, low-value data to free up space. <strong style="color:var(--y)">Transactions, bets, and admin audit logs are never touched here</strong> — those are your real financial and accountability records, and export/backup them above before relying on this for anything important.
+    </p>
+
+    <div style="border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">Read Notifications</div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:8px">Already-read notifications older than the chosen age. Safe — purely a UI convenience, no financial data.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="inp" type="number" id="cleanupDaysNotif" value="90" style="width:90px" min="7"/>
+        <span style="font-size:12px;color:var(--mt)">days old</span>
+        <button class="btn btn-r btn-sm" style="margin-left:auto" onclick="runCleanup('read_notifications','cleanupDaysNotif')">Delete</button>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">Wallet History (internal audit trail)</div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:8px">Bucket-level balance change log — NOT your Transaction history, which stays untouched. Reasonably safe past 90 days.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="inp" type="number" id="cleanupDaysWallet" value="180" style="width:90px" min="7"/>
+        <span style="font-size:12px;color:var(--mt)">days old</span>
+        <button class="btn btn-r btn-sm" style="margin-left:auto" onclick="runCleanup('wallet_history','cleanupDaysWallet')">Delete</button>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">Old Finished Matches</div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:8px">Finished fixtures older than the chosen age. Safe — this is cached data re-fetched from the football API, not something unique to your database.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="inp" type="number" id="cleanupDaysMatches" value="30" style="width:90px" min="7"/>
+        <span style="font-size:12px;color:var(--mt)">days old</span>
+        <button class="btn btn-r btn-sm" style="margin-left:auto" onclick="runCleanup('old_matches','cleanupDaysMatches')">Delete</button>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--bd);border-radius:10px;padding:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">Login Activity Log</div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:8px">Trims the in-memory login log shown under Login Activity. Doesn't affect MongoDB storage — this one resets on redeploy anyway.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="inp" type="number" id="cleanupDaysLogin" value="30" style="width:90px" min="7"/>
+        <span style="font-size:12px;color:var(--mt)">days old</span>
+        <button class="btn btn-r btn-sm" style="margin-left:auto" onclick="runCleanup('login_log','cleanupDaysLogin')">Trim</button>
+      </div>
+    </div>
+
+    <div class="res" id="cleanupRes"></div>
+  </div>
+</div>
+
+<!-- 30. SYSTEM LOGS -->
+<div class="panel" id="panel-logs">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📝 System Health</h3><button class="btn btn-ghost btn-sm" onclick="loadHealth()">↻ Check</button></div>
+    <div id="healthInfo"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🔧 Quick Actions</h3></div>
+    <button class="btn btn-y btn-full" onclick="fixIndexes()">🔧 Rebuild DB Indexes</button>
+    <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="clearCache()">🗑️ Clear API Cache</button>
+    <div class="res" id="logsRes"></div>
+  </div>
+</div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /dashboard -->
+
+<script>
+let PWD='', loginFails=0, sidebarOpen=true;
+
+// ══ AUTH ══
+function doLogin(){
+  const p=document.getElementById('apwd').value;
+  const btn=document.getElementById('lbtn');
+  if(!p){showErr('lerr','Enter password');return;}
+  if(loginFails>=5){showErr('lerr','Too many attempts — refresh page');return;}
+  loginFails++;
+  PWD=p; btn.disabled=true; btn.textContent='Checking...';
+  api('/api/admin/stats').then(d=>{
+    if(d.success){
+      document.getElementById('loginScreen').style.display='none';
+      document.getElementById('dashboard').style.display='block';
+      loginFails=0;
+      initDashboard();
+    } else {
+      showErr('lerr','Wrong password');
+      PWD=''; btn.disabled=false; btn.textContent='Access Panel';
+    }
+  }).catch(()=>{showErr('lerr','Connection error');PWD='';btn.disabled=false;btn.textContent='Access Panel';});
+}
+
+function doLogout(){
+  PWD='';
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('apwd').value='';
+  document.getElementById('lbtn').disabled=false;
+  document.getElementById('lbtn').textContent='Access Panel';
+}
+
+function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
+
+// ══ API ══
+function api(url,opts={}){
+  return fetch(url,{...opts,headers:{'Content-Type':'application/json','x-admin-secret':PWD,...(opts.headers||{})}}).then(r=>r.json());
+}
+
+// ══ NAV ══
+function nav(name,el){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.sb-item').forEach(t=>t.classList.remove('on'));
+  document.getElementById('panel-'+name).classList.add('on');
+  if(el) el.classList.add('on');
+  document.getElementById('pageTitle').textContent=el?el.textContent.trim():'Admin';
+  // Close sidebar on mobile after selection
+  if(window.innerWidth<=640) closeSidebar();
+  // Auto-load data
+  if(name==='bets') loadBets();
+  else if(name==='transactions') loadTx();
+  else if(name==='matches') loadAdminMatches();
+  else if(name==='deposits') loadDeposits();
+  else if(name==='withdrawals') loadWithdrawals();
+  else if(name==='live') loadLiveMatches();
+  else if(name==='revenue') loadRevenue();
+  else if(name==='odds') { loadOddsGameList(); loadOddsBoosts(); }
+  else if(name==='wallet') loadWallet();
+  else if(name==='logs') loadHealth();
+  else if(name==='fraud') loadFraudPatterns();
+  else if(name==='logins') loadLogins();
+  else if(name==='blacklist') loadBlacklist();
+  else if(name==='referrals') loadReferrals();
+  else if(name==='settings') loadSiteConfig();
+  else if(name==='backup') loadStorageStats();
+  else if(name==='jackpot') loadJpRounds();
+  else if(name==='loyalty') loadLoyaltyTiers();
+}
+
+function toggleSidebar(){
+  const sb=document.getElementById('sidebar');
+  const ov=document.getElementById('overlay');
+  const isMobile=window.innerWidth<=640;
+  if(isMobile){
+    const opening=!sb.classList.contains('open');
+    sb.classList.toggle('open');
+    if(opening){ov.classList.add('on');}else{ov.classList.remove('on');}
+  } else {
+    sidebarOpen=!sidebarOpen;
+    if(sidebarOpen){sb.style.transform='';document.getElementById('main').style.marginLeft='200px';}
+    else{sb.style.transform='translateX(-200px)';document.getElementById('main').style.marginLeft='0';}
+  }
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('on');
+}
+
+// ══ INIT ══
+function initDashboard(){
+  setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString(),1000);
+  loadDashboard();
+  loadBannerForm();
+  loadApkInfo();
+  setInterval(loadDashboard,60000);
+  // Check pending withdrawals badge
+  api('/api/admin/transactions?type=withdrawal&status=pending').then(d=>{
+    if(d.success) document.getElementById('pendingWdBadge').textContent=d.data?.filter(t=>t.status==='pending').length||0;
+  });
+}
+
+// ══ DASHBOARD ══
+async function loadDashboard(){
+  const d=await api('/api/admin/stats');
+  if(!d.success) return;
+  document.getElementById('ds-users').textContent=d.users||0;
+  document.getElementById('ds-bets').textContent=d.bets||0;
+  document.getElementById('ds-pending').textContent=d.pending||0;
+  document.getElementById('ds-deposits').textContent='KES '+(d.deposits||0).toLocaleString();
+  document.getElementById('ds-withdrawals').textContent='KES '+(d.withdrawals||0).toLocaleString();
+  document.getElementById('ds-revenue').textContent='KES '+(d.revenue||0).toLocaleString();
+  document.getElementById('ds-live').textContent=d.liveMatches||0;
+  document.getElementById('ds-matches').textContent=d.upcomingMatches||0;
+  // Recent activity
+  const ra=document.getElementById('recentActivity');
+  if(d.recent?.length){
+    ra.innerHTML=d.recent.map(r=>`<div class="tx-row"><div class="tx-l"><div class="tx-type">${r.type}</div><div class="tx-sub">${r.description||''}</div></div><div class="tx-r"><div class="tx-amt ${r.amount>0?'pos':'neg'}">${r.amount>0?'+':''}KES ${Math.abs(r.amount).toLocaleString()}</div><div class="tx-bal">${new Date(r.createdAt).toLocaleString('en-KE')}</div></div></div>`).join('');
+  } else ra.innerHTML='<div class="empty">No recent activity</div>';
+}
+
+// ══ REVENUE ══
+async function loadRevenue(){
+  const d=await api('/api/admin/revenue');
+  if(!d.success) return;
+  document.getElementById('rev-gross').textContent='KES '+(d.gross||0).toLocaleString();
+  document.getElementById('rev-paid').textContent='KES '+(d.paid||0).toLocaleString();
+  document.getElementById('rev-tax').textContent='KES '+(d.tax||0).toLocaleString();
+  document.getElementById('rev-net').textContent='KES '+(d.net||0).toLocaleString();
+  // Simple bar chart
+  const rc=document.getElementById('revChart');
+  if(d.daily?.length){
+    const max=Math.max(...d.daily.map(x=>x.v),1);
+    rc.innerHTML=`<div class="chart-bar">${d.daily.map(x=>`<div style="flex:1"><div class="bar" style="height:${Math.max(4,(x.v/max)*70)}px" title="KES ${x.v}"></div><div class="bar-lbl">${x.l}</div></div>`).join('')}</div>`;
+  } else rc.innerHTML='<div class="empty">No revenue data</div>';
+}
+
+// ══ LIVE ══
+async function loadLiveMatches(){
+  const d=await api('/api/odds/live');
+  const el=document.getElementById('liveMatchList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No live matches right now</div>';return;}
+  document.getElementById('live-online').textContent=d.data.length;
+  el.innerHTML=d.data.map(m=>`
+    <div class="tx-row">
+      <div class="tx-l"><div class="tx-type">${m.homeTeam} vs ${m.awayTeam}</div><div class="tx-sub">${m.league} · ${m.score?.minute||0}'</div></div>
+      <div class="tx-r"><div class="tx-amt" style="color:var(--y)">${m.score?.home??0} – ${m.score?.away??0}</div></div>
+    </div>`).join('');
+  // Live stats from admin
+  const ds=await api('/api/admin/live-stats');
+  if(ds.success){
+    document.getElementById('live-bets').textContent=ds.betsLastHour||0;
+    document.getElementById('live-deposits').textContent='KES '+(ds.depositsToday||0).toLocaleString();
+    document.getElementById('live-pending').textContent=ds.pendingWd||0;
+  }
+}
+
+// ══ USERS ══
+async function loadUsers(){
+  const d=await api('/api/admin/users');
+  const el=document.getElementById('userList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No users</div>';return;}
+  el.innerHTML=`<table class="tbl"><thead><tr><th>User</th><th>Phone</th><th>Balance</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>${
+    d.data.map(u=>`<tr>
+      <td><b>${u.username}</b></td>
+      <td>${fmtPhone(u.phone)}</td>
+      <td style="color:var(--g)">KES ${(u.balance||0).toLocaleString()}</td>
+      <td><span class="badge ${u.isActive?'bg-g':'bg-r'}">${u.isActive?'Active':'Suspended'}</span></td>
+      <td>${new Date(u.createdAt).toLocaleDateString('en-KE')}</td>
+      <td style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="quickBal('${u.phone}')">+Bal</button>
+        <button class="btn btn-y btn-sm" onclick="suspUser('${u._id}','${u.isActive}')">${u.isActive?'Suspend':'Activate'}</button>
+        <button class="btn btn-r btn-sm" onclick="delUser('${u.phone}','${u.username}')">Del</button>
+      </td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function searchUser(){
+  const q=document.getElementById('uSearch').value.trim();if(!q)return;
+  const d=await api(`/api/admin/user/${encodeURIComponent(q)}`);
+  const el=document.getElementById('uRes');el.style.display='block';
+  if(d.success&&d.user){el.className='res ok';el.innerHTML=`✅ <b>${d.user.username}</b> | ${fmtPhone(d.user.phone)} | Balance: <b>KES ${d.user.balance}</b> | Bets: ${d.user.bets} | Status: ${d.user.isActive?'Active':'Suspended'}`;}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Not found');}
+}
+
+async function deleteSearched(){
+  const q=document.getElementById('uSearch').value.trim();
+  if(!q){alert('Search first');return;}if(!confirm(`Delete "${q}"?`))return;
+  const d=await api(`/api/admin/user/${encodeURIComponent(q)}`,{method:'DELETE'});
+  const el=document.getElementById('uRes');el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ '+d.message;loadUsers();loadDashboard();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+async function delUser(phone,name){
+  if(!confirm(`Delete ${name}?`))return;
+  const d=await api(`/api/admin/user/${encodeURIComponent(phone)}`,{method:'DELETE'});
+  if(d.success){toast('Deleted: '+name,'ok');loadUsers();loadDashboard();}else alert('Failed: '+d.message);
+}
+
+async function suspUser(id,isActive){
+  const d=await api('/api/admin/user/toggle',{method:'POST',body:JSON.stringify({userId:id,active:isActive==='true'?false:true})});
+  if(d.success){toast(d.message,'ok');loadUsers();}else alert('Failed: '+d.message);
+}
+
+function quickBal(phone){
+  document.getElementById('balUser').value=phone;
+  document.querySelectorAll('.sb-item').forEach(t=>{if(t.textContent.includes('User Management'))t.click();});
+}
+
+async function adjustBal(){
+  const user=document.getElementById('balUser').value.trim();
+  const amt=parseFloat(document.getElementById('balAmt').value);
+  const note=document.getElementById('balNote').value.trim();
+  const el=document.getElementById('balRes');
+  if(!user||isNaN(amt)){el.style.display='block';el.className='res er';el.textContent='Fill user and amount';return;}
+  const d=await api('/api/admin/balance',{method:'POST',body:JSON.stringify({identifier:user,amount:amt,note})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent=`✅ New balance: KES ${d.balance.toLocaleString()}`;loadUsers();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ BLACKLIST ══
+async function loadBlacklist(){
+  const d=await api('/api/admin/blacklist');
+  const el=document.getElementById('blList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No blacklisted entries</div>';return;}
+  el.innerHTML=d.data.map(b=>`<div class="tx-row"><div class="tx-l"><div class="tx-type">${b.target}</div><div class="tx-sub">${b.reason||'No reason'} · ${new Date(b.createdAt).toLocaleDateString('en-KE')}</div></div><div class="tx-r"><button class="btn btn-ghost btn-sm" onclick="removeBlacklist('${b._id}')">Remove</button></div></div>`).join('');
+}
+
+async function addBlacklist(){
+  const target=document.getElementById('blTarget').value.trim();
+  const reason=document.getElementById('blReason').value.trim();
+  const el=document.getElementById('blRes');
+  if(!target){el.style.display='block';el.className='res er';el.textContent='Enter phone or IP';return;}
+  const d=await api('/api/admin/blacklist',{method:'POST',body:JSON.stringify({target,reason})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Blacklisted';loadBlacklist();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+async function removeBlacklist(id){
+  const d=await api(`/api/admin/blacklist/${id}`,{method:'DELETE'});
+  if(d.success){toast('Removed from blacklist','ok');loadBlacklist();}
+}
+
+// ══ BETS ══
+async function loadBets(){
+  const status=document.getElementById('betFilter').value;
+  const search=document.getElementById('betSearch').value.trim();
+  const d=await api(`/api/admin/bets?status=${status}&search=${search}`);
+  const el=document.getElementById('betList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No bets found</div>';return;}
+  el.innerHTML=d.data.map(b=>`
+    <div class="b-row ${b.status}">
+      <div class="b-top"><span class="b-code">${b.betCode}</span><span class="badge bg-${b.status==='won'?'g':b.status==='lost'?'r':'y'}">${b.status}</span></div>
+      <div class="b-sels">${b.selections?.map(s=>`${s.homeTeam} vs ${s.awayTeam} → <b>${s.pick}</b> @ ${s.odds}x`).join('<br>')}</div>
+      <div class="b-foot">
+        <span>Stake: <b>KES ${b.stake?.toLocaleString()}</b></span>
+        <span>Odds: <b>${b.totalOdds}x</b></span>
+        <span style="color:var(--g)">Win: <b>KES ${b.potentialWin?.toLocaleString()}</b></span>
+        <span style="color:var(--mt)">${new Date(b.createdAt).toLocaleString('en-KE')}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function runSettle(){
+  const el=document.getElementById('settleRes');
+  el.style.display='block';el.className='res inf';
+  el.innerHTML='⏳ Running settlement engine — checking all 3 passes...';
+  try{
+    const d=await api('/api/admin/force-settle',{method:'POST'});
+    if(d.success){
+      el.className='res ok';
+      el.innerHTML=`✅ Settlement complete<br>
+        🎯 Bets settled: <b>${d.data?.settled||0}</b><br>
+        💰 Bets paid out: <b>${d.data?.paid||0}</b>`;
+      loadBets();
+      loadDashboard();
+    } else {
+      el.className='res er';el.textContent='❌ '+(d.message||'Failed');
+    }
+  }catch(e){
+    el.className='res er';el.textContent='❌ Network error — check server logs';
+  }
+}
+
+// ══ MATCHES ══
+let matchLoadTimer=null;
+function loadAdminMatches(){
+  clearTimeout(matchLoadTimer);
+  matchLoadTimer=setTimeout(async ()=>{
+    const status=document.getElementById('matchStatusFilter')?.value||'';
+    const q=document.getElementById('matchSearchFilter')?.value.trim()||'';
+    const params=new URLSearchParams();
+    if(status) params.set('status',status);
+    if(q) params.set('q',q);
+    const d=await api('/api/admin/matches'+(params.toString()?`?${params}`:''));
+    const el=document.getElementById('matchList');
+    if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No matches found</div>';return;}
+    el.innerHTML=`<table class="tbl"><thead><tr><th>Match</th><th>League</th><th>Status</th><th>Source</th><th>Kick-off</th><th>Odds H/D/A</th><th>Actions</th></tr></thead><tbody>${
+      d.data.map(m=>`<tr>
+        <td><b>${m.homeTeam} vs ${m.awayTeam}</b></td>
+        <td>${m.league}</td>
+        <td>${statusBadge(m.status)}</td>
+        <td>${srcBadge(m)}</td>
+        <td>${m.status==='live' ? '<span style="color:var(--r);font-weight:600">LIVE NOW</span>' : (oddsDateLabel(m.commenceTime, m.status)||'') + ' ' + new Date(m.commenceTime).toLocaleTimeString('en-KE',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${m.odds?.home??'-'}/${m.odds?.draw??'-'}/${m.odds?.away??'-'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="goEditOdds('${m.matchId}')">📈 Odds</button>
+          <button class="btn btn-r btn-sm" onclick="delMatch('${m.matchId}')">Delete</button>
+        </td>
+      </tr>`).join('')
+    }</tbody></table>`;
+  }, 200);
+}
+
+function statusBadge(s){
+  const colors={upcoming:'var(--b)',live:'var(--r)',finished:'var(--mt)',cancelled:'var(--y)'};
+  return `<span style="color:${colors[s]||'var(--mt)'}">${s}</span>`;
+}
+
+function srcBadge(m){
+  const lock = m.oddsLocked ? ' <span title="Odds locked by admin — auto-sync will not overwrite" style="color:var(--y)">🔒</span>' : '';
+  return `${m.source||'manual'}${lock}`;
+}
+
+// Jump to the Odds panel with a match pre-selected for editing
+function goEditOdds(matchId){
+  nav('odds', document.getElementById('nav-odds'));
+  document.getElementById('oddsMatchId').value = matchId;
+  document.getElementById('oddsH').value='';
+  document.getElementById('oddsD').value='';
+  document.getElementById('oddsA').value='';
+  document.getElementById('oddsMatchId').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+async function addMatch(){
+  const home=document.getElementById('mHome').value.trim();
+  const away=document.getElementById('mAway').value.trim();
+  const league=document.getElementById('mLeague').value.trim();
+  const date=document.getElementById('mDate').value;
+  const oh=parseFloat(document.getElementById('mOH').value)||0;
+  const od=parseFloat(document.getElementById('mOD').value)||0;
+  const oa=parseFloat(document.getElementById('mOA').value)||0;
+  const el=document.getElementById('matchRes');
+  if(!home||!away||!league||!date){el.style.display='block';el.className='res er';el.textContent='Fill all fields';return;}
+  const d=await api('/api/admin/match',{method:'POST',body:JSON.stringify({homeTeam:home,awayTeam:away,league,commenceTime:new Date(date).toISOString(),customOdds:oh&&od&&oa?{home:oh,draw:od,away:oa}:null})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Match added!';loadAdminMatches();clearCache();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+async function delMatch(id){
+  if(!confirm('Delete this match?'))return;
+  const d=await api(`/api/admin/match/${encodeURIComponent(id)}`,{method:'DELETE'});
+  if(d.success){toast('Match deleted','ok');loadAdminMatches();}else alert('Failed: '+d.message);
+}
+
+// ══ ODDS ══
+async function updateOdds(){
+  const matchId=document.getElementById('oddsMatchId').value.trim();
+  const h=parseFloat(document.getElementById('oddsH').value);
+  const dr=parseFloat(document.getElementById('oddsD').value);
+  const a=parseFloat(document.getElementById('oddsA').value);
+  const el=document.getElementById('oddsRes');
+  if(!matchId||!h||!dr||!a){el.style.display='block';el.className='res er';el.textContent='Fill all fields';return;}
+  const d=await api('/api/admin/odds',{method:'POST',body:JSON.stringify({matchId,home:h,draw:dr,away:a})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Odds updated & locked — auto-sync will not overwrite these';clearCache();loadOddsGameList();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+async function unlockOdds(){
+  const matchId=document.getElementById('oddsMatchId').value.trim();
+  const el=document.getElementById('oddsRes');
+  if(!matchId){el.style.display='block';el.className='res er';el.textContent='Enter a Match ID first';return;}
+  const d=await api('/api/admin/odds/unlock',{method:'POST',body:JSON.stringify({matchId})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='🔓 Odds unlocked — will resume auto-updating from its source';clearCache();loadOddsGameList();}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+let oddsSearchTimer=null;
+function oddsDateLabel(iso, status){
+  if(status==='live') return null; // grouped under a LIVE header instead of a date
+  const d=new Date(iso);
+  const now=new Date();
+  const startOfDay=(x)=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const diffDays=Math.round((startOfDay(d)-startOfDay(now))/86400000);
+  if(diffDays===0) return 'Today';
+  if(diffDays===1) return 'Tomorrow';
+  if(diffDays===-1) return 'Yesterday';
+  return d.toLocaleDateString('en-KE',{weekday:'short',day:'numeric',month:'short'});
+}
+
+function loadOddsGameList(){
+  clearTimeout(oddsSearchTimer);
+  oddsSearchTimer=setTimeout(async ()=>{
+    const q=document.getElementById('oddsSearch')?.value.trim()||'';
+    const el=document.getElementById('oddsGameList');
+    el.innerHTML='<div class="loading">Loading...</div>';
+    const url='/api/admin/matches?status=upcoming,live'+(q?`&q=${encodeURIComponent(q)}`:'');
+    const d=await api(url);
+    if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No matches found</div>';return;}
+
+    // Server already sorts live-first, then soonest-upcoming-first — render
+    // with a group header whenever the group (LIVE / date) changes, so it's
+    // scannable at a glance instead of one long flat list.
+    let lastGroup=null;
+    const rows=d.data.slice(0,150).map(m=>{
+      const group = m.status==='live' ? '🔴 LIVE NOW' : (oddsDateLabel(m.commenceTime, m.status) || m.status);
+      const kickoff = new Date(m.commenceTime).toLocaleTimeString('en-KE',{hour:'2-digit',minute:'2-digit'});
+      let header='';
+      if(group!==lastGroup){
+        header=`<div style="position:sticky;top:0;background:var(--bg,#0b0f0c);padding:8px 0 4px;font-size:11px;font-weight:700;color:${m.status==='live'?'var(--r)':'var(--g)'};letter-spacing:.03em;text-transform:uppercase">${group}</div>`;
+        lastGroup=group;
+      }
+      return header+`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)">
+        <div style="min-width:0">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.homeTeam} vs ${m.awayTeam}</div>
+          <div style="font-size:11px;color:var(--mt)">${kickoff} · ${m.league} · ${srcBadge(m)} · ${m.odds?.home??'-'}/${m.odds?.draw??'-'}/${m.odds?.away??'-'}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="goEditOdds('${m.matchId}')">Edit</button>
+      </div>`;
+    });
+    el.innerHTML=rows.join('');
+  }, 250);
+}
+
+// ══ DEPOSITS ══
+async function loadDeposits(){
+  const d=await api('/api/admin/transactions?type=deposit');
+  const el=document.getElementById('depList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No deposits</div>';return;}
+  const today=new Date().toDateString();
+  const todayAmt=d.data.filter(t=>new Date(t.createdAt).toDateString()===today&&t.status==='completed').reduce((a,t)=>a+t.amount,0);
+  const total=d.data.filter(t=>t.status==='completed').reduce((a,t)=>a+t.amount,0);
+  document.getElementById('dep-today').textContent='KES '+todayAmt.toLocaleString();
+  document.getElementById('dep-total').textContent='KES '+total.toLocaleString();
+  el.innerHTML=`<table class="tbl"><thead><tr><th>User</th><th>Amount</th><th>M-Pesa Ref</th><th>Status</th><th>Date</th></tr></thead><tbody>${
+    d.data.slice(0,50).map(t=>`<tr>
+      <td>${t.userId}</td>
+      <td style="color:var(--g)">KES ${t.amount?.toLocaleString()}</td>
+      <td style="color:var(--mt);font-size:11px">${t.mpesaRef||t.reference||'—'}</td>
+      <td><span class="badge ${t.status==='completed'?'bg-g':t.status==='pending'?'bg-y':'bg-r'}">${t.status}</span></td>
+      <td>${new Date(t.createdAt).toLocaleString('en-KE')}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ══ WITHDRAWALS ══
+async function loadWithdrawals(){
+  const d=await api('/api/admin/transactions?type=withdrawal');
+  const pending=document.getElementById('wdPending');
+  const list=document.getElementById('wdList');
+  if(!d.success||!d.data?.length){pending.innerHTML='<div class="empty">No pending withdrawals</div>';list.innerHTML='';return;}
+  const pend=d.data.filter(t=>t.status==='pending');
+  document.getElementById('pendingWdBadge').textContent=pend.length;
+  pending.innerHTML=pend.length?pend.map(t=>`
+    <div class="b-row pending" style="display:flex;align-items:center;justify-content:space-between">
+      <div><div style="font-weight:700">KES ${Math.abs(t.amount).toLocaleString()}</div><div style="font-size:11px;color:var(--mt)">${t.reference} · ${new Date(t.createdAt).toLocaleString('en-KE')}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-g btn-sm" onclick="approveWd('${t._id}')">✅ Approve</button>
+        <button class="btn btn-r btn-sm" onclick="rejectWd('${t._id}')">❌ Reject</button>
+      </div>
+    </div>`).join(''):'<div class="empty">No pending withdrawals</div>';
+  list.innerHTML=`<table class="tbl"><thead><tr><th>Ref</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>${
+    d.data.slice(0,30).map(t=>`<tr>
+      <td style="font-size:11px">${t.reference}</td>
+      <td style="color:var(--r)">KES ${Math.abs(t.amount).toLocaleString()}</td>
+      <td><span class="badge ${t.status==='completed'?'bg-g':t.status==='pending'?'bg-y':'bg-r'}">${t.status}</span></td>
+      <td>${new Date(t.createdAt).toLocaleString('en-KE')}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function approveWd(id){
+  const d=await api('/api/admin/withdrawal/approve',{method:'POST',body:JSON.stringify({txId:id})});
+  if(d.success){toast('Withdrawal approved & processed','ok');loadWithdrawals();}
+  else alert('Failed: '+d.message);
+}
+
+async function rejectWd(id){
+  const reason=prompt('Reason for rejection?');
+  const d=await api('/api/admin/withdrawal/reject',{method:'POST',body:JSON.stringify({txId:id,reason:reason||'Rejected by admin'})});
+  if(d.success){toast('Withdrawal rejected — funds returned','ok');loadWithdrawals();}
+  else alert('Failed: '+d.message);
+}
+
+// ══ WALLET ══
+async function loadWallet(){
+  const d=await api('/api/admin/wallet');
+  document.getElementById('wal-total').textContent='KES '+(d.totalBalance||0).toLocaleString();
+  document.getElementById('wal-users').textContent=d.fundedUsers||0;
+  const el=document.getElementById('walletList');
+  el.innerHTML=d.topWallets?.map(u=>`<div class="tx-row"><div class="tx-l"><div class="tx-type">${u.username}</div><div class="tx-sub">${fmtPhone(u.phone)}</div></div><div class="tx-r"><div class="tx-amt pos">KES ${(u.balance||0).toLocaleString()}</div></div></div>`).join('')||'<div class="empty">No data</div>';
+}
+
+// ══ TRANSACTIONS ══
+async function loadTx(){
+  const type=document.getElementById('txFilter').value;
+  const d=await api(`/api/admin/transactions?type=${type}`);
+  const el=document.getElementById('txList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No transactions</div>';return;}
+  const cls={deposit:'pos',win:'pos',bonus:'pos',stake:'neg',withdrawal:'neg',refund:'pos'};
+  el.innerHTML=`<table class="tbl"><thead><tr><th>Type</th><th>Amount</th><th>Balance After</th><th>Description</th><th>Date</th></tr></thead><tbody>${
+    d.data.slice(0,100).map(t=>`<tr>
+      <td><span class="badge bg-${t.type==='deposit'||t.type==='win'||t.type==='bonus'?'g':'r'}">${t.type}</span></td>
+      <td class="tx-amt ${cls[t.type]||''}">${t.amount>0?'+':''}KES ${Math.abs(t.amount).toLocaleString()}</td>
+      <td style="color:var(--mt)">KES ${(t.balance||0).toLocaleString()}</td>
+      <td style="color:var(--mt);font-size:11px">${t.description||'—'}</td>
+      <td style="color:var(--mt);font-size:11px">${new Date(t.createdAt).toLocaleString('en-KE')}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ══ LIMITS ══
+async function saveLimits(type){
+  let data={};
+  if(type==='bet') data={minBet:+document.getElementById('limMinBet').value,maxBet:+document.getElementById('limMaxBet').value,maxSelections:+document.getElementById('limMaxSel').value,maxPayout:+document.getElementById('limMaxPayout').value};
+  if(type==='deposit') data={minDeposit:+document.getElementById('limMinDep').value,maxDeposit:+document.getElementById('limMaxDep').value};
+  if(type==='withdrawal') data={minWithdrawal:+document.getElementById('limMinWd').value,maxWithdrawal:+document.getElementById('limMaxWd').value,wdPerDay:+document.getElementById('limWdPerDay').value};
+  if(type==='margin'){
+    const val = +document.getElementById('limPlatformMargin').value;
+    if (val > 20) { const el=document.getElementById('limMarginRes'); el.style.display='block'; el.className='res er'; el.textContent='❌ 20% max — anything higher makes odds look broken'; return; }
+    data={platformMarginPercent: val};
+  }
+  const d=await api('/api/admin/limits',{method:'POST',body:JSON.stringify({type,...data})});
+  const resIdMap={bet:'limBetRes',deposit:'limDepRes',withdrawal:'limWdRes',margin:'limMarginRes'};
+  const el=document.getElementById(resIdMap[type]);
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Limits saved';}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ BONUS ══
+async function saveBonus(){
+  const d=await api('/api/admin/bonus-settings',{method:'POST',body:JSON.stringify({welcomeBonus:+document.getElementById('welcomeBonus').value,minBonusDep:+document.getElementById('minBonusDep').value})});
+  const el=document.getElementById('bonusRes');el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Bonus settings saved';}else{el.className='res er';el.textContent='❌ Failed';}
+}
+
+async function giveBonus(){
+  const user=document.getElementById('bonusUser').value.trim();
+  const amt=parseFloat(document.getElementById('bonusAmt').value);
+  const note=document.getElementById('bonusNote').value.trim();
+  const el=document.getElementById('bonusGiveRes');
+  if(!user||!amt){el.style.display='block';el.className='res er';el.textContent='Fill user and amount';return;}
+  const d=await api('/api/admin/balance',{method:'POST',body:JSON.stringify({identifier:user,amount:amt,note:note||'Manual bonus'})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent=`✅ KES ${amt} bonus given! New balance: KES ${d.balance}`;}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ NOTIFICATIONS ══
+async function sendNotif(){
+  const title=document.getElementById('notifTitle').value.trim();
+  const msg=document.getElementById('notifMsg').value.trim();
+  const target=document.getElementById('notifTarget').value;
+  const el=document.getElementById('notifRes');
+  if(!title||!msg){el.style.display='block';el.className='res er';el.textContent='Fill title and message';return;}
+  const d=await api('/api/admin/notify',{method:'POST',body:JSON.stringify({title,message:msg,target})});
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent=`✅ Broadcast sent to ${d.sent||0} users`;}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ CONTENT ══
+function previewBannerImage(){
+  const file = document.getElementById('bannerImageFile').files[0];
+  const img = document.getElementById('bannerImagePreview');
+  if (!file) { img.style.display = 'none'; return; }
+  const reader = new FileReader();
+  reader.onload = e => { img.src = e.target.result; img.style.display = 'block'; };
+  reader.readAsDataURL(file);
+}
+async function saveBanner(){
+  const el=document.getElementById('bannerRes');
+  el.style.display='block'; el.className='res'; el.textContent='Saving...';
+
+  const file = document.getElementById('bannerImageFile').files[0];
+  try {
+    if (file) {
+      const fd = new FormData();
+      fd.append('image', file);
+      fd.append('key', 'banner');
+      const r = await fetch('/api/admin/upload-image', {
+        method: 'POST',
+        headers: { 'x-admin-secret': PWD },
+        body: fd
+      });
+      const ud = await r.json();
+      if (!ud.success) { el.className='res er'; el.textContent='❌ '+(ud.message||'Image upload failed'); return; }
+    }
+    const d = await api('/api/admin/content',{method:'POST',body:JSON.stringify({key:'banner',value:document.getElementById('bannerText').value,link:document.getElementById('bannerLink').value})});
+    if(d.success){el.className='res ok';el.textContent='✅ Banner updated — live on homepage now';document.getElementById('bannerImageFile').value='';}
+    else{el.className='res er';el.textContent='❌ Failed';}
+  } catch(e) {
+    el.className='res er'; el.textContent='❌ Upload failed — check connection';
+  }
+}
+async function loadBannerForm(){
+  try{
+    const d=await api('/api/admin/content');
+    if(d.success&&d.data){
+      document.getElementById('bannerText').value=d.data.banner||'';
+      document.getElementById('bannerLink').value=d.data.bannerLink||'';
+      if(d.data.bannerImage){
+        const img=document.getElementById('bannerImagePreview');
+        img.src=d.data.bannerImage; img.style.display='block';
+      }
+      document.getElementById('popupLink').value=d.data.popupLink||'';
+      document.getElementById('popupEnabled').checked=!!d.data.popupEnabled;
+      if(d.data.popupImage){
+        const pimg=document.getElementById('popupImagePreview');
+        pimg.src=d.data.popupImage; pimg.style.display='block';
+      }
+    }
+  }catch(e){}
+  // Aviator thumbnail always shows current stored image, if any (regardless of banner content state)
+  const aimg=document.getElementById('aviatorImagePreview');
+  aimg.src='/api/content/image/aviator?v='+Date.now();
+  aimg.onload=()=>{ aimg.style.display='block'; };
+  aimg.onerror=()=>{ aimg.style.display='none'; };
+}
+
+function previewAviatorImage(){
+  const file = document.getElementById('aviatorImageFile').files[0];
+  const img = document.getElementById('aviatorImagePreview');
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { img.src = e.target.result; img.style.display = 'block'; };
+  reader.readAsDataURL(file);
+}
+async function saveAviatorImage(){
+  const el=document.getElementById('aviatorImgRes');
+  const file = document.getElementById('aviatorImageFile').files[0];
+  if (!file) { el.style.display='block'; el.className='res er'; el.textContent='Choose an image first'; return; }
+  el.style.display='block'; el.className='res'; el.textContent='Uploading...';
+  try {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('key', 'aviator');
+    const r = await fetch('/api/admin/upload-image', {
+      method: 'POST',
+      headers: { 'x-admin-secret': PWD },
+      body: fd
+    });
+    const ud = await r.json();
+    if (ud.success) { el.className='res ok'; el.textContent='✅ Aviator thumbnail updated — live now'; document.getElementById('aviatorImageFile').value=''; }
+    else { el.className='res er'; el.textContent='❌ '+(ud.message||'Upload failed'); }
+  } catch(e) {
+    el.className='res er'; el.textContent='❌ Upload failed — check connection';
+  }
+}
+
+function formatBytes(n){
+  if(!n) return '0 MB';
+  return (n/1024/1024).toFixed(1)+' MB';
+}
+// ══ JACKPOT ══
+let jpSelected = []; // { matchId, homeTeam, awayTeam, league, commenceTime }
+let jpSearchTimer = null;
+
+function searchJpFixtures(){
+  clearTimeout(jpSearchTimer);
+  jpSearchTimer = setTimeout(async () => {
+    const q = document.getElementById('jpSearch').value.trim();
+    const resEl = document.getElementById('jpSearchResults');
+    if (!q) { resEl.innerHTML = ''; return; }
+    resEl.innerHTML = '<div class="loading">Searching...</div>';
+    try {
+      const d = await api(`/api/admin/matches?q=${encodeURIComponent(q)}&status=upcoming&limit=20`);
+      if (!d.success || !d.data?.length) { resEl.innerHTML = '<div style="font-size:12px;color:var(--mt);padding:8px">No upcoming fixtures found</div>'; return; }
+      resEl.innerHTML = d.data.map(m => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid var(--bd);border-radius:8px;margin-bottom:6px;cursor:pointer" onclick='addJpFixture(${JSON.stringify({matchId:m.matchId,homeTeam:m.homeTeam,awayTeam:m.awayTeam,league:m.league,commenceTime:m.commenceTime}).replace(/'/g,"&apos;")})'>
+          <div>
+            <div style="font-size:12px;font-weight:700">${m.homeTeam} vs ${m.awayTeam}</div>
+            <div style="font-size:10px;color:var(--mt)">${m.league||''} · ${new Date(m.commenceTime).toLocaleString([], {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+          <span style="color:var(--g);font-size:18px">+</span>
+        </div>`).join('');
+    } catch(e) { resEl.innerHTML = '<div style="font-size:12px;color:var(--mt)">Search failed</div>'; }
+  }, 350);
+}
+
+function addJpFixture(fx){
+  if (jpSelected.find(f => f.matchId === fx.matchId)) return; // already added
+  jpSelected.push(fx);
+  renderJpSelected();
+}
+function removeJpFixture(matchId){
+  jpSelected = jpSelected.filter(f => f.matchId !== matchId);
+  renderJpSelected();
+}
+function renderJpSelected(){
+  document.getElementById('jpSelectedCount').textContent = jpSelected.length;
+  document.getElementById('jpSelectedList').innerHTML = jpSelected.map(f => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--s2);border-radius:6px;margin-bottom:4px">
+      <span style="font-size:12px">${f.homeTeam} vs ${f.awayTeam}</span>
+      <span style="color:var(--r);cursor:pointer;font-weight:700" onclick="removeJpFixture('${f.matchId}')">✕</span>
+    </div>`).join('');
+}
+
+async function createJackpotRound(){
+  const el = document.getElementById('jpCreateRes');
+  const name = document.getElementById('jpName').value.trim();
+  const fee = parseFloat(document.getElementById('jpFee').value);
+  el.style.display='block';
+  if (!name) { el.className='res er'; el.textContent='Enter a round name'; return; }
+  if (!fee || fee < 1) { el.className='res er'; el.textContent='Enter a valid entry fee'; return; }
+  if (jpSelected.length < 2) { el.className='res er'; el.textContent='Select at least 2 fixtures'; return; }
+
+  el.className='res'; el.textContent='Creating...';
+  try{
+    const d = await fetch('/api/jackpot/admin/create', {
+      method:'POST',
+      headers: { 'Content-Type':'application/json', 'x-admin-secret': PWD },
+      body: JSON.stringify({ name, entryFee: fee, matchIds: jpSelected.map(f=>f.matchId) })
+    }).then(r=>r.json());
+    if (d.success) {
+      el.className='res ok'; el.textContent='✅ Jackpot round created and live now';
+      jpSelected = []; renderJpSelected();
+      document.getElementById('jpName').value=''; document.getElementById('jpFee').value='';
+      document.getElementById('jpSearch').value=''; document.getElementById('jpSearchResults').innerHTML='';
+      loadJpRounds();
+    } else {
+      el.className='res er'; el.textContent='❌ '+(d.message||'Failed to create round');
+    }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed — check connection'; }
+}
+
+// ══ ODDS BOOST ══
+async function createOddsBoost(){
+  const el = document.getElementById('boostCreateRes');
+  const matchId = document.getElementById('boostMatchId').value.trim();
+  const market = document.getElementById('boostMarket').value;
+  const pick = document.getElementById('boostPick').value.trim();
+  const boostedOdds = parseFloat(document.getElementById('boostOdds').value);
+  const maxQualifyingStake = parseFloat(document.getElementById('boostMaxStake').value);
+
+  el.style.display='block';
+  if (!matchId || !pick) { el.className='res er'; el.textContent='Match ID and pick are required'; return; }
+  if (!boostedOdds || !maxQualifyingStake) { el.className='res er'; el.textContent='Enter boosted odds and max stake'; return; }
+
+  el.className='res'; el.textContent='Creating...';
+  try{
+    const d = await api('/api/admin/odds-boost', { method:'POST', body: JSON.stringify({ matchId, market, pick, boostedOdds, maxQualifyingStake }) });
+    if (d.success) {
+      el.className='res ok'; el.textContent=`✅ Boost created. Real odds: ${d.realOdds} → Boosted: ${boostedOdds}. Max possible loss: KES ${d.maxPossibleLoss}`;
+      document.getElementById('boostMatchId').value=''; document.getElementById('boostPick').value='';
+      document.getElementById('boostOdds').value=''; document.getElementById('boostMaxStake').value='';
+      loadOddsBoosts();
+    } else {
+      el.className='res er'; el.textContent='❌ '+(d.message||'Failed to create boost');
+    }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed — check connection'; }
+}
+
+async function loadOddsBoosts(){
+  const el = document.getElementById('boostsList');
+  el.textContent = 'Loading...';
+  try{
+    const d = await api('/api/admin/odds-boost');
+    if (!d.success || !d.data?.length) { el.textContent = 'No odds boosts yet.'; return; }
+    el.innerHTML = d.data.map(b => `
+      <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong style="color:var(--tx);font-size:12px">${b.matchId}</strong>
+          <span style="color:${b.active?'var(--g)':'var(--mt)'};font-size:11px;cursor:pointer" onclick="toggleOddsBoost('${b._id}')">${b.active?'● Active (tap to disable)':'○ Disabled (tap to enable)'}</span>
+        </div>
+        <div style="font-size:11px;margin-top:4px">${b.market} / ${b.pick} → <strong style="color:var(--yl)">${b.boostedOdds}</strong> (cap KES ${b.maxQualifyingStake.toLocaleString()})</div>
+      </div>`).join('');
+  }catch(e){ el.textContent = 'Failed to load boosts'; }
+}
+
+async function toggleOddsBoost(id){
+  try{ await api(`/api/admin/odds-boost/${id}/toggle`, { method:'POST' }); loadOddsBoosts(); }catch(e){}
+}
+
+// ══ LOYALTY ══
+async function createLoyaltyTier(){
+  const el = document.getElementById('loyCreateRes');
+  const name = document.getElementById('loyName').value.trim();
+  const minPoints = parseFloat(document.getElementById('loyMinPoints').value);
+  const order = parseFloat(document.getElementById('loyOrder').value);
+  const cashbackPercent = parseFloat(document.getElementById('loyCashback').value) || 0;
+  const wageringMultiplier = parseFloat(document.getElementById('loyWagering').value) || 3;
+  const badgeIcon = document.getElementById('loyIcon').value.trim() || '🥉';
+
+  el.style.display='block';
+  if (!name || minPoints==null || isNaN(minPoints) || order==null || isNaN(order)) { el.className='res er'; el.textContent='Name, min points, and order are required'; return; }
+  if (cashbackPercent > 50) { el.className='res er'; el.textContent='Cashback % cannot exceed 50 — too high a loss risk'; return; }
+
+  el.className='res'; el.textContent='Creating...';
+  try{
+    const d = await api('/api/loyalty/admin/tiers', { method:'POST', body: JSON.stringify({ name, minPoints, order, cashbackPercent, wageringMultiplier, badgeIcon }) });
+    if (d.success) {
+      el.className='res ok'; el.textContent='✅ Tier created';
+      ['loyName','loyMinPoints','loyOrder','loyCashback'].forEach(id=>document.getElementById(id).value='');
+      loadLoyaltyTiers();
+    } else {
+      el.className='res er'; el.textContent='❌ '+(d.message||'Failed to create tier');
+    }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed — check connection'; }
+}
+
+async function loadLoyaltyTiers(){
+  const el = document.getElementById('loyTiersList');
+  el.textContent = 'Loading...';
+  try{
+    const d = await api('/api/loyalty/admin/tiers');
+    if (!d.success || !d.data?.length) { el.textContent = 'No tiers created yet.'; return; }
+    el.innerHTML = d.data.map(t => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px">
+        <div>
+          <strong style="color:var(--tx)">${t.badgeIcon} ${t.name}</strong>
+          <div style="font-size:11px;margin-top:2px">${t.minPoints.toLocaleString()}+ points · ${t.cashbackPercent}% weekly cashback · ${t.wageringMultiplier}x wagering</div>
+        </div>
+        <span style="color:var(--r);cursor:pointer;font-weight:700" onclick="deleteLoyaltyTier('${t._id}')">✕</span>
+      </div>`).join('');
+  }catch(e){ el.textContent = 'Failed to load tiers'; }
+}
+
+async function deleteLoyaltyTier(id){
+  if (!confirm('Delete this tier? Users at this tier will drop to the next one down.')) return;
+  try{ await api(`/api/loyalty/admin/tiers/${id}`, { method:'DELETE' }); loadLoyaltyTiers(); }catch(e){}
+}
+
+async function loadJpRounds(){
+  const el = document.getElementById('jpRoundsList');
+  el.textContent = 'Loading...';
+  try{
+    const d = await fetch('/api/jackpot/admin/rounds', { headers: { 'x-admin-secret': PWD } }).then(r=>r.json());
+    if (!d.success || !d.data?.length) { el.textContent = 'No jackpot rounds yet.'; return; }
+    el.innerHTML = d.data.map(r => `
+      <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${r.name}</strong><span style="text-transform:capitalize">${r.status}</span></div>
+        <div style="font-size:11px;margin-top:4px">Pool: KES ${r.poolAmount.toLocaleString()} · ${r.fixtures.length} fixtures · Fee KES ${r.entryFee}</div>
+      </div>`).join('');
+  }catch(e){ el.textContent = 'Failed to load rounds'; }
+}
+
+async function loadApkInfo(){
+  try{
+    const d = await api('/api/admin/apk-info');
+    const el = document.getElementById('apkCurrentInfo');
+    if (d.success && d.data) {
+      const ver = d.data.metadata?.version ? ` — v${d.data.metadata.version}` : '';
+      el.textContent = `Current: ${formatBytes(d.data.length)}${ver}, uploaded ${new Date(d.data.uploadDate).toLocaleDateString()}`;
+    } else {
+      el.textContent = 'No APK uploaded yet.';
+    }
+  }catch(e){ document.getElementById('apkCurrentInfo').textContent = 'Could not check current version.'; }
+}
+async function uploadApk(){
+  const el = document.getElementById('apkRes');
+  const file = document.getElementById('apkFile').files[0];
+  if (!file) { el.style.display='block'; el.className='res er'; el.textContent='Choose an APK file first'; return; }
+  el.style.display='block'; el.className='res'; el.textContent='Uploading — this may take a minute for larger files...';
+  try {
+    const fd = new FormData();
+    fd.append('apk', file);
+    fd.append('version', document.getElementById('apkVersion').value.trim());
+    const r = await fetch('/api/admin/upload-apk', {
+      method: 'POST',
+      headers: { 'x-admin-secret': PWD },
+      body: fd
+    });
+    const ud = await r.json();
+    if (ud.success) {
+      el.className='res ok'; el.textContent='✅ APK uploaded — live for download now';
+      document.getElementById('apkFile').value='';
+      loadApkInfo();
+    } else {
+      el.className='res er'; el.textContent='❌ '+(ud.message||'Upload failed');
+    }
+  } catch(e) {
+    el.className='res er'; el.textContent='❌ Upload failed — check connection';
+  }
+}
+
+function previewPopupImage(){
+  const file = document.getElementById('popupImageFile').files[0];
+  const img = document.getElementById('popupImagePreview');
+  if (!file) { img.style.display = 'none'; return; }
+  const reader = new FileReader();
+  reader.onload = e => { img.src = e.target.result; img.style.display = 'block'; };
+  reader.readAsDataURL(file);
+}
+async function savePopup(){
+  const el=document.getElementById('popupRes');
+  el.style.display='block'; el.className='res'; el.textContent='Saving...';
+
+  const file = document.getElementById('popupImageFile').files[0];
+  try {
+    if (file) {
+      const fd = new FormData();
+      fd.append('image', file);
+      fd.append('key', 'popup');
+      const r = await fetch('/api/admin/upload-image', {
+        method: 'POST',
+        headers: { 'x-admin-secret': PWD },
+        body: fd
+      });
+      const ud = await r.json();
+      if (!ud.success) { el.className='res er'; el.textContent='❌ '+(ud.message||'Image upload failed'); return; }
+    }
+    const d = await api('/api/admin/content',{method:'POST',body:JSON.stringify({key:'popup',link:document.getElementById('popupLink').value})});
+    if(d.success){el.className='res ok';el.textContent='✅ Popup ad updated';document.getElementById('popupImageFile').value='';}
+    else{el.className='res er';el.textContent='❌ Failed';}
+  } catch(e) {
+    el.className='res er'; el.textContent='❌ Upload failed — check connection';
+  }
+}
+async function togglePopup(){
+  const enabled = document.getElementById('popupEnabled').checked;
+  const d = await api('/api/admin/content/popup-toggle',{method:'POST',body:JSON.stringify({enabled})});
+  const el=document.getElementById('popupRes');
+  el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent=enabled?'✅ Popup ad is now ON':'Popup ad is now OFF';}
+  else{document.getElementById('popupEnabled').checked=!enabled;el.className='res er';el.textContent='❌ Failed to toggle';}
+}
+
+async function saveSiteNotice(){
+  const d=await api('/api/admin/content',{method:'POST',body:JSON.stringify({key:'notice',value:document.getElementById('siteNotice').value})});
+  const el=document.getElementById('noticeRes');el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Notice updated';}else{el.className='res er';el.textContent='❌ Failed';}
+}
+
+// ══ FRAUD ══
+async function loadFraudPatterns(){
+  const d=await api('/api/admin/fraud');
+  const el=document.getElementById('fraudPatterns');
+  if(!d.success||!d.patterns?.length){el.innerHTML='<div class="empty">No suspicious patterns</div>';return;}
+  el.innerHTML=d.patterns.map(p=>`<div class="b-row lost"><div><b>${p.type}</b></div><div style="color:var(--mt);font-size:12px;margin-top:4px">${p.description}</div><div style="margin-top:6px"><button class="btn btn-r btn-sm" onclick="delUser('${p.userId}','${p.username}')">Block User</button></div></div>`).join('');
+}
+
+async function loadFraud(){
+  document.getElementById('fraudList').innerHTML='<div class="loading">Scanning...</div>';
+  const d=await api('/api/admin/fraud');
+  const el=document.getElementById('fraudList');
+  if(!d.success){el.innerHTML='<div class="empty">Scan failed</div>';return;}
+  el.innerHTML=`<div class="res ok" style="display:block">✅ Scan complete: ${d.patterns?.length||0} issues found, ${d.totalUsers||0} users checked</div>`;
+  loadFraudPatterns();
+}
+
+// ══ LOGIN ACTIVITY ══
+async function loadLogins(){
+  const d=await api('/api/admin/login-activity');
+  const el=document.getElementById('loginList');
+  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No login records</div>';return;}
+  el.innerHTML=`<table class="tbl"><thead><tr><th>User</th><th>IP</th><th>Time</th><th>Status</th></tr></thead><tbody>${
+    d.data.map(l=>`<tr>
+      <td>${l.username||l.userId}</td>
+      <td style="color:var(--mt);font-size:11px">${l.ip||'—'}</td>
+      <td style="color:var(--mt);font-size:11px">${new Date(l.createdAt).toLocaleString('en-KE')}</td>
+      <td><span class="badge ${l.success?'bg-g':'bg-r'}">${l.success?'OK':'Failed'}</span></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ══ SECURITY ══
+async function saveSecurity(){
+  const el=document.getElementById('secRes');el.style.display='block';el.className='res ok';
+  el.textContent='✅ Security settings saved (restart required for some changes)';
+}
+
+function formatMB(bytes){ return (bytes/1024/1024).toFixed(1)+' MB'; }
+async function loadStorageStats(){
+  const barEl = document.getElementById('storageUsageBar');
+  const brkEl = document.getElementById('storageBreakdown');
+  barEl.innerHTML = '<div class="loading">Loading...</div>';
+  try{
+    const d = await api('/api/admin/storage/stats');
+    if (!d.success) { barEl.innerHTML=''; brkEl.textContent='Could not load storage stats.'; return; }
+    const pct = Math.min(100, (d.dbSizeBytes / d.freeTierLimitBytes) * 100);
+    const barColor = pct > 85 ? 'var(--r)' : pct > 60 ? 'var(--y)' : 'var(--g)';
+    barEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span>${formatMB(d.dbSizeBytes)} used</span>
+        <span style="color:var(--mt)">of ${formatMB(d.freeTierLimitBytes)} free tier limit</span>
+      </div>
+      <div style="height:10px;background:var(--s3);border-radius:6px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${barColor};transition:width 0.3s"></div>
+      </div>
+      <div style="font-size:11px;color:var(--mt);margin-top:4px">${pct.toFixed(1)}% used</div>`;
+    brkEl.innerHTML = (d.collections||[]).map(c => `<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${c.name}</span><span>${c.count.toLocaleString()} docs</span></div>`).join('');
+  }catch(e){ barEl.innerHTML=''; brkEl.textContent='Could not load storage stats — check connection.'; }
+}
+
+async function runCleanup(target, daysInputId){
+  const days = document.getElementById(daysInputId).value;
+  const labels = { read_notifications:'read notifications', wallet_history:'wallet history entries', old_matches:'old finished matches', login_log:'login log entries' };
+  const confirmed = confirm(`Delete ${labels[target]} older than ${days} days? This cannot be undone. Export a backup first if unsure.`);
+  if (!confirmed) return;
+
+  const el = document.getElementById('cleanupRes');
+  el.style.display='block'; el.className='res'; el.textContent='Cleaning up...';
+  try{
+    const d = await api('/api/admin/storage/cleanup', { method:'POST', body: JSON.stringify({ target, olderThanDays: days }) });
+    if (d.success) {
+      el.className='res ok'; el.textContent=`✅ Deleted: ${d.deleted}`;
+      loadStorageStats();
+    } else {
+      el.className='res er'; el.textContent='❌ '+(d.message||'Cleanup failed');
+    }
+  }catch(e){ el.className='res er'; el.textContent='❌ Cleanup failed — check connection'; }
+}
+
+async function fixIndexes(){
+  const el=document.getElementById('idxRes')||document.getElementById('logsRes');
+  if(el){el.style.display='block';el.className='res inf';el.textContent='Fixing...';}
+  const d=await api('/api/admin/fix-indexes',{method:'POST'});
+  if(el){
+    if(d.success){el.className='res ok';el.textContent=`✅ ${d.message} · Removed ${d.deletedBadRecords||0} bad records`;}
+    else{el.className='res er';el.textContent='❌ '+d.message;}
+  }
+}
+
+// ══ SETTINGS ══
+async function saveSettings(){
+  const el=document.getElementById('settingsRes');el.style.display='block';
+  const d=await api('/api/admin/site-settings',{method:'POST',body:JSON.stringify({
+    siteName:document.getElementById('siteName').value,
+    allowRegistration:document.getElementById('allowReg').checked,
+    allowDeposits:document.getElementById('allowDep').checked,
+    allowWithdrawals:document.getElementById('allowWd').checked
+  })});
+  if(d.success){el.className='res ok';el.textContent='✅ Settings saved';}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+async function loadSiteConfig(){
+  try{
+    const d=await api('/api/admin/site-config');
+    if(!d.success) return;
+    const s=d.data;
+    const fields=['site_email','site_phone','site_whatsapp','site_license',
+      'social_twitter','social_facebook','social_instagram','social_telegram','social_whatsapp','social_tiktok',
+      'terms_content','privacy_content','responsible_content'];
+    fields.forEach(k=>{
+      const el=document.getElementById('cfg_'+k);
+      if(el && s[k]!==undefined) el.value=s[k]||'';
+    });
+  }catch(e){}
+}
+
+async function saveSiteConfig(keys, resId){
+  const el=document.getElementById(resId);
+  el.style.display='block';el.className='res inf';el.textContent='Saving...';
+  const data={};
+  keys.forEach(k=>{
+    const inp=document.getElementById('cfg_'+k);
+    if(inp) data[k]=inp.value;
+  });
+  const d=await api('/api/admin/site-config',{method:'POST',body:JSON.stringify(data)});
+  if(d.success){el.className='res ok';el.textContent='✅ Saved — live on site immediately';}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+function saveSiteContact(){
+  saveSiteConfig(['site_email','site_phone','site_whatsapp','site_license'],'contactRes');
+}
+function saveSiteSocial(){
+  saveSiteConfig(['social_twitter','social_facebook','social_instagram','social_telegram','social_whatsapp','social_tiktok'],'socialRes');
+}
+function saveSiteLegal(){
+  saveSiteConfig(['terms_content','privacy_content','responsible_content'],'legalRes');
+}
+
+// ══ M-PESA ══
+async function saveMpesa(){
+  const el=document.getElementById('mpRes');el.style.display='block';el.className='res inf';el.textContent='Note: M-Pesa keys are stored in Render environment variables, not here. Update them in Render → Environment.';
+}
+
+async function testStk(){
+  const phone=document.getElementById('testPhone').value.trim();
+  const el=document.getElementById('stkRes');
+  if(!phone){el.style.display='block';el.className='res er';el.textContent='Enter phone';return;}
+  el.style.display='block';el.className='res inf';el.textContent='Sending test STK push...';
+  const d=await api('/api/admin/test-stk',{method:'POST',body:JSON.stringify({phone})});
+  if(d.success){el.className='res ok';el.textContent='✅ STK push sent!';}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ MAINTENANCE ══
+async function toggleMaint(){
+  const on=document.getElementById('maintToggle').checked;
+  const d=await api('/api/admin/site-settings',{method:'POST',body:JSON.stringify({maintenanceMode:on})});
+  document.getElementById('maintBanner').style.display=on?'flex':'none';
+  toast(on?'⚠️ Maintenance mode ON':'✅ Maintenance mode OFF',on?'warn':'ok');
+}
+
+async function saveMaint(){
+  const msg=document.getElementById('maintMsg').value;
+  const d=await api('/api/admin/site-settings',{method:'POST',body:JSON.stringify({maintenanceMessage:msg})});
+  const el=document.getElementById('maintRes');el.style.display='block';
+  if(d.success){el.className='res ok';el.textContent='✅ Maintenance message updated';}
+}
+
+// ══ API MANAGEMENT ══
+async function saveApiKeys(){
+  const key=document.getElementById('apifKey').value.trim();
+  const el=document.getElementById('apiRes');el.style.display='block';
+  el.className='res inf';el.textContent='Update APIFOOTBALL_KEY in Render → Environment variables for it to persist after restart.';
+}
+
+async function testApi(){
+  const el=document.getElementById('apiTestRes');el.style.display='block';el.className='res inf';el.textContent='Testing...';
+  const d=await api('/api/odds/debug');
+  if(d){el.className='res ok';el.innerHTML=`✅ API Status:<br>${JSON.stringify(d,null,2).replace(/\n/g,'<br>').replace(/ /g,'&nbsp;')}`;}
+  else{el.className='res er';el.textContent='❌ Failed';}
+}
+
+// ══ CACHE ══
+async function clearCache(){
+  const d=await api('/api/odds/cache/clear',{method:'POST'});
+  const el=document.getElementById('cacheRes');
+  if(el){el.style.display='block';if(d.success){el.className='res ok';el.textContent='✅ Cache cleared!';}else{el.className='res er';el.textContent='❌ Failed';}}
+  else if(d.success) toast('Cache cleared!','ok');
+}
+
+// ══ HEALTH ══
+async function loadHealth(){
+  const d=await fetch('/api/health').then(r=>r.json());
+  const el=document.getElementById('healthInfo');
+  el.innerHTML=`<div class="res ok" style="display:block">✅ Server Online<br>Uptime: ${Math.floor(d.uptime/3600)}h ${Math.floor((d.uptime%3600)/60)}m<br>Time: ${d.time}</div>`;
+}
+
+// ══ REPORTS ══
+async function genReport(){
+  const el=document.getElementById('reportRes');el.style.display='block';el.className='res inf';el.textContent='Generating...';
+  const d=await api(`/api/admin/report?type=${document.getElementById('reportType').value}&from=${document.getElementById('reportFrom').value}&to=${document.getElementById('reportTo').value}`);
+  if(d.success){el.className='res ok';el.innerHTML='✅ Report:<br>'+JSON.stringify(d.data,null,2).replace(/\n/g,'<br>').replace(/ /g,'&nbsp;');}
+  else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ BACKUP ══
+async function exportData(type){
+  const d=await api(`/api/admin/export/${type}`);
+  if(d.success){
+    const blob=new Blob([JSON.stringify(d.data,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`betake-${type}-${new Date().toISOString().split('T')[0]}.json`;a.click();
+    toast(`Exported ${type} data`,'ok');
+  }else toast('Export failed','err');
+}
+
+// ══ REFERRALS ══
+async function loadReferrals(){
+  await Promise.all([loadRefConfig(), loadRefStats()]);
+}
+
+async function loadRefConfig(){
+  try {
+    const d = await api(`/api/admin/referral/config`);
+    if (!d.success) return;
+    const { enabled, amount } = d.data;
+
+    const toggle = document.getElementById('refEnabledToggle');
+    const track  = document.getElementById('refToggleTrack');
+    const thumb  = document.getElementById('refToggleThumb');
+    toggle.checked = enabled;
+    track.style.background = enabled ? 'var(--g)' : '#333';
+    thumb.style.transform  = enabled ? 'translateX(22px)' : 'translateX(0)';
+
+    document.getElementById('refAmountInp').value = amount;
+    updateRefStatusBadge(enabled, amount);
+  } catch(e) {
+    document.getElementById('refConfigStatus').textContent = 'Failed to load config';
+  }
+}
+
+function updateRefStatusBadge(enabled, amount){
+  const el = document.getElementById('refConfigStatus');
+  if (!enabled) {
+    el.style.color = 'var(--r)';
+    el.textContent = '🔴 Referral program is DISABLED — no bonuses will be paid';
+  } else if (amount === 0) {
+    el.style.color = 'var(--y)';
+    el.textContent = '🟡 Referral program is ON but bonus is KES 0 — tracking only, no cash paid';
+  } else {
+    el.style.color = 'var(--g)';
+    el.textContent = `🟢 Referral program is ACTIVE — paying KES ${amount} per referral`;
+  }
+}
+
+async function updateRefConfig(){
+  const enabled = document.getElementById('refEnabledToggle').checked;
+  const track   = document.getElementById('refToggleTrack');
+  const thumb   = document.getElementById('refToggleThumb');
+  track.style.background = enabled ? 'var(--g)' : '#333';
+  thumb.style.transform  = enabled ? 'translateX(22px)' : 'translateX(0)';
+  try {
+    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ enabled }) });
+    if (d.success) {
+      updateRefStatusBadge(d.data.enabled, d.data.amount);
+      toast(enabled ? '✅ Referral program enabled' : '🔴 Referral program disabled');
+    } else toast(d.message || 'Update failed', 'err');
+  } catch(e) { toast('Network error', 'err'); }
+}
+
+async function saveRefAmount(){
+  const amount = parseFloat(document.getElementById('refAmountInp').value);
+  if (isNaN(amount) || amount < 0) { toast('Enter a valid amount (0 or more)', 'err'); return; }
+  try {
+    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ amount }) });
+    if (d.success) {
+      updateRefStatusBadge(d.data.enabled, d.data.amount);
+      toast(`✅ Bonus updated to KES ${amount}`);
+    } else toast(d.message || 'Update failed', 'err');
+  } catch(e) { toast('Network error', 'err'); }
+}
+
+async function loadRefStats(){
+  try {
+    const d = await api(`/api/admin/referrals`);
+    if (!d.success) return;
+
+    // Get current amount from config to calculate total bonus paid
+    const cfgD = await api(`/api/admin/referral/config`);
+    const amount = cfgD.data?.amount || 0;
+
+    const total = d.data?.totalReferrals || d.data?.length || 0;
+    document.getElementById('ref-total').textContent = total;
+    document.getElementById('ref-bonus').textContent = `KES ${(total * amount).toLocaleString()}`;
+
+    const top = d.data?.topReferrers || d.data || [];
+    if (!top.length) {
+      document.getElementById('refList').innerHTML = '<div class="empty">No referrals yet</div>';
+      return;
+    }
+    document.getElementById('refList').innerHTML = top.map(u => `
+      <div class="list-row">
+        <div class="lr-info">
+          <div class="lr-name">👤 ${u.username}</div>
+          <div class="lr-sub">${u.phone || ''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--g)">${u.count || u.referredCount || 0} referrals</div>
+          <div style="font-size:11px;color:var(--mt)">KES ${((u.count || u.referredCount || 0) * amount).toLocaleString()} earned</div>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('refList').innerHTML = '<div class="empty">Failed to load referral stats</div>';
+  }
+}
+
+// ══ HELPERS ══
+function fmtPhone(p){return p?p.replace('254','0'):'—';}
+
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  t.style.borderColor=type==='ok'?'var(--g)':type==='err'?'var(--r)':'var(--y)';
+  t.style.color=type==='ok'?'var(--g)':type==='err'?'#ff6b6b':'var(--y)';
+  t.textContent=msg;t.style.display='block';
+  setTimeout(()=>t.style.display='none',3000);
+}
+
+// ══ KEYBOARD ══
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&document.getElementById('loginScreen').style.display!=='none') doLogin();
+});
+</script>
+</body>
+</html>

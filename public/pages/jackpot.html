@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Jackpot – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#080c08;--s1:#0d120d;--s2:#131a13;--s3:#192019;--bd:rgba(0,200,83,0.08);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--yl:#b8860b;--rd:#d32f2f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:40px}
+.topbar{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
+.back{font-size:20px;background:none;border:none;color:var(--tx);cursor:pointer}
+.tb-ttl{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700}
+
+.pool-hero{text-align:center;padding:28px 16px;background:linear-gradient(135deg,rgba(0,200,83,0.12),rgba(0,200,83,0.02))}
+.pool-lbl{font-size:12px;color:var(--mt);text-transform:uppercase;letter-spacing:1px}
+.pool-amt{font-family:'Rajdhani',sans-serif;font-size:42px;font-weight:800;color:var(--g);margin:6px 0}
+.pool-sub{font-size:11px;color:var(--mt)}
+
+.main{padding:14px}
+.fx-card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:10px}
+.fx-teams{font-weight:700;font-size:14px;margin-bottom:2px}
+.fx-league{font-size:10px;color:var(--mt);text-transform:uppercase;margin-bottom:10px}
+.fx-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fx-pick{background:var(--s2);border:1.5px solid var(--bd);border-radius:8px;padding:10px 4px;text-align:center;font-size:12px;font-weight:700;cursor:pointer}
+.fx-pick.sel{background:var(--g);border-color:var(--g);color:#04140a}
+
+.enter-bar{position:sticky;bottom:0;background:var(--s1);border-top:1px solid var(--bd);padding:14px 16px;margin-top:10px}
+.enter-progress{font-size:12px;color:var(--mt);margin-bottom:8px;text-align:center}
+.enter-btn{width:100%;padding:14px;background:var(--g);color:#04140a;border:none;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer}
+.enter-btn:disabled{opacity:0.4;cursor:not-allowed}
+.res{margin-top:8px;font-size:12px;text-align:center}
+.res.ok{color:var(--g)}
+.res.er{color:var(--rd)}
+
+.empty{text-align:center;padding:60px 20px;color:var(--mt);font-size:13px}
+.already-entered{text-align:center;padding:16px;background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.2);border-radius:12px;margin:14px;font-size:13px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back" onclick="history.back()">←</button>
+  <div class="tb-ttl">🏆 Jackpot</div>
+</div>
+
+<div id="content">
+  <div class="empty">Loading jackpot…</div>
+</div>
+
+<script>
+let round = null;
+let myEntry = null;
+let picks = {}; // matchId -> pick
+
+async function init(){
+  try {
+    const r = await fetch('/api/jackpot/current');
+    const d = await r.json();
+    if (!d.success || !d.round) {
+      document.getElementById('content').innerHTML = '<div class="empty">No active jackpot right now — check back soon.</div>';
+      return;
+    }
+    round = d.round;
+
+    const token = localStorage.getItem('token');
+    if (token) {
+      const er = await fetch(`/api/jackpot/my-entry/${round._id}`, { headers: { 'Authorization': 'Bearer '+token } });
+      const ed = await er.json();
+      if (ed.success) myEntry = ed.entry;
+    }
+    render();
+  } catch(e) {
+    document.getElementById('content').innerHTML = '<div class="empty">Failed to load — check connection.</div>';
+  }
+}
+
+function render(){
+  const el = document.getElementById('content');
+  const potentialWinnings = round.poolAmount; // split among perfect scorers at settlement — shown as "up to" since split depends on final winner count
+
+  let html = `
+    <div class="pool-hero">
+      <div class="pool-lbl">${round.name}</div>
+      <div class="pool-amt">KES ${round.poolAmount.toLocaleString()}</div>
+      <div class="pool-sub">${round.entryCount || 0} entries so far · Entry fee KES ${round.entryFee} · Predict all ${round.fixtures.length} correctly to win a share</div>
+    </div>
+    <div class="main">`;
+
+  if (myEntry) {
+    html += `<div class="already-entered">✅ You've entered this round with ${myEntry.predictions.length} predictions. Results will show once all fixtures finish.</div>`;
+  } else if (round.status !== 'open') {
+    html += `<div class="already-entered">🔒 Entries closed — the first fixture has already kicked off.</div>`;
+  }
+
+  round.fixtures.forEach(fx => {
+    const locked = myEntry || round.status !== 'open';
+    html += `
+      <div class="fx-card">
+        <div class="fx-teams">${fx.homeTeam} vs ${fx.awayTeam}</div>
+        <div class="fx-league">${fx.league || ''} · ${new Date(fx.commenceTime).toLocaleString([], {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>
+        <div class="fx-picks">
+          ${['home','draw','away'].map(p => {
+            const sel = myEntry ? myEntry.predictions.find(pr=>pr.matchId===fx.matchId)?.pick === p : picks[fx.matchId] === p;
+            const label = p==='home' ? fx.homeTeam : p==='away' ? fx.awayTeam : 'Draw';
+            return `<div class="fx-pick ${sel?'sel':''}" ${locked?'':`onclick="selectPick('${fx.matchId}','${p}')"`}>${label}</div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  });
+
+  html += `</div>`;
+
+  if (!myEntry && round.status === 'open') {
+    const done = Object.keys(picks).length;
+    html += `
+      <div class="enter-bar">
+        <div class="enter-progress">${done} / ${round.fixtures.length} predicted</div>
+        <button class="enter-btn" id="enterBtn" ${done<round.fixtures.length?'disabled':''} onclick="enterJackpot()">Enter for KES ${round.entryFee}</button>
+        <div class="res" id="enterRes"></div>
+      </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function selectPick(matchId, pick){
+  picks[matchId] = pick;
+  render();
+}
+
+async function enterJackpot(){
+  const token = localStorage.getItem('token');
+  if (!token) { location.href = '/login'; return; }
+  const el = document.getElementById('enterRes');
+  el.className = 'res'; el.textContent = 'Entering...';
+  try {
+    const predictions = Object.entries(picks).map(([matchId, pick]) => ({ matchId, pick }));
+    const r = await fetch('/api/jackpot/enter', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body: JSON.stringify({ roundId: round._id, predictions })
+    });
+    const d = await r.json();
+    if (d.success) {
+      el.className = 'res ok'; el.textContent = '✅ Entered! Good luck.';
+      setTimeout(init, 1200);
+    } else {
+      el.className = 'res er'; el.textContent = '❌ ' + (d.message || 'Failed to enter');
+    }
+  } catch(e) {
+    el.className = 'res er'; el.textContent = '❌ Failed — check connection';
+  }
+}
+
+init();
+</script>
+</body>
+</html>
