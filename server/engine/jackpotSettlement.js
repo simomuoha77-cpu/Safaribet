@@ -58,7 +58,12 @@ async function settleJackpots() {
       }
 
       if (winners.length > 0) {
-        const share = parseFloat((round.poolAmount / winners.length).toFixed(2));
+        // If admin set a guaranteed prize, that's what gets split — regardless
+        // of how much the real entry-fee pool actually grew to. This is the
+        // standard "Win up to KES X" jackpot model (Betika/SportPesa-style):
+        // the platform tops up the difference if the real pool is smaller.
+        const payoutPool = round.guaranteedPrize > 0 ? round.guaranteedPrize : round.poolAmount;
+        const share = parseFloat((payoutPool / winners.length).toFixed(2));
         for (const w of winners) {
           await walletService.credit(w.userId, 'main', share, 'jackpot_win', `jackpot_win_${round._id}_${w.userId}`, { roundId: round._id });
           w.payout = share;

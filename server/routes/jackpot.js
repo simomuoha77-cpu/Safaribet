@@ -73,9 +73,12 @@ router.get('/history', async (req, res) => {
 router.post('/admin/create', async (req, res) => {
   if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
   try {
-    const { name, entryFee, matchIds, carryOverFromRoundId } = req.body;
+    const { name, entryFee, matchIds, carryOverFromRoundId, guaranteedPrize } = req.body;
     if (!name || !entryFee || !Array.isArray(matchIds) || matchIds.length < 2) {
       return res.status(400).json({ success: false, message: 'name, entryFee, and at least 2 matchIds are required' });
+    }
+    if (guaranteedPrize != null && (isNaN(guaranteedPrize) || guaranteedPrize < 0)) {
+      return res.status(400).json({ success: false, message: 'guaranteedPrize must be a non-negative number' });
     }
     const matches = await Match.find({ matchId: { $in: matchIds } }).lean();
     if (matches.length !== matchIds.length) {
@@ -94,6 +97,7 @@ router.post('/admin/create', async (req, res) => {
 
     const round = await JackpotRound.create({
       name, entryFee, poolAmount, carriedOverFrom,
+      guaranteedPrize: guaranteedPrize ? Number(guaranteedPrize) : 0,
       fixtures: matches.map(m => ({
         matchId: m.matchId, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
         league: m.league, commenceTime: m.commenceTime

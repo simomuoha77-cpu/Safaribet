@@ -571,6 +571,9 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <input class="inp" id="jpName" placeholder="e.g. Midweek Jackpot"/>
     <label class="lbl">Entry Fee (KES)</label>
     <input class="inp" id="jpFee" type="number" placeholder="e.g. 50"/>
+    <label class="lbl">Guaranteed Total Prize (KES) — optional</label>
+    <input class="inp" id="jpGuaranteed" type="number" placeholder="e.g. 500000 — total split among users who get ALL fixtures correct"/>
+    <div class="mt" style="font-size:11px;margin:4px 0 0;color:var(--mt)">Leave blank to just split the real entry-fee pool. Set this to advertise a fixed "Win up to KES X" prize like Betika/SportPesa — winners split this amount instead of the live pool, even if the pool hasn't reached it yet.</div>
     <label class="lbl">Search Fixtures</label>
     <input class="inp" id="jpSearch" placeholder="Type team or league name..." oninput="searchJpFixtures()"/>
     <div id="jpSearchResults" style="max-height:240px;overflow-y:auto;margin:8px 0"></div>
@@ -1837,9 +1840,12 @@ async function createJackpotRound(){
   const el = document.getElementById('jpCreateRes');
   const name = document.getElementById('jpName').value.trim();
   const fee = parseFloat(document.getElementById('jpFee').value);
+  const guaranteedRaw = document.getElementById('jpGuaranteed').value.trim();
+  const guaranteedPrize = guaranteedRaw ? parseFloat(guaranteedRaw) : 0;
   el.style.display='block';
   if (!name) { el.className='res er'; el.textContent='Enter a round name'; return; }
   if (!fee || fee < 1) { el.className='res er'; el.textContent='Enter a valid entry fee'; return; }
+  if (guaranteedRaw && (isNaN(guaranteedPrize) || guaranteedPrize < 0)) { el.className='res er'; el.textContent='Enter a valid guaranteed prize amount'; return; }
   if (jpSelected.length < 2) { el.className='res er'; el.textContent='Select at least 2 fixtures'; return; }
 
   el.className='res'; el.textContent='Creating...';
@@ -1847,12 +1853,12 @@ async function createJackpotRound(){
     const d = await fetch('/api/jackpot/admin/create', {
       method:'POST',
       headers: { 'Content-Type':'application/json', 'x-admin-secret': PWD },
-      body: JSON.stringify({ name, entryFee: fee, matchIds: jpSelected.map(f=>f.matchId) })
+      body: JSON.stringify({ name, entryFee: fee, guaranteedPrize, matchIds: jpSelected.map(f=>f.matchId) })
     }).then(r=>r.json());
     if (d.success) {
       el.className='res ok'; el.textContent='✅ Jackpot round created and live now';
       jpSelected = []; renderJpSelected();
-      document.getElementById('jpName').value=''; document.getElementById('jpFee').value='';
+      document.getElementById('jpName').value=''; document.getElementById('jpFee').value=''; document.getElementById('jpGuaranteed').value='';
       document.getElementById('jpSearch').value=''; document.getElementById('jpSearchResults').innerHTML='';
       loadJpRounds();
     } else {
@@ -1967,7 +1973,7 @@ async function loadJpRounds(){
     el.innerHTML = d.data.map(r => `
       <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${r.name}</strong><span style="text-transform:capitalize">${r.status}</span></div>
-        <div style="font-size:11px;margin-top:4px">Pool: KES ${r.poolAmount.toLocaleString()} · ${r.fixtures.length} fixtures · Fee KES ${r.entryFee}</div>
+        <div style="font-size:11px;margin-top:4px">Pool: KES ${r.poolAmount.toLocaleString()}${r.guaranteedPrize ? ` · 🏆 Guaranteed: KES ${r.guaranteedPrize.toLocaleString()}` : ''} · ${r.fixtures.length} fixtures · Fee KES ${r.entryFee}</div>
       </div>`).join('');
   }catch(e){ el.textContent = 'Failed to load rounds'; }
 }

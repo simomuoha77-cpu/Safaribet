@@ -19,6 +19,7 @@ const jackpotRoundSchema = new mongoose.Schema({
     result:       { type: String, enum: ['home','draw','away',null], default: null } // filled in once the real match finishes
   }],
   poolAmount:      { type: Number, default: 0 }, // grows with every entry fee paid; carries over if no winner
+  guaranteedPrize: { type: Number, default: 0 }, // admin-set fixed total prize (e.g. "Win up to KES 500,000") — if set, this is what's split among perfect-score winners at settlement instead of the real entry-fee pool, same as Betika/SportPesa-style guaranteed jackpots. 0 = no guarantee, fall back to the real pool.
   carriedOverFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'JackpotRound', default: null },
   status:          { type: String, enum: ['open','locked','settled'], default: 'open' }, // open=accepting entries, locked=first fixture kicked off, settled=all fixtures finished & paid out
   createdAt:       { type: Date, default: Date.now },

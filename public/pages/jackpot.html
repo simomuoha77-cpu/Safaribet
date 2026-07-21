@@ -80,12 +80,16 @@ async function init(){
 
 function render(){
   const el = document.getElementById('content');
-  const potentialWinnings = round.poolAmount; // split among perfect scorers at settlement — shown as "up to" since split depends on final winner count
+  // If admin set a guaranteed prize, that's the headline figure users see and
+  // what actually gets split at settlement — otherwise fall back to the real,
+  // live entry-fee pool (which keeps growing as more people enter).
+  const hasGuarantee = round.guaranteedPrize > 0;
+  const potentialWinnings = hasGuarantee ? round.guaranteedPrize : round.poolAmount; // split among perfect scorers at settlement — shown as "up to" since split depends on final winner count
 
   let html = `
     <div class="pool-hero">
-      <div class="pool-lbl">${round.name}</div>
-      <div class="pool-amt">KES ${round.poolAmount.toLocaleString()}</div>
+      <div class="pool-lbl">${round.name}${hasGuarantee ? ' · Guaranteed Prize' : ''}</div>
+      <div class="pool-amt">KES ${potentialWinnings.toLocaleString()}</div>
       <div class="pool-sub">${round.entryCount || 0} entries so far · Entry fee KES ${round.entryFee} · Predict all ${round.fixtures.length} correctly to win a share</div>
     </div>
     <div class="main">`;
