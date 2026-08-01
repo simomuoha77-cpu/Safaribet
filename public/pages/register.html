@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Register – SafariBet</title>
+<script src="/js/theme.js"></script>
+<style>
+:root{--g:#00c853;--bg:#0d1f0f;--s1:#111111;--s2:#1a1a1a;--s3:#2a2a2a;--bd:#1e3a1e;--tx:#ffffff;--mt:#888888;--mt2:#555555;--mt3:#444444;--yl:#f5c518;--rd:#ff6b6b}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:#c8dccb;--tx:#14231a;--mt:#5c7a63;--mt2:#8aa38f;--mt3:#9ab09e;--yl:#b8860b;--rd:#d32f2f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.logo{text-align:center;margin-bottom:28px}
+.logo h1{font-size:32px;font-weight:900;color:var(--g)}
+.logo h1 span{color:var(--yl)}
+.logo p{color:var(--mt);font-size:13px;margin-top:4px}
+.bonus-bar{background:var(--s2);border:1px solid rgba(0,200,83,0.27);border-radius:12px;padding:12px 16px;margin-bottom:20px;width:100%;max-width:380px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--mt)}
+.bonus-bar span{color:var(--yl);font-weight:700}
+.card{background:var(--s1);border-radius:20px;padding:28px 24px;width:100%;max-width:380px;border:1px solid var(--bd)}
+.err{background:rgba(255,23,68,0.1);border:1px solid rgba(255,23,68,0.27);color:var(--rd);padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+.ok{background:rgba(0,200,83,0.07);border:1px solid rgba(0,200,83,0.27);color:var(--g);padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+label{display:block;font-size:11px;font-weight:700;color:var(--mt);letter-spacing:1px;margin-bottom:6px;margin-top:16px}
+input{width:100%;background:var(--s2);border:1.5px solid var(--s3);border-radius:12px;padding:15px;color:var(--tx);font-size:16px;outline:none;transition:border .2s}
+input:focus{border-color:var(--g)}
+.hint{font-size:11px;color:var(--mt2);margin-top:5px}
+.btn{width:100%;background:var(--g);color:#000;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:800;cursor:pointer;margin-top:20px;transition:background .2s}
+.btn:hover{background:#00e65c}
+.btn:disabled{background:var(--s3);color:var(--mt2);cursor:not-allowed}
+.footer{text-align:center;margin-top:16px;font-size:13px;color:var(--mt2)}
+.footer a{color:var(--g);text-decoration:none;font-weight:600}
+.back{display:flex;align-items:center;gap:6px;color:var(--mt2);font-size:13px;margin-bottom:20px;cursor:pointer}
+.back:hover{color:var(--g)}
+h2{font-size:22px;font-weight:800;color:var(--tx);margin-bottom:4px}
+.sub{font-size:13px;color:var(--mt2);margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<div class="logo">
+  <h1>Safari<span>Bet</span></h1>
+  <p>Kenya's Premier Betting Platform</p>
+</div>
+
+<div class="bonus-bar">
+  🎁 Register now and get <span>KES 20</span> welcome bonus on first deposit!
+</div>
+
+<div class="card">
+  <div class="back" onclick="location.href='/'">← Back to Home</div>
+  <h2>Create Account</h2>
+  <p class="sub">Free to join, takes 30 seconds</p>
+
+  <div class="err" id="err"></div>
+  <div class="ok" id="ok"></div>
+
+  <div id="registerStep">
+  <label>USERNAME</label>
+  <input type="text" id="username" placeholder="e.g. john123" maxlength="24" autocomplete="new-password"/>
+  <div class="hint">3–24 characters, letters and numbers only</div>
+
+  <label>M-PESA PHONE NUMBER</label>
+  <input type="tel" id="phone" placeholder="e.g. 0712345678" autocomplete="new-password"/>
+  <div class="hint">Used for deposits & withdrawals</div>
+
+  <label>PASSWORD</label>
+  <input type="password" id="password" placeholder="Min 6 characters" autocomplete="new-password"/>
+
+  <label>CONFIRM PASSWORD</label>
+  <input type="password" id="confirm" placeholder="Repeat password" autocomplete="new-password"/>
+
+  <button class="btn" id="btn" onclick="doRegister()">Create Free Account</button>
+
+  <div class="footer" style="margin-top:12px;font-size:11px;color:var(--mt3)">
+    By registering you confirm you are 18+ and agree to our Terms
+  </div>
+  </div>
+
+  <div id="otpStep" style="display:none">
+    <p class="sub" style="margin-bottom:16px">Enter the 6-digit code sent to <strong id="otpPhoneDisplay"></strong></p>
+    <label>VERIFICATION CODE</label>
+    <input type="text" id="otpCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="letter-spacing:6px;font-size:20px;text-align:center;font-weight:700"/>
+
+    <button class="btn" id="otpBtn" onclick="doVerifyOtp()" style="margin-top:16px">Verify & Create Account</button>
+
+    <div style="text-align:center;margin-top:14px;font-size:13px">
+      <span id="resendCountdown" style="color:var(--mt3)"></span>
+      <a href="#" id="resendLink" onclick="doResendOtp();return false" style="display:none;color:var(--g)">Resend code</a>
+    </div>
+    <div style="text-align:center;margin-top:10px">
+      <a href="#" onclick="backToForm();return false" style="font-size:12px;color:var(--mt3)">← Change phone number</a>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Already have an account? <a href="/login">Sign in</a>
+  <div id="refBadge" style="display:none;margin-top:12px;background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--g);text-align:center">
+    🎁 You were referred by a friend! Sign up to get started.
+  </div>
+</div>
+
+<script>
+// Show referral badge if ?ref= in URL
+window.addEventListener('DOMContentLoaded', () => {
+  const ref = new URLSearchParams(location.search).get('ref');
+  if (ref) {
+    document.getElementById('refBadge').style.display = 'block';
+  }
+});
+
+let registeredPhone = '';
+let resendTimer = null;
+
+function displayPhone(p){
+  const s = String(p);
+  return s.startsWith('254') ? '0' + s.slice(3) : s;
+}
+
+function startResendCountdown(){
+  let secs = 60;
+  const countEl = document.getElementById('resendCountdown');
+  const linkEl = document.getElementById('resendLink');
+  linkEl.style.display = 'none';
+  clearInterval(resendTimer);
+  countEl.textContent = `Resend code in ${secs}s`;
+  resendTimer = setInterval(() => {
+    secs--;
+    if (secs <= 0) {
+      clearInterval(resendTimer);
+      countEl.textContent = '';
+      linkEl.style.display = 'inline';
+    } else {
+      countEl.textContent = `Resend code in ${secs}s`;
+    }
+  }, 1000);
+}
+
+function backToForm(){
+  document.getElementById('otpStep').style.display = 'none';
+  document.getElementById('registerStep').style.display = 'block';
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('ok').style.display = 'none';
+  clearInterval(resendTimer);
+}
+
+async function doVerifyOtp(){
+  const btn = document.getElementById('otpBtn');
+  const errEl = document.getElementById('err');
+  const okEl = document.getElementById('ok');
+  const otp = document.getElementById('otpCode').value.trim();
+  errEl.style.display = 'none';
+  okEl.style.display = 'none';
+
+  if (!/^\d{6}$/.test(otp)) {
+    return showErr('Enter the 6-digit code');
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  try {
+    const res = await fetch('/api/auth/register/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: registeredPhone, otp })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      okEl.textContent = '✅ Account created! Redirecting...';
+      okEl.style.display = 'block';
+      setTimeout(() => location.href = '/', 1200);
+    } else {
+      showErr(data.message || 'Invalid code');
+      btn.disabled = false;
+      btn.textContent = 'Verify & Create Account';
+    }
+  } catch (e) {
+    showErr('Network error. Check connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Verify & Create Account';
+  }
+}
+
+async function doResendOtp(){
+  const errEl = document.getElementById('err');
+  const okEl = document.getElementById('ok');
+  errEl.style.display = 'none';
+  okEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/register/resend-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: registeredPhone })
+    });
+    const data = await res.json();
+    if (data.success) {
+      okEl.textContent = '✅ New code sent';
+      okEl.style.display = 'block';
+      startResendCountdown();
+    } else {
+      showErr(data.message || 'Could not resend code');
+    }
+  } catch (e) {
+    showErr('Network error. Check connection and try again.');
+  }
+}
+
+async function doRegister(){
+  const btn      = document.getElementById('btn');
+  const errEl    = document.getElementById('err');
+  const okEl     = document.getElementById('ok');
+  const username = document.getElementById('username').value.trim();
+  const phone    = document.getElementById('phone').value.trim();
+  const password = document.getElementById('password').value;
+  const confirm  = document.getElementById('confirm').value;
+
+  // Hide messages
+  errEl.style.display='none';
+  okEl.style.display='none';
+
+  // Client-side validation
+  if(!username || !phone || !password || !confirm){
+    return showErr('Please fill in all fields');
+  }
+  if(username.length < 3){
+    return showErr('Username must be at least 3 characters');
+  }
+  if(!/^[a-zA-Z0-9_]+$/.test(username)){
+    return showErr('Username: letters, numbers, underscore only');
+  }
+  if(password.length < 6){
+    return showErr('Password must be at least 6 characters');
+  }
+  if(password !== confirm){
+    return showErr('Passwords do not match');
+  }
+
+  // Clean phone
+  const cleanPhone = phone.replace(/\D/g,'');
+  if(cleanPhone.length < 9 || cleanPhone.length > 12){
+    return showErr('Enter a valid phone number e.g. 0712345678');
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending code...';
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, phone: cleanPhone, password, refCode: new URLSearchParams(location.search).get('ref') || '' })
+    });
+
+    const data = await res.json();
+
+    if(data.success && data.requiresOtp){
+      registeredPhone = data.phone;
+      document.getElementById('otpPhoneDisplay').textContent = displayPhone(data.phone);
+      document.getElementById('registerStep').style.display = 'none';
+      document.getElementById('otpStep').style.display = 'block';
+      okEl.textContent = '✅ Code sent via SMS';
+      okEl.style.display = 'block';
+      startResendCountdown();
+      btn.disabled = false;
+      btn.textContent = 'Create Free Account';
+    } else {
+      showErr(data.message || 'Registration failed');
+      btn.disabled = false;
+      btn.textContent = 'Create Free Account';
+    }
+  } catch(e) {
+    showErr('Network error. Check connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Create Free Account';
+  }
+}
+
+function showErr(msg){
+  const el = document.getElementById('err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// Allow Enter key
+document.addEventListener('keydown', e => {
+  if(e.key === 'Enter') doRegister();
+});
+</script>
+</body>
+</html>

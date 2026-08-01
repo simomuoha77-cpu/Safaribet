@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Refer & Earn – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--gg:rgba(0,200,83,0.12);--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b;--hh:52px;--bn:56px;--hdr:rgba(8,12,8,0.98)}
+html[data-theme="light"]{--g:#00a844;--gg:rgba(0,168,68,0.10);--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--yl:#b8860b;--rd:#d32f2f;--hdr:rgba(255,255,255,0.98)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);background:var(--hdr);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 14px;gap:10px;backdrop-filter:blur(20px)}
+.back{font-size:20px;cursor:pointer;color:var(--g)}
+.logo{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--g)}
+.logo span{color:var(--yl)}
+.main{margin-top:var(--hh);padding:16px 12px calc(var(--bn)+20px)}
+
+/* Hero */
+.hero{background:linear-gradient(135deg,#003d1a,#001a0d);border:1px solid rgba(0,200,83,0.2);border-radius:16px;padding:24px 20px;text-align:center;margin-bottom:16px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-40px;right:-40px;width:150px;height:150px;background:radial-gradient(circle,rgba(0,200,83,0.15),transparent 70%);border-radius:50%}
+.hero-icon{font-size:48px;margin-bottom:8px}
+.hero-title{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:700;margin-bottom:4px}
+.hero-sub{font-size:13px;color:var(--mt);margin-bottom:16px}
+.hero-amount{font-family:'Rajdhani',sans-serif;font-size:42px;font-weight:800;color:var(--yl);text-shadow:0 0 20px rgba(255,214,0,0.3);margin-bottom:4px}
+.hero-per{font-size:12px;color:var(--mt)}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.stat{background:var(--s2);border:1px solid var(--bd);border-radius:12px;padding:16px;text-align:center}
+.stat-val{font-family:'Rajdhani',sans-serif;font-size:28px;font-weight:800;color:var(--g)}
+.stat-lbl{font-size:11px;color:var(--mt);margin-top:2px}
+
+/* Link box */
+.link-box{background:var(--s2);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:16px}
+.link-ttl{font-size:12px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px}
+.link-url{background:var(--s3);border:1px solid var(--bd);border-radius:10px;padding:12px;font-size:12px;color:var(--g);word-break:break-all;margin-bottom:10px;line-height:1.5}
+.btn-row{display:flex;gap:8px}
+.btn{flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all 0.2s;text-align:center}
+.btn-g{background:linear-gradient(135deg,#00e65c,#00c853);color:#000}
+.btn-o{background:var(--s3);border:1px solid var(--bd);color:var(--mt)}
+
+/* How it works */
+.how{background:var(--s2);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:16px}
+.how-ttl{font-size:14px;font-weight:700;margin-bottom:12px}
+.step{display:flex;align-items:flex-start;gap:12px;margin-bottom:10px}
+.step:last-child{margin-bottom:0}
+.step-num{width:28px;height:28px;background:var(--g);color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0}
+.step-text{font-size:13px;color:var(--mt);line-height:1.5}
+.step-text strong{color:var(--tx)}
+
+/* Recent referrals */
+.recent{background:var(--s2);border:1px solid var(--bd);border-radius:14px;padding:16px}
+.recent-ttl{font-size:14px;font-weight:700;margin-bottom:12px}
+.ref-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)}
+.ref-row:last-child{border:none}
+.ref-user{font-size:13px;font-weight:600}
+.ref-date{font-size:11px;color:var(--mt)}
+.ref-earn{font-size:13px;font-weight:700;color:var(--g)}
+.empty-ref{text-align:center;padding:20px;color:var(--mt);font-size:13px}
+
+/* Bottom nav */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:199;background:var(--hdr);border-top:1px solid var(--bd);display:flex;height:var(--bn);backdrop-filter:blur(20px)}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--mt);cursor:pointer;gap:2px;transition:all 0.25s;text-transform:uppercase}
+.bni.on{color:var(--g)}
+.bni svg{width:22px;height:22px;fill:currentColor}
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid var(--bd);white-space:nowrap}
+.toast.on{opacity:1}
+.toast.ok{border-color:var(--g);color:var(--g)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="back" onclick="history.back()">←</div>
+  <div class="logo">Safari<span>Bet</span> — Refer & Earn</div>
+</header>
+
+<main class="main">
+
+  <div class="hero">
+    <div class="hero-icon">🤝</div>
+    <div class="hero-title">Invite Friends, <span style="color:var(--g)">Earn Cash</span></div>
+    <div class="hero-sub">For every friend who joins using your link</div>
+    <div class="hero-amount" id="heroAmount">KES —</div>
+    <div class="hero-per" id="heroPer">paid instantly to your balance</div>
+    <div id="pausedBanner" style="display:none;margin-top:12px;background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.3);border-radius:8px;padding:8px 14px;font-size:12px;color:#ff6b6b">
+      ⏸ Referral bonuses are currently paused by admin. Your referral link still works — bonuses will resume when re-enabled.
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-val" id="totalRefs">—</div>
+      <div class="stat-lbl">Friends Referred</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val" id="totalEarned">—</div>
+      <div class="stat-lbl">Total Earned (KES)</div>
+    </div>
+  </div>
+
+  <div class="link-box">
+    <div class="link-ttl">🔗 Your Referral Link</div>
+    <div class="link-url" id="refLink">Loading...</div>
+    <div class="btn-row">
+      <button class="btn btn-g" onclick="copyLink()">📋 Copy Link</button>
+      <button class="btn btn-o" onclick="shareLink()">🔗 Share</button>
+    </div>
+  </div>
+
+  <div class="how">
+    <div class="how-ttl">How it works</div>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-text"><strong>Share your link</strong> — Copy and send it to friends on WhatsApp, SMS, or social media</div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-text"><strong>Friend registers</strong> — They sign up using your link</div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-text"><strong>You earn KES 5</strong> — Paid instantly to your SafariBet balance, no waiting</div>
+    </div>
+  </div>
+
+  <div class="recent">
+    <div class="recent-ttl">Recent Referrals</div>
+    <div id="recentList"><div class="empty-ref">Loading...</div></div>
+  </div>
+
+</main>
+
+<nav class="bnav">
+  <div class="bni" onclick="location.href='/'">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
+  </div>
+  <div class="bni" onclick="location.href='/my-bets'">
+    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg>My Bets
+  </div>
+  <div class="bni on" onclick="location.href='/referral'">
+    <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>Refer
+  </div>
+  <div class="bni" onclick="location.href='/account'">
+    <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Account
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const token = localStorage.getItem('token');
+if (!token) { location.href = '/login'; }
+
+let refLink = '';
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/referral/stats', { headers: { Authorization: 'Bearer ' + token } });
+    const d = await r.json();
+    if (!d.success) return;
+    const { totalReferrals, totalEarned, referralLink, recentReferrals, bonusPerReferral, referralEnabled } = d.data;
+    refLink = referralLink;
+
+    document.getElementById('totalRefs').textContent = totalReferrals;
+    document.getElementById('totalEarned').textContent = totalEarned;
+    document.getElementById('refLink').textContent = referralLink;
+
+    // Reflect live admin config on hero
+    const heroAmount = document.getElementById('heroAmount');
+    const heroPer    = document.getElementById('heroPer');
+    const paused     = document.getElementById('pausedBanner');
+    if (!referralEnabled) {
+      heroAmount.textContent = 'Paused';
+      heroAmount.style.color = '#ff6b6b';
+      heroPer.style.display  = 'none';
+      paused.style.display   = 'block';
+    } else if (bonusPerReferral === 0) {
+      heroAmount.textContent = 'KES 0';
+      heroAmount.style.color = 'var(--yl)';
+      heroPer.textContent    = 'Referral tracking active — no cash bonus currently';
+    } else {
+      heroAmount.textContent = `KES ${bonusPerReferral}`;
+      heroAmount.style.color = 'var(--yl)';
+      heroPer.textContent    = 'paid instantly to your balance';
+    }
+
+    const listEl = document.getElementById('recentList');
+    if (!recentReferrals.length) {
+      listEl.innerHTML = '<div class="empty-ref">No referrals yet — share your link to start earning!</div>';
+    } else {
+      listEl.innerHTML = recentReferrals.map(r => `
+        <div class="ref-row">
+          <div>
+            <div class="ref-user">👤 ${r.username}</div>
+            <div class="ref-date">${new Date(r.joinedAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</div>
+          </div>
+          <div class="ref-earn">+KES 5</div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    document.getElementById('refLink').textContent = 'Could not load — try again';
+  }
+}
+
+function copyLink() {
+  if (!refLink) return;
+  navigator.clipboard?.writeText(refLink)
+    .then(() => showT('Link copied! 🎉', 'ok'))
+    .catch(() => {
+      // Fallback for Android browsers
+      const el = document.createElement('textarea');
+      el.value = refLink;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      showT('Link copied! 🎉', 'ok');
+    });
+}
+
+function shareLink() {
+  if (!refLink) return;
+  if (navigator.share) {
+    navigator.share({
+      title: 'Join SafariBet & win big!',
+      text: '🎯 Join me on SafariBet — the best betting site in Kenya! Sign up with my link:',
+      url: refLink
+    }).catch(() => {});
+  } else {
+    copyLink();
+  }
+}
+
+let tT = null;
+function showT(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `toast on ${type}`;
+  clearTimeout(tT); tT = setTimeout(() => el.classList.remove('on'), 3000);
+}
+
+loadStats();
+</script>
+</body>
+</html>

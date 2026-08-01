@@ -1,0 +1,38 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Responsible Gaming – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b;--hh:52px;--hdr:rgba(8,12,8,0.98)}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#fff;--s2:#eef3ee;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--hdr:rgba(255,255,255,0.98)}
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx)}
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);background:var(--hdr);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 14px;gap:10px;backdrop-filter:blur(20px)}
+.back{font-size:20px;color:var(--g);text-decoration:none}.logo{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--g)}.logo span{color:var(--yl)}
+.main{margin-top:var(--hh);padding:20px 16px 40px;max-width:600px;margin-left:auto;margin-right:auto}
+.pg-title{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;margin-bottom:20px}
+.age-badge{width:56px;height:56px;border-radius:50%;border:3px solid var(--rd);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:var(--rd);margin:0 auto 20px}
+.warn-box{background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.2);border-radius:12px;padding:16px;margin-bottom:20px;text-align:center}
+.warn-box p{font-size:13px;color:var(--mt);line-height:1.7}
+.content h3{font-size:15px;font-weight:700;margin:20px 0 8px;color:var(--g)}
+.content p,.content li{font-size:13px;line-height:1.8;color:var(--mt)}
+.content ul{padding-left:18px;margin-bottom:8px}
+.content a{color:var(--g)}
+.excl-btn{display:block;width:100%;margin-top:24px;padding:14px;background:linear-gradient(135deg,rgba(255,59,59,0.15),rgba(255,59,59,0.05));border:1px solid rgba(255,59,59,0.3);border-radius:12px;color:var(--rd);font-size:14px;font-weight:700;text-align:center;cursor:pointer;text-decoration:none}
+</style></head><body>
+<header><a class="back" href="/account">←</a><div class="logo">Safari<span>Bet</span></div></header>
+<main class="main">
+  <div class="pg-title">🎯 Responsible Gaming</div>
+  <div class="age-badge">18+</div>
+  <div class="warn-box">
+    <p>SafariBet does not support underage gambling. You must be <strong style="color:var(--tx)">18 years or older</strong> to register or play. Gambling is addictive — please gamble responsibly.</p>
+  </div>
+  <div class="content" id="content">Loading...</div>
+  <a class="excl-btn" href="/account">🚫 Use Self-Exclusion Tool →</a>
+</main>
+<script>
+fetch('/api/settings/site').then(r=>r.json()).then(d=>{
+  if(!d.success) return;
+  document.getElementById('content').innerHTML=d.data.responsible_content;
+});
+</script></body></html>

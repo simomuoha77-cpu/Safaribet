@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Login – SafariBet</title>
+<script src="/js/theme.js"></script>
+<style>
+:root{--g:#00c853;--bg:#0d1f0f;--s1:#111111;--s2:#1a1a1a;--s3:#2a2a2a;--bd:#1e3a1e;--tx:#ffffff;--mt:#888888;--mt2:#555555;--yl:#f5c518;--rd:#ff6b6b}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:#c8dccb;--tx:#14231a;--mt:#5c7a63;--mt2:#8aa38f;--yl:#b8860b;--rd:#d32f2f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.logo{text-align:center;margin-bottom:28px}
+.logo h1{font-size:32px;font-weight:900;color:var(--g)}
+.logo h1 span{color:var(--yl)}
+.logo p{color:var(--mt);font-size:13px;margin-top:4px}
+.card{background:var(--s1);border-radius:20px;padding:28px 24px;width:100%;max-width:380px;border:1px solid var(--bd)}
+.err{background:rgba(255,23,68,0.1);border:1px solid rgba(255,23,68,0.27);color:var(--rd);padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+.ok{background:rgba(0,200,83,0.07);border:1px solid rgba(0,200,83,0.27);color:var(--g);padding:12px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none;text-align:center}
+label{display:block;font-size:11px;font-weight:700;color:var(--mt);letter-spacing:1px;margin-bottom:6px;margin-top:16px}
+input{width:100%;background:var(--s2);border:1.5px solid var(--s3);border-radius:12px;padding:15px;color:var(--tx);font-size:16px;outline:none;transition:border .2s}
+input:focus{border-color:var(--g)}
+.hint{font-size:11px;color:var(--mt2);margin-top:5px}
+.btn{width:100%;background:var(--g);color:#000;border:none;border-radius:12px;padding:16px;font-size:17px;font-weight:800;cursor:pointer;margin-top:20px;transition:background .2s}
+.btn:hover{background:#00e65c}
+.btn:disabled{background:var(--s3);color:var(--mt2);cursor:not-allowed}
+.footer{text-align:center;margin-top:16px;font-size:13px;color:var(--mt2)}
+.footer a{color:var(--g);text-decoration:none;font-weight:600}
+.back{display:flex;align-items:center;gap:6px;color:var(--mt2);font-size:13px;margin-bottom:20px;cursor:pointer}
+.back:hover{color:var(--g)}
+h2{font-size:22px;font-weight:800;color:var(--tx);margin-bottom:4px}
+.sub{font-size:13px;color:var(--mt2);margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<div class="logo">
+  <h1>Safari<span>Bet</span></h1>
+  <p>Kenya's Premier Betting Platform</p>
+</div>
+
+<div class="card">
+  <div class="back" onclick="location.href='/'">← Back to Home</div>
+  <h2>Welcome Back</h2>
+  <p class="sub">Sign in to your account</p>
+
+  <div class="err" id="err"></div>
+  <div class="ok" id="ok"></div>
+
+  <label>PHONE NUMBER OR USERNAME</label>
+  <input type="text" id="identifier" placeholder="e.g. 0712345678 or john123" autocomplete="off"/>
+  <div class="hint">Enter your phone number or username</div>
+
+  <label>PASSWORD</label>
+  <input type="password" id="password" placeholder="Your password" autocomplete="off"/>
+
+  <button class="btn" id="btn" onclick="doLogin()">Sign In</button>
+</div>
+
+<div class="footer">
+  Don't have an account? <a href="/register">Create one free</a>
+</div>
+
+<script>
+async function doLogin(){
+  const btn        = document.getElementById('btn');
+  const errEl      = document.getElementById('err');
+  const okEl       = document.getElementById('ok');
+  const identifier = document.getElementById('identifier').value.trim();
+  const password   = document.getElementById('password').value;
+
+  errEl.style.display = 'none';
+  okEl.style.display  = 'none';
+
+  if(!identifier || !password){
+    return showErr('Please enter your phone/username and password');
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+
+  try {
+    // Send as both phone and username — server handles either
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: identifier, username: identifier, password })
+    });
+
+    const data = await res.json();
+
+    if(data.success){
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      okEl.textContent = '✅ Welcome back! Redirecting...';
+      okEl.style.display = 'block';
+      setTimeout(()=> location.href = '/', 1000);
+    } else {
+      showErr(data.message || 'Wrong credentials');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  } catch(e) {
+    showErr('Network error. Check connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+function showErr(msg){
+  const el = document.getElementById('err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+document.addEventListener('keydown', e => {
+  if(e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>
