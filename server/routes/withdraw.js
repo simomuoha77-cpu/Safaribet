@@ -296,7 +296,7 @@ router.post('/b2c/timeout', async (req, res) => {
 
     const ref = req.body?.ReferenceData?.ReferenceItem?.Value;
     if (!ref) return;
-    const tx = await Transaction.findOne({ reference: ref, status: 'pending' });
+    const tx = await Transaction.findOne({ reference: ref, status: { $in: ['pending', 'processing'] } });
     if (!tx) return;
     // Timeout — release the lock back to main
     const walletService = require('../services/walletService');
