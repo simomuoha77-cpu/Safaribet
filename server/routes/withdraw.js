@@ -193,7 +193,10 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
         b2cResult = await sendB2C(phone, amount, ref);
         if (b2cResult?.ResponseCode === '0') {
           await Transaction.findByIdAndUpdate(tx._id, {
-            $set: { description: `${tx.description} — B2C sent: ${b2cResult.ConversationID}` }
+            $set: {
+              description: `${tx.description} — B2C sent: ${b2cResult.ConversationID}`,
+              conversationId: b2cResult.ConversationID
+            }
           });
           console.log(`✅ B2C sent: ${b2cResult.ConversationID}`);
         }
@@ -243,12 +246,27 @@ router.post('/b2c/result', async (req, res) => {
     }
 
     const result = req.body?.Result;
-    if (!result) return;
-    const ref    = result.ReferenceData?.ReferenceItem?.Value;
-    const code   = result.ResultCode;
+    if (!result) {
+      console.warn('[withdraw/b2c/result] No Result object in callback body — cannot process.');
+      return;
+    }
+    const conversationId = result.ConversationID;
+    const code = result.ResultCode;
+    console.log('[withdraw/b2c/result] ConversationID:', conversationId, '| ResultCode:', code, '| ResultDesc:', result.ResultDesc);
 
-    const tx = await Transaction.findOne({ reference: ref });
-    if (!tx) return;
+    // Match primarily on ConversationID (reliable — this is what Safaricom gave us
+    // when we sent the payout). Fall back to the old ReferenceData lookup only for
+    // any in-flight transaction sent before this fix, so nothing already pending gets stranded.
+    let tx = await Transaction.findOne({ conversationId });
+    if (!tx) {
+      const legacyRef = result.ReferenceData?.ReferenceItem?.Value;
+      if (legacyRef) tx = await Transaction.findOne({ reference: legacyRef });
+    }
+    if (!tx) {
+      console.warn('[withdraw/b2c/result] No matching transaction found for ConversationID:', conversationId);
+      return;
+    }
+    const ref = tx.reference;
     // Idempotency — a transaction already in a terminal state ('completed'/'failed')
     // has already been processed; ignore replayed/duplicate callbacks so funds
     // can't be released or finalized twice.
@@ -294,10 +312,14 @@ router.post('/b2c/timeout', async (req, res) => {
       return;
     }
 
-    const ref = req.body?.ReferenceData?.ReferenceItem?.Value;
-    if (!ref) return;
-    const tx = await Transaction.findOne({ reference: ref, status: { $in: ['pending', 'processing'] } });
+    const conversationId = req.body?.ConversationID;
+    let tx = await Transaction.findOne({ conversationId, status: { $in: ['pending', 'processing'] } });
+    if (!tx) {
+      const legacyRef = req.body?.ReferenceData?.ReferenceItem?.Value;
+      if (legacyRef) tx = await Transaction.findOne({ reference: legacyRef, status: { $in: ['pending', 'processing'] } });
+    }
     if (!tx) return;
+    const ref = tx.reference;
     // Timeout — release the lock back to main
     const walletService = require('../services/walletService');
     const amount = Math.abs(tx.amount);

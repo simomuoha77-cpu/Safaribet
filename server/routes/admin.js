@@ -486,7 +486,10 @@ router.post('/withdrawal/approve', async (req, res) => {
     // so it can never be double-approved, and NOT completed, since only the real
     // /b2c/result callback should do that once Safaricom confirms the payout).
     await Transaction.findByIdAndUpdate(txId, {
-      $set: { description: `${tx.description} — B2C sent via admin approve: ${b2cResult.ConversationID}` }
+      $set: {
+        description: `${tx.description} — B2C sent via admin approve: ${b2cResult.ConversationID}`,
+        conversationId: b2cResult.ConversationID
+      }
     });
 
     audit('APPROVE_WITHDRAWAL', { txId, amount: tx.amount });
