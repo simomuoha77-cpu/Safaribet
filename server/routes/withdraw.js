@@ -190,11 +190,8 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
           console.log(`✅ B2C sent: ${b2cResult.ConversationID}`);
         }
       } catch(e) {
-        // Safaricom's actual rejection reason lives in e.response.data, not e.message
-        // (axios only gives "Request failed with status code 400" otherwise).
-        const safaricomDetail = e?.response?.data;
-        b2cError = safaricomDetail ? JSON.stringify(safaricomDetail) : e.message;
-        console.error('[B2C error]', b2cError);
+        b2cError = e.message;
+        console.error('[B2C error]', e.message);
         // The B2C request never reached Safaricom — release the lock so the user
         // isn't stuck with funds frozen indefinitely. Admin can see the failed tx and retry manually.
         await walletService.releaseLock(req.user._id, amount, ref).catch(() => {});
