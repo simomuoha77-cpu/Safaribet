@@ -441,14 +441,41 @@ router.post('/withdrawal/approve', async (req, res) => {
     if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
     if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
 
-    const walletService = require('../services/walletService');
-    await walletService.finalizeWithdrawal(tx.userId, Math.abs(tx.amount), tx.reference);
-    await Transaction.findByIdAndUpdate(txId, { $set:{ status:'completed' } });
+    // Extract the recipient phone number from the transaction description
+    // (format: "Withdrawal KES <amount> to <phone>") since it isn't stored as its own field.
+    const phoneMatch = tx.description?.match(/to (\d+)/);
+    const phone = phoneMatch?.[1];
+    if (!phone) {
+      return res.status(400).json({ success:false, message:'Could not determine recipient phone number from transaction — approve manually only after confirming payment was actually sent via M-Pesa.' });
+    }
 
-    require('../services/notificationService').notify(tx.userId, 'withdrawal_success', { amount: Math.abs(tx.amount) }).catch(()=>{});
+    // Actually attempt to send the money via B2C — approving in the dashboard
+    // must not silently mark "completed" without a real disbursement attempt.
+    const { sendB2C } = require('./withdraw');
+    let b2cResult;
+    try {
+      b2cResult = await sendB2C(phone, Math.abs(tx.amount), tx.reference);
+    } catch (b2cErr) {
+      const detail = b2cErr?.response?.data ? JSON.stringify(b2cErr.response.data) : b2cErr.message;
+      console.error('[admin/withdrawal/approve] B2C send failed:', detail);
+      return res.status(502).json({ success:false, message: `B2C send failed — money was NOT sent: ${detail}` });
+    }
+
+    if (b2cResult?.ResponseCode !== '0') {
+      return res.status(502).json({ success:false, message: `Safaricom did not accept the request: ${JSON.stringify(b2cResult)}` });
+    }
+
+    // B2C was accepted by Safaricom — leave status as 'pending'. The transaction
+    // is only finalized to 'completed' by the real /b2c/result callback once
+    // Safaricom confirms the payout actually succeeded. This avoids the previous
+    // bug where Approve marked things "completed" with zero money ever sent.
+    await Transaction.findByIdAndUpdate(txId, {
+      $set: { description: `${tx.description} — B2C sent via admin approve: ${b2cResult.ConversationID}` }
+    });
+
     audit('APPROVE_WITHDRAWAL', { txId, amount: tx.amount });
     require('../services/auditService').log('admin.withdrawal.approve', { targetType:'Transaction', targetId:txId, meta:{ amount: tx.amount } });
-    res.json({ success:true, message:'Withdrawal approved' });
+    res.json({ success:true, message:'B2C payout sent to Safaricom — awaiting confirmation callback. Do not mark as completed manually.' });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
