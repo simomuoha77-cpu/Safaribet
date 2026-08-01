@@ -9,7 +9,7 @@ const router  = express.Router();
 const mpesaLimiter = rateLimit({ windowMs: 60000, max: 3, message: { success: false, message: 'Too many payment requests.' } });
 
 const MPESA_ENV    = process.env.MPESA_ENV || 'sandbox';
-const BASE_URL     = MPESA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+const BASE_URL     = (MPESA_ENV === 'production' || MPESA_ENV === 'live') ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
 const SHORTCODE    = process.env.MPESA_SHORTCODE;
 const PASSKEY      = process.env.MPESA_PASSKEY;
 const CONSUMER_KEY = process.env.MPESA_CONSUMER_KEY;

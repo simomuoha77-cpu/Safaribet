@@ -25,11 +25,12 @@ const dailyLimiter = rateLimit({
 });
 
 // ── M-PESA B2C ──
-const BASE     = process.env.MPESA_ENV === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+const BASE     = process.env.MPESA_ENV === 'production' || process.env.MPESA_ENV === 'live' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
 const SHORTCODE = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
-const CERTPATH  = process.env.MPESA_CERT_PATH;
 const INITIATOR = process.env.MPESA_INITIATOR_NAME || 'testapi';
-const INIT_PWD  = process.env.MPESA_INITIATOR_PASSWORD;
+const SECURITY_CREDENTIAL = process.env.MPESA_SECURITY_CREDENTIAL;
+const RESULT_URL = process.env.MPESA_RESULT_URL || `${process.env.APP_URL}/api/withdraw/b2c/result`;
+const TIMEOUT_URL = process.env.MPESA_QUEUE_TIMEOUT_URL || `${process.env.APP_URL}/api/withdraw/b2c/timeout`;
 
 async function getB2CToken() {
   const creds = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
@@ -43,17 +44,20 @@ async function sendB2C(phone, amount, ref) {
   if (!process.env.MPESA_CONSUMER_KEY || !process.env.MPESA_CONSUMER_SECRET) {
     throw new Error('M-Pesa not configured');
   }
+  if (!SECURITY_CREDENTIAL) {
+    throw new Error('MPESA_SECURITY_CREDENTIAL is not set — B2C cannot be authorized');
+  }
   const token = await getB2CToken();
   const r = await axios.post(`${BASE}/mpesa/b2c/v3/paymentrequest`, {
     InitiatorName:          INITIATOR,
-    SecurityCredential:     INIT_PWD || 'placeholder',
+    SecurityCredential:     SECURITY_CREDENTIAL,
     CommandID:              'BusinessPayment',
     Amount:                 amount,
     PartyA:                 SHORTCODE,
     PartyB:                 phone,
     Remarks:                `SafariBet withdrawal ${ref}`,
-    QueueTimeOutURL:        `${process.env.APP_URL}/api/withdraw/b2c/timeout`,
-    ResultURL:              `${process.env.APP_URL}/api/withdraw/b2c/result`,
+    QueueTimeOutURL:        TIMEOUT_URL,
+    ResultURL:              RESULT_URL,
     Occasion:               ref
   }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
   return r.data;
