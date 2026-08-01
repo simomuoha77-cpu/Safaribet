@@ -3,10 +3,22 @@
 // Football API via server/engine/apifootball.js. No other provider is used.
 // ══════════════════════════════════════════════════════════════════════════════
 const express = require('express');
+const crypto  = require('crypto');
 const safeError = require('../utils/safeError');
 const Match   = require('../models/Match');
 const { getFixtures, getLive, competitionKey } = require('../engine/apifootball');
 const router  = express.Router();
+
+// Short request-coalescing cache to avoid duplicate upstream calls within the
+// same few seconds. NOT a data store — expires fast enough that stale data
+// can never linger between poll cycles.
+const cache = {};
+const C = {
+  get: (k, ttl) => { const c = cache[k]; return (c && Date.now() - c.ts < ttl) ? c.data : null; },
+  set: (k, d)   => { cache[k] = { data: d, ts: Date.now() }; }
+};
+const FIXTURES_TTL = 20000; // 20 seconds
+const LIVE_TTL     = 8000;  // 8 seconds
 const { resolveOdds } = require('../services/marketResolver');
 
 // Strips any suspended or below-floor odds directly off a match's raw odds
@@ -75,28 +87,55 @@ function deriveLeagues(matches) {
 }
 
 // ── AVAILABLE LEAGUES ──
-// Served from MongoDB, not a live upstream call — scheduler.js already syncs
-// this DB from the Juan API every 5 minutes, so there's no reason to make the
-// user wait on a live third-party round-trip just to list leagues.
 router.get('/available', async (req, res) => {
   try {
-    const matches = await Match.find({}).lean();
+    let matches = C.get('fixtures', FIXTURES_TTL);
+    if (!matches) {
+      matches = await getFixtures(7);
+      C.set('fixtures', matches);
+    }
     res.json({ success: true, data: deriveLeagues(matches) });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Failed to load leagues: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
   }
 });
 
 // ── FEATURED ──
-// DB already has live scores merged in via updateLive() (runs every 10s), so
-// no separate live-overlay call is needed here — just read the DB directly.
+// Supports conditional GET (If-None-Match / ETag) so a client polling this on
+// an interval — exactly what the homepage does for its silent background
+// refresh — gets a cheap 304 with no body whenever nothing has actually
+// changed, instead of re-downloading the entire match list every time. The
+// ETag is a hash of the exact payload being sent, so it only changes when a
+// score, live minute, odds price, or match status actually moves.
 router.get('/featured', async (req, res) => {
   try {
-    const matches = await Match.find({}).lean();
-    const sorted = smartSort(matches).map(applyOddsPipeline);
-    res.json({ success: true, data: sorted, count: sorted.length });
+    let matches = C.get('fixtures', FIXTURES_TTL);
+    if (!matches) {
+      matches = await getFixtures(7);
+      C.set('fixtures', matches);
+    }
+    // Overlay live data on top
+    let live = C.get('live', LIVE_TTL);
+    if (!live) { try { live = await getLive(); C.set('live', live); } catch { live = []; } }
+    const liveMap = new Map(live.map(m => [m.matchId, m]));
+    const merged = matches.map(m => liveMap.has(m.matchId) ? liveMap.get(m.matchId) : m);
+    live.forEach(m => { if (!merged.find(x => x.matchId === m.matchId)) merged.push(m); });
+
+    const sorted = smartSort(merged).map(applyOddsPipeline);
+    const payload = { success: true, data: sorted, count: sorted.length };
+    const etag = 'W/"' + crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex') + '"';
+
+    res.set('ETag', etag);
+    // Always revalidate with the server rather than letting the browser's own
+    // HTTP cache silently serve a stale copy — the 304 short-circuit above is
+    // the bandwidth optimization, not the browser cache.
+    res.set('Cache-Control', 'no-cache');
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.json(payload);
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Failed to load matches: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
   }
 });
 
@@ -104,21 +143,28 @@ router.get('/featured', async (req, res) => {
 router.get('/matches/:sport', async (req, res) => {
   const sport = req.params.sport;
   try {
-    const matches = await Match.find({ sport }).lean();
-    const filtered = smartSort(matches).map(applyOddsPipeline);
+    let matches = C.get('fixtures', FIXTURES_TTL);
+    if (!matches) {
+      matches = await getFixtures(7);
+      C.set('fixtures', matches);
+    }
+    const filtered = smartSort(matches.filter(m => m.sport === sport)).map(applyOddsPipeline);
     res.json({ success: true, data: filtered, count: filtered.length });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Failed to load matches: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
   }
 });
 
 // ── LIVE ──
-// updateLive() (scheduler.js, every 10s) keeps status:'live' docs fresh in the
-// DB, including marking matches finished the moment they drop off the feed —
-// so this is always as current as a live upstream call, without the wait.
+// Always serves what the Juan API currently says is live. If it says zero
+// live matches, we return zero — never stale or cached data beyond LIVE_TTL.
 router.get('/live', async (req, res) => {
   try {
-    const live = await Match.find({ status: 'live' }).lean();
+    let live = C.get('live', LIVE_TTL);
+    if (!live) {
+      live = await getLive();
+      C.set('live', live);
+    }
     res.json({ success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' });
   } catch (e) {
     res.status(502).json({ success: false, data: [], message: 'Live data unavailable: ' + e.message });
@@ -192,21 +238,12 @@ router.get('/match/:matchId', async (req, res) => {
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }
 });
 
-// ── FORCE RE-SYNC ──
-// admin.html's "clear cache" button now triggers an immediate DB re-sync
-// instead — there's no more in-memory cache to clear now that list endpoints
-// read straight from MongoDB.
-router.post('/cache/clear', async (req, res) => {
+// ── CACHE CLEAR ──
+router.post('/cache/clear', (req, res) => {
   if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
     return res.status(401).json({ success: false });
-  try {
-    const { syncFixtures, updateLive } = require('../engine/apifootball');
-    const result = await syncFixtures();
-    await updateLive().catch(() => {});
-    res.json({ success: true, message: `Re-synced ${result.synced || 0} fixtures` });
-  } catch (e) {
-    res.status(502).json({ success: false, message: 'Re-sync failed: ' + e.message });
-  }
+  Object.keys(cache).forEach(k => delete cache[k]);
+  res.json({ success: true, message: 'Cache cleared' });
 });
 
 // ── DEBUG ──

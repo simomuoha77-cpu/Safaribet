@@ -577,6 +577,10 @@ header{
       </div>
     </div>
   </div>
+  <div id="pullRefreshIndicator" style="height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:8px;transition:height .15s ease;color:var(--mt);font-size:12px">
+    <div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div>
+    <span id="pullRefreshLabel">Pull to refresh</span>
+  </div>
   <div id="matchList">
     <div class="loading"><div class="spin"></div>Loading matches...</div>
   </div>
@@ -843,26 +847,48 @@ function toggleFaq(i){
 let USER=null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
 let oddsRefresh=null;
 let allMatches=[], currentFilter='highlights', currentMarket='1x2', currentLeague='';
+let matchesEtag=null; // last ETag /api/odds/featured sent us — lets the next refresh be a cheap conditional request
+let homeScrollRestored=false; // guards against restoring scroll more than once per page load
 
-// Restore matches from a short-lived cache (2 min) so navigating back to the
-// homepage paints instantly from what we already fetched moments ago, instead
-// of always blocking on a fresh network round-trip for ~400+ matches. Uses
-// localStorage, not sessionStorage — sessionStorage only survives within the
-// exact same tab and is lost the moment Android/Chrome discards and reloads a
-// backgrounded tab (common with many tabs open), which is what made this
-// cache seem to not be working at all. localStorage survives that. Still
-// refreshed silently right after, so data never goes stale beyond the window.
-// Painted HERE, synchronously, rather than waiting for DOMContentLoaded — every
-// element applyFilters() touches (matchList, secTtl, leagueSelect, todayCount)
-// is already above this <script> tag in the document, so it's safe to repaint
-// the instant this line runs instead of after the whole page finishes parsing.
+// Restore matches from cache (whatever's there, however old) so navigating back to
+// the homepage paints instantly from what we already fetched, instead of always
+// blocking on a fresh network round-trip for ~400+ matches. loadAllMatches() always
+// kicks off a silent background refresh right after this instant paint, so stale
+// data on screen is only ever visible for as long as that request takes — the
+// ETag carried over here usually makes that refresh a tiny 304, not a full
+// re-download.
 try {
-  const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
-  if (cached && cached.data && (Date.now() - cached.ts) < 120000) {
+  const cached = JSON.parse(sessionStorage.getItem('matchesCache') || 'null');
+  if (cached && cached.data && cached.data.length) {
     allMatches = cached.data;
-    applyFilters(true);
   }
+  if (cached && cached.etag) matchesEtag = cached.etag;
 } catch(e) {}
+
+// ── SCROLL POSITION ──
+// Save the homepage's scroll offset whenever the page is about to be left —
+// covers navigating to another tab (My Bets, Casino, Account), closing the
+// tab, and the back/forward gesture. Restored in renderMatches() the first
+// time real content is painted after this load, so returning to Home drops
+// the user back where they were instead of snapping to the top.
+function saveHomeScroll(){
+  try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); } catch(e){}
+}
+window.addEventListener('pagehide', saveHomeScroll);
+window.addEventListener('beforeunload', saveHomeScroll);
+
+function restoreHomeScrollOnce(){
+  if (homeScrollRestored) return;
+  homeScrollRestored = true;
+  let y = 0;
+  try { y = parseInt(sessionStorage.getItem('homeScrollY') || '0', 10) || 0; } catch(e){}
+  if (y > 0) {
+    // Wait a frame so the just-painted match cards have real layout height —
+    // scrolling before that would clamp to whatever the (still-short) page
+    // height was a moment ago.
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }
+}
 
 // ── INIT ──
 let notifPanelOpen = false;
@@ -1053,6 +1079,50 @@ window.addEventListener('DOMContentLoaded', ()=>{
   }, 20000);
 });
 
+// ── PULL TO REFRESH ──
+// Lets the user force an immediate refresh (rather than waiting for the 20s
+// background cycle) by pulling down at the very top of the page — the same
+// gesture Betika/SportyBet use. Reuses the normal silent refresh path
+// (loadAllMatches(true)) so it never shows the full-page spinner or loses
+// scroll position; the indicator below is the only feedback.
+(function(){
+  let startY = 0, pulling = false, currentPull = 0, refreshing = false;
+  const THRESHOLD = 70, MAX_PULL = 90;
+  const indicator = document.getElementById('pullRefreshIndicator');
+  const label = document.getElementById('pullRefreshLabel');
+  if (!indicator) return;
+
+  document.addEventListener('touchstart', (e) => {
+    if (window.scrollY <= 0 && !refreshing) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    if (window.scrollY > 0) { pulling = false; indicator.style.height = '0px'; currentPull = 0; return; }
+    const delta = e.touches[0].clientY - startY;
+    if (delta <= 0) { indicator.style.height = '0px'; currentPull = 0; return; }
+    e.preventDefault(); // this is our gesture now, not the browser's native pull-to-reload
+    currentPull = Math.min(delta * 0.5, MAX_PULL);
+    indicator.style.height = currentPull + 'px';
+    label.textContent = currentPull >= THRESHOLD ? 'Release to refresh' : 'Pull to refresh';
+  }, { passive: false });
+
+  document.addEventListener('touchend', async () => {
+    if (!pulling) return;
+    pulling = false;
+    if (currentPull >= THRESHOLD && !refreshing) {
+      refreshing = true;
+      label.textContent = 'Refreshing…';
+      try { await loadAllMatches(true); } finally { refreshing = false; }
+    }
+    indicator.style.height = '0px';
+    currentPull = 0;
+  }, { passive: true });
+})();
+
 
 // ── FILTER BAR ──
 function pickFilter(el){
@@ -1140,11 +1210,24 @@ async function loadAllMatches(silent=false){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
   }
   try{
-    const r=await fetch('/api/odds/featured');
+    // Conditional request — if the server's data hasn't changed since our last
+    // fetch, this comes back as a 304 with no body at all, instead of
+    // re-downloading the full ~400+ match list every 20s just to find nothing
+    // moved.
+    const headers = matchesEtag ? { 'If-None-Match': matchesEtag } : {};
+    const r=await fetch('/api/odds/featured', { headers });
+    if (r.status === 304) {
+      // Confirmed up to date — nothing to re-render, just refresh the cache
+      // timestamp so this still counts as a recent sync.
+      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      return;
+    }
+    const newEtag = r.headers.get('ETag');
     const d=await r.json();
     if(d.success&&d.data){
       allMatches=d.data;
-      try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now() })); } catch(e) {}
+      matchesEtag = newEtag || matchesEtag;
+      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       // Count today's matches
       const todayStr=new Date().toDateString();
       const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
@@ -1548,93 +1631,41 @@ function renderMatches(matches, silent=false){
   <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches right now</div>
   <div style="font-size:13px;color:var(--mt)">Check back shortly — fixtures are added regularly.</div>
 </div>`;
+    restoreHomeScrollOnce();
     return;
   }
 
-  // silent=true is a background 20s refresh — only rebuild the whole list on
-  // first load or after a real filter/market change (silent=false). On a
-  // silent pass, patch only the cards whose odds/score actually changed, so a
-  // card the user is mid-tap on is never torn down and replaced under their
-  // finger — that full-rebuild-every-20s was why taps felt like they weren't
-  // registering.
-  const canPatch = silent && el.querySelector('.mc');
-
-  if (!canPatch) {
-    el.innerHTML=matches.map(m=>renderMatch(m)).join('');
-    lastMatchSig = {};
-    matches.forEach(m=>{ lastMatchSig[m.matchId]=matchSig(m); });
-
-    stopAllLiveTimers();
-    matches.filter(m => m.status === 'live').forEach(m => {
-      startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated);
-    });
-
-    slip.forEach(s=>{
-      const btn=document.getElementById(`odd_${s.matchId}_${s.pick}`);
-      if(btn) btn.classList.add('sel');
-    });
-    return;
+  const prevOdds={};
+  if(silent){
+    document.querySelectorAll('[data-odds]').forEach(b=>{ prevOdds[b.id]=parseFloat(b.dataset.odds); });
   }
 
-  const seen = new Set();
-  const liveMatches = [];
+  el.innerHTML=matches.map(m=>renderMatch(m)).join('');
 
-  matches.forEach(m=>{
-    seen.add(m.matchId);
-    const sig = matchSig(m);
-    const existing = document.getElementById(`mc_${m.matchId}`);
-
-    if (!existing) {
-      el.insertAdjacentHTML('beforeend', renderMatch(m));
-      lastMatchSig[m.matchId] = sig;
-    } else if (lastMatchSig[m.matchId] !== sig) {
-      const prevOdds={};
-      existing.querySelectorAll('[data-odds]').forEach(b=>{ prevOdds[b.id]=parseFloat(b.dataset.odds); });
-
-      existing.outerHTML = renderMatch(m);
-      lastMatchSig[m.matchId] = sig;
-
-      const fresh = document.getElementById(`mc_${m.matchId}`);
-      if (fresh) {
-        fresh.querySelectorAll('[data-odds]').forEach(b=>{
-          const prev = prevOdds[b.id];
-          if (prev==null) return;
-          const curr=parseFloat(b.dataset.odds);
-          if(curr>prev) b.classList.add('changed-up');
-          else if(curr<prev) b.classList.add('changed-dn');
-          setTimeout(()=>b.classList.remove('changed-up','changed-dn'),600);
-        });
-        slip.forEach(s=>{
-          if (s.matchId!==m.matchId) return;
-          const btn=document.getElementById(`odd_${s.matchId}_${s.pick}`);
-          if(btn) btn.classList.add('sel');
-        });
-      }
-    }
-    if (m.status==='live') liveMatches.push(m);
-  });
-
-  // Drop cards for matches no longer in the feed (finished/expired)
-  el.querySelectorAll('.mc').forEach(card=>{
-    const id = card.id.slice(3); // strip "mc_"
-    if(!seen.has(id)) { card.remove(); delete lastMatchSig[id]; }
-  });
-
+  // Start counting timers for all live match cards
   stopAllLiveTimers();
-  liveMatches.forEach(m => {
+  matches.filter(m => m.status === 'live').forEach(m => {
     startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated);
   });
-}
 
-let lastMatchSig = {};
-function matchSig(m){
-  const ao = m.aiOdds||m.odds||{};
-  return [
-    m.status, m.score?.home, m.score?.away, m.score?.minute, m.score?.period, m.score?.minuteIsEstimated,
-    m.odds?.home, m.odds?.draw, m.odds?.away, m.odds?.homeDraw, m.odds?.homeAway, m.odds?.drawAway,
-    m.odds?.btts, m.odds?.bttsNo, m.odds?.over25, m.odds?.under25,
-    ao.homeWin, ao.draw, ao.awayWin, ao.dc_home_draw, ao.dc_home_away, ao.dc_draw_away, ao.btts, ao.bttsNo, ao.over25, ao.under25
-  ].join('|');
+  // Restore selections
+  slip.forEach(s=>{
+    const btn=document.getElementById(`odd_${s.matchId}_${s.pick}`);
+    if(btn) btn.classList.add('sel');
+  });
+
+  if(silent){
+    Object.entries(prevOdds).forEach(([id,prev])=>{
+      const btn=document.getElementById(id);
+      if(!btn) return;
+      const curr=parseFloat(btn.dataset.odds);
+      if(curr>prev) btn.classList.add('changed-up');
+      else if(curr<prev) btn.classList.add('changed-dn');
+      setTimeout(()=>btn.classList.remove('changed-up','changed-dn'),600);
+    });
+  }
+
+  restoreHomeScrollOnce();
 }
 
 // ── RENDER MATCH ──
