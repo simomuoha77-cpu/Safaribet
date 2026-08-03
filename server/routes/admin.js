@@ -215,7 +215,9 @@ router.get('/user/:id', async (req, res) => {
     let q = req.params.id.trim();
     let phone = q.replace(/\D/g,'');
     if (phone.startsWith('0')) phone = '254'+phone.slice(1);
-    const user = await User.findOne({ $or:[{phone},{username:q.toLowerCase()}] }).select('username phone balance createdAt isActive').lean();
+    const user = await User.findOne({ $or:[{phone},{username:q.toLowerCase()}] })
+      .select('username phone balance createdAt isActive role kycStatus phoneVerified dailyDepositLimit dailyStakeLimit selfExcludedUntil favouriteTeams')
+      .lean();
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
     const bets = await Bet.countDocuments({ userId:user._id });
     res.json({ success:true, user:{ ...user, bets } });
@@ -241,6 +243,69 @@ router.post('/user/toggle', async (req, res) => {
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
     audit('TOGGLE_USER', { username:user.username, active });
     res.json({ success:true, message:`User ${active?'activated':'suspended'}` });
+  } catch(e) { return safeError(res, e, 'admin'); }
+});
+
+router.get('/user/:id/bets', async (req, res) => {
+  try {
+    const status = req.query.status; // optional filter, e.g. 'pending'
+    const q = { userId: req.params.id };
+    if (status) q.status = status;
+    const bets = await Bet.find(q).sort({ createdAt: -1 }).limit(30).lean();
+    res.json({ success:true, data: bets });
+  } catch(e) { return safeError(res, e, 'admin'); }
+});
+
+// ── EDIT USER (general profile fields) ──
+// Deliberately excludes balance/bonus — those must go through POST /admin/balance,
+// which uses walletService + Transaction records instead of a raw $set, and the
+// User schema itself blocks a direct $set on balance at the model level (see
+// the pre('findOneAndUpdate') hook in models/User.js). This endpoint is only
+// for account/profile fields, never the wallet itself.
+const EDITABLE_USER_FIELDS = [
+  'username', 'phone', 'phoneVerified', 'role', 'isActive',
+  'kycStatus', 'kycRejectReason', 'favouriteTeams',
+  'dailyDepositLimit', 'dailyStakeLimit', 'selfExcludedUntil'
+];
+router.patch('/user/:id', async (req, res) => {
+  try {
+    const updates = {};
+    for (const field of EDITABLE_USER_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) updates[field] = req.body[field];
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success:false, message:'No editable fields provided.' });
+    }
+    if (updates.role && !['user','admin','support'].includes(updates.role)) {
+      return res.status(400).json({ success:false, message:'Invalid role.' });
+    }
+
+    const before = await User.findById(req.params.id).lean();
+    if (!before) return res.status(404).json({ success:false, message:'User not found' });
+
+    const user = await User.findByIdAndUpdate(req.params.id, { $set: updates }, { new:true, runValidators:true });
+    audit('EDIT_USER', { userId: req.params.id, username: user.username, changes: updates });
+    require('../services/auditService').log('admin.user.edit', { targetType:'User', targetId:req.params.id, meta:{ changes: updates } }).catch(()=>{});
+    res.json({ success:true, message:'User updated.', user });
+  } catch(e) {
+    if (e.code === 11000) return res.status(400).json({ success:false, message:'That username or phone is already in use.' });
+    return safeError(res, e, 'admin');
+  }
+});
+
+// ── RESET USER PASSWORD (admin-initiated, e.g. account recovery) ──
+router.post('/user/:id/reset-password', async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success:false, message:'New password must be at least 6 characters.' });
+    }
+    const bcrypt = require('bcryptjs');
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const user = await User.findByIdAndUpdate(req.params.id, { $set:{ passwordHash } }, { new:true });
+    if (!user) return res.status(404).json({ success:false, message:'User not found' });
+    audit('RESET_USER_PASSWORD', { userId: req.params.id, username: user.username });
+    res.json({ success:true, message:`Password reset for ${user.username}.` });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
@@ -437,18 +502,64 @@ router.get('/transactions', async (req, res) => {
 router.post('/withdrawal/approve', async (req, res) => {
   try {
     const { txId } = req.body;
-    const tx = await Transaction.findById(txId);
-    if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
-    if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
 
-    const walletService = require('../services/walletService');
-    await walletService.finalizeWithdrawal(tx.userId, Math.abs(tx.amount), tx.reference);
-    await Transaction.findByIdAndUpdate(txId, { $set:{ status:'completed' } });
+    // Atomically claim this transaction by flipping pending -> processing in one
+    // step. If two clicks (or a double-tap) hit this at the same time, only the
+    // first one will find status:'pending' and succeed; the second will match
+    // nothing and get a clear "already being processed" response — never a
+    // second real B2C send for the same withdrawal.
+    const tx = await Transaction.findOneAndUpdate(
+      { _id: txId, status: 'pending' },
+      { $set: { status: 'processing' } },
+      { new: false } // return the pre-update doc so we still have original fields
+    );
+    if (!tx) {
+      const existing = await Transaction.findById(txId).lean();
+      if (!existing) return res.status(404).json({ success:false, message:'Transaction not found' });
+      return res.status(409).json({ success:false, message:`Already ${existing.status} — cannot approve again.` });
+    }
 
-    require('../services/notificationService').notify(tx.userId, 'withdrawal_success', { amount: Math.abs(tx.amount) }).catch(()=>{});
+    // Extract the recipient phone number from the transaction description
+    // (format: "Withdrawal KES <amount> to <phone>") since it isn't stored as its own field.
+    const phoneMatch = tx.description?.match(/to (\d+)/);
+    const phone = phoneMatch?.[1];
+    if (!phone) {
+      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } }); // release the lock, nothing was sent
+      return res.status(400).json({ success:false, message:'Could not determine recipient phone number from transaction — approve manually only after confirming payment was actually sent via M-Pesa.' });
+    }
+
+    // Actually attempt to send the money via B2C — approving in the dashboard
+    // must not silently mark "completed" without a real disbursement attempt.
+    const { sendB2C } = require('./withdraw');
+    let b2cResult;
+    try {
+      b2cResult = await sendB2C(phone, Math.abs(tx.amount), tx.reference);
+    } catch (b2cErr) {
+      const detail = b2cErr?.response?.data ? JSON.stringify(b2cErr.response.data) : b2cErr.message;
+      console.error('[admin/withdrawal/approve] B2C send failed:', detail);
+      // Send genuinely failed — release the lock back to pending so it can be retried.
+      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } });
+      return res.status(502).json({ success:false, message: `B2C send failed — money was NOT sent: ${detail}` });
+    }
+
+    if (b2cResult?.ResponseCode !== '0') {
+      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } });
+      return res.status(502).json({ success:false, message: `Safaricom did not accept the request: ${JSON.stringify(b2cResult)}` });
+    }
+
+    // B2C was accepted by Safaricom — leave status as 'processing' (NOT pending,
+    // so it can never be double-approved, and NOT completed, since only the real
+    // /b2c/result callback should do that once Safaricom confirms the payout).
+    await Transaction.findByIdAndUpdate(txId, {
+      $set: {
+        description: `${tx.description} — B2C sent via admin approve: ${b2cResult.ConversationID}`,
+        conversationId: b2cResult.ConversationID
+      }
+    });
+
     audit('APPROVE_WITHDRAWAL', { txId, amount: tx.amount });
     require('../services/auditService').log('admin.withdrawal.approve', { targetType:'Transaction', targetId:txId, meta:{ amount: tx.amount } });
-    res.json({ success:true, message:'Withdrawal approved' });
+    res.json({ success:true, message:'B2C payout sent to Safaricom — awaiting confirmation callback. Do not mark as completed manually.' });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 

@@ -65,20 +65,20 @@ async function settleJackpots() {
         const payoutPool = round.guaranteedPrize > 0 ? round.guaranteedPrize : round.poolAmount;
         const share = parseFloat((payoutPool / winners.length).toFixed(2));
         for (const w of winners) {
-          await walletService.credit(w.userId, 'main', share, 'jackpot_win', `jackpot_win_${round._id}_${w.userId}`, { roundId: round._id });
+          // Record the computed payout so the admin approval screen can show
+          // exactly what will be paid — but do NOT credit the wallet yet.
           w.payout = share;
           await w.save();
-          require('../services/notificationService')
-            .notify(w.userId, 'system', { title: '🎉 Jackpot Winner!', message: `You won KES ${share.toLocaleString()} in the "${round.name}" jackpot!` })
-            .catch(() => {});
         }
-        console.log(`  🎉 [jackpot] Round "${round.name}" settled — ${winners.length} winner(s), KES ${share} each`);
+        console.log(`  ⏳ [jackpot] Round "${round.name}" graded — ${winners.length} winner(s) at KES ${share} each, awaiting admin approval before payout`);
       } else {
-        console.log(`  ↪️ [jackpot] Round "${round.name}" settled — no perfect score, pool of KES ${round.poolAmount} carries over`);
+        console.log(`  ↪️ [jackpot] Round "${round.name}" graded — no perfect score, pool of KES ${round.poolAmount} will carry over once approved`);
       }
 
-      round.status = 'settled';
-      round.settledAt = new Date();
+      // Fixtures have all finished and every entry is graded, but nothing has
+      // been paid out yet — an admin must review and approve this round
+      // (see POST /api/jackpot/admin/approve/:roundId) before winners are credited.
+      round.status = 'awaiting_approval';
       await round.save();
     } catch (e) {
       console.error(`  [jackpot] Failed to settle round ${round._id}:`, e.message);

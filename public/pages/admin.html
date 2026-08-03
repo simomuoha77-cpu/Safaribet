@@ -353,6 +353,56 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     </div>
     <div class="res" id="uRes"></div>
   </div>
+
+  <div class="sec" id="userEditSec" style="display:none">
+    <div class="sec-hdr"><h3>✏️ Edit User: <span id="editUserName"></span></h3></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label class="lbl">Username</label><input class="inp" id="euUsername"/></div>
+      <div><label class="lbl">Phone</label><input class="inp" id="euPhone"/></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+      <div><label class="lbl">Role</label>
+        <select class="inp" id="euRole"><option value="user">user</option><option value="support">support</option><option value="admin">admin</option></select>
+      </div>
+      <div><label class="lbl">KYC Status</label>
+        <select class="inp" id="euKyc"><option value="not_started">not_started</option><option value="pending">pending</option><option value="verified">verified</option><option value="rejected">rejected</option></select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+      <div><label class="lbl">Daily Deposit Limit (KES, blank = none)</label><input class="inp" type="number" id="euDepLimit"/></div>
+      <div><label class="lbl">Daily Stake Limit (KES, blank = none)</label><input class="inp" type="number" id="euStakeLimit"/></div>
+    </div>
+    <div style="margin-top:8px">
+      <label class="lbl">Self-Exclude Until (blank = not excluded)</label>
+      <input class="inp" type="date" id="euSelfExclude"/>
+    </div>
+    <div style="margin-top:8px">
+      <label class="lbl"><input type="checkbox" id="euPhoneVerified" style="width:auto;margin-right:6px"/>Phone Verified</label>
+    </div>
+    <button class="btn btn-g btn-full" style="margin-top:10px" onclick="saveUserEdit()">Save Changes</button>
+    <div class="res" id="euRes"></div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--bd);padding-top:12px">
+      <label class="lbl">Reset Password</label>
+      <div class="inp-row">
+        <input class="inp" type="text" id="euNewPassword" placeholder="New password (min 6 chars)"/>
+        <button class="btn btn-y btn-sm" onclick="resetUserPassword()">Reset</button>
+      </div>
+      <div class="res" id="euPwRes"></div>
+    </div>
+  </div>
+
+  <div class="sec" id="userBetsSec" style="display:none">
+    <div class="sec-hdr"><h3>🎲 Bets — <span id="betsUserName"></span></h3></div>
+    <div class="inp-row" style="margin-bottom:8px">
+      <select class="inp" id="betsFilter" onchange="loadUserBets()">
+        <option value="pending">Pending only</option>
+        <option value="">All bets</option>
+      </select>
+    </div>
+    <div id="userBetsList" style="font-size:12px;color:var(--mt)">Search a user first.</div>
+  </div>
+
   <div class="sec">
     <div class="sec-hdr"><h3>💰 Adjust Balance</h3></div>
     <label class="lbl">User</label>
@@ -581,6 +631,11 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <div id="jpSelectedList" style="margin-bottom:12px"></div>
     <button class="btn btn-g btn-full" onclick="createJackpotRound()">Create Jackpot Round</button>
     <div class="res" id="jpCreateRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>⏳ Pending Jackpot Approvals</h3><button class="btn btn-ghost btn-sm" onclick="loadJpPending()">↻ Refresh</button></div>
+    <div class="mt" style="font-size:12px;margin-bottom:8px;color:var(--mt)">All fixtures in these rounds have finished and every entry is graded — nothing is paid out until you approve.</div>
+    <div id="jpPendingList" style="font-size:12px;color:var(--mt)">Loading...</div>
   </div>
   <div class="sec">
     <div class="sec-hdr"><h3>📋 Recent Rounds</h3><button class="btn btn-ghost btn-sm" onclick="loadJpRounds()">↻ Refresh</button></div>
@@ -1195,7 +1250,7 @@ function nav(name,el){
   else if(name==='referrals') loadReferrals();
   else if(name==='settings') loadSiteConfig();
   else if(name==='backup') loadStorageStats();
-  else if(name==='jackpot') loadJpRounds();
+  else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
 }
 
@@ -1307,12 +1362,149 @@ async function loadUsers(){
   }</tbody></table>`;
 }
 
+let currentSearchedUser = null;
+
 async function searchUser(){
   const q=document.getElementById('uSearch').value.trim();if(!q)return;
   const d=await api(`/api/admin/user/${encodeURIComponent(q)}`);
   const el=document.getElementById('uRes');el.style.display='block';
-  if(d.success&&d.user){el.className='res ok';el.innerHTML=`✅ <b>${d.user.username}</b> | ${fmtPhone(d.user.phone)} | Balance: <b>KES ${d.user.balance}</b> | Bets: ${d.user.bets} | Status: ${d.user.isActive?'Active':'Suspended'}`;}
-  else{el.className='res er';el.textContent='❌ '+(d.message||'Not found');}
+  if(d.success&&d.user){
+    currentSearchedUser = d.user;
+    el.className='res ok';
+    el.innerHTML=`✅ <b>${d.user.username}</b> | ${fmtPhone(d.user.phone)} | Balance: <b>KES ${d.user.balance}</b> | Bets: ${d.user.bets} | Status: ${d.user.isActive?'Active':'Suspended'}
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn btn-g btn-sm" onclick="openUserEdit()">✏️ Edit User</button>
+        <button class="btn btn-ghost btn-sm" onclick="openUserBets()">🎲 View Bets</button>
+      </div>`;
+  }
+  else{currentSearchedUser=null;el.className='res er';el.textContent='❌ '+(d.message||'Not found');}
+}
+
+function openUserEdit(){
+  if (!currentSearchedUser) return;
+  const u = currentSearchedUser;
+  document.getElementById('editUserName').textContent = u.username;
+  document.getElementById('euUsername').value = u.username || '';
+  document.getElementById('euPhone').value = u.phone || '';
+  document.getElementById('euRole').value = u.role || 'user';
+  document.getElementById('euKyc').value = u.kycStatus || 'not_started';
+  document.getElementById('euDepLimit').value = u.dailyDepositLimit ?? '';
+  document.getElementById('euStakeLimit').value = u.dailyStakeLimit ?? '';
+  document.getElementById('euSelfExclude').value = u.selfExcludedUntil ? new Date(u.selfExcludedUntil).toISOString().slice(0,10) : '';
+  document.getElementById('euPhoneVerified').checked = !!u.phoneVerified;
+  document.getElementById('euNewPassword').value = '';
+  document.getElementById('euRes').style.display='none';
+  document.getElementById('euPwRes').style.display='none';
+  document.getElementById('userEditSec').style.display='block';
+  document.getElementById('userBetsSec').style.display='none';
+  document.getElementById('userEditSec').scrollIntoView({behavior:'smooth'});
+}
+
+async function saveUserEdit(){
+  if (!currentSearchedUser) return;
+  const el = document.getElementById('euRes');
+  const depLimitRaw = document.getElementById('euDepLimit').value.trim();
+  const stakeLimitRaw = document.getElementById('euStakeLimit').value.trim();
+  const selfExRaw = document.getElementById('euSelfExclude').value;
+  const body = {
+    username: document.getElementById('euUsername').value.trim(),
+    phone: document.getElementById('euPhone').value.trim(),
+    role: document.getElementById('euRole').value,
+    kycStatus: document.getElementById('euKyc').value,
+    phoneVerified: document.getElementById('euPhoneVerified').checked,
+    dailyDepositLimit: depLimitRaw ? parseFloat(depLimitRaw) : null,
+    dailyStakeLimit: stakeLimitRaw ? parseFloat(stakeLimitRaw) : null,
+    selfExcludedUntil: selfExRaw ? new Date(selfExRaw).toISOString() : null
+  };
+  el.style.display='block'; el.className='res'; el.textContent='Saving...';
+  try{
+    const d = await api(`/api/admin/user/${currentSearchedUser._id}`, { method:'PATCH', body: JSON.stringify(body) });
+    if (d.success) {
+      el.className='res ok'; el.textContent='✅ Saved.';
+      currentSearchedUser = { ...currentSearchedUser, ...body };
+      loadUsers();
+    } else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed to save'; }
+}
+
+async function resetUserPassword(){
+  if (!currentSearchedUser) return;
+  const newPassword = document.getElementById('euNewPassword').value;
+  const el = document.getElementById('euPwRes');
+  el.style.display='block';
+  if (!newPassword || newPassword.length < 6) { el.className='res er'; el.textContent='Password must be at least 6 characters'; return; }
+  if (!confirm(`Reset password for ${currentSearchedUser.username}?`)) return;
+  el.className='res'; el.textContent='Resetting...';
+  try{
+    const d = await api(`/api/admin/user/${currentSearchedUser._id}/reset-password`, { method:'POST', body: JSON.stringify({ newPassword }) });
+    if (d.success) { el.className='res ok'; el.textContent='✅ '+d.message; document.getElementById('euNewPassword').value=''; }
+    else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed to reset'; }
+}
+
+function openUserBets(){
+  if (!currentSearchedUser) return;
+  document.getElementById('betsUserName').textContent = currentSearchedUser.username;
+  document.getElementById('userEditSec').style.display='none';
+  document.getElementById('userBetsSec').style.display='block';
+  document.getElementById('userBetsSec').scrollIntoView({behavior:'smooth'});
+  loadUserBets();
+}
+
+async function loadUserBets(){
+  if (!currentSearchedUser) return;
+  const status = document.getElementById('betsFilter').value;
+  const el = document.getElementById('userBetsList');
+  el.textContent = 'Loading...';
+  try{
+    const d = await api(`/api/admin/user/${currentSearchedUser._id}/bets${status?`?status=${status}`:''}`);
+    if (!d.success || !d.data?.length) { el.textContent = 'No bets found.'; return; }
+    el.innerHTML = d.data.map(b => `
+      <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${b.betCode}</strong><span style="text-transform:capitalize">${b.status}</span></div>
+        <div style="font-size:11px;margin:4px 0">Stake: KES ${b.stake} · Odds: ${b.totalOdds} · Potential: KES ${b.potentialWin.toLocaleString()}</div>
+        <div style="font-size:11px;color:var(--mt)">${b.selections.map(s=>`${s.homeTeam} vs ${s.awayTeam} — ${s.pickLabel||s.pick} @ ${s.odds}`).join('<br>')}</div>
+        ${b.status==='pending' ? `
+          <div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+            <input class="inp" placeholder="Search team/league to add a selection..." oninput="searchAddSelFixtures('${b._id}', this.value)"/>
+            <div id="addSelResults-${b._id}" style="margin-top:6px"></div>
+          </div>` : ''}
+      </div>`).join('');
+  }catch(e){ el.textContent = 'Failed to load bets'; }
+}
+
+let addSelTimer;
+function searchAddSelFixtures(betId, q){
+  clearTimeout(addSelTimer);
+  q = q.trim();
+  const resEl = document.getElementById(`addSelResults-${betId}`);
+  if (!q) { resEl.innerHTML=''; return; }
+  addSelTimer = setTimeout(async () => {
+    resEl.innerHTML = '<div class="loading">Searching...</div>';
+    try{
+      const d = await api(`/api/admin/matches?q=${encodeURIComponent(q)}&status=upcoming&limit=15`);
+      if (!d.success || !d.data?.length) { resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">No upcoming fixtures found</div>'; return; }
+      resEl.innerHTML = d.data.map(m => `
+        <div style="padding:8px;border:1px solid var(--bd);border-radius:6px;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700">${m.homeTeam} vs ${m.awayTeam}</div>
+          <div style="font-size:10px;color:var(--mt);margin-bottom:6px">${m.league||''}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','home')">${m.homeTeam} win</button>
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','draw')">Draw</button>
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','away')">${m.awayTeam} win</button>
+          </div>
+        </div>`).join('');
+    }catch(e){ resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">Search failed</div>'; }
+  }, 350);
+}
+
+async function addSelectionToBet(betId, matchId, market, pick){
+  if (!confirm('Add this selection to the bet? This recalculates total odds and potential win.')) return;
+  try{
+    const d = await api(`/api/bets/admin/add-selection/${betId}`, { method:'POST', body: JSON.stringify({ matchId, market, pick }) });
+    if (d.success) { toast('Selection added','ok'); loadUserBets(); }
+    else alert('Failed: '+d.message);
+  }catch(e){ alert('Failed to add selection'); }
 }
 
 async function deleteSearched(){
@@ -1594,8 +1786,8 @@ async function loadWithdrawals(){
     <div class="b-row pending" style="display:flex;align-items:center;justify-content:space-between">
       <div><div style="font-weight:700">KES ${Math.abs(t.amount).toLocaleString()}</div><div style="font-size:11px;color:var(--mt)">${t.reference} · ${new Date(t.createdAt).toLocaleString('en-KE')}</div></div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-g btn-sm" onclick="approveWd('${t._id}')">✅ Approve</button>
-        <button class="btn btn-r btn-sm" onclick="rejectWd('${t._id}')">❌ Reject</button>
+        <button class="btn btn-g btn-sm" onclick="approveWd('${t._id}', this)">✅ Approve</button>
+        <button class="btn btn-r btn-sm" onclick="rejectWd('${t._id}', this)">❌ Reject</button>
       </div>
     </div>`).join(''):'<div class="empty">No pending withdrawals</div>';
   list.innerHTML=`<table class="tbl"><thead><tr><th>Ref</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>${
@@ -1608,17 +1800,20 @@ async function loadWithdrawals(){
   }</tbody></table>`;
 }
 
-async function approveWd(id){
+async function approveWd(id, btn){
+  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
   const d=await api('/api/admin/withdrawal/approve',{method:'POST',body:JSON.stringify({txId:id})});
   if(d.success){toast('Withdrawal approved & processed','ok');loadWithdrawals();}
-  else alert('Failed: '+d.message);
+  else { alert('Failed: '+d.message); if(btn){ btn.disabled=false; btn.textContent='✅ Approve'; } }
 }
 
-async function rejectWd(id){
+async function rejectWd(id, btn){
   const reason=prompt('Reason for rejection?');
+  if(reason===null) return; // cancelled — don't disable/submit
+  if(btn){ btn.disabled=true; btn.textContent='Rejecting...'; }
   const d=await api('/api/admin/withdrawal/reject',{method:'POST',body:JSON.stringify({txId:id,reason:reason||'Rejected by admin'})});
   if(d.success){toast('Withdrawal rejected — funds returned','ok');loadWithdrawals();}
-  else alert('Failed: '+d.message);
+  else { alert('Failed: '+d.message); if(btn){ btn.disabled=false; btn.textContent='❌ Reject'; } }
 }
 
 // ══ WALLET ══
@@ -1962,6 +2157,32 @@ async function loadLoyaltyTiers(){
 async function deleteLoyaltyTier(id){
   if (!confirm('Delete this tier? Users at this tier will drop to the next one down.')) return;
   try{ await api(`/api/loyalty/admin/tiers/${id}`, { method:'DELETE' }); loadLoyaltyTiers(); }catch(e){}
+}
+
+async function loadJpPending(){
+  const el = document.getElementById('jpPendingList');
+  el.textContent = 'Loading...';
+  try{
+    const d = await fetch('/api/jackpot/admin/pending-approval', { headers: { 'x-admin-secret': PWD } }).then(r=>r.json());
+    if (!d.success || !d.data?.length) { el.textContent = 'No rounds awaiting approval right now.'; return; }
+    el.innerHTML = d.data.map(r => `
+      <div style="padding:10px;border:1px solid var(--y);border-radius:8px;margin-bottom:8px;background:rgba(234,179,8,0.06)">
+        <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${r.name}</strong><span>${r.winners.length} winner(s)</span></div>
+        <div style="font-size:11px;margin-top:4px">Pool: KES ${r.poolAmount.toLocaleString()}${r.guaranteedPrize ? ` · 🏆 Guaranteed: KES ${r.guaranteedPrize.toLocaleString()}` : ''} · ${r.fixtures.length} fixtures</div>
+        ${r.winners.length ? `<div style="font-size:11px;margin-top:6px">${r.winners.map(w=>`${w.username||w.phone||'user'} — KES ${(w.payout||0).toLocaleString()}`).join('<br>')}</div>` : `<div style="font-size:11px;margin-top:6px;color:var(--mt)">No perfect scores — pool carries over once approved.</div>`}
+        <button class="btn btn-g btn-sm" style="margin-top:8px" onclick="approveJpRound('${r._id}', this)">✅ Approve & Pay Out</button>
+      </div>`).join('');
+  }catch(e){ el.textContent = 'Failed to load pending approvals'; }
+}
+
+async function approveJpRound(id, btn){
+  if (!confirm('Approve this round? Winners will be paid immediately and this cannot be undone.')) return;
+  if(btn){ btn.disabled=true; btn.textContent='Processing...'; }
+  try{
+    const d = await api(`/api/jackpot/admin/approve/${id}`, { method:'POST' });
+    if (d.success) { toast(d.message,'ok'); loadJpPending(); loadJpRounds(); }
+    else { alert('Failed: '+d.message); if(btn){ btn.disabled=false; btn.textContent='✅ Approve & Pay Out'; } }
+  }catch(e){ alert('Failed to approve round'); if(btn){ btn.disabled=false; btn.textContent='✅ Approve & Pay Out'; } }
 }
 
 async function loadJpRounds(){

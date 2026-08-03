@@ -115,4 +115,49 @@ router.get('/admin/rounds', async (req, res) => {
   } catch (e) { return safeError(res, e, 'jackpot/admin/rounds'); }
 });
 
+// ── ADMIN: ROUNDS AWAITING APPROVAL (all fixtures finished, graded, but not yet paid) ──
+router.get('/admin/pending-approval', async (req, res) => {
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+  try {
+    const rounds = await JackpotRound.find({ status: 'awaiting_approval' }).sort({ createdAt: -1 }).lean();
+    // Attach winner details so the admin can see exactly who/what will be paid before approving
+    const withWinners = await Promise.all(rounds.map(async r => {
+      const winners = await JackpotEntry.find({ roundId: r._id, isWinner: true })
+        .populate('userId', 'phone username').lean();
+      return { ...r, winners: winners.map(w => ({ userId: w.userId?._id, phone: w.userId?.phone, username: w.userId?.username, payout: w.payout })) };
+    }));
+    res.json({ success: true, data: withWinners });
+  } catch (e) { return safeError(res, e, 'jackpot/admin/pending-approval'); }
+});
+
+// ── ADMIN: APPROVE A GRADED ROUND — this is the only place jackpot money actually moves ──
+router.post('/admin/approve/:roundId', async (req, res) => {
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+  try {
+    const round = await JackpotRound.findById(req.params.roundId);
+    if (!round) return res.status(404).json({ success:false, message:'Round not found' });
+    if (round.status !== 'awaiting_approval') {
+      return res.status(400).json({ success:false, message:`This round is '${round.status}', not awaiting approval.` });
+    }
+
+    const winners = await JackpotEntry.find({ roundId: round._id, isWinner: true, creditedAt: null });
+    for (const w of winners) {
+      // Atomic wallet credit, same trusted path used for every other real payout on the platform
+      await walletService.credit(w.userId, 'main', w.payout, 'jackpot_win', `jackpot_win_${round._id}_${w.userId}`, { roundId: round._id });
+      w.creditedAt = new Date();
+      await w.save();
+      require('../services/notificationService')
+        .notify(w.userId, 'system', { title: '🎉 Jackpot Winner!', message: `You won KES ${w.payout.toLocaleString()} in the "${round.name}" jackpot!` })
+        .catch(() => {});
+    }
+
+    round.status = 'settled';
+    round.settledAt = new Date();
+    await round.save();
+
+    require('../services/auditService').log('admin.jackpot.approve', { targetType:'JackpotRound', targetId: round._id, meta:{ winners: winners.length } }).catch(()=>{});
+    res.json({ success:true, message: `Approved — ${winners.length} winner(s) paid out.`, winnersCount: winners.length });
+  } catch (e) { return safeError(res, e, 'jackpot/admin/approve'); }
+});
+
 module.exports = router;
