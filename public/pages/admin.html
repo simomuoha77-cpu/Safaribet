@@ -1370,6 +1370,7 @@ async function searchUser(){
   const el=document.getElementById('uRes');el.style.display='block';
   if(d.success&&d.user){
     currentSearchedUser = d.user;
+    document.getElementById('balUser').value = d.user.phone; // auto-fill Adjust Balance so it doesn't need retyping
     el.className='res ok';
     el.innerHTML=`✅ <b>${d.user.username}</b> | ${fmtPhone(d.user.phone)} | Balance: <b>KES ${d.user.balance}</b> | Bets: ${d.user.bets} | Status: ${d.user.isActive?'Active':'Suspended'}
       <div style="margin-top:8px;display:flex;gap:6px">
@@ -1451,6 +1452,8 @@ function openUserBets(){
   loadUserBets();
 }
 
+let betSelectionsMap = {}; // betId -> Set of matchIds already in that bet, so search can filter them out
+
 async function loadUserBets(){
   if (!currentSearchedUser) return;
   const status = document.getElementById('betsFilter').value;
@@ -1459,17 +1462,22 @@ async function loadUserBets(){
   try{
     const d = await api(`/api/admin/user/${currentSearchedUser._id}/bets${status?`?status=${status}`:''}`);
     if (!d.success || !d.data?.length) { el.textContent = 'No bets found.'; return; }
-    el.innerHTML = d.data.map(b => `
+    betSelectionsMap = {};
+    el.innerHTML = d.data.map(b => {
+      betSelectionsMap[b._id] = new Set(b.selections.map(s => s.matchId));
+      return `
       <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${b.betCode}</strong><span style="text-transform:capitalize">${b.status}</span></div>
         <div style="font-size:11px;margin:4px 0">Stake: KES ${b.stake} · Odds: ${b.totalOdds} · Potential: KES ${b.potentialWin.toLocaleString()}</div>
         <div style="font-size:11px;color:var(--mt)">${b.selections.map(s=>`${s.homeTeam} vs ${s.awayTeam} — ${s.pickLabel||s.pick} @ ${s.odds}`).join('<br>')}</div>
         ${b.status==='pending' ? `
           <div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
-            <input class="inp" placeholder="Search team/league to add a selection..." oninput="searchAddSelFixtures('${b._id}', this.value)"/>
+            <input class="inp" id="addSelInput-${b._id}" placeholder="Search team/league to add a selection..." oninput="searchAddSelFixtures('${b._id}', this.value)"/>
             <div id="addSelResults-${b._id}" style="margin-top:6px"></div>
+            <div class="res" id="addSelMsg-${b._id}" style="display:none;margin-top:6px"></div>
           </div>` : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }catch(e){ el.textContent = 'Failed to load bets'; }
 }
 
@@ -1484,7 +1492,10 @@ function searchAddSelFixtures(betId, q){
     try{
       const d = await api(`/api/admin/matches?q=${encodeURIComponent(q)}&status=upcoming&limit=15`);
       if (!d.success || !d.data?.length) { resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">No upcoming fixtures found</div>'; return; }
-      resEl.innerHTML = d.data.map(m => `
+      const already = betSelectionsMap[betId] || new Set();
+      const filtered = d.data.filter(m => !already.has(m.matchId));
+      if (!filtered.length) { resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">All matching fixtures are already in this bet.</div>'; return; }
+      resEl.innerHTML = filtered.map(m => `
         <div style="padding:8px;border:1px solid var(--bd);border-radius:6px;margin-bottom:6px">
           <div style="font-size:12px;font-weight:700">${m.homeTeam} vs ${m.awayTeam}</div>
           <div style="font-size:10px;color:var(--mt);margin-bottom:6px">${m.league||''}</div>
@@ -1500,11 +1511,20 @@ function searchAddSelFixtures(betId, q){
 
 async function addSelectionToBet(betId, matchId, market, pick){
   if (!confirm('Add this selection to the bet? This recalculates total odds and potential win.')) return;
+  const msgEl = document.getElementById(`addSelMsg-${betId}`);
+  msgEl.style.display='block'; msgEl.className='res'; msgEl.textContent='Adding...';
   try{
     const d = await api(`/api/bets/admin/add-selection/${betId}`, { method:'POST', body: JSON.stringify({ matchId, market, pick }) });
-    if (d.success) { toast('Selection added','ok'); loadUserBets(); }
-    else alert('Failed: '+d.message);
-  }catch(e){ alert('Failed to add selection'); }
+    if (d.success) {
+      msgEl.className='res ok';
+      msgEl.textContent = `✅ Added — new total odds ${d.bet.totalOdds}, potential win KES ${d.bet.potentialWin.toLocaleString()}`;
+      toast('Selection added','ok');
+      document.getElementById(`addSelInput-${betId}`).value = '';
+      document.getElementById(`addSelResults-${betId}`).innerHTML = '';
+      loadUserBets();
+    }
+    else { msgEl.className='res er'; msgEl.textContent = '❌ '+d.message; }
+  }catch(e){ msgEl.className='res er'; msgEl.textContent = '❌ Failed to add selection'; }
 }
 
 async function deleteSearched(){
