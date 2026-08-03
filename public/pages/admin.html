@@ -1235,6 +1235,7 @@ function nav(name,el){
   if(window.innerWidth<=640) closeSidebar();
   // Auto-load data
   if(name==='bets') loadBets();
+  else if(name==='users') loadUsers();
   else if(name==='transactions') loadTx();
   else if(name==='matches') loadAdminMatches();
   else if(name==='deposits') loadDeposits();
