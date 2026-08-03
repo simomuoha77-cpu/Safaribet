@@ -499,8 +499,8 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <div class="sec-hdr"><h3>🎯 Bet Management</h3><button class="btn btn-y btn-sm" onclick="runSettle()" style="background:linear-gradient(135deg,#ff9800,#f57c00);color:#000">⚡ Force Settle Now</button></div>
     <div class="inp-row">
       <select class="inp" id="betFilter" onchange="loadBets()">
+        <option value="pending" selected>Pending / Live</option>
         <option value="all">All Bets</option>
-        <option value="pending">Pending</option>
         <option value="won">Won</option>
         <option value="lost">Lost</option>
       </select>
