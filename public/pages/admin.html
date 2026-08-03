@@ -1596,9 +1596,11 @@ async function loadBets(){
   const d=await api(`/api/admin/bets?status=${status}&search=${search}`);
   const el=document.getElementById('betList');
   if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No bets found</div>';return;}
+  d.data.forEach(b => { betSelectionsMap[b._id] = new Set((b.selections||[]).map(s => s.matchId)); });
   el.innerHTML=d.data.map(b=>`
     <div class="b-row ${b.status}">
       <div class="b-top"><span class="b-code">${b.betCode}</span><span class="badge bg-${b.status==='won'?'g':b.status==='lost'?'r':'y'}">${b.status}</span></div>
+      <div style="font-size:11px;color:var(--mt);margin-bottom:4px">👤 ${b.userId?.username || 'unknown'} (${fmtPhone(b.userId?.phone||'')})</div>
       <div class="b-sels">${b.selections?.map(s=>`${s.homeTeam} vs ${s.awayTeam} → <b>${s.pick}</b> @ ${s.odds}x`).join('<br>')}</div>
       <div class="b-foot">
         <span>Stake: <b>KES ${b.stake?.toLocaleString()}</b></span>
@@ -1606,6 +1608,12 @@ async function loadBets(){
         <span style="color:var(--g)">Win: <b>KES ${b.potentialWin?.toLocaleString()}</b></span>
         <span style="color:var(--mt)">${new Date(b.createdAt).toLocaleString('en-KE')}</span>
       </div>
+      ${b.status==='pending' ? `
+        <div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+          <input class="inp" id="addSelInput-${b._id}" placeholder="Search team/league to add a selection to this bet..." oninput="searchAddSelFixtures('${b._id}', this.value)"/>
+          <div id="addSelResults-${b._id}" style="margin-top:6px"></div>
+          <div class="res" id="addSelMsg-${b._id}" style="display:none;margin-top:6px"></div>
+        </div>` : ''}
     </div>`).join('');
 }
 

@@ -364,7 +364,8 @@ router.get('/bets', async (req, res) => {
     const filter = {};
     if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
     if (req.query.search) filter.betCode = new RegExp(req.query.search, 'i');
-    const bets = await Bet.find(filter).sort({ createdAt:-1 }).limit(100).lean();
+    const bets = await Bet.find(filter).sort({ createdAt:-1 }).limit(100)
+      .populate('userId', 'username phone').lean();
     res.json({ success:true, data:bets });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
