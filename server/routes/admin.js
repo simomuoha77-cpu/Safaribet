@@ -437,64 +437,18 @@ router.get('/transactions', async (req, res) => {
 router.post('/withdrawal/approve', async (req, res) => {
   try {
     const { txId } = req.body;
+    const tx = await Transaction.findById(txId);
+    if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
 
-    // Atomically claim this transaction by flipping pending -> processing in one
-    // step. If two clicks (or a double-tap) hit this at the same time, only the
-    // first one will find status:'pending' and succeed; the second will match
-    // nothing and get a clear "already being processed" response — never a
-    // second real B2C send for the same withdrawal.
-    const tx = await Transaction.findOneAndUpdate(
-      { _id: txId, status: 'pending' },
-      { $set: { status: 'processing' } },
-      { new: false } // return the pre-update doc so we still have original fields
-    );
-    if (!tx) {
-      const existing = await Transaction.findById(txId).lean();
-      if (!existing) return res.status(404).json({ success:false, message:'Transaction not found' });
-      return res.status(409).json({ success:false, message:`Already ${existing.status} — cannot approve again.` });
-    }
+    const walletService = require('../services/walletService');
+    await walletService.finalizeWithdrawal(tx.userId, Math.abs(tx.amount), tx.reference);
+    await Transaction.findByIdAndUpdate(txId, { $set:{ status:'completed' } });
 
-    // Extract the recipient phone number from the transaction description
-    // (format: "Withdrawal KES <amount> to <phone>") since it isn't stored as its own field.
-    const phoneMatch = tx.description?.match(/to (\d+)/);
-    const phone = phoneMatch?.[1];
-    if (!phone) {
-      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } }); // release the lock, nothing was sent
-      return res.status(400).json({ success:false, message:'Could not determine recipient phone number from transaction — approve manually only after confirming payment was actually sent via M-Pesa.' });
-    }
-
-    // Actually attempt to send the money via B2C — approving in the dashboard
-    // must not silently mark "completed" without a real disbursement attempt.
-    const { sendB2C } = require('./withdraw');
-    let b2cResult;
-    try {
-      b2cResult = await sendB2C(phone, Math.abs(tx.amount), tx.reference);
-    } catch (b2cErr) {
-      const detail = b2cErr?.response?.data ? JSON.stringify(b2cErr.response.data) : b2cErr.message;
-      console.error('[admin/withdrawal/approve] B2C send failed:', detail);
-      // Send genuinely failed — release the lock back to pending so it can be retried.
-      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } });
-      return res.status(502).json({ success:false, message: `B2C send failed — money was NOT sent: ${detail}` });
-    }
-
-    if (b2cResult?.ResponseCode !== '0') {
-      await Transaction.findByIdAndUpdate(txId, { $set: { status: 'pending' } });
-      return res.status(502).json({ success:false, message: `Safaricom did not accept the request: ${JSON.stringify(b2cResult)}` });
-    }
-
-    // B2C was accepted by Safaricom — leave status as 'processing' (NOT pending,
-    // so it can never be double-approved, and NOT completed, since only the real
-    // /b2c/result callback should do that once Safaricom confirms the payout).
-    await Transaction.findByIdAndUpdate(txId, {
-      $set: {
-        description: `${tx.description} — B2C sent via admin approve: ${b2cResult.ConversationID}`,
-        conversationId: b2cResult.ConversationID
-      }
-    });
-
+    require('../services/notificationService').notify(tx.userId, 'withdrawal_success', { amount: Math.abs(tx.amount) }).catch(()=>{});
     audit('APPROVE_WITHDRAWAL', { txId, amount: tx.amount });
     require('../services/auditService').log('admin.withdrawal.approve', { targetType:'Transaction', targetId:txId, meta:{ amount: tx.amount } });
-    res.json({ success:true, message:'B2C payout sent to Safaricom — awaiting confirmation callback. Do not mark as completed manually.' });
+    res.json({ success:true, message:'Withdrawal approved' });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 

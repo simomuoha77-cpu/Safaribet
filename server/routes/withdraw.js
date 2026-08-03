@@ -32,15 +32,8 @@ const SECURITY_CREDENTIAL = process.env.MPESA_SECURITY_CREDENTIAL;
 const RESULT_URL = process.env.MPESA_RESULT_URL || `${process.env.APP_URL}/api/withdraw/b2c/result`;
 const TIMEOUT_URL = process.env.MPESA_QUEUE_TIMEOUT_URL || `${process.env.APP_URL}/api/withdraw/b2c/timeout`;
 
-// B2C often lives on a SEPARATE Daraja app from STK/Paybill, with its own
-// Consumer Key/Secret. If you created a dedicated app for B2C (e.g.
-// "Prod-ImpactVest-...") set MPESA_B2C_CONSUMER_KEY / MPESA_B2C_CONSUMER_SECRET
-// to that app's credentials. If unset, falls back to the shared STK credentials.
-const B2C_CONSUMER_KEY    = process.env.MPESA_B2C_CONSUMER_KEY    || process.env.MPESA_CONSUMER_KEY;
-const B2C_CONSUMER_SECRET = process.env.MPESA_B2C_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
-
 async function getB2CToken() {
-  const creds = Buffer.from(`${B2C_CONSUMER_KEY}:${B2C_CONSUMER_SECRET}`).toString('base64');
+  const creds = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
   const r = await axios.get(`${BASE}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: { Authorization: `Basic ${creds}` }, timeout: 8000
   });
@@ -48,15 +41,14 @@ async function getB2CToken() {
 }
 
 async function sendB2C(phone, amount, ref) {
-  if (!B2C_CONSUMER_KEY || !B2C_CONSUMER_SECRET) {
-    throw new Error('M-Pesa B2C not configured — missing Consumer Key/Secret');
+  if (!process.env.MPESA_CONSUMER_KEY || !process.env.MPESA_CONSUMER_SECRET) {
+    throw new Error('M-Pesa not configured');
   }
   if (!SECURITY_CREDENTIAL) {
     throw new Error('MPESA_SECURITY_CREDENTIAL is not set — B2C cannot be authorized');
   }
-  console.log('[B2C] Sending payout — ResultURL:', RESULT_URL, '| TimeoutURL:', TIMEOUT_URL);
   const token = await getB2CToken();
-  const r = await axios.post(`${BASE}/mpesa/b2c/v1/paymentrequest`, {
+  const r = await axios.post(`${BASE}/mpesa/b2c/v3/paymentrequest`, {
     InitiatorName:          INITIATOR,
     SecurityCredential:     SECURITY_CREDENTIAL,
     CommandID:              'BusinessPayment',
@@ -193,19 +185,13 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
         b2cResult = await sendB2C(phone, amount, ref);
         if (b2cResult?.ResponseCode === '0') {
           await Transaction.findByIdAndUpdate(tx._id, {
-            $set: {
-              description: `${tx.description} — B2C sent: ${b2cResult.ConversationID}`,
-              conversationId: b2cResult.ConversationID
-            }
+            $set: { description: `${tx.description} — B2C sent: ${b2cResult.ConversationID}` }
           });
           console.log(`✅ B2C sent: ${b2cResult.ConversationID}`);
         }
       } catch(e) {
-        // Safaricom's actual rejection reason lives in e.response.data, not e.message
-        // (axios only gives "Request failed with status code 400" otherwise).
-        const safaricomDetail = e?.response?.data;
-        b2cError = safaricomDetail ? JSON.stringify(safaricomDetail) : e.message;
-        console.error('[B2C error]', b2cError);
+        b2cError = e.message;
+        console.error('[B2C error]', e.message);
         // The B2C request never reached Safaricom — release the lock so the user
         // isn't stuck with funds frozen indefinitely. Admin can see the failed tx and retry manually.
         await walletService.releaseLock(req.user._id, amount, ref).catch(() => {});
@@ -238,7 +224,6 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
 // ── B2C RESULT CALLBACK ──
 router.post('/b2c/result', async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
-  console.log('[withdraw/b2c/result] Incoming callback received from IP:', req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   try {
     if (!isFromSafaricom(req)) {
       console.warn('[withdraw/b2c/result] REJECTED — non-Safaricom source IP:', req.headers['x-forwarded-for'] || req.socket.remoteAddress);
@@ -246,27 +231,12 @@ router.post('/b2c/result', async (req, res) => {
     }
 
     const result = req.body?.Result;
-    if (!result) {
-      console.warn('[withdraw/b2c/result] No Result object in callback body — cannot process.');
-      return;
-    }
-    const conversationId = result.ConversationID;
-    const code = result.ResultCode;
-    console.log('[withdraw/b2c/result] ConversationID:', conversationId, '| ResultCode:', code, '| ResultDesc:', result.ResultDesc);
+    if (!result) return;
+    const ref    = result.ReferenceData?.ReferenceItem?.Value;
+    const code   = result.ResultCode;
 
-    // Match primarily on ConversationID (reliable — this is what Safaricom gave us
-    // when we sent the payout). Fall back to the old ReferenceData lookup only for
-    // any in-flight transaction sent before this fix, so nothing already pending gets stranded.
-    let tx = await Transaction.findOne({ conversationId });
-    if (!tx) {
-      const legacyRef = result.ReferenceData?.ReferenceItem?.Value;
-      if (legacyRef) tx = await Transaction.findOne({ reference: legacyRef });
-    }
-    if (!tx) {
-      console.warn('[withdraw/b2c/result] No matching transaction found for ConversationID:', conversationId);
-      return;
-    }
-    const ref = tx.reference;
+    const tx = await Transaction.findOne({ reference: ref });
+    if (!tx) return;
     // Idempotency — a transaction already in a terminal state ('completed'/'failed')
     // has already been processed; ignore replayed/duplicate callbacks so funds
     // can't be released or finalized twice.
@@ -312,14 +282,10 @@ router.post('/b2c/timeout', async (req, res) => {
       return;
     }
 
-    const conversationId = req.body?.ConversationID;
-    let tx = await Transaction.findOne({ conversationId, status: { $in: ['pending', 'processing'] } });
-    if (!tx) {
-      const legacyRef = req.body?.ReferenceData?.ReferenceItem?.Value;
-      if (legacyRef) tx = await Transaction.findOne({ reference: legacyRef, status: { $in: ['pending', 'processing'] } });
-    }
+    const ref = req.body?.ReferenceData?.ReferenceItem?.Value;
+    if (!ref) return;
+    const tx = await Transaction.findOne({ reference: ref, status: 'pending' });
     if (!tx) return;
-    const ref = tx.reference;
     // Timeout — release the lock back to main
     const walletService = require('../services/walletService');
     const amount = Math.abs(tx.amount);
@@ -340,4 +306,3 @@ router.get('/history', auth, async (req, res) => {
 });
 
 module.exports = router;
-module.exports.sendB2C = sendB2C;

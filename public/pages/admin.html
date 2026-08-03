@@ -1594,8 +1594,8 @@ async function loadWithdrawals(){
     <div class="b-row pending" style="display:flex;align-items:center;justify-content:space-between">
       <div><div style="font-weight:700">KES ${Math.abs(t.amount).toLocaleString()}</div><div style="font-size:11px;color:var(--mt)">${t.reference} · ${new Date(t.createdAt).toLocaleString('en-KE')}</div></div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-g btn-sm" onclick="approveWd('${t._id}', this)">✅ Approve</button>
-        <button class="btn btn-r btn-sm" onclick="rejectWd('${t._id}', this)">❌ Reject</button>
+        <button class="btn btn-g btn-sm" onclick="approveWd('${t._id}')">✅ Approve</button>
+        <button class="btn btn-r btn-sm" onclick="rejectWd('${t._id}')">❌ Reject</button>
       </div>
     </div>`).join(''):'<div class="empty">No pending withdrawals</div>';
   list.innerHTML=`<table class="tbl"><thead><tr><th>Ref</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>${
@@ -1608,20 +1608,17 @@ async function loadWithdrawals(){
   }</tbody></table>`;
 }
 
-async function approveWd(id, btn){
-  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
+async function approveWd(id){
   const d=await api('/api/admin/withdrawal/approve',{method:'POST',body:JSON.stringify({txId:id})});
   if(d.success){toast('Withdrawal approved & processed','ok');loadWithdrawals();}
-  else { alert('Failed: '+d.message); if(btn){ btn.disabled=false; btn.textContent='✅ Approve'; } }
+  else alert('Failed: '+d.message);
 }
 
-async function rejectWd(id, btn){
+async function rejectWd(id){
   const reason=prompt('Reason for rejection?');
-  if(reason===null) return; // cancelled — don't disable/submit
-  if(btn){ btn.disabled=true; btn.textContent='Rejecting...'; }
   const d=await api('/api/admin/withdrawal/reject',{method:'POST',body:JSON.stringify({txId:id,reason:reason||'Rejected by admin'})});
   if(d.success){toast('Withdrawal rejected — funds returned','ok');loadWithdrawals();}
-  else { alert('Failed: '+d.message); if(btn){ btn.disabled=false; btn.textContent='❌ Reject'; } }
+  else alert('Failed: '+d.message);
 }
 
 // ══ WALLET ══
