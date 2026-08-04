@@ -213,7 +213,7 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <input class="linp" type="password" id="aPassword" placeholder="Password" autocomplete="current-password"/>
     <input class="linp" type="text" id="aTotp" placeholder="6-digit authenticator code" maxlength="6" inputmode="numeric"/>
     <button class="lbtn" id="lbtn" onclick="doLogin()">Access Panel</button>
-    <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--mt)">No admin account yet? <a href="#" onclick="showSetup();return false" style="color:var(--g)">Set one up</a></div>
+    <div id="setupLinkRow" style="display:none;text-align:center;margin-top:10px;font-size:12px;color:var(--mt)">No admin account yet? <a href="#" onclick="showSetup();return false" style="color:var(--g)">Set one up</a></div>
   </div>
 </div>
 
@@ -1220,7 +1220,14 @@ function showLogin(){
   document.getElementById('setupScreen').style.display='none';
   document.getElementById('loginScreen').style.display='flex';
 }
-function showSetup(){
+async function showSetup(){
+  // Defensive re-check every time, not just at page load — if an admin
+  // account already exists, refuse to show the setup form at all, even if
+  // this got triggered some other way (stale link, direct call, etc).
+  try{
+    const s = await fetch('/api/admin-auth/status').then(r=>r.json());
+    if (s.success && s.hasAdmin) { showLogin(); return; }
+  }catch(e){ showLogin(); return; }
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('setupScreen').style.display='flex';
   document.getElementById('setupForm').style.display='block';
@@ -1303,7 +1310,12 @@ function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e
   // No valid session — check whether an admin account exists yet at all
   try{
     const s = await fetch('/api/admin-auth/status').then(r=>r.json());
-    if (s.success && !s.hasAdmin) showSetup(); else showLogin();
+    if (s.success && !s.hasAdmin) {
+      document.getElementById('setupLinkRow').style.display='block';
+      showSetup();
+    } else {
+      showLogin(); // setupLinkRow stays hidden by default — nothing to do
+    }
   }catch(e){ showLogin(); }
 })();
 
