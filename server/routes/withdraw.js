@@ -27,8 +27,8 @@ const dailyLimiter = rateLimit({
 // ── M-PESA B2C ──
 const BASE     = process.env.MPESA_ENV === 'production' || process.env.MPESA_ENV === 'live' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
 const SHORTCODE = process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
-const INITIATOR = process.env.MPESA_INITIATOR_NAME || 'testapi';
-const SECURITY_CREDENTIAL = process.env.MPESA_SECURITY_CREDENTIAL;
+const INITIATOR = (process.env.MPESA_INITIATOR_NAME || 'testapi').trim();
+const SECURITY_CREDENTIAL = (process.env.MPESA_SECURITY_CREDENTIAL || '').trim();
 const RESULT_URL = process.env.MPESA_RESULT_URL || `${process.env.APP_URL}/api/withdraw/b2c/result`;
 const TIMEOUT_URL = process.env.MPESA_QUEUE_TIMEOUT_URL || `${process.env.APP_URL}/api/withdraw/b2c/timeout`;
 
@@ -55,6 +55,7 @@ async function sendB2C(phone, amount, ref) {
     throw new Error('MPESA_SECURITY_CREDENTIAL is not set — B2C cannot be authorized');
   }
   console.log('[B2C] Sending payout — ResultURL:', RESULT_URL, '| TimeoutURL:', TIMEOUT_URL);
+  console.log(`[B2C] InitiatorName: "${INITIATOR}" (${INITIATOR.length} chars) | SecurityCredential: ${SECURITY_CREDENTIAL.length} chars, starts "${SECURITY_CREDENTIAL.slice(0,6)}...", ends "...${SECURITY_CREDENTIAL.slice(-6)}"`);
   const token = await getB2CToken();
   const r = await axios.post(`${BASE}/mpesa/b2c/v1/paymentrequest`, {
     InitiatorName:          INITIATOR,
