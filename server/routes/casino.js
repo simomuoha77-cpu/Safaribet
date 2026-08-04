@@ -260,7 +260,7 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
 
     const baseUrl = game.gameUrl?.startsWith('http') ? game.gameUrl : `${JUAN_URL()}${game.gameUrl}`;
     const sep = baseUrl.includes('?') ? '&' : '?';
-    const webhookBase = `${process.env.APP_URL || 'https://safaribet.onrender.com'}/api/casino/wallet`;
+    const webhookBase = `${process.env.APP_URL || 'https://safaribet.top'}/api/casino/wallet`;
     const gameUrl = `${baseUrl}${sep}key=${JUAN_KEY()}&utoken=${encodeURIComponent(utoken)}&userId=${encodeURIComponent(user._id.toString())}&username=${encodeURIComponent(user.username)}&currency=KES&walletUrl=${encodeURIComponent(webhookBase)}`;
 
     res.send(`<!DOCTYPE html>

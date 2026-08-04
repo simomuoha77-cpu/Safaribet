@@ -21,7 +21,7 @@ router.get('/stats', auth, async (req, res) => {
     const recentReferrals = await User.find({ referredBy: req.user._id })
       .select('username createdAt').sort({ createdAt: -1 }).limit(10).lean();
 
-    const appUrl = process.env.APP_URL || 'https://safaribet.onrender.com';
+    const appUrl = process.env.APP_URL || 'https://safaribet.top';
     const referralLink = `${appUrl}/register?ref=${user.referralCode}`;
 
     res.json({
