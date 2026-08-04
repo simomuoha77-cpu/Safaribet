@@ -4,6 +4,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 const express = require('express');
 const crypto  = require('crypto');
+const { requireAdmin } = require('../utils/adminAuth');
 const safeError = require('../utils/safeError');
 const Match   = require('../models/Match');
 const { getFixtures, getLive, competitionKey } = require('../engine/apifootball');
@@ -239,9 +240,7 @@ router.get('/match/:matchId', async (req, res) => {
 });
 
 // ── CACHE CLEAR ──
-router.post('/cache/clear', (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
-    return res.status(401).json({ success: false });
+router.post('/cache/clear', requireAdmin, (req, res) => {
   Object.keys(cache).forEach(k => delete cache[k]);
   res.json({ success: true, message: 'Cache cleared' });
 });

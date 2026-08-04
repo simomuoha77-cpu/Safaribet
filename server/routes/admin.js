@@ -2,65 +2,29 @@ const express = require('express');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const safeError = require('../utils/safeError');
+const { requireAdmin } = require('../utils/adminAuth');
 const User        = require('../models/User');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const Transaction = require('../models/Transaction');
 const router      = express.Router();
 
-// ── ADMIN AUTH MIDDLEWARE ──
-// Layered defense: (1) hard rate limit per-IP on ALL admin requests, so brute forcing
-// the secret is infeasible even hitting the API directly (curl/Postman, bypassing any
-// client-side JS limit) (2) progressive lockout per-IP after repeated failures
-// (3) constant-time secret comparison to avoid timing side-channels.
+// ── ADMIN AUTH ──
+// Real authentication now lives in routes/adminAuth.js (username + email +
+// password + 6-digit TOTP code, issuing a signed JWT). This router just keeps
+// a per-IP rate limit as defense-in-depth, then requires a valid token on
+// every request via requireAdmin — there is no longer a single shared
+// password checked directly against these routes.
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // 30 admin requests per 15 min per IP — generous for normal dashboard use, tight for brute force
+  max: 300, // generous — real throttling now happens at the login gate itself; this just caps abuse of an already-valid session
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many admin requests. Try again later.' }
 });
 
-const failedAttempts = new Map(); // ip -> { count, lockedUntil }
-const LOCKOUT_THRESHOLD = 5;
-const LOCKOUT_MS = 15 * 60 * 1000;
-
-function safeCompare(a, b) {
-  const bufA = Buffer.from(String(a || ''));
-  const bufB = Buffer.from(String(b || ''));
-  if (bufA.length !== bufB.length) {
-    // still run a comparison of equal-length buffers to avoid leaking length via timing
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
 router.use(adminLimiter);
-router.use((req, res, next) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  const entry = failedAttempts.get(ip);
-
-  if (entry && entry.lockedUntil && entry.lockedUntil > Date.now()) {
-    const minsLeft = Math.ceil((entry.lockedUntil - Date.now()) / 60000);
-    return res.status(429).json({ success: false, message: `Too many failed attempts. Locked for ${minsLeft} more minute(s).` });
-  }
-
-  if (!process.env.ADMIN_PASSWORD || !safeCompare(req.headers['x-admin-secret'], process.env.ADMIN_PASSWORD)) {
-    const current = failedAttempts.get(ip) || { count: 0, lockedUntil: 0 };
-    current.count += 1;
-    if (current.count >= LOCKOUT_THRESHOLD) {
-      current.lockedUntil = Date.now() + LOCKOUT_MS;
-      current.count = 0;
-      console.warn(`[admin/auth] IP ${ip} locked out for ${LOCKOUT_MS/60000}min after ${LOCKOUT_THRESHOLD} failed attempts`);
-    }
-    failedAttempts.set(ip, current);
-    return res.status(401).json({ success: false, message: 'Unauthorized' });
-  }
-
-  failedAttempts.delete(ip); // reset on success
-  next();
-});
+router.use(requireAdmin);
 
 // ── IN-MEMORY STORE (settings, blacklist, content, audit) ──
 // NOTE: `content` (banner/popup/notice) is now backed by MongoDB via SiteContent —

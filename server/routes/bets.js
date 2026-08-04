@@ -2,6 +2,7 @@ const express = require('express');
 const safeError = require('../utils/safeError');
 const rateLimit = require('express-rate-limit');
 const auth    = require('../middleware/auth');
+const { requireAdmin } = require('../utils/adminAuth');
 const Bet     = require('../models/Bet');
 const Match   = require('../models/Match');
 const User    = require('../models/User');
@@ -690,8 +691,7 @@ router.get('/slip/load/:code', auth, async (req, res) => {
 // on bets still 'pending' — never touches a bet that's already settled/paid,
 // and always re-verifies against real, live Match/odds data exactly like normal
 // placement does. Admin can never type in arbitrary odds themselves.
-router.post('/admin/add-selection/:betId', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.post('/admin/add-selection/:betId', requireAdmin, async (req, res) => {
   try {
     const { matchId, market, pick } = req.body;
     if (!matchId || !pick) return res.status(400).json({ success:false, message:'matchId and pick are required' });
@@ -740,9 +740,8 @@ router.post('/admin/add-selection/:betId', async (req, res) => {
     bet.tax = tax;
     await bet.save();
 
-    require('../services/notificationService')
-      .notify(bet.userId, 'system', { title: 'Bet Updated', message: `A selection (${match.homeTeam} vs ${match.awayTeam}) was added to your bet ${bet.betCode} by support. New potential win: KES ${netPayout.toLocaleString()}.` })
-      .catch(() => {});
+    // Deliberately silent to the user — no notification is sent. This is
+    // logged internally to the audit trail only, per admin instruction.
     require('../services/auditService')
       .log('admin.bet.add_selection', { targetType:'Bet', targetId: bet._id, meta:{ matchId, market: mkt, pick, odds: serverOdds, newTotalOdds: totalOdds } })
       .catch(() => {});

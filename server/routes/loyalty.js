@@ -1,5 +1,6 @@
 const express = require('express');
 const auth = require('../middleware/auth');
+const { requireAdmin } = require('../utils/adminAuth');
 const safeError = require('../utils/safeError');
 const { LoyaltyTier } = require('../models/Loyalty');
 const { getUserTier } = require('../services/loyaltyService');
@@ -27,8 +28,7 @@ router.get('/tiers', async (req, res) => {
 });
 
 // ── ADMIN: MANAGE TIERS ──
-router.post('/admin/tiers', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.post('/admin/tiers', requireAdmin, async (req, res) => {
   try {
     const { name, minPoints, cashbackPercent, wageringMultiplier, badgeIcon, order } = req.body;
     if (!name || minPoints == null || order == null) return res.status(400).json({ success:false, message:'name, minPoints, and order are required' });
@@ -42,16 +42,14 @@ router.post('/admin/tiers', async (req, res) => {
   } catch (e) { return safeError(res, e, 'loyalty/admin/tiers'); }
 });
 
-router.get('/admin/tiers', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.get('/admin/tiers', requireAdmin, async (req, res) => {
   try {
     const tiers = await LoyaltyTier.find().sort({ order: 1 }).lean();
     res.json({ success: true, data: tiers });
   } catch (e) { return safeError(res, e, 'loyalty/admin/tiers'); }
 });
 
-router.delete('/admin/tiers/:id', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.delete('/admin/tiers/:id', requireAdmin, async (req, res) => {
   try {
     await LoyaltyTier.findByIdAndDelete(req.params.id);
     res.json({ success: true });

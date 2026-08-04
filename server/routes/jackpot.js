@@ -1,5 +1,6 @@
 const express = require('express');
 const auth = require('../middleware/auth');
+const { requireAdmin } = require('../utils/adminAuth');
 const safeError = require('../utils/safeError');
 const { JackpotRound, JackpotEntry } = require('../models/Jackpot');
 const Match = require('../models/Match');
@@ -70,8 +71,7 @@ router.get('/history', async (req, res) => {
 // Fixtures must already exist in the Match collection (i.e. real matches Juan AI
 // has sent us) — this never accepts a fabricated match, only matchIds that
 // actually resolve to real Match documents.
-router.post('/admin/create', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.post('/admin/create', requireAdmin, async (req, res) => {
   try {
     const { name, entryFee, matchIds, carryOverFromRoundId, guaranteedPrize } = req.body;
     if (!name || !entryFee || !Array.isArray(matchIds) || matchIds.length < 2) {
@@ -107,8 +107,7 @@ router.post('/admin/create', async (req, res) => {
   } catch (e) { return safeError(res, e, 'jackpot/admin/create'); }
 });
 
-router.get('/admin/rounds', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.get('/admin/rounds', requireAdmin, async (req, res) => {
   try {
     const rounds = await JackpotRound.find().sort({ createdAt: -1 }).limit(20).lean();
     res.json({ success: true, data: rounds });
@@ -116,8 +115,7 @@ router.get('/admin/rounds', async (req, res) => {
 });
 
 // ── ADMIN: ROUNDS AWAITING APPROVAL (all fixtures finished, graded, but not yet paid) ──
-router.get('/admin/pending-approval', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.get('/admin/pending-approval', requireAdmin, async (req, res) => {
   try {
     const rounds = await JackpotRound.find({ status: 'awaiting_approval' }).sort({ createdAt: -1 }).lean();
     // Attach winner details so the admin can see exactly who/what will be paid before approving
@@ -131,8 +129,7 @@ router.get('/admin/pending-approval', async (req, res) => {
 });
 
 // ── ADMIN: APPROVE A GRADED ROUND — this is the only place jackpot money actually moves ──
-router.post('/admin/approve/:roundId', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD) return res.status(401).json({ success:false, message:'Unauthorized' });
+router.post('/admin/approve/:roundId', requireAdmin, async (req, res) => {
   try {
     const round = await JackpotRound.findById(req.params.roundId);
     if (!round) return res.status(404).json({ success:false, message:'Round not found' });

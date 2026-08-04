@@ -138,6 +138,7 @@ app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);
+app.use('/api/admin-auth', require('./routes/adminAuth'));
 app.use('/api/admin',   adminRoutes);
 
 // ── PUBLIC SITE CONTENT (banner, notice) — no auth, read-only ──
@@ -227,9 +228,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── ADMIN: settlement trigger ──
-app.post('/api/admin/settle', async (req, res) => {
-  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
-    return res.status(401).json({ success: false });
+app.post('/api/admin/settle', require('./utils/adminAuth').requireAdmin, async (req, res) => {
   try {
     const { runSettlement } = require('./engine/settlementEngine');
     const result = await runSettlement();
@@ -241,9 +240,9 @@ app.post('/api/admin/settle', async (req, res) => {
 });
 
 // ── ADMIN PANEL UI ──
-// Two independent secrets are required to even see the login form:
+// Two independent layers are required to even use the panel:
 //   1. ADMIN_PANEL_TOKEN in the URL (?t=...) — proves you were given the link, not just guessed the path
-//   2. ADMIN_PASSWORD, entered in the login form, checked against /api/admin/* (rate-limited, lockout-protected)
+//   2. Real login at /api/admin-auth/login — username + email + password + 6-digit TOTP code, issuing a signed JWT
 // Anyone without the URL token gets a plain 404 — indistinguishable from a nonexistent route,
 // so probing/guessing the path reveals nothing.
 const panelAccessLimiter = require('express-rate-limit')({

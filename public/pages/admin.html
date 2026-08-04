@@ -208,8 +208,36 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
       <p>Admin Control Panel</p>
     </div>
     <div class="lerr" id="lerr"></div>
-    <input class="linp" type="password" id="apwd" placeholder="Admin password" autocomplete="new-password"/>
+    <input class="linp" type="text" id="aUsername" placeholder="Username" autocomplete="username"/>
+    <input class="linp" type="email" id="aEmail" placeholder="Email" autocomplete="email"/>
+    <input class="linp" type="password" id="aPassword" placeholder="Password" autocomplete="current-password"/>
+    <input class="linp" type="text" id="aTotp" placeholder="6-digit authenticator code" maxlength="6" inputmode="numeric"/>
     <button class="lbtn" id="lbtn" onclick="doLogin()">Access Panel</button>
+    <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--mt)">No admin account yet? <a href="#" onclick="showSetup();return false" style="color:var(--g)">Set one up</a></div>
+  </div>
+</div>
+
+<div id="setupScreen" style="display:none">
+  <div class="lbox">
+    <div class="llogo">
+      <h1>Safari<span>Bet</span></h1>
+      <p>First-Time Admin Setup</p>
+    </div>
+    <div class="lerr" id="serr"></div>
+    <div id="setupForm">
+      <input class="linp" type="text" id="sUsername" placeholder="Choose a username" autocomplete="username"/>
+      <input class="linp" type="email" id="sEmail" placeholder="Your email" autocomplete="email"/>
+      <input class="linp" type="password" id="sPassword" placeholder="Choose a password (min 8 chars)" autocomplete="new-password"/>
+      <button class="lbtn" onclick="doSetup()">Create Admin Account</button>
+      <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--mt)"><a href="#" onclick="showLogin();return false" style="color:var(--g)">Back to login</a></div>
+    </div>
+    <div id="setupQr" style="display:none;text-align:center">
+      <p style="font-size:13px;color:var(--tx);margin-bottom:10px">Scan this into Google Authenticator, Authy, or any TOTP app:</p>
+      <img id="qrImg" style="width:200px;height:200px;border-radius:8px;background:#fff;padding:8px"/>
+      <p style="font-size:11px;color:var(--mt);margin-top:10px">Can't scan? Enter manually:</p>
+      <div style="font-size:12px;font-family:monospace;background:var(--bg2);padding:8px;border-radius:6px;word-break:break-all" id="manualKey"></div>
+      <button class="lbtn" style="margin-top:14px" onclick="showLogin()">I've scanned it — go to Login</button>
+    </div>
   </div>
 </div>
 
@@ -1185,43 +1213,106 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 </div><!-- /dashboard -->
 
 <script>
-let PWD='', loginFails=0, sidebarOpen=true;
+let ADMIN_TOKEN = localStorage.getItem('sb_admin_token') || '', sidebarOpen=true;
 
 // ══ AUTH ══
-function doLogin(){
-  const p=document.getElementById('apwd').value;
+function showLogin(){
+  document.getElementById('setupScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+function showSetup(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('setupScreen').style.display='flex';
+  document.getElementById('setupForm').style.display='block';
+  document.getElementById('setupQr').style.display='none';
+}
+
+async function doLogin(){
+  const username=document.getElementById('aUsername').value.trim();
+  const email=document.getElementById('aEmail').value.trim();
+  const password=document.getElementById('aPassword').value;
+  const totpCode=document.getElementById('aTotp').value.trim();
   const btn=document.getElementById('lbtn');
-  if(!p){showErr('lerr','Enter password');return;}
-  if(loginFails>=5){showErr('lerr','Too many attempts — refresh page');return;}
-  loginFails++;
-  PWD=p; btn.disabled=true; btn.textContent='Checking...';
-  api('/api/admin/stats').then(d=>{
+  if(!username||!email||!password||!totpCode){showErr('lerr','All fields are required, including your 6-digit code');return;}
+  btn.disabled=true; btn.textContent='Checking...';
+  try{
+    const d = await fetch('/api/admin-auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,email,password,totpCode})}).then(r=>r.json());
     if(d.success){
-      document.getElementById('loginScreen').style.display='none';
-      document.getElementById('dashboard').style.display='block';
-      loginFails=0;
-      initDashboard();
+      ADMIN_TOKEN = d.token;
+      localStorage.setItem('sb_admin_token', ADMIN_TOKEN);
+      enterDashboard();
     } else {
-      showErr('lerr','Wrong password');
-      PWD=''; btn.disabled=false; btn.textContent='Access Panel';
+      showErr('lerr', d.message||'Invalid credentials');
+      btn.disabled=false; btn.textContent='Access Panel';
     }
-  }).catch(()=>{showErr('lerr','Connection error');PWD='';btn.disabled=false;btn.textContent='Access Panel';});
+  }catch(e){ showErr('lerr','Connection error'); btn.disabled=false; btn.textContent='Access Panel'; }
+}
+
+async function doSetup(){
+  const username=document.getElementById('sUsername').value.trim();
+  const email=document.getElementById('sEmail').value.trim();
+  const password=document.getElementById('sPassword').value;
+  if(!username||!email||!password){showErr('serr','All fields are required');return;}
+  try{
+    const d = await fetch('/api/admin-auth/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,email,password})}).then(r=>r.json());
+    if(d.success){
+      document.getElementById('setupForm').style.display='none';
+      document.getElementById('setupQr').style.display='block';
+      document.getElementById('qrImg').src=d.qrDataUrl;
+      document.getElementById('manualKey').textContent=d.manualEntryKey;
+    } else {
+      showErr('serr', d.message||'Setup failed');
+    }
+  }catch(e){ showErr('serr','Connection error'); }
+}
+
+function enterDashboard(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('setupScreen').style.display='none';
+  document.getElementById('dashboard').style.display='block';
+  initDashboard();
 }
 
 function doLogout(){
-  PWD='';
+  ADMIN_TOKEN='';
+  localStorage.removeItem('sb_admin_token');
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('dashboard').style.display='none';
-  document.getElementById('apwd').value='';
+  document.getElementById('aUsername').value='';
+  document.getElementById('aEmail').value='';
+  document.getElementById('aPassword').value='';
+  document.getElementById('aTotp').value='';
   document.getElementById('lbtn').disabled=false;
   document.getElementById('lbtn').textContent='Access Panel';
 }
 
 function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
 
+// On page load: if a token is already saved, silently verify it instead of
+// showing the login form again — this is what makes refreshing the page NOT
+// force a fresh login every time, as long as the 12-hour session is still valid.
+(async function boot(){
+  if (ADMIN_TOKEN) {
+    try{
+      const d = await fetch('/api/admin-auth/verify',{headers:{'Authorization':'Bearer '+ADMIN_TOKEN}}).then(r=>r.json());
+      if (d.success) { enterDashboard(); return; }
+    }catch(e){ /* fall through to login screen */ }
+    localStorage.removeItem('sb_admin_token');
+    ADMIN_TOKEN='';
+  }
+  // No valid session — check whether an admin account exists yet at all
+  try{
+    const s = await fetch('/api/admin-auth/status').then(r=>r.json());
+    if (s.success && !s.hasAdmin) showSetup(); else showLogin();
+  }catch(e){ showLogin(); }
+})();
+
 // ══ API ══
 function api(url,opts={}){
-  return fetch(url,{...opts,headers:{'Content-Type':'application/json','x-admin-secret':PWD,...(opts.headers||{})}}).then(r=>r.json());
+  return fetch(url,{...opts,headers:{'Content-Type':'application/json','Authorization':'Bearer '+ADMIN_TOKEN,...(opts.headers||{})}}).then(async r=>{
+    if (r.status === 401) { doLogout(); return { success:false, message:'Session expired — please log in again.' }; }
+    return r.json();
+  });
 }
 
 // ══ NAV ══
@@ -1944,7 +2035,7 @@ async function saveBanner(){
       fd.append('key', 'banner');
       const r = await fetch('/api/admin/upload-image', {
         method: 'POST',
-        headers: { 'x-admin-secret': PWD },
+        headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN },
         body: fd
       });
       const ud = await r.json();
@@ -2001,7 +2092,7 @@ async function saveAviatorImage(){
     fd.append('key', 'aviator');
     const r = await fetch('/api/admin/upload-image', {
       method: 'POST',
-      headers: { 'x-admin-secret': PWD },
+      headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN },
       body: fd
     });
     const ud = await r.json();
@@ -2076,7 +2167,7 @@ async function createJackpotRound(){
   try{
     const d = await fetch('/api/jackpot/admin/create', {
       method:'POST',
-      headers: { 'Content-Type':'application/json', 'x-admin-secret': PWD },
+      headers: { 'Content-Type':'application/json', 'Authorization': 'Bearer '+ADMIN_TOKEN },
       body: JSON.stringify({ name, entryFee: fee, guaranteedPrize, matchIds: jpSelected.map(f=>f.matchId) })
     }).then(r=>r.json());
     if (d.success) {
@@ -2192,7 +2283,7 @@ async function loadJpPending(){
   const el = document.getElementById('jpPendingList');
   el.textContent = 'Loading...';
   try{
-    const d = await fetch('/api/jackpot/admin/pending-approval', { headers: { 'x-admin-secret': PWD } }).then(r=>r.json());
+    const d = await fetch('/api/jackpot/admin/pending-approval', { headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN } }).then(r=>r.json());
     if (!d.success || !d.data?.length) { el.textContent = 'No rounds awaiting approval right now.'; return; }
     el.innerHTML = d.data.map(r => `
       <div style="padding:10px;border:1px solid var(--y);border-radius:8px;margin-bottom:8px;background:rgba(234,179,8,0.06)">
@@ -2218,7 +2309,7 @@ async function loadJpRounds(){
   const el = document.getElementById('jpRoundsList');
   el.textContent = 'Loading...';
   try{
-    const d = await fetch('/api/jackpot/admin/rounds', { headers: { 'x-admin-secret': PWD } }).then(r=>r.json());
+    const d = await fetch('/api/jackpot/admin/rounds', { headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN } }).then(r=>r.json());
     if (!d.success || !d.data?.length) { el.textContent = 'No jackpot rounds yet.'; return; }
     el.innerHTML = d.data.map(r => `
       <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px">
@@ -2251,7 +2342,7 @@ async function uploadApk(){
     fd.append('version', document.getElementById('apkVersion').value.trim());
     const r = await fetch('/api/admin/upload-apk', {
       method: 'POST',
-      headers: { 'x-admin-secret': PWD },
+      headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN },
       body: fd
     });
     const ud = await r.json();
@@ -2287,7 +2378,7 @@ async function savePopup(){
       fd.append('key', 'popup');
       const r = await fetch('/api/admin/upload-image', {
         method: 'POST',
-        headers: { 'x-admin-secret': PWD },
+        headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN },
         body: fd
       });
       const ud = await r.json();
