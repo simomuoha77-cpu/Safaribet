@@ -273,6 +273,31 @@ router.post('/user/:id/reset-password', async (req, res) => {
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
+// ── SEND SMS TO USER ──
+router.post('/user/:id/message', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success:false, message:'Message text is required.' });
+    }
+    if (message.length > 459) { // 3 SMS segments (153 chars each) — CommsGrid concatenates but this is a sane cap
+      return res.status(400).json({ success:false, message:'Message too long (max 459 characters).' });
+    }
+    const user = await User.findById(req.params.id).select('username phone').lean();
+    if (!user) return res.status(404).json({ success:false, message:'User not found' });
+
+    const { sendSms } = require('../services/smsService');
+    const result = await sendSms(user.phone, message.trim());
+    if (!result.success) {
+      return res.status(502).json({ success:false, message:`SMS failed to send: ${result.error}` });
+    }
+
+    audit('SEND_USER_SMS', { userId: req.params.id, username: user.username, messageLength: message.length });
+    require('../services/auditService').log('admin.user.message', { targetType:'User', targetId:req.params.id, meta:{ messageLength: message.length } }).catch(()=>{});
+    res.json({ success:true, message:`SMS sent to ${user.username} (${user.phone}).` });
+  } catch(e) { return safeError(res, e, 'admin'); }
+});
+
 // ── BALANCE ──
 router.post('/balance', async (req, res) => {
   try {

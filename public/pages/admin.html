@@ -418,6 +418,14 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
       </div>
       <div class="res" id="euPwRes"></div>
     </div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--bd);padding-top:12px">
+      <label class="lbl">📱 Send SMS to User</label>
+      <textarea class="inp" id="euSmsMessage" rows="3" maxlength="459" placeholder="e.g. Hi, your withdrawal has been approved and is on its way." style="resize:vertical"></textarea>
+      <div style="font-size:11px;color:var(--mt);margin:4px 0 8px" id="euSmsCharCount">0 / 459 characters</div>
+      <button class="btn btn-g btn-full" onclick="sendUserSms()">Send SMS</button>
+      <div class="res" id="euSmsRes"></div>
+    </div>
   </div>
 
   <div class="sec" id="userBetsSec" style="display:none">
@@ -1501,8 +1509,11 @@ function openUserEdit(){
   document.getElementById('euSelfExclude').value = u.selfExcludedUntil ? new Date(u.selfExcludedUntil).toISOString().slice(0,10) : '';
   document.getElementById('euPhoneVerified').checked = !!u.phoneVerified;
   document.getElementById('euNewPassword').value = '';
+  document.getElementById('euSmsMessage').value = '';
+  document.getElementById('euSmsCharCount').textContent = '0 / 459 characters';
   document.getElementById('euRes').style.display='none';
   document.getElementById('euPwRes').style.display='none';
+  document.getElementById('euSmsRes').style.display='none';
   document.getElementById('userEditSec').style.display='block';
   document.getElementById('userBetsSec').style.display='none';
   document.getElementById('userEditSec').scrollIntoView({behavior:'smooth'});
@@ -1549,6 +1560,27 @@ async function resetUserPassword(){
     else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
   }catch(e){ el.className='res er'; el.textContent='❌ Failed to reset'; }
 }
+
+async function sendUserSms(){
+  if (!currentSearchedUser) return;
+  const message = document.getElementById('euSmsMessage').value.trim();
+  const el = document.getElementById('euSmsRes');
+  el.style.display='block';
+  if (!message) { el.className='res er'; el.textContent='Message cannot be empty'; return; }
+  if (!confirm(`Send this SMS to ${currentSearchedUser.username} (${fmtPhone(currentSearchedUser.phone)})?\n\n"${message}"`)) return;
+  el.className='res'; el.textContent='Sending...';
+  try{
+    const d = await api(`/api/admin/user/${currentSearchedUser._id}/message`, { method:'POST', body: JSON.stringify({ message }) });
+    if (d.success) { el.className='res ok'; el.textContent='✅ '+d.message; document.getElementById('euSmsMessage').value=''; document.getElementById('euSmsCharCount').textContent='0 / 459 characters'; }
+    else { el.className='res er'; el.textContent='❌ '+(d.message||'Failed'); }
+  }catch(e){ el.className='res er'; el.textContent='❌ Failed to send SMS'; }
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target?.id === 'euSmsMessage') {
+    document.getElementById('euSmsCharCount').textContent = `${e.target.value.length} / 459 characters`;
+  }
+});
 
 function openUserBets(){
   if (!currentSearchedUser) return;
