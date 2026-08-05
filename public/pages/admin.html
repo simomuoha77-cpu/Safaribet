@@ -1560,6 +1560,7 @@ function openUserBets(){
 }
 
 let betSelectionsMap = {}; // betId -> Set of matchIds already in that bet, so search can filter them out
+let betMetaMap = {}; // betId -> { totalOdds, stake } — used to show a live "before → after" preview before confirming an add
 
 async function loadUserBets(){
   if (!currentSearchedUser) return;
@@ -1572,6 +1573,7 @@ async function loadUserBets(){
     betSelectionsMap = {};
     el.innerHTML = d.data.map(b => {
       betSelectionsMap[b._id] = new Set(b.selections.map(s => s.matchId));
+      betMetaMap[b._id] = { totalOdds: b.totalOdds, stake: b.stake };
       return `
       <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${b.betCode}</strong><span style="text-transform:capitalize">${b.status}</span></div>
@@ -1602,22 +1604,41 @@ function searchAddSelFixtures(betId, q){
       const already = betSelectionsMap[betId] || new Set();
       const filtered = d.data.filter(m => !already.has(m.matchId));
       if (!filtered.length) { resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">All matching fixtures are already in this bet.</div>'; return; }
-      resEl.innerHTML = filtered.map(m => `
+      resEl.innerHTML = filtered.map(m => {
+        const o = m.odds || {};
+        return `
         <div style="padding:8px;border:1px solid var(--bd);border-radius:6px;margin-bottom:6px">
           <div style="font-size:12px;font-weight:700">${m.homeTeam} vs ${m.awayTeam}</div>
           <div style="font-size:10px;color:var(--mt);margin-bottom:6px">${m.league||''}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','home')">${m.homeTeam} win</button>
-            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','draw')">Draw</button>
-            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','away')">${m.awayTeam} win</button>
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','home',${o.home||0},'${m.homeTeam.replace(/'/g,"\\'")}','${m.awayTeam.replace(/'/g,"\\'")}')">${m.homeTeam} win @ ${o.home||'?'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','draw',${o.draw||0},'${m.homeTeam.replace(/'/g,"\\'")}','${m.awayTeam.replace(/'/g,"\\'")}')">Draw @ ${o.draw||'?'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="addSelectionToBet('${betId}','${m.matchId}','1x2','away',${o.away||0},'${m.homeTeam.replace(/'/g,"\\'")}','${m.awayTeam.replace(/'/g,"\\'")}')">${m.awayTeam} win @ ${o.away||'?'}</button>
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
     }catch(e){ resEl.innerHTML = '<div style="font-size:11px;color:var(--mt)">Search failed</div>'; }
   }, 350);
 }
 
-async function addSelectionToBet(betId, matchId, market, pick){
-  if (!confirm('Add this selection to the bet? This recalculates total odds and potential win.')) return;
+async function addSelectionToBet(betId, matchId, market, pick, oddsPreview, homeTeam, awayTeam){
+  // Show exactly what will happen BEFORE committing — accumulator odds
+  // multiply with every added leg, so even one extra selection can noticeably
+  // jump the potential win. That's correct math, but it should never be a
+  // surprise after the fact, so the confirm dialog spells it out up front.
+  const meta = betMetaMap[betId];
+  let confirmMsg = 'Add this selection to the bet?';
+  if (meta && oddsPreview > 0) {
+    const newOdds = parseFloat((meta.totalOdds * oddsPreview).toFixed(4));
+    const oldWin = parseFloat((meta.stake * meta.totalOdds).toFixed(2));
+    const newWin = parseFloat((meta.stake * newOdds).toFixed(2));
+    confirmMsg = `Add ${homeTeam} vs ${awayTeam} @ ${oddsPreview}?\n\n` +
+      `Odds: ${meta.totalOdds} → ${newOdds}\n` +
+      `Potential win (before tax): KES ${oldWin.toLocaleString()} → KES ${newWin.toLocaleString()}\n\n` +
+      `Note: odds multiply with each added leg — this jump is expected accumulator math, not an error.`;
+  }
+  if (!confirm(confirmMsg)) return;
+
   const msgEl = document.getElementById(`addSelMsg-${betId}`);
   msgEl.style.display='block'; msgEl.className='res'; msgEl.textContent='Adding...';
   try{
@@ -1628,7 +1649,10 @@ async function addSelectionToBet(betId, matchId, market, pick){
       toast('Selection added','ok');
       document.getElementById(`addSelInput-${betId}`).value = '';
       document.getElementById(`addSelResults-${betId}`).innerHTML = '';
-      loadUserBets();
+      // Refresh whichever list is actually visible — this function is used
+      // from both the main Bet Management list and the per-user bets view.
+      const betsPanelActive = document.getElementById('panel-bets')?.classList.contains('on');
+      if (betsPanelActive) loadBets(); else loadUserBets();
     }
     else { msgEl.className='res er'; msgEl.textContent = '❌ '+d.message; }
   }catch(e){ msgEl.className='res er'; msgEl.textContent = '❌ Failed to add selection'; }
@@ -1702,7 +1726,7 @@ async function loadBets(){
   const d=await api(`/api/admin/bets?status=${status}&search=${search}`);
   const el=document.getElementById('betList');
   if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No bets found</div>';return;}
-  d.data.forEach(b => { betSelectionsMap[b._id] = new Set((b.selections||[]).map(s => s.matchId)); });
+  d.data.forEach(b => { betSelectionsMap[b._id] = new Set((b.selections||[]).map(s => s.matchId)); betMetaMap[b._id] = { totalOdds: b.totalOdds, stake: b.stake }; });
   el.innerHTML=d.data.map(b=>`
     <div class="b-row ${b.status}">
       <div class="b-top"><span class="b-code">${b.betCode}</span><span class="badge bg-${b.status==='won'?'g':b.status==='lost'?'r':'y'}">${b.status}</span></div>
