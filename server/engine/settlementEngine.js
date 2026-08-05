@@ -90,6 +90,25 @@ async function payWinner(bet, netPayout) {
   }
 }
 
+// Instantly finalize a bet as LOST the moment any single selection loses —
+// mirrors how real sportsbooks (Betika, SportPesa) settle accumulators: one
+// loss kills the whole slip immediately, without waiting for the rest of the
+// matches to finish. The remaining still-pending selections keep grading in
+// later settlement runs purely for display (see runSettlement's query below),
+// but never re-trigger finalization once a bet is already lost.
+async function finalizeBetAsLost(bet) {
+  bet.status    = 'lost';
+  bet.payout    = 0;
+  bet.netPayout = 0;
+  bet.settledAt = new Date();
+  await bet.save();
+
+  require('../services/notificationService')
+    .notify(bet.userId, 'bet_lost', { betCode: bet.betCode }).catch(()=>{});
+
+  return { status: 'lost', netPayout: 0 };
+}
+
 // Fully grade and save one bet once all selections have results
 async function finalizeBet(bet) {
   const nonVoid = bet.selections.filter(s => s.result !== 'void');
@@ -141,14 +160,38 @@ function applyResult(s, matchResult, homeScore, awayScore) {
   return true;
 }
 
-async function runSettlement() {
-  const startTime = Date.now();
-  console.log('\n🔄 [Settlement] Starting...');
+let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
 
-  // ── 1. Count pending bets ──
+async function runSettlement(includeApiFetch = true) {
+  if (settlementRunning) {
+    console.log('[Settlement] Skipped — a settlement run is already in progress.');
+    return { settled: 0, paid: 0, skipped: true };
+  }
+  settlementRunning = true;
+  try {
+    return await _runSettlementInner(includeApiFetch);
+  } finally {
+    settlementRunning = false;
+  }
+}
+
+async function _runSettlementInner(includeApiFetch) {
+  const startTime = Date.now();
+  console.log(`\n🔄 [Settlement] Starting${includeApiFetch ? '' : ' (fast DB-only pass)'}...`);
+
+  // ── 1. Count bets that still need processing ──
+  // This includes truly pending bets AND already-lost bets that still have
+  // unresolved selections — the latter keep grading purely for display
+  // (so match 3/4/5 still show ✅/❌ once they finish), without re-triggering
+  // any finalize/payout logic, since finalizeBetAsLost only ever runs once.
+  const openQuery = { $or: [
+    { status: 'pending' },
+    { status: 'lost', selections: { $elemMatch: { result: 'pending' } } }
+  ]};
+
   let pendingCount;
   try {
-    pendingCount = await Bet.countDocuments({ status: 'pending' });
+    pendingCount = await Bet.countDocuments(openQuery);
   } catch(e) {
     console.error('[Settlement] MongoDB error counting pending bets:', e.message);
     return { settled: 0, paid: 0, error: e.message };
@@ -161,16 +204,23 @@ async function runSettlement() {
   console.log(`[Settlement] ${pendingCount} pending bets to check`);
 
   // ── 2. Build match result lookup ──
-  // Source A: Juan API (days 0-7, parallel calls)
+  // Source A: Juan API (days 0-7, parallel calls) — only on the slower,
+  // periodic full pass. This hits the external API 8x per call with no
+  // caching, so it must NOT run on every fast per-minute check.
   let apiMatches = [];
-  try {
-    apiMatches = await getFixtures(7);
-    console.log(`[Settlement] API snapshot: ${apiMatches.length} matches`);
-  } catch(e) {
-    console.error('[Settlement] API fetch failed (continuing with DB only):', e.message);
+  if (includeApiFetch) {
+    try {
+      apiMatches = await getFixtures(7);
+      console.log(`[Settlement] API snapshot: ${apiMatches.length} matches`);
+    } catch(e) {
+      console.error('[Settlement] API fetch failed (continuing with DB only):', e.message);
+    }
   }
 
-  // Source B: DB matches marked finished with a result
+  // Source B: DB matches marked finished with a result — this is the primary,
+  // fast source. updateLive() writes results here every ~10s as matches end,
+  // so checking this alone every minute is what actually delivers "real time"
+  // settlement without needing the heavy API call on every pass.
   let dbMatches = [];
   try {
     dbMatches = await Match.find({
@@ -204,10 +254,10 @@ async function runSettlement() {
 
   console.log(`[Settlement] Result map: ${resultMap.size} entries`);
 
-  // ── 3. Load all pending bets ──
+  // ── 3. Load all bets needing processing (pending + already-lost-but-display-pending) ──
   let bets;
   try {
-    bets = await Bet.find({ status: 'pending' });
+    bets = await Bet.find(openQuery);
   } catch(e) {
     console.error('[Settlement] DB error fetching bets:', e.message);
     return { settled: 0, paid: 0, error: e.message };
@@ -302,6 +352,28 @@ async function runSettlement() {
 
       if (!changed) continue;
 
+      // ── INSTANT LOSS SETTLEMENT ──
+      // The moment ANY graded selection is a loss, the whole accumulator is
+      // dead — settle it right now, exactly like Betika/SportPesa, without
+      // waiting for the remaining matches. Guarded by bet.status !== 'lost'
+      // so a bet that was already settled-as-lost in an earlier run (and is
+      // only here now because it still has pending selections to grade for
+      // display) never gets finalized/notified a second time.
+      const hasLoss = bet.selections.some(s => s.result === 'lost');
+      if (hasLoss && bet.status === 'pending') {
+        const { status, netPayout } = await finalizeBetAsLost(bet);
+        totalSettled++;
+        console.log(`  🎯 Bet ${bet.betCode}: LOST instantly (1+ selection lost, others may still be pending)`);
+        continue;
+      }
+
+      if (bet.status === 'lost') {
+        // Already settled as lost in a prior run — just persist the newly
+        // graded selection(s) for display, no re-finalization.
+        await bet.save();
+        continue;
+      }
+
       // Check if all selections are resolved
       const allDone = bet.selections.every(s => s.result !== 'pending');
       if (!allDone) {
@@ -309,7 +381,7 @@ async function runSettlement() {
         continue;
       }
 
-      // All done — finalize the bet
+      // All done, nothing lost — finalize as won (or void-refund)
       const { status, netPayout } = await finalizeBet(bet);
       totalSettled++;
       if (status === 'won' && netPayout > 0) totalPaid++;

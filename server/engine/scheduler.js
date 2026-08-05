@@ -17,8 +17,12 @@ function start() {
   const liveMs = parseInt(process.env.LIVE_POLL_MS) || 10000; // 10s — catch score changes before match disappears
   setInterval(() => { updateLive().catch(console.error); }, liveMs);
 
-  // Settlement every 5 minutes — fast win/loss notification for users
-  cron.schedule('*/5 * * * *', () => { runSettlement().catch(console.error); });
+  // Settlement: fast DB-only pass every minute (cheap — matches are already
+  // polled every 10s by updateLive above, so this alone delivers near-instant
+  // win/loss settlement) plus a slower full pass with the external API
+  // fallback every 5 minutes as a safety net for anything the DB path missed.
+  cron.schedule('* * * * *', () => { runSettlement(false).catch(console.error); });
+  cron.schedule('*/5 * * * *', () => { runSettlement(true).catch(console.error); });
 
   // Jackpot settlement — same cadence, checks if all fixtures in any open round finished
   cron.schedule('*/5 * * * *', () => { settleJackpots().catch(console.error); });
