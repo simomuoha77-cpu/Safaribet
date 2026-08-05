@@ -733,6 +733,8 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <label class="lbl">Min Withdrawal (KES)</label><input class="inp" type="number" id="limMinWd" value="100"/>
     <label class="lbl">Max Withdrawal (KES)</label><input class="inp" type="number" id="limMaxWd" value="70000"/>
     <label class="lbl">Max Withdrawals per Day</label><input class="inp" type="number" id="limWdPerDay" value="3"/>
+    <label class="lbl">Auto-Approve Withdrawals Up To (KES)</label><input class="inp" type="number" id="limAutoApprove" value="1000"/>
+    <div style="font-size:11px;color:var(--mt);margin-top:-4px;margin-bottom:6px">Withdrawals at or below this amount pay out instantly. Above it, they wait in Pending Approvals for you to approve manually.</div>
     <button class="btn btn-g btn-full" onclick="saveLimits('withdrawal')">Save Withdrawal Limits</button>
     <div class="res" id="limWdRes"></div>
   </div>
@@ -1339,6 +1341,7 @@ function nav(name,el){
   // Auto-load data
   if(name==='bets') loadBets();
   else if(name==='users') loadUsers();
+  else if(name==='limits') loadLimits();
   else if(name==='transactions') loadTx();
   else if(name==='matches') loadAdminMatches();
   else if(name==='deposits') loadDeposits();
@@ -1976,11 +1979,25 @@ async function loadTx(){
 }
 
 // ══ LIMITS ══
+async function loadLimits(){
+  try{
+    const d = await api('/api/admin/limits');
+    if (!d.success || !d.data) return;
+    const l = d.data;
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined && val !== null) el.value = val; };
+    set('limMinBet', l.minBet); set('limMaxBet', l.maxBet); set('limMaxSel', l.maxSelections); set('limMaxPayout', l.maxPayout);
+    set('limPlatformMargin', l.platformMarginPercent);
+    set('limMinDep', l.minDeposit); set('limMaxDep', l.maxDeposit);
+    set('limMinWd', l.minWithdrawal); set('limMaxWd', l.maxWithdrawal); set('limWdPerDay', l.wdPerDay);
+    set('limAutoApprove', l.withdrawalAutoApproveLimit);
+  }catch(e){ /* leave defaults on failure */ }
+}
+
 async function saveLimits(type){
   let data={};
   if(type==='bet') data={minBet:+document.getElementById('limMinBet').value,maxBet:+document.getElementById('limMaxBet').value,maxSelections:+document.getElementById('limMaxSel').value,maxPayout:+document.getElementById('limMaxPayout').value};
   if(type==='deposit') data={minDeposit:+document.getElementById('limMinDep').value,maxDeposit:+document.getElementById('limMaxDep').value};
-  if(type==='withdrawal') data={minWithdrawal:+document.getElementById('limMinWd').value,maxWithdrawal:+document.getElementById('limMaxWd').value,wdPerDay:+document.getElementById('limWdPerDay').value};
+  if(type==='withdrawal') data={minWithdrawal:+document.getElementById('limMinWd').value,maxWithdrawal:+document.getElementById('limMaxWd').value,wdPerDay:+document.getElementById('limWdPerDay').value,withdrawalAutoApproveLimit:+document.getElementById('limAutoApprove').value};
   if(type==='margin'){
     const val = +document.getElementById('limPlatformMargin').value;
     if (val > 20) { const el=document.getElementById('limMarginRes'); el.style.display='block'; el.className='res er'; el.textContent='❌ 20% max — anything higher makes odds look broken'; return; }

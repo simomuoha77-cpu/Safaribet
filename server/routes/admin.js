@@ -38,7 +38,7 @@ const store = {
   loginLog:    [],
   content:     { banner: '', notice: '', bannerLink: '', bannerImage: '', popupLink: '', popupImage: '', popupEnabled: false },
   settings:    { maintenanceMode: false, maintenanceMessage: '', allowRegistration: true, allowDeposits: true, allowWithdrawals: true, siteName: 'SafariBet' },
-  limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0 },
+  limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0, withdrawalAutoApproveLimit: 1000 },
   bonusSettings:{ welcomeBonus: 20, minBonusDep: 0 },
   notifications:[]
 };
@@ -561,6 +561,9 @@ router.get('/wallet', async (req, res) => {
 });
 
 // ── LIMITS ──
+router.get('/limits', async (req, res) => {
+  res.json({ success:true, data: store.limits });
+});
 router.post('/limits', async (req, res) => {
   const { type, ...data } = req.body;
   Object.assign(store.limits, data);

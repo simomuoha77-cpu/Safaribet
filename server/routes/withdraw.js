@@ -185,6 +185,24 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
 
     console.log(`💸 Withdrawal: ${user.username} KES ${amount} → ${phone} [${ref}]`);
 
+    // Amounts at or below the admin-configured threshold go out instantly via
+    // B2C, same as before. Above it, the transaction is deliberately left
+    // 'pending' with funds already locked — no B2C call is attempted here at
+    // all — until an admin reviews and approves it via POST /admin/withdrawal/approve.
+    const autoApproveLimit = limits.withdrawalAutoApproveLimit ?? 1000;
+    const needsApproval = amount > autoApproveLimit;
+
+    if (needsApproval) {
+      console.log(`⏳ Withdrawal KES ${amount} exceeds auto-approve limit (KES ${autoApproveLimit}) — held for admin approval [${ref}]`);
+      return res.json({
+        success:    true,
+        message:    `Withdrawal of KES ${amount.toLocaleString()} requires admin approval since it's above KES ${autoApproveLimit.toLocaleString()}. You'll be paid once approved.`,
+        reference:  ref,
+        newBalance: user.balance,
+        pendingApproval: true
+      });
+    }
+
     // Try B2C immediately
     let b2cResult = null;
     let b2cError  = null;
