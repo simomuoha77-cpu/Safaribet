@@ -68,13 +68,13 @@ async function sendSms(phoneE164, message) {
       return { success: false, error: reason, raw: data };
     }
 
+    console.log(`[sms] Sent successfully to ${e164} — messageId: ${detail?.message_id || 'n/a'}`);
     return { success: true, messageId: detail?.message_id || null, raw: data };
   } catch (e) {
     console.error('[sms] CommsGrid send failed:', e.response?.data || e.message);
     return { success: false, error: e.response?.data?.message || e.message };
   }
 }
-
 /**
  * Generates a random 6-digit OTP code as a string, e.g. "042837".
  */

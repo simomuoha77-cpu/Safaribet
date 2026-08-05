@@ -275,6 +275,7 @@ router.post('/user/:id/reset-password', async (req, res) => {
 
 // ── SEND SMS TO USER ──
 router.post('/user/:id/message', async (req, res) => {
+  console.log(`[admin/sms] Request received for user ${req.params.id}`);
   try {
     const { message } = req.body;
     if (!message || !message.trim()) {
@@ -286,8 +287,10 @@ router.post('/user/:id/message', async (req, res) => {
     const user = await User.findById(req.params.id).select('username phone').lean();
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
 
+    console.log(`[admin/sms] Sending to ${user.phone} (${user.username}): "${message.trim().slice(0,40)}..."`);
     const { sendSms } = require('../services/smsService');
     const result = await sendSms(user.phone, message.trim());
+    console.log(`[admin/sms] Result:`, JSON.stringify(result));
     if (!result.success) {
       return res.status(502).json({ success:false, message:`SMS failed to send: ${result.error}` });
     }
@@ -295,7 +298,10 @@ router.post('/user/:id/message', async (req, res) => {
     audit('SEND_USER_SMS', { userId: req.params.id, username: user.username, messageLength: message.length });
     require('../services/auditService').log('admin.user.message', { targetType:'User', targetId:req.params.id, meta:{ messageLength: message.length } }).catch(()=>{});
     res.json({ success:true, message:`SMS sent to ${user.username} (${user.phone}).` });
-  } catch(e) { return safeError(res, e, 'admin'); }
+  } catch(e) {
+    console.error('[admin/sms] Exception:', e.message);
+    return safeError(res, e, 'admin');
+  }
 });
 
 // ── BALANCE ──
