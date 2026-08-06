@@ -24,7 +24,27 @@ html[data-theme="light"]{
   --hdr:rgba(255,255,255,0.98);--odd-bg:#eef3ee;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;transition:background 0.2s,color 0.2s}
+html{scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;transition:background 0.2s,color 0.2s}
+
+/* SCROLL PERFORMANCE — every fixed/sticky bar (header, search, sport tabs,
+   filter rows, bottom nav) gets promoted to its own GPU compositing layer.
+   Without this, the browser repaints all of them on every single scroll
+   frame, which is what makes scrolling feel like it's "hanging" — this is
+   the single biggest fix for that. Also applied to any inner scrollable
+   panel so touch-scrolling inside them feels native instead of sticky. */
+header, .stabs, .srch-wrap, .sport-tabs, .fbar, .mkts, .bnav,
+[style*="position:fixed"], [style*="position: fixed"]{
+  transform:translateZ(0);
+  -webkit-transform:translateZ(0);
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+.slip-body, #notifPanel, .srch-results,
+[style*="overflow-y:auto"], [style*="overflow-x:auto"],
+[style*="overflow-y: auto"], [style*="overflow-x: auto"]{
+  -webkit-overflow-scrolling:touch;
+}
 
 /* HEADER */
 header{
@@ -32,7 +52,7 @@ header{
   background:var(--hdr);
   border-bottom:1px solid var(--bd);
   display:flex;align-items:center;justify-content:space-between;
-  padding:0 14px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  padding:0 14px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
 .logo{
   font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;
@@ -64,7 +84,7 @@ header{
   background:var(--hdr);
   border-bottom:1px solid var(--bd);
   display:flex;overflow-x:auto;scrollbar-width:none;
-  backdrop-filter:blur(10px);gap:2px;padding:0 6px;
+  backdrop-filter:blur(8px);gap:2px;padding:0 6px;
 }
 .stabs::-webkit-scrollbar{display:none}
 .stab{
@@ -282,8 +302,8 @@ header{
   background:var(--hdr);
   border-top:1px solid var(--bd);
   display:flex;height:var(--bn);
-  backdrop-filter:blur(20px);
-  -webkit-backdrop-filter:blur(20px);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
   padding-bottom:env(safe-area-inset-bottom);
 }
 .bni{
@@ -324,7 +344,7 @@ header{
 /* SEARCH BAR */
 .srch-wrap{position:fixed;top:calc(var(--hh));left:0;right:0;z-index:97;
   background:var(--hdr);border-bottom:1px solid var(--bd);padding:7px 10px;
-  backdrop-filter:blur(20px)}
+  backdrop-filter:blur(8px)}
 .srch-box{display:flex;align-items:center;gap:8px;background:var(--s2);
   border:1px solid var(--bd);border-radius:10px;padding:8px 12px}
 .srch-box input{flex:1;background:none;border:none;outline:none;font-size:13px;
@@ -336,7 +356,7 @@ header{
 .sport-tabs{position:fixed;left:0;right:0;z-index:96;
   background:var(--hdr);border-bottom:1px solid var(--bd);
   display:flex;gap:6px;padding:6px 10px;overflow-x:auto;scrollbar-width:none;
-  backdrop-filter:blur(20px)}
+  backdrop-filter:blur(8px)}
 .sport-tabs::-webkit-scrollbar{display:none}
 .sp-tab{flex-shrink:0;display:flex;flex-direction:column;align-items:center;
   gap:3px;padding:6px 10px;border-radius:10px;cursor:pointer;
@@ -370,7 +390,7 @@ header{
   display:flex;align-items:center;gap:6px;padding:6px 10px;
   overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap;
   background:var(--hdr);border-bottom:1px solid var(--bd);
-  backdrop-filter:blur(10px);
+  backdrop-filter:blur(8px);
 }
 .fbar::-webkit-scrollbar{display:none}
 .ftab{
@@ -399,7 +419,7 @@ header{
   display:flex;gap:6px;padding:4px 10px 6px;
   overflow-x:auto;scrollbar-width:none;
   background:var(--hdr);border-bottom:1px solid var(--bd);
-  backdrop-filter:blur(10px);
+  backdrop-filter:blur(8px);
 }
 .mkts::-webkit-scrollbar{display:none}
 .mkt{
