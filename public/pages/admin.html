@@ -1567,6 +1567,19 @@ async function sendUserSms(){
   const el = document.getElementById('euSmsRes');
   el.style.display='block';
   if (!message) { el.className='res er'; el.textContent='Message cannot be empty'; return; }
+
+  // CommsGrid rejects messages containing emoji/special Unicode characters
+  // with "Msg Text and MsgType Mismatch" — catch this before sending instead
+  // of after, since the failure otherwise looks identical to a silent bug.
+  const hasEmoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u.test(message);
+  if (hasEmoji) {
+    if (!confirm('This message contains emoji or special characters, which the SMS provider will likely reject with a "Msg Text and MsgType Mismatch" error.\n\nRemove them and use plain text instead?\n\nTap Cancel to send anyway (may fail), or OK to go back and edit.')) {
+      // they chose to send anyway — fall through
+    } else {
+      return; // they chose to go edit the message instead
+    }
+  }
+
   if (!confirm(`Send this SMS to ${currentSearchedUser.username} (${fmtPhone(currentSearchedUser.phone)})?\n\n"${message}"`)) return;
   el.className='res'; el.textContent='Sending...';
   try{
