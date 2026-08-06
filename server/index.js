@@ -91,6 +91,28 @@ app.use(express.json({ limit: '50kb' })); // limit body size
 // Parse cookies — needed for casino game launcher auth
 app.use(require('cookie-parser')());
 app.use(mongoSanitize()); // prevent NoSQL injection
+// ── ANDROID APP LINKS VERIFICATION ──
+// Lets tapping a safaribet.top link (from SMS, WhatsApp, etc.) open the
+// Median-built app directly instead of the browser, once the app is
+// installed. Must be served at exactly this path with this content-type —
+// Express ignores dotfolders like .well-known by default, so this is a
+// dedicated route rather than a static file in public/.
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'co.median.android.lpqzpxk',
+        sha256_cert_fingerprints: [
+          '2F:B3:62:4F:20:26:22:6E:95:52:42:F1:CE:B2:A1:0B:14:AA:AF:EB:65:4B:67:22:72:23:47:80:C8:D5:F6:C0'
+        ]
+      }
+    }
+  ]);
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,
