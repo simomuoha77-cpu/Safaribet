@@ -7,6 +7,7 @@ const User        = require('../models/User');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const Transaction = require('../models/Transaction');
+const walletService = require('../services/walletService');
 const router      = express.Router();
 
 // ── ADMIN AUTH ──
@@ -169,7 +170,22 @@ router.get('/live-stats', async (req, res) => {
 // ── USERS ──
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find().sort({ createdAt:-1 }).limit(200).select('username phone balance createdAt isActive _id').lean();
+    // Join real, live Wallet balances instead of reading the stale legacy
+    // User.balance field — same bug/fix as GET /user/:id below, but done as
+    // a single aggregation here since this returns up to 200 users at once
+    // and looping individual wallet lookups would be far too slow.
+    const users = await User.aggregate([
+      { $sort: { createdAt: -1 } },
+      { $limit: 200 },
+      { $lookup: { from: 'wallets', localField: '_id', foreignField: 'userId', as: 'wallet' } },
+      { $addFields: {
+          balance: { $ifNull: [ { $add: [
+            { $ifNull: [ { $arrayElemAt: ['$wallet.main', 0] }, 0 ] },
+            { $ifNull: [ { $arrayElemAt: ['$wallet.bonus', 0] }, 0 ] }
+          ] }, 0 ] }
+      } },
+      { $project: { username:1, phone:1, balance:1, createdAt:1, isActive:1 } }
+    ]);
     res.json({ success:true, data:users });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
@@ -180,11 +196,17 @@ router.get('/user/:id', async (req, res) => {
     let phone = q.replace(/\D/g,'');
     if (phone.startsWith('0')) phone = '254'+phone.slice(1);
     const user = await User.findOne({ $or:[{phone},{username:q.toLowerCase()}] })
-      .select('username phone balance createdAt isActive role kycStatus phoneVerified dailyDepositLimit dailyStakeLimit selfExcludedUntil favouriteTeams')
+      .select('username phone createdAt isActive role kycStatus phoneVerified dailyDepositLimit dailyStakeLimit selfExcludedUntil favouriteTeams')
       .lean();
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
     const bets = await Bet.countDocuments({ userId:user._id });
-    res.json({ success:true, user:{ ...user, bets } });
+    // Live wallet balance — NEVER read User.balance for display. That field is
+    // a legacy snapshot only ever written to when an admin manually adjusts
+    // balance; every normal bet, win, loss, deposit, and withdrawal updates
+    // the real Wallet collection only, so User.balance silently goes stale
+    // for any user who does anything but get a manual admin adjustment.
+    const wallet = await walletService.getBalance(user._id);
+    res.json({ success:true, user:{ ...user, balance: wallet.spendable, walletMain: wallet.main, walletBonus: wallet.bonus, walletLocked: wallet.locked, bets } });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
@@ -314,7 +336,6 @@ router.post('/balance', async (req, res) => {
     const user = await User.findOne({ $or:[{phone},{username:identifier.toLowerCase()}] });
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
 
-    const walletService = require('../services/walletService');
     const amt = parseFloat(amount);
     let wallet;
     if (amt >= 0) {
@@ -566,7 +587,6 @@ router.post('/withdrawal/reject', async (req, res) => {
     if (!tx) return res.status(404).json({ success:false, message:'Transaction not found' });
     if (tx.status !== 'pending') return res.status(400).json({ success:false, message:'Transaction is not pending' });
 
-    const walletService = require('../services/walletService');
     const amount = Math.abs(tx.amount);
     // Release funds from locked back to main (this withdrawal was locked, not yet debited from main permanently)
     await walletService.releaseLock(tx.userId, amount, tx.reference);
@@ -585,8 +605,29 @@ router.post('/withdrawal/reject', async (req, res) => {
 // ── WALLET ──
 router.get('/wallet', async (req, res) => {
   try {
-    const agg = await User.aggregate([{ $group:{ _id:null, total:{ $sum:'$balance' }, count:{ $sum:{ $cond:[{ $gt:['$balance',0] },1,0] } } } }]);
-    const top = await User.find({ balance:{ $gt:0 } }).sort({ balance:-1 }).limit(20).select('username phone balance').lean();
+    // Real, live balances only — same fix as GET /users and GET /user/:id
+    // above. User.balance is a frozen legacy field; the Wallet collection is
+    // the only accurate source after any bet, deposit, win, or loss.
+    const pipeline = [
+      { $lookup: { from: 'wallets', localField: '_id', foreignField: 'userId', as: 'wallet' } },
+      { $addFields: {
+          balance: { $ifNull: [ { $add: [
+            { $ifNull: [ { $arrayElemAt: ['$wallet.main', 0] }, 0 ] },
+            { $ifNull: [ { $arrayElemAt: ['$wallet.bonus', 0] }, 0 ] }
+          ] }, 0 ] }
+      } }
+    ];
+    const agg = await User.aggregate([
+      ...pipeline,
+      { $group:{ _id:null, total:{ $sum:'$balance' }, count:{ $sum:{ $cond:[{ $gt:['$balance',0] },1,0] } } } }
+    ]);
+    const top = await User.aggregate([
+      ...pipeline,
+      { $match: { balance: { $gt: 0 } } },
+      { $sort: { balance: -1 } },
+      { $limit: 20 },
+      { $project: { username:1, phone:1, balance:1 } }
+    ]);
     res.json({ success:true, totalBalance:agg[0]?.total||0, fundedUsers:agg[0]?.count||0, topWallets:top });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
@@ -989,7 +1030,6 @@ router.get('/wallets', async (req, res) => {
 
 router.get('/wallets/:userId/history', async (req, res) => {
   try {
-    const walletService = require('../services/walletService');
     const result = await walletService.getHistory(req.params.userId, { page: parseInt(req.query.page)||1, limit: 50 });
     res.json({ success:true, ...result });
   } catch(e) { return safeError(res, e, 'admin'); }
