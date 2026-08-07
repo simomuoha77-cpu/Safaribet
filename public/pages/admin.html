@@ -1350,6 +1350,7 @@ function nav(name,el){
   if(name==='bets') loadBets();
   else if(name==='users') loadUsers();
   else if(name==='limits') loadLimits();
+  else if(name==='bonus') loadBonusSettings();
   else if(name==='transactions') loadTx();
   else if(name==='matches') loadAdminMatches();
   else if(name==='deposits') loadDeposits();
@@ -2081,10 +2082,19 @@ async function saveLimits(type){
 }
 
 // ══ BONUS ══
+async function loadBonusSettings(){
+  try{
+    const d = await api('/api/admin/bonus-settings');
+    if (!d.success || !d.data) return;
+    document.getElementById('welcomeBonus').value = d.data.welcomeBonus;
+    document.getElementById('minBonusDep').value = d.data.minBonusDep;
+  }catch(e){ /* leave static defaults on failure */ }
+}
+
 async function saveBonus(){
   const d=await api('/api/admin/bonus-settings',{method:'POST',body:JSON.stringify({welcomeBonus:+document.getElementById('welcomeBonus').value,minBonusDep:+document.getElementById('minBonusDep').value})});
   const el=document.getElementById('bonusRes');el.style.display='block';
-  if(d.success){el.className='res ok';el.textContent='✅ Bonus settings saved';}else{el.className='res er';el.textContent='❌ Failed';}
+  if(d.success){el.className='res ok';el.textContent='✅ '+(d.message||'Bonus settings saved');}else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
 }
 
 async function giveBonus(){

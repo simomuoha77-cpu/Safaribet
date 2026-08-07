@@ -7,6 +7,7 @@ const User        = require('../models/User');
 const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const Transaction = require('../models/Transaction');
+const Promotion   = require('../models/Promotion');
 const walletService = require('../services/walletService');
 const router      = express.Router();
 
@@ -645,11 +646,55 @@ router.post('/limits', async (req, res) => {
 });
 
 // ── BONUS SETTINGS ──
+// The welcome bonus a new user actually receives is granted by
+// promotionService.tryGrantWelcomeBonus() on their first deposit, which looks
+// up a Promotion document with type:'welcome_bonus'. Previously this admin
+// panel only saved to a disconnected in-memory settings store that nothing
+// in the real deposit flow ever read — meaning saved changes here silently
+// never took effect for real users. This now upserts the actual Promotion
+// record that's checked at deposit time.
+router.get('/bonus-settings', async (req, res) => {
+  try {
+    const promo = await Promotion.findOne({ type: 'welcome_bonus' }).lean();
+    res.json({ success:true, data: {
+      welcomeBonus: promo?.amountValue ?? store.bonusSettings.welcomeBonus,
+      minBonusDep:  promo?.minDeposit  ?? store.bonusSettings.minBonusDep,
+      active: promo?.active ?? true
+    }});
+  } catch(e) { return safeError(res, e, 'admin'); }
+});
+
 router.post('/bonus-settings', async (req, res) => {
-  Object.assign(store.bonusSettings, req.body);
-  await persistBonusSettings();
-  audit('UPDATE_BONUS', req.body);
-  res.json({ success:true });
+  try {
+    const { welcomeBonus, minBonusDep } = req.body;
+    if (welcomeBonus === undefined || welcomeBonus < 0) {
+      return res.status(400).json({ success:false, message:'Welcome bonus amount is required and must be 0 or more.' });
+    }
+
+    // This is the fix — actually write to the Promotion collection the
+    // deposit flow depends on, not just the disconnected settings store.
+    await Promotion.findOneAndUpdate(
+      { type: 'welcome_bonus' },
+      {
+        $set: {
+          name: 'Welcome Bonus',
+          type: 'welcome_bonus',
+          amountType: 'fixed',
+          amountValue: welcomeBonus,
+          minDeposit: minBonusDep || 0,
+          active: true
+        }
+      },
+      { upsert: true, new: true }
+    );
+
+    // Keep the legacy store in sync too, in case anything else still reads it
+    Object.assign(store.bonusSettings, req.body);
+    await persistBonusSettings();
+
+    audit('UPDATE_BONUS', req.body);
+    res.json({ success:true, message:'Welcome bonus updated — takes effect on the next qualifying deposit.' });
+  } catch(e) { return safeError(res, e, 'admin'); }
 });
 
 // ── NOTIFICATIONS ──
