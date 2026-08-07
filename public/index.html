@@ -1280,32 +1280,13 @@ async function loadLeagueOptions(){
 async function loadAllMatches(silent=false){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
   const el=document.getElementById('matchList');
-
-  // A fresh page load (e.g. navigating back from My Bets) resets the
-  // in-memory allMatches to empty every time, since this is a multi-page
-  // site, not a SPA — that's what made "back" feel like a full reload even
-  // though matches rarely change. Restore from sessionStorage first, if
-  // reasonably fresh, before falling through to the in-memory check.
-  if ((!allMatches || !allMatches.length) && !silent) {
-    try{
-      const cached = JSON.parse(sessionStorage.getItem('matchesCache') || 'null');
-      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 120000) {
-        allMatches = cached.data;
-        matchesEtag = cached.etag || matchesEtag;
-      }
-    }catch(e){ /* corrupt cache — ignore */ }
-  }
-
-  // If we already have data (from memory or just restored from cache), render it
+  // If we already have data from a previous load this session, render it
   // immediately instead of blanking the screen with a spinner — this is what
   // made "back" feel like a full reload every time, even though the data was
   // already sitting in memory. Only show the spinner on a genuine first load.
   const hasExistingData = allMatches && allMatches.length > 0;
   if(!silent && hasExistingData){
     applyFilters(true); // repaint instantly from memory, no spinner, no blank flash
-    const todayStr=new Date().toDateString();
-    const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
-    document.getElementById('todayCount').textContent=todayCount;
     silent = true; // still fetch fresh data below, just don't block the UI for it
   } else if(!silent){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
