@@ -1046,24 +1046,30 @@ document.addEventListener('click', (e) => {
 });
 
 async function loadDownloadAppBanner(){
-  try{
-    const r = await fetch('/api/app-info');
-    const d = await r.json();
-    if (!d.success || !d.available) return; // no APK uploaded — stay hidden
+  const cacheKey = 'sb_appinfo_cache';
+  const render = (d) => {
+    if (!d.available) return;
     document.getElementById('downloadAppBanner').style.display = 'flex';
     const sizeMb = (d.sizeBytes/1024/1024).toFixed(1);
     const ver = d.version ? `v${d.version} · ` : '';
     document.getElementById('downloadAppSub').textContent = `${ver}${sizeMb} MB · Faster on slow data`;
+  };
+  try{
+    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+    if (cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant, no pop-in delay
+  }catch(e){}
+  try{
+    const r = await fetch('/api/app-info');
+    const d = await r.json();
+    if (!d.success) return;
+    render(d);
+    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
   }catch(e){ /* optional feature — fail silently */ }
 }
 
 async function loadAdminBanner(){
-  try{
-    const r = await fetch('/api/content');
-    const d = await r.json();
-    if(!d.success) return;
-
-    // Inline banner strip (existing feature — untouched logic below)
+  const cacheKey = 'sb_content_cache';
+  const render = (d) => {
     if (d.bannerImage) {
       const wrap = document.getElementById('adminBanner');
       const img  = document.getElementById('adminBannerImg');
@@ -1073,6 +1079,19 @@ async function loadAdminBanner(){
       wrap.onclick = () => { if (d.bannerLink) location.href = d.bannerLink; };
       img.onerror = () => { wrap.style.display = 'none'; };
     }
+  };
+  try{
+    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+    if (cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant banner, no wait for fetch
+  }catch(e){}
+  try{
+    const r = await fetch('/api/content');
+    const d = await r.json();
+    if(!d.success) return;
+
+    // Inline banner strip (existing feature — untouched logic below)
+    render(d);
+    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
 
     // Full-screen popup ad — shows once per browser session, not on every page nav
     if (d.popupEnabled && d.popupImage && !sessionStorage.getItem('popupAdSeen')) {
@@ -1617,7 +1636,25 @@ async function loadUpcoming(silent=false){
 // ── LOAD MATCHES (used for the Live tab) ──
 async function loadMatches(sport, silent=false){
   const el=document.getElementById('matchList');
-  if(!silent) el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+  const cacheKey = 'sb_matches_cache_' + sport;
+  let usedCache = false;
+
+  // Cache-first: this is a multi-page site, so returning to Home from another
+  // page is a full reload, not a SPA route change — without this, users saw
+  // a blank "Loading matches..." spinner every single time, even though the
+  // match list barely changes minute to minute. A short-lived cache (2 min)
+  // renders instantly from what was already fetched, then quietly refreshes
+  // in the background — no visible loading state, no scroll disruption.
+  if(!silent){
+    try{
+      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 120000) {
+        renderMatches(cached.data, true);
+        usedCache = true;
+      }
+    }catch(e){ /* corrupt cache — ignore, fall through to normal load */ }
+    if (!usedCache) el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+  }
 
   try{
     const url = sport==='live' ? '/api/odds/live' : `/api/odds/matches/${sport}`;
@@ -1625,6 +1662,7 @@ async function loadMatches(sport, silent=false){
     const d=await r.json();
 
     if(!d.success||!d.data||!d.data.length){
+      if (usedCache) return; // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
   <div style="font-size:36px;margin-bottom:12px">${isLiveTab ? '🔴' : '⚽'}</div>
@@ -1638,9 +1676,10 @@ async function loadMatches(sport, silent=false){
       return;
     }
 
-    renderMatches(d.data, silent);
+    renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
   }catch{
-    if(!silent) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
   }
 }
 
