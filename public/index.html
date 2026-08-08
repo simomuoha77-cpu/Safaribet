@@ -1720,11 +1720,11 @@ function patchMatchesInPlace(matches){
     if(m.status==='live'){
       const scoreEl = card.querySelector('.live-score');
       if(scoreEl && m.score?.home!=null) scoreEl.textContent = `${m.score.home} - ${m.score.away}`;
-      const timerEl = document.getElementById(`ltimer_${m.matchId}`);
-      if(timerEl){
-        const est = (m.score?.minute==null||m.score?.minuteIsEstimated)?'~':'';
-        timerEl.textContent = `${est}${m.score?.minute ?? '0'}′`;
-      }
+      // Reuse the exact same trusted logic as the full render path (cap,
+      // estimateMinute fallback, HT/ET/Pen states) instead of a simplified
+      // duplicate — a divergent copy here was the cause of incorrect/frozen
+      // minute displays.
+      startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated);
       const hs=m.score?.home, as=m.score?.away;
       const tnames = card.querySelectorAll('.tname');
       if(tnames.length===2 && hs!=null && as!=null){
