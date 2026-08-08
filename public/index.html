@@ -796,7 +796,7 @@ function toggleFaq(i){
     <button class="slip-clr" onclick="clearSlip()">Clear all</button>
   </div>
   <div class="slip-codebar" id="slipCodebar">
-    <button class="slip-codebtn" onclick="shareSlipCode()">🔗 Share Code</button>
+    <button class="slip-codebtn" id="shareSlipBtn" onclick="shareSlipCode()">🔗 Share Code</button>
     <button class="slip-codebtn" onclick="openLoadCode()">📥 Load Code</button>
   </div>
   <div class="slip-body" id="slipBody"></div>
@@ -1704,6 +1704,69 @@ function pickSport(el){
   }
 }
 
+let lastRenderedMatchIds = null; // tracks what's currently in the DOM, so silent refreshes can skip the expensive full rebuild when nothing structurally changed
+
+// ── PATCH MATCHES IN PLACE (no DOM destruction) ──
+// Used instead of a full innerHTML rebuild when the exact same set of
+// matches is still on screen — only updates odds values/score/timer text on
+// the existing DOM nodes. This is what stops a background 20s refresh from
+// destroying the exact button a user is mid-tap on, which was the real cause
+// of odds clicks feeling delayed/unregistered.
+function patchMatchesInPlace(matches){
+  matches.forEach(m=>{
+    const card = document.getElementById(`mc_${m.matchId}`);
+    if(!card) return;
+
+    if(m.status==='live'){
+      const scoreEl = card.querySelector('.live-score');
+      if(scoreEl && m.score?.home!=null) scoreEl.textContent = `${m.score.home} - ${m.score.away}`;
+      const timerEl = document.getElementById(`ltimer_${m.matchId}`);
+      if(timerEl){
+        const est = (m.score?.minute==null||m.score?.minuteIsEstimated)?'~':'';
+        timerEl.textContent = `${est}${m.score?.minute ?? '0'}′`;
+      }
+      const hs=m.score?.home, as=m.score?.away;
+      const tnames = card.querySelectorAll('.tname');
+      if(tnames.length===2 && hs!=null && as!=null){
+        tnames[0].classList.toggle('losing', hs<as);
+        tnames[1].classList.toggle('losing', as<hs);
+      }
+    }
+
+    const ao=m.aiOdds||m.odds||{};
+    const oddsMap = currentMarket==='dc' ? [
+        ['dc_1x', ao.dc_home_draw||m.odds?.homeDraw, '1X (Home or Draw)'],
+        ['dc_12', ao.dc_home_away||m.odds?.homeAway, '12 (Home or Away)'],
+        ['dc_x2', ao.dc_draw_away||m.odds?.drawAway, 'X2 (Draw or Away)']
+      ] : currentMarket==='btts' ? [
+        ['btts', ao.btts||m.odds?.btts, 'Both Teams Score'],
+        ['btts_no', ao.bttsNo||m.odds?.bttsNo, 'No Both Teams Score']
+      ] : currentMarket==='ou25' ? [
+        ['over25', ao.over25||m.odds?.over25, 'Over 2.5 Goals'],
+        ['under25', ao.under25||m.odds?.under25, 'Under 2.5 Goals']
+      ] : [
+        ['home', m.odds?.home||ao.homeWin, m.homeTeam],
+        ['draw', m.odds?.draw||ao.draw, 'Draw'],
+        ['away', m.odds?.away||ao.awayWin, m.awayTeam]
+      ];
+
+    oddsMap.forEach(([pick, odds, pickLabel])=>{
+      const btn = document.getElementById(`odd_${m.matchId}_${pick}`);
+      if(!btn || !odds) return;
+      const o = parseFloat(odds).toFixed(2);
+      const prevOdds = parseFloat(btn.dataset.odds);
+      if(prevOdds === parseFloat(o)) return; // unchanged — skip touching this node at all
+      btn.dataset.odds = o;
+      const valEl = btn.querySelector('.ov');
+      if(valEl) valEl.textContent = o;
+      const args=`'${m.matchId}','${esc(m.homeTeam)}','${esc(m.awayTeam)}','${esc(m.league)}','${m.sport}','${pick}','${esc(pickLabel)}',${odds},'${m.commenceTime}'`;
+      btn.setAttribute('onclick', `togOdd(${args})`);
+      btn.classList.add(parseFloat(o)>prevOdds?'changed-up':'changed-dn');
+      setTimeout(()=>btn.classList.remove('changed-up','changed-dn'),600);
+    });
+  });
+}
+
 // ── RENDER MATCHES LIST ──
 // Show every match the server returns — fixtures included even before odds
 // are attached (odds show as "-" via oddBtn until a real source or admin
@@ -1733,7 +1796,20 @@ function renderMatches(matches, silent=false){
   <div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">No matches right now</div>
   <div style="font-size:13px;color:var(--mt)">Check back shortly — fixtures are added regularly.</div>
 </div>`;
+    lastRenderedMatchIds = null;
     restoreHomeScrollOnce();
+    return;
+  }
+
+  const newIds = matches.map(m=>m.matchId).join(',');
+  const sameMatchSet = silent && lastRenderedMatchIds === newIds;
+
+  if(sameMatchSet){
+    // Same matches still on screen — patch odds/scores in place instead of
+    // destroying and recreating every DOM node. This is the fix: no more
+    // rebuilding the whole list (and losing whatever button the user's
+    // finger is on) every single 20s background refresh.
+    patchMatchesInPlace(matches);
     return;
   }
 
@@ -1743,6 +1819,7 @@ function renderMatches(matches, silent=false){
   }
 
   el.innerHTML=matches.map(m=>renderMatch(m)).join('');
+  lastRenderedMatchIds = newIds;
 
   // Start counting timers for all live match cards
   stopAllLiveTimers();
@@ -1949,8 +2026,7 @@ function togOdd(matchId, homeTeam, awayTeam, league, sport, pick, pickLabel, odd
 }
 
 // ── SLIP UI ──
-function updateSlip(){
-  localStorage.setItem('betslip', JSON.stringify(slip));
+function updateSlipTotals(){
   const cnt=slip.length;
   const totalOdds=parseFloat(slip.reduce((a,s)=>a*s.odds,1).toFixed(2));
   const stake=parseFloat(document.getElementById('stakeInp').value)||0;
@@ -1959,18 +2035,17 @@ function updateSlip(){
   const tax=parseFloat((winnings*0.20).toFixed(2));
   const net=parseFloat((gross-tax).toFixed(2));
 
-  // Bet Slip nav tab badge
   const slipTabBadge=document.getElementById('slipTabBadge');
   if(slipTabBadge){ slipTabBadge.style.display=cnt>0?'flex':'none'; slipTabBadge.textContent=cnt; }
 
-  // Slip header
   document.getElementById('slipCnt').textContent=cnt;
   document.getElementById('totalOdds').textContent=totalOdds.toFixed(2);
   document.getElementById('grossWin').textContent=`KES ${gross.toFixed(2)}`;
   document.getElementById('taxVal').textContent=`- KES ${tax.toFixed(2)}`;
   document.getElementById('netWin').textContent=`KES ${net.toFixed(2)}`;
+}
 
-  // Slip items
+function renderSlipItems(){
   document.getElementById('slipBody').innerHTML=slip.map((s,i)=>`
     <div class="si">
       <div class="si-lg">${s.league}</div>
@@ -1983,6 +2058,14 @@ function updateSlip(){
       </div>
       <button class="si-del" onclick="removeSlip(${i})">✕</button>
     </div>`).join('');
+}
+
+function updateSlip(){
+  // Full update — slip contents actually changed (add/remove/clear), so both
+  // the totals AND the item list need rebuilding.
+  localStorage.setItem('betslip', JSON.stringify(slip));
+  updateSlipTotals();
+  renderSlipItems();
 }
 
 function removeSlip(i){
@@ -2004,7 +2087,12 @@ function clearSlip(){
   closeSlip();
 }
 
-function calcWin(){ updateSlip(); }
+// Stake input fires on every keystroke — only the totals depend on stake,
+// the slip item cards themselves never change from typing a number, so this
+// no longer touches slipBody's innerHTML at all. This was the actual cause
+// of stake input feeling laggy: every character was rebuilding the whole
+// slip list from scratch for no reason.
+function calcWin(){ updateSlipTotals(); }
 function addStake(v){
   const inp=document.getElementById('stakeInp');
   inp.value=(parseFloat(inp.value)||0)+v;
@@ -2029,6 +2117,10 @@ let lastShareCode=null;
 async function shareSlipCode(){
   if(!USER){ showT('Login to share a slip','err'); return; }
   if(!slip.length){ showT('Add selections first','err'); return; }
+  const btn = document.getElementById('shareSlipBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
   try{
     const r=await fetch('/api/bets/slip/share',{
       method:'POST',
@@ -2044,6 +2136,7 @@ async function shareSlipCode(){
       showT(d.message||'Could not create slip code','err');
     }
   }catch(e){ showT('Network error — try again','err'); }
+  finally{ btn.disabled = false; btn.textContent = originalText; }
 }
 function copyShareCode(){
   if(!lastShareCode) return;
