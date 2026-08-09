@@ -188,6 +188,53 @@ function getSyntheticOdds(match, market, pick) {
 // around 1.01) — this mirrors that floor.
 const MIN_VIABLE_ODDS = 1.05;
 
+// ── LIVE RISK CAP ──
+// isPickSuspended is a hard on/off switch at the very last stretch of a
+// near-certain result. But right up until that exact moment, raw odds stayed
+// completely unchanged — e.g. a team down 2-0 with 16 minutes left could
+// still show 30x+ on the fully-priced comeback, then simply vanish a few
+// minutes later. Real bookmakers don't leave a cliff like that; they reprice
+// gradually as a lead becomes more dangerous. This tapers the ceiling down
+// smoothly as the situation approaches the suspension boundary, rather than
+// leaving it exploitable at long odds until the last possible second. It
+// only ever LOWERS an already-generous price toward a safer one — it never
+// raises odds or invents a price where none exists.
+function getLiveOddsCap(match, market, pick) {
+  if (match.status !== 'live') return null;
+  const h = match.score?.home, a = match.score?.away;
+  if (h == null || a == null) return null;
+
+  const minute = match.score?.minute;
+  const effectiveMinute = minute != null ? minute : estimateMinuteFromKickoff(match.commenceTime);
+  if (effectiveMinute == null) return null;
+  const minutesRemaining = Math.max(0, 90 - effectiveMinute);
+  if (minutesRemaining > 25 || minutesRemaining <= 10) return null; // outside the taper window entirely (either plenty of time, or already handled by the hard suspension above)
+
+  const diff = h - a; // positive = home leading
+
+  // How big a deficit is this specific pick facing? (0 or negative = not an underdog outcome — no cap needed)
+  let against;
+  if (market === '1x2') {
+    if (pick === 'home') against = -diff;
+    else if (pick === 'away') against = diff;
+    else return null; // draw's risk profile is already tightly handled by the 3-minute suspension rule
+  } else if (market === 'dc') {
+    if (pick === 'dc_1x') against = Math.max(-diff, 0); // hurt only if away is leading
+    else if (pick === 'dc_x2') against = Math.max(diff, 0); // hurt only if home is leading
+    else return null; // dc_12 has a different (excludes-draw) risk shape — leave uncapped for now
+  } else {
+    return null;
+  }
+  if (against < 2) return null; // only a 1-goal margin — genuinely still open, no cap warranted
+
+  // Smooth taper: tight right at the suspension boundary (10 min left),
+  // loosening the further out we are (up to 25 min left). A 3+ goal deficit
+  // is more decisive than a 2-goal one, so it gets a tighter base cap.
+  const base = against >= 3 ? 2.5 : 4;
+  const slack = minutesRemaining - 10; // 0 at the boundary, up to 15 at the 25-min mark
+  return Math.max(base, parseFloat((base + slack * 0.9).toFixed(2)));
+}
+
 // Public entry point: resolve odds for any market+pick against a Match document.
 // Returns { odds, isSynthetic } or null if this match has no base data to price from.
 function resolveOdds(match, market, pick) {
@@ -199,6 +246,12 @@ function resolveOdds(match, market, pick) {
   } else {
     const odds = getSyntheticOdds(match, market, pick);
     result = odds != null ? { odds, isSynthetic: true } : null;
+  }
+  if (result) {
+    const cap = getLiveOddsCap(match, market, pick);
+    if (cap != null && result.odds > cap) {
+      result = { ...result, odds: cap, riskCapped: true };
+    }
   }
   if (result && result.odds < MIN_VIABLE_ODDS) return null;
   return result;
