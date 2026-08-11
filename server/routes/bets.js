@@ -662,7 +662,12 @@ router.get('/slip/load/:code', auth, async (req, res) => {
 
     const selections = doc.selections.map(s => {
       const live = byId[s.matchId];
-      const stillUpcoming = live && live.status === 'upcoming';
+      // A match is still bettable if it's upcoming OR currently live — only
+      // finished/cancelled matches (or ones that vanished entirely) should
+      // ever be marked unavailable. Checking only 'upcoming' incorrectly
+      // rejected perfectly valid live selections, which is most of what
+      // gets shared from the live-heavy Highlights tab.
+      const stillBettable = live && (live.status === 'upcoming' || live.status === 'live');
       const currentOdds = live?.hasOdds ? live.odds?.[s.pick] : null;
       return {
         matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam,
@@ -670,7 +675,7 @@ router.get('/slip/load/:code', auth, async (req, res) => {
         sharedOdds: s.odds,                       // what it was when shared
         currentOdds: currentOdds || null,         // what it is right now (null if unavailable)
         oddsChanged: !!currentOdds && Math.abs(currentOdds - s.odds) > 0.001,
-        stillAvailable: !!stillUpcoming,
+        stillAvailable: !!stillBettable,
         commenceTime: s.commenceTime
       };
     });
