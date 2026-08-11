@@ -2560,18 +2560,19 @@ async function loadStorageStats(){
   try{
     const d = await api('/api/admin/storage/stats');
     if (!d.success) { barEl.innerHTML=''; brkEl.textContent='Could not load storage stats.'; return; }
-    const pct = Math.min(100, (d.dbSizeBytes / d.freeTierLimitBytes) * 100);
-    const barColor = pct > 85 ? 'var(--r)' : pct > 60 ? 'var(--y)' : 'var(--g)';
+    const pct = d.percentUsed ?? Math.min(100, (d.dbSizeBytes / d.freeTierLimitBytes) * 100);
+    const barColor = pct >= 90 ? 'var(--r)' : pct >= 70 ? 'var(--y)' : 'var(--g)';
     barEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-        <span>${formatMB(d.dbSizeBytes)} used</span>
-        <span style="color:var(--mt)">of ${formatMB(d.freeTierLimitBytes)} free tier limit</span>
+        <span>${formatMB(d.dbSizeBytes)} data + ${formatMB(d.indexSizeBytes||0)} indexes</span>
+        <span style="color:var(--mt)">of ${formatMB(d.freeTierLimitBytes)} limit</span>
       </div>
       <div style="height:10px;background:var(--s3);border-radius:6px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:${barColor};transition:width 0.3s"></div>
+        <div style="height:100%;width:${Math.min(100,pct)}%;background:${barColor};transition:width 0.3s"></div>
       </div>
-      <div style="font-size:11px;color:var(--mt);margin-top:4px">${pct.toFixed(1)}% used</div>`;
-    brkEl.innerHTML = (d.collections||[]).map(c => `<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${c.name}</span><span>${c.count.toLocaleString()} docs</span></div>`).join('');
+      <div style="font-size:11px;color:var(--mt);margin-top:4px">${pct.toFixed(1)}% used${d.levelLabel ? ` — ${d.levelLabel}` : ''}</div>`;
+    const rows = d.collectionsDetailed && d.collectionsDetailed.length ? d.collectionsDetailed : (d.collections||[]);
+    brkEl.innerHTML = rows.map(c => `<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${c.name}</span><span>${c.count.toLocaleString()} docs${c.totalSize?` · ${formatMB(c.totalSize)}`:''}</span></div>`).join('');
   }catch(e){ barEl.innerHTML=''; brkEl.textContent='Could not load storage stats — check connection.'; }
 }
 

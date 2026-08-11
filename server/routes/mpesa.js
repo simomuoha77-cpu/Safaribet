@@ -143,13 +143,25 @@ router.post('/callback', async (req, res) => {
     const ref    = cb.CheckoutRequestID;
     if (!amount) return;
 
-    const tx = await Transaction.findOne({ reference: ref, status: 'pending' }).lean();
-    if (!tx) return;
+    // Atomically claim this transaction (pending -> processing) in a single
+    // step. Safaricom is known to redeliver the same callback more than
+    // once — if two deliveries arrive close together, only the first
+    // findOneAndUpdate here will actually match status:'pending'; the second
+    // finds nothing and safely no-ops instead of crediting the wallet twice.
+    // A plain read-then-later-write here would NOT be safe: both requests
+    // could read 'pending' before either finished writing 'completed'.
+    const tx = await Transaction.findOneAndUpdate(
+      { reference: ref, status: 'pending' },
+      { $set: { status: 'processing' } },
+      { new: false }
+    );
+    if (!tx) return; // already handled by another delivery of this same callback, or genuinely not found
 
     // Amount in the callback MUST match what we originally requested via STK push.
     // Prevents a forged/replayed callback from crediting a different (larger) amount.
     if (Number(tx.amount) !== amount) {
       console.warn(`[mpesa/callback] AMOUNT MISMATCH — tx ${tx._id} requested ${tx.amount}, callback claimed ${amount}. Rejected.`);
+      await Transaction.findByIdAndUpdate(tx._id, { $set: { status: 'pending' } }); // release the claim — nothing was credited
       return;
     }
 

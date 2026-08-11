@@ -246,7 +246,14 @@ app.get('/api/app-info', async (req, res) => {
 
 // ── HEALTH ──
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString(), uptime: Math.floor(process.uptime()) });
+  const dbState = mongoose.connection.readyState; // 0=disconnected,1=connected,2=connecting,3=disconnecting
+  const dbStateNames = ['disconnected','connected','connecting','disconnecting'];
+  res.json({
+    status: dbState === 1 ? 'ok' : 'degraded',
+    time: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    database: dbStateNames[dbState] || 'unknown'
+  });
 });
 
 // ── ADMIN: settlement trigger ──
@@ -329,6 +336,13 @@ app.use((err, req, res, next) => {
 });
 
 // ── CONNECT & START ──
+// Connection event visibility — mongoose auto-reconnects on transient drops,
+// but there was no logging of it happening at all, making connectivity
+// issues invisible until something else failed downstream.
+mongoose.connection.on('disconnected', () => console.warn('⚠️ MongoDB disconnected — mongoose will attempt to reconnect automatically'));
+mongoose.connection.on('reconnected', () => console.log('✅ MongoDB reconnected'));
+mongoose.connection.on('error', (err) => console.error('❌ MongoDB connection error:', err.message));
+
 mongoose.connect(process.env.MONGO_URI, {
   serverSelectionTimeoutMS: 10000
 })

@@ -1343,23 +1343,25 @@ router.get('/health', async (req, res) => {
 // can see exactly what's using space before deleting anything.
 router.get('/storage/stats', async (req, res) => {
   try {
-    const mongoose = require('mongoose');
-    const dbStats = await mongoose.connection.db.stats();
-    const collections = ['Notification', 'WalletHistory', 'Match', 'Transaction', 'Bet'];
-    const perCollection = [];
-    for (const name of collections) {
-      try {
-        const Model = require(`../models/${name}`);
-        const count = await Model.estimatedDocumentCount();
-        perCollection.push({ name, count });
-      } catch (e) { /* model doesn't exist or errored — skip */ }
-    }
+    const { getStorageStatus } = require('../utils/storageMonitor');
+    const s = await getStorageStatus();
+    if (!s.available) return res.status(503).json({ success: false, message: s.message });
+
     res.json({
       success: true,
-      dbSizeBytes: dbStats.dataSize,
-      storageSizeBytes: dbStats.storageSize,
-      freeTierLimitBytes: 512 * 1024 * 1024, // Atlas M0 free tier cap, for reference in the UI
-      collections: perCollection
+      // Existing fields the current frontend already reads — kept as-is so nothing breaks
+      dbSizeBytes: s.dataSizeBytes,
+      storageSizeBytes: s.totalSizeBytes,
+      freeTierLimitBytes: s.limitBytes,
+      collections: s.collections.map(c => ({ name: c.name, count: c.count })),
+      // New fields: index size tracked separately (per the requirement that
+      // indexes count too, not just raw data), graduated warning level, and
+      // the full per-collection size breakdown for the dashboard to show.
+      indexSizeBytes: s.indexSizeBytes,
+      percentUsed: s.percentUsed,
+      level: s.level,
+      levelLabel: s.label,
+      collectionsDetailed: s.collections
     });
   } catch (e) { return safeError(res, e, 'admin/storage-stats'); }
 });
