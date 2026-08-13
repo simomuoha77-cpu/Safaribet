@@ -208,31 +208,42 @@ function getLiveOddsCap(match, market, pick) {
   const effectiveMinute = minute != null ? minute : estimateMinuteFromKickoff(match.commenceTime);
   if (effectiveMinute == null) return null;
   const minutesRemaining = Math.max(0, 90 - effectiveMinute);
-  if (minutesRemaining > 25 || minutesRemaining <= 10) return null; // outside the taper window entirely (either plenty of time, or already handled by the hard suspension above)
 
   const diff = h - a; // positive = home leading
+  const absDiff = Math.abs(diff);
+  if (absDiff < 2) return null; // only a 1-goal margin — genuinely still open, no cap warranted
 
-  // How big a deficit is this specific pick facing? (0 or negative = not an underdog outcome — no cap needed)
+  // Bigger, more decisive leads start tapering earlier — a 4-5 goal gap is
+  // essentially over even with 30-40 minutes left, so it shouldn't wait
+  // until the same 25-minute mark a bare 2-goal lead does.
+  const window = absDiff >= 4 ? 40 : absDiff === 3 ? 30 : 25;
+  if (minutesRemaining > window || minutesRemaining <= 10) return null;
+
+  // How big a deficit is THIS pick facing? Draw is included now — a draw
+  // is just as unrealistic as the trailing team winning outright once a
+  // match is several goals from level, and was previously left completely
+  // uncapped regardless of how lopsided the score was.
   let against;
   if (market === '1x2') {
-    if (pick === 'home') against = -diff;
-    else if (pick === 'away') against = diff;
-    else return null; // draw's risk profile is already tightly handled by the 3-minute suspension rule
+    if (pick === 'home') against = diff < 0 ? -diff : 0;
+    else if (pick === 'away') against = diff > 0 ? diff : 0;
+    else if (pick === 'draw') against = absDiff;
+    else return null;
   } else if (market === 'dc') {
-    if (pick === 'dc_1x') against = Math.max(-diff, 0); // hurt only if away is leading
-    else if (pick === 'dc_x2') against = Math.max(diff, 0); // hurt only if home is leading
+    if (pick === 'dc_1x') against = diff < 0 ? -diff : 0;
+    else if (pick === 'dc_x2') against = diff > 0 ? diff : 0;
     else return null; // dc_12 has a different (excludes-draw) risk shape — leave uncapped for now
   } else {
     return null;
   }
-  if (against < 2) return null; // only a 1-goal margin — genuinely still open, no cap warranted
+  if (against < 2) return null;
 
-  // Smooth taper: tight right at the suspension boundary (10 min left),
-  // loosening the further out we are (up to 25 min left). A 3+ goal deficit
-  // is more decisive than a 2-goal one, so it gets a tighter base cap.
-  const base = against >= 3 ? 2.5 : 4;
-  const slack = minutesRemaining - 10; // 0 at the boundary, up to 15 at the 25-min mark
-  return Math.max(base, parseFloat((base + slack * 0.9).toFixed(2)));
+  // Base cap tightens further as the deficit grows — a 2-goal gap still
+  // leaves some real (if slim) hope of a comeback; a 5-goal gap does not,
+  // and shouldn't be priced as if it does.
+  const base = against >= 5 ? 1.3 : against >= 4 ? 1.5 : against === 3 ? 2.0 : 3.0;
+  const slack = minutesRemaining - 10; // 0 at the boundary, growing toward the window's edge
+  return Math.max(base, parseFloat((base + slack * 0.65).toFixed(2)));
 }
 
 // Public entry point: resolve odds for any market+pick against a Match document.
