@@ -509,6 +509,36 @@ header{
   </div>
 </header>
 
+<script>
+// ── APPLY AUTH HEADER STATE IMMEDIATELY ──
+// This runs the instant the parser reaches this point — right after the
+// header exists in the DOM — instead of waiting for DOMContentLoaded, which
+// only fires once the ENTIRE ~2300-line document (including everything the
+// match list needs) has been parsed. Previously the header sat in its raw
+// HTML default (Login/Join visible, balance hidden) for that whole window,
+// then flipped to Balance/Logout right around when matches finished loading
+// — looking like the user had been logged out and the page reloaded.
+// Auth state and match state are intentionally independent: this block only
+// ever touches the header. It does not fetch matches and does not wait on
+// anything match-related. Match loading is still kicked off later, in the
+// DOMContentLoaded handler below, and only ever touches the match section.
+(function(){
+  var t = localStorage.getItem('token'), u = localStorage.getItem('user');
+  if (!t || !u) return; // unauthenticated — header's HTML default (Login/Join) is already correct
+  try {
+    window.USER = JSON.parse(u);
+  } catch(e) { return; }
+  document.getElementById('loginBtn').style.display = 'none';
+  document.getElementById('joinBtn').style.display = 'none';
+  document.getElementById('logoutBtn').style.display = 'inline-block';
+  document.getElementById('balpill').style.display = 'flex';
+  // Paint the cached balance instantly (no blank flash); refreshBalance()
+  // (called from DOMContentLoaded once it's defined) corrects it from the
+  // server right after.
+  document.getElementById('balv').textContent = parseFloat(window.USER.balance || 0).toFixed(2);
+})();
+</script>
+
 <!-- NOTIFICATION DROPDOWN PANEL -->
 <div id="notifPanel" style="display:none;position:fixed;top:52px;right:8px;left:8px;max-width:360px;margin-left:auto;background:var(--s1);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:999;max-height:70vh;overflow-y:auto">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--bd)">
@@ -911,7 +941,11 @@ function toggleFaq(i){
 
 <script>
 // ── STATE ──
-let USER=null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
+// USER may already have been set by the early auth-header script right after
+// <header> (window.USER) — pick that up instead of resetting to null, or the
+// header would be visually correct but every USER-dependent function below
+// (placeBet, refreshBalance, etc.) would still see a logged-out state.
+let USER=window.USER||null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
 let oddsRefresh=null;
 let allMatches=[], currentFilter='highlights', currentMarket='1x2', currentLeague='';
 let matchesEtag=null; // last ETag /api/odds/featured sent us — lets the next refresh be a cheap conditional request
@@ -1123,21 +1157,17 @@ function closePopupAd(){
 window.addEventListener('DOMContentLoaded', ()=>{
   loadAdminBanner();
   loadDownloadAppBanner();
-  const t=localStorage.getItem('token'), u=localStorage.getItem('user');
-  if(t&&u){
-    USER=JSON.parse(u);
-    document.getElementById('loginBtn').style.display='none';
-    document.getElementById('joinBtn').style.display='none';
-    document.getElementById('logoutBtn').style.display='inline-block';
-    document.getElementById('balpill').style.display='flex';
+  // Auth header state (Login/Join vs Balance/Logout) was already applied
+  // synchronously right after <header> above — do NOT redo it here and do
+  // NOT let it gate on or wait for match loading below. This block only
+  // handles auth-dependent work that ISN'T the header itself: refreshing the
+  // live balance, notifications, favorites, and the bet slip action button.
+  if (window.USER) {
     // Show the LIVE wallet balance, not the snapshot cached at login — USER.balance
     // never updates after login, so it silently drifts from the real balance the
     // moment a bet is placed, a deposit lands, or a bet settles. This is what
     // caused the header and Account page to show two different numbers even
-    // though they're supposed to be the same value. Show the cached figure
-    // immediately (instant paint, no blank flash) then correct it from the
-    // server right away.
-    document.getElementById('balv').textContent=parseFloat(USER.balance||0).toFixed(2);
+    // though they're supposed to be the same value.
     refreshBalance();
     loadNotifications();
     loadFavorites();
@@ -1146,6 +1176,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('slipAction').innerHTML=
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
+  // Match loading is fully independent of auth state — runs regardless of
+  // whether the user is logged in, and never touches the header. If this
+  // takes 10s or fails outright, the header above is completely unaffected.
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
