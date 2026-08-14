@@ -119,7 +119,7 @@ app.use(express.static(path.join(__dirname, '../public'), {
   setHeaders: (res, filePath) => {
     // No caching for HTML
     if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
   }
 }));

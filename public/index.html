@@ -118,6 +118,10 @@ header{
   background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.15);
   padding:4px 10px;border-radius:20px;
 }
+/* Small "Updating…" pill state — shown briefly during a silent background
+   refresh (never a full-page loader) so the user gets a subtle signal that
+   fresh data is being fetched without any disruption to what's on screen. */
+.seeall.updating{ color:var(--mt); animation:blink 1.1s infinite; }
 
 /* MATCH TABLE HEAD */
 .mth{
@@ -1168,6 +1172,22 @@ window.addEventListener('DOMContentLoaded', ()=>{
   }, 20000);
 });
 
+// ── INSTANT RESYNC ON BFCACHE RESTORE ──
+// Fires when the browser restores this exact page from its back/forward
+// cache (bfcache) — e.g. Home → My Bets → Home — instead of doing a fresh
+// reload. DOMContentLoaded does NOT fire in that case (the page was frozen,
+// not destroyed), so without this the already-visible match list would just
+// sit there until the next scheduled 20s poll tick before syncing anything
+// that changed while the tab was away. This kicks that sync immediately,
+// through the same silent path used everywhere else — no spinner, no
+// disruption, matches already on screen stay exactly where they are while
+// this quietly checks for anything new.
+window.addEventListener('pageshow', function(e){
+  if(e.persisted){
+    loadAllMatches(true);
+  }
+});
+
 // ── PULL TO REFRESH ──
 // Lets the user force an immediate refresh (rather than waiting for the 20s
 // background cycle) by pulling down at the very top of the page — the same
@@ -1298,6 +1318,9 @@ async function loadAllMatches(silent=false){
   } else if(!silent){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
   }
+  // Only the small pill shows for a background refresh — never a full-page
+  // loader once real data is already visible.
+  if(silent && hasExistingData) setUpdatingIndicator(true);
   try{
     // Conditional request — if the server's data hasn't changed since our last
     // fetch, this comes back as a 304 with no body at all, instead of
@@ -1320,6 +1343,7 @@ async function loadAllMatches(silent=false){
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
       try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      setUpdatingIndicator(false);
       return;
     }
     const newEtag = r.headers.get('ETag');
@@ -1346,8 +1370,10 @@ async function loadAllMatches(silent=false){
     // populated feed on screen — most likely a transient upstream blip, not a
     // real "zero matches" state. Keep showing what we have; the next 20s poll
     // will pick up real data once the upstream recovers.
+    setUpdatingIndicator(false);
   }catch(e){
     if(!silent && !hasExistingData) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    setUpdatingIndicator(false);
   }
 }
 
@@ -1686,6 +1712,10 @@ async function loadMatches(sport, silent=false){
 
   try{
     const url = sport==='live' ? '/api/odds/live' : `/api/odds/matches/${sport}`;
+    // Background refresh in progress (either an explicit silent poll, or the
+    // network fetch that follows an instant cache-first paint) — show the
+    // small pill, never the full-page loader.
+    if(silent || usedCache) setUpdatingIndicator(true);
     // Same hard timeout as the homepage feed — never let a stalled connection
     // leave the spinner up forever.
     const ctrl = new AbortController();
@@ -1699,7 +1729,7 @@ async function loadMatches(sport, silent=false){
     const d=await r.json();
 
     if(!d.success||!d.data||!d.data.length){
-      if (usedCache) return; // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
+      if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
   <div style="font-size:36px;margin-bottom:12px">${isLiveTab ? '🔴' : '⚽'}</div>
@@ -1710,13 +1740,16 @@ async function loadMatches(sport, silent=false){
     ${isLiveTab ? 'Live matches will appear here automatically when games kick off.' : ''}
   </div>
 </div>`;
+      setUpdatingIndicator(false);
       return;
     }
 
     renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
     try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    setUpdatingIndicator(false);
   }catch{
     if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    setUpdatingIndicator(false);
   }
 }
 
@@ -1742,6 +1775,29 @@ function pickSport(el){
 }
 
 let lastRenderedMatchIds = null; // tracks what's currently in the DOM, so silent refreshes can skip the expensive full rebuild when nothing structurally changed
+
+// ── "UPDATING…" INDICATOR ──
+// Small, non-disruptive signal that a background refresh is in flight —
+// used instead of ever showing the full-page "Loading matches..." spinner
+// once real data is already on screen. Purely cosmetic: safe to call any
+// number of times, and never blocks or delays the actual fetch.
+let updatingBadgeTimer = null;
+function setUpdatingIndicator(isUpdating){
+  const badge = document.getElementById('liveUpdBadge');
+  if(!badge) return;
+  clearTimeout(updatingBadgeTimer);
+  if(isUpdating){
+    badge.textContent = 'Updating…';
+    badge.classList.add('updating');
+  } else {
+    // Small delay before reverting so a very fast (cached/304) refresh still
+    // gives a brief, perceptible acknowledgement instead of flickering.
+    updatingBadgeTimer = setTimeout(()=>{
+      badge.textContent = 'Updated live →';
+      badge.classList.remove('updating');
+    }, 250);
+  }
+}
 
 // ── PATCH MATCHES IN PLACE (no DOM destruction) ──
 // Used instead of a full innerHTML rebuild when the exact same set of
