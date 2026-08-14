@@ -142,6 +142,15 @@ async function getFixtures(daysAhead = 7) {
   const seen = new Set();
   const all = [];
   const requests = [];
+  // Tracks whether ANY of the per-day requests actually succeeded. Each request
+  // below still catches its own error and resolves to [] so one bad day doesn't
+  // sink the others — but if EVERY day fails (upstream Juan API down, network
+  // blip, rate limit, etc.) that must not look identical to "API is up and
+  // genuinely has zero fixtures". Silently returning [] in that case is what
+  // caused matches to vanish/flicker to live-only on the homepage whenever the
+  // upstream had a transient failure — callers had no way to tell "empty" apart
+  // from "failed". Throwing instead lets routes fall back to last-known-good data.
+  let anySucceeded = false;
   for (let d = 0; d <= daysAhead; d++) {
     requests.push(
       axios.get(`${JUAN_URL()}/api/fixtures`, {
@@ -154,7 +163,7 @@ async function getFixtures(daysAhead = 7) {
           ...(process.env.REAL_ODDS_ONLY === '1' ? { realOddsOnly: 1 } : {})
         },
         timeout: 15000
-      }).then(r => r.data?.matches || []).catch(() => [])
+      }).then(r => { anySucceeded = true; return r.data?.matches || []; }).catch(() => [])
     );
   }
   const results = await Promise.all(requests);
@@ -166,6 +175,9 @@ async function getFixtures(daysAhead = 7) {
       seen.add(normalized.matchId);
       all.push(normalized);
     }
+  }
+  if (!anySucceeded) {
+    throw new Error('Juan Football API unreachable — all fixture requests failed');
   }
   console.log(`  [juan] getFixtures(0-${daysAhead}): ${all.length} total matches`);
   return all;

@@ -1306,7 +1306,13 @@ async function loadAllMatches(silent=false){
     }
     const newEtag = r.headers.get('ETag');
     const d=await r.json();
-    if(d.success&&d.data){
+    // Only replace what's on screen if this response actually has matches, OR
+    // this is a genuine first load with nothing shown yet. A background poll
+    // that comes back empty (e.g. a brief upstream hiccup) must never wipe out
+    // an already-populated list — that silent overwrite was what made games
+    // intermittently vanish, or the feed collapse to live-only, even though
+    // the previous good list was still perfectly valid.
+    if(d.success && d.data && (d.data.length || !hasExistingData)){
       allMatches=d.data;
       matchesEtag = newEtag || matchesEtag;
       try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
@@ -1318,6 +1324,10 @@ async function loadAllMatches(silent=false){
     } else if(!hasExistingData) {
       el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
     }
+    // else: server returned success but an empty list while we already have a
+    // populated feed on screen — most likely a transient upstream blip, not a
+    // real "zero matches" state. Keep showing what we have; the next 20s poll
+    // will pick up real data once the upstream recovers.
   }catch(e){
     if(!silent && !hasExistingData) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
   }

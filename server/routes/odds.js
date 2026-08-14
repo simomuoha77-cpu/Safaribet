@@ -22,6 +22,52 @@ const FIXTURES_TTL = 20000; // 20 seconds
 const LIVE_TTL     = 8000;  // 8 seconds
 const { resolveOdds } = require('../services/marketResolver');
 
+// Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
+// fallback for when the upstream Juan API has a transient outage. Without
+// this, a single failed poll during a brief upstream hiccup would make
+// matches disappear (or the homepage collapse to live-only, since live has
+// its own independent fallback below) for every visitor until the API
+// recovered — even though we had a perfectly good match list moments ago.
+let lastGoodFixtures = null;
+let lastGoodLive = [];
+
+// Fetches fixtures via the shared short-lived cache, falling back to the last
+// successful fetch if the upstream is currently down. Only throws if we have
+// never successfully fetched fixtures at all (e.g. right after server start
+// with the upstream already unreachable).
+async function fixturesWithFallback() {
+  let matches = C.get('fixtures', FIXTURES_TTL);
+  if (matches) return matches;
+  try {
+    matches = await getFixtures(7);
+    C.set('fixtures', matches);
+    lastGoodFixtures = matches;
+    return matches;
+  } catch (e) {
+    if (lastGoodFixtures) {
+      console.warn('  [odds] getFixtures failed, serving last-known-good fixtures:', e.message);
+      return lastGoodFixtures;
+    }
+    throw e;
+  }
+}
+
+// Same fallback strategy for live matches — if getLive() fails transiently,
+// keep showing whatever was last confirmed live rather than dropping to zero.
+async function liveWithFallback() {
+  let live = C.get('live', LIVE_TTL);
+  if (live) return live;
+  try {
+    live = await getLive();
+    C.set('live', live);
+    lastGoodLive = live;
+    return live;
+  } catch (e) {
+    console.warn('  [odds] getLive failed, serving last-known-good live matches:', e.message);
+    return lastGoodLive;
+  }
+}
+
 // Strips any suspended or below-floor odds directly off a match's raw odds
 // fields (both the legacy `odds` object and `aiOdds`) before it's sent to list
 // views like the homepage's match list — this is what the inline quick-pick
@@ -90,11 +136,7 @@ function deriveLeagues(matches) {
 // ── AVAILABLE LEAGUES ──
 router.get('/available', async (req, res) => {
   try {
-    let matches = C.get('fixtures', FIXTURES_TTL);
-    if (!matches) {
-      matches = await getFixtures(7);
-      C.set('fixtures', matches);
-    }
+    const matches = await fixturesWithFallback();
     res.json({ success: true, data: deriveLeagues(matches) });
   } catch (e) {
     res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
@@ -110,14 +152,9 @@ router.get('/available', async (req, res) => {
 // score, live minute, odds price, or match status actually moves.
 router.get('/featured', async (req, res) => {
   try {
-    let matches = C.get('fixtures', FIXTURES_TTL);
-    if (!matches) {
-      matches = await getFixtures(7);
-      C.set('fixtures', matches);
-    }
+    const matches = await fixturesWithFallback();
     // Overlay live data on top
-    let live = C.get('live', LIVE_TTL);
-    if (!live) { try { live = await getLive(); C.set('live', live); } catch { live = []; } }
+    const live = await liveWithFallback();
     const liveMap = new Map(live.map(m => [m.matchId, m]));
     const merged = matches.map(m => liveMap.has(m.matchId) ? liveMap.get(m.matchId) : m);
     live.forEach(m => { if (!merged.find(x => x.matchId === m.matchId)) merged.push(m); });
@@ -144,11 +181,7 @@ router.get('/featured', async (req, res) => {
 router.get('/matches/:sport', async (req, res) => {
   const sport = req.params.sport;
   try {
-    let matches = C.get('fixtures', FIXTURES_TTL);
-    if (!matches) {
-      matches = await getFixtures(7);
-      C.set('fixtures', matches);
-    }
+    const matches = await fixturesWithFallback();
     const filtered = smartSort(matches.filter(m => m.sport === sport)).map(applyOddsPipeline);
     res.json({ success: true, data: filtered, count: filtered.length });
   } catch (e) {
@@ -161,11 +194,7 @@ router.get('/matches/:sport', async (req, res) => {
 // live matches, we return zero — never stale or cached data beyond LIVE_TTL.
 router.get('/live', async (req, res) => {
   try {
-    let live = C.get('live', LIVE_TTL);
-    if (!live) {
-      live = await getLive();
-      C.set('live', live);
-    }
+    const live = await liveWithFallback();
     res.json({ success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' });
   } catch (e) {
     res.status(502).json({ success: false, data: [], message: 'Live data unavailable: ' + e.message });
