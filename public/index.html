@@ -1344,7 +1344,7 @@ async function loadLeagueOptions(){
   }catch{}
 }
 
-async function loadAllMatches(silent=false){
+async function loadAllMatches(silent=false, retryAttempt=0){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
   const el=document.getElementById('matchList');
   // If we already have data from a previous load this session, render it
@@ -1355,7 +1355,7 @@ async function loadAllMatches(silent=false){
   if(!silent && hasExistingData){
     applyFilters(true); // repaint instantly from memory, no spinner, no blank flash
     silent = true; // still fetch fresh data below, just don't block the UI for it
-  } else if(!silent){
+  } else if(!silent && retryAttempt===0){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
   }
   // Only the small pill shows for a background refresh — never a full-page
@@ -1367,12 +1367,16 @@ async function loadAllMatches(silent=false){
     // re-downloading the full ~400+ match list every 20s just to find nothing
     // moved.
     const headers = matchesEtag ? { 'If-None-Match': matchesEtag } : {};
-    // Hard timeout so a slow/stalled connection can never leave the spinner
-    // spinning forever — the server keeps its own cache warmed in the
-    // background so this should normally resolve in well under a second, but
-    // this is the safety net for genuinely bad network conditions.
+    // Hard timeout per attempt — the free-tier host can cold-start on the very
+    // first request after a period of inactivity, which alone can take
+    // 20-40s+. 12s used to be a hard cutoff after which we just gave up and
+    // showed "Failed to load", even though the request was still genuinely in
+    // flight and would have succeeded seconds later — that's what pull-to-
+    // refresh was "fixing" (it just happened to land after the cold start
+    // finished). Now a slow/stalled first attempt retries automatically
+    // instead of dead-ending on an error.
     const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
       r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
@@ -1412,6 +1416,20 @@ async function loadAllMatches(silent=false){
     // will pick up real data once the upstream recovers.
     setUpdatingIndicator(false);
   }catch(e){
+    // On a genuine first load with nothing cached, a single failed/timed-out
+    // attempt is very likely just the server still waking up — retry quietly
+    // a few times (with backoff) instead of dead-ending on an error message.
+    // Only after real, repeated failures do we show the error state, and even
+    // then the 20s background poll (set up in DOMContentLoaded) keeps trying.
+    const MAX_RETRIES = 5;
+    if(!hasExistingData && retryAttempt < MAX_RETRIES){
+      el.innerHTML = '<div class="loading"><div class="spin"></div>'
+        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
+        + '</div>';
+      const delay = Math.min(3000 * (retryAttempt+1), 12000); // 3s,6s,9s,12s,12s
+      setTimeout(() => loadAllMatches(false, retryAttempt+1), delay);
+      return;
+    }
     if(!silent && !hasExistingData) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
@@ -1728,7 +1746,7 @@ async function loadUpcoming(silent=false){
 }
 
 // ── LOAD MATCHES (used for the Live tab) ──
-async function loadMatches(sport, silent=false){
+async function loadMatches(sport, silent=false, retryAttempt=0){
   const el=document.getElementById('matchList');
   const cacheKey = 'sb_matches_cache_' + sport;
   let usedCache = false;
@@ -1739,9 +1757,12 @@ async function loadMatches(sport, silent=false){
   // match list barely changes minute to minute. A short-lived cache (2 min)
   // renders instantly from what was already fetched, then quietly refreshes
   // in the background — no visible loading state, no scroll disruption.
-  if(!silent){
+  // localStorage, not sessionStorage — sessionStorage is scoped per browser
+  // TAB, so a backgrounded tab that Android discards/reloads under memory
+  // pressure can come back with no cache at all even though one was written.
+  if(!silent && retryAttempt===0){
     try{
-      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
       if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 120000) {
         renderMatches(cached.data, true);
         usedCache = true;
@@ -1756,10 +1777,10 @@ async function loadMatches(sport, silent=false){
     // network fetch that follows an instant cache-first paint) — show the
     // small pill, never the full-page loader.
     if(silent || usedCache) setUpdatingIndicator(true);
-    // Same hard timeout as the homepage feed — never let a stalled connection
-    // leave the spinner up forever.
+    // Same per-attempt timeout as the homepage feed, with the same auto-retry
+    // below covering a slow cold start instead of dead-ending on an error.
     const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
       r = await fetch(url, { signal: ctrl.signal });
@@ -1785,9 +1806,21 @@ async function loadMatches(sport, silent=false){
     }
 
     renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
-    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
+    // A failed/timed-out first attempt with nothing on screen yet is very
+    // likely just the server waking up from a cold start — retry quietly
+    // instead of dead-ending on "Failed to load".
+    const MAX_RETRIES = 5;
+    if(!usedCache && retryAttempt < MAX_RETRIES){
+      el.innerHTML = '<div class="loading"><div class="spin"></div>'
+        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
+        + '</div>';
+      const delay = Math.min(3000 * (retryAttempt+1), 12000);
+      setTimeout(() => loadMatches(sport, false, retryAttempt+1), delay);
+      return;
+    }
     if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
