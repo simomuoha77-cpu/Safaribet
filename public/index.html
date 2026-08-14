@@ -934,11 +934,18 @@ try {
 // tab, and the back/forward gesture. Restored in renderMatches() the first
 // time real content is painted after this load, so returning to Home drops
 // the user back where they were instead of snapping to the top.
+//
+// Only `pagehide` is used here (not `beforeunload`) — pagehide already fires
+// in every case we need (navigating away, closing the tab, back/forward),
+// but unlike beforeunload it doesn't disqualify this page from the browser's
+// back/forward cache (bfcache). A beforeunload listener makes some browsers
+// treat the page as unsafe to bfcache-restore, forcing a full reload (and a
+// fresh "Loading matches..." spinner) every time the user comes back —
+// exactly what we don't want.
 function saveHomeScroll(){
   try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); } catch(e){}
 }
 window.addEventListener('pagehide', saveHomeScroll);
-window.addEventListener('beforeunload', saveHomeScroll);
 
 function restoreHomeScrollOnce(){
   if (homeScrollRestored) return;
@@ -1297,7 +1304,18 @@ async function loadAllMatches(silent=false){
     // re-downloading the full ~400+ match list every 20s just to find nothing
     // moved.
     const headers = matchesEtag ? { 'If-None-Match': matchesEtag } : {};
-    const r=await fetch('/api/odds/featured', { headers });
+    // Hard timeout so a slow/stalled connection can never leave the spinner
+    // spinning forever — the server keeps its own cache warmed in the
+    // background so this should normally resolve in well under a second, but
+    // this is the safety net for genuinely bad network conditions.
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    let r;
+    try {
+      r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (r.status === 304) {
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
@@ -1668,7 +1686,16 @@ async function loadMatches(sport, silent=false){
 
   try{
     const url = sport==='live' ? '/api/odds/live' : `/api/odds/matches/${sport}`;
-    const r=await fetch(url);
+    // Same hard timeout as the homepage feed — never let a stalled connection
+    // leave the spinner up forever.
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    let r;
+    try {
+      r = await fetch(url, { signal: ctrl.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const d=await r.json();
 
     if(!d.success||!d.data||!d.data.length){

@@ -68,6 +68,30 @@ async function liveWithFallback() {
   }
 }
 
+// ── BACKGROUND CACHE WARMER ──
+// Proactively refreshes the fixtures/live cache lines on a timer, slightly
+// faster than their own TTLs expire, so a real visitor's request essentially
+// never has to pay for a cold fetch from the upstream Juan API. Before this,
+// whichever request happened to land right after the 20s/8s cache expired
+// had to wait out a full upstream round-trip (up to 15s for fixtures) before
+// the homepage could paint anything — that's what made "Loading matches..."
+// feel stuck on a fresh visit, especially on a slower mobile connection.
+// fixturesWithFallback()/liveWithFallback() each check their own cache TTL
+// first, so calling them here on a short interval is cheap — it only ever
+// hits the upstream API when the cache line has actually expired.
+let warmerStarted = false;
+function startCacheWarmer() {
+  if (warmerStarted) return;
+  warmerStarted = true;
+  const warm = async () => {
+    try { await fixturesWithFallback(); } catch (e) { console.warn('  [odds] warmer: fixtures refresh failed:', e.message); }
+    try { await liveWithFallback(); } catch (e) { console.warn('  [odds] warmer: live refresh failed:', e.message); }
+  };
+  warm(); // warm immediately at boot — don't make the first real visitor wait for the first tick
+  setInterval(warm, 7000); // comfortably under both the 20s fixtures TTL and 8s live TTL
+}
+startCacheWarmer();
+
 // Strips any suspended or below-floor odds directly off a match's raw odds
 // fields (both the legacy `odds` object and `aiOdds`) before it's sent to list
 // views like the homepage's match list — this is what the inline quick-pick
