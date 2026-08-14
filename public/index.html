@@ -959,7 +959,14 @@ let homeScrollRestored=false; // guards against restoring scroll more than once 
 // ETag carried over here usually makes that refresh a tiny 304, not a full
 // re-download.
 try {
-  const cached = JSON.parse(sessionStorage.getItem('matchesCache') || 'null');
+  // localStorage, not sessionStorage — sessionStorage is scoped per browser
+  // TAB. On Android, backgrounding this tab while the user is on a different
+  // Chrome tab (or another app) can get it discarded and reloaded fresh under
+  // memory pressure, which can hand it a new sessionStorage context — the
+  // cache write was real, it just wasn't visible from that reload. Match
+  // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
+  // tab kills and full app restarts) is the right scope for this cache.
+  const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
   if (cached && cached.data && cached.data.length) {
     allMatches = cached.data;
   }
@@ -1375,7 +1382,7 @@ async function loadAllMatches(silent=false){
     if (r.status === 304) {
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
-      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      try { localStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       setUpdatingIndicator(false);
       return;
     }
@@ -1390,7 +1397,7 @@ async function loadAllMatches(silent=false){
     if(d.success && d.data && (d.data.length || !hasExistingData)){
       allMatches=d.data;
       matchesEtag = newEtag || matchesEtag;
-      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       // Count today's matches
       const todayStr=new Date().toDateString();
       const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
