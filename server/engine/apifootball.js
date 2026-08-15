@@ -162,7 +162,7 @@ async function getFixtures(daysAhead = 7) {
           // Safe for real-money betting. Falls back gracefully if param unsupported.
           ...(process.env.REAL_ODDS_ONLY === '1' ? { realOddsOnly: 1 } : {})
         },
-        timeout: 15000
+        timeout: 20000
       }).then(r => {
         anySucceeded = true;
         const count = r.data?.matches?.length || 0;
@@ -199,9 +199,15 @@ async function getLive() {
   // Juan API has no /api/live endpoint — we get live matches from days=0
   // filtered by IN_PLAY status. We call days=0 directly (not getFixtures
   // which does 0-7) to keep this fast and avoid rate limits.
+  // Timeout bumped 10s -> 20s: JuanAI's day-0 payload has grown substantially
+  // (1000+ matches some days) since this was first set, and the old 10s limit
+  // started getting exceeded on that larger payload — which is exactly what
+  // was making the Live tab show "No live matches" even when there genuinely
+  // were live games, because the request was timing out before it ever came
+  // back. This matches the 20s used for getFixtures's per-day requests.
   const r = await axios.get(`${JUAN_URL()}/api/fixtures`, {
     params: { key: JUAN_KEY(), days: 0 },
-    timeout: 10000
+    timeout: 20000
   });
   const raw = r.data?.matches || [];
   const live = raw

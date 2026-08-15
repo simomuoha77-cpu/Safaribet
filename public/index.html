@@ -682,6 +682,26 @@ header{
     <div class="loading"><div class="spin"></div>Loading matches...</div>
   </div>
 
+  <script>
+  // ── EARLY MATCH-LIST PAINT ──
+  // Same idea as the header's early-paint script: this runs the instant the
+  // parser reaches this point, right after #matchList exists — not once
+  // DOMContentLoaded fires, which requires the entire rest of this ~2000-line
+  // document (footer, modals, bottom nav, the main JS block below) to
+  // finish parsing first. That gap is what still showed the raw HTML
+  // "Loading matches..." spinner for a beat on every return to Home, even
+  // though the real fix (instant paint from cached data) was already running
+  // correctly — it just wasn't running early enough. This block only ever
+  // touches #matchList; it doesn't fetch anything and doesn't affect the
+  // header or auth state at all.
+  (function(){
+    try {
+      var html = localStorage.getItem('matchListHTML');
+      if (html) document.getElementById('matchList').innerHTML = html;
+    } catch(e) {}
+  })();
+  </script>
+
   <!-- SITE FOOTER -->
   <footer id="siteFooter" style="margin-top:24px;border-top:1px solid var(--bd);padding:0 0 8px">
 
@@ -1993,6 +2013,19 @@ function renderMatches(matches, silent=false){
 
   el.innerHTML=matches.map(m=>renderMatch(m)).join('');
   lastRenderedMatchIds = newIds;
+
+  // Cache the actual rendered HTML for the default Highlights view. Every
+  // "page" here is a full reload (not a SPA route), so on the next visit to
+  // Home this lets an early inline script (placed right after the empty
+  // #matchList div in the HTML) paint real content INSTANTLY as soon as the
+  // parser reaches it — instead of only repainting once DOMContentLoaded
+  // fires, which requires the ENTIRE ~2000-line document to finish parsing
+  // first. That parse-time gap is invisible on a slow network (masked by
+  // the request itself taking longer) but very visible on localhost/fast
+  // connections, which is exactly what was still showing a spinner flash.
+  if (currentFilter === 'highlights' && !currentLeague) {
+    try { localStorage.setItem('matchListHTML', el.innerHTML); } catch(e) {}
+  }
 
   // Start counting timers for all live match cards
   stopAllLiveTimers();
