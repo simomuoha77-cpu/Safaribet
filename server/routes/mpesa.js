@@ -178,8 +178,24 @@ router.post('/callback', async (req, res) => {
     const walletService = require('../services/walletService');
     const promotionService = require('../services/promotionService');
 
-    // Credit real cash to main wallet balance (atomic, auditable)
-    const wallet = await walletService.confirmDeposit(tx.userId, amount, mpRef, { checkoutId: ref });
+    // Credit real cash to main wallet balance (atomic, auditable). If this
+    // throws for any reason (DB blip, validation error, etc.), the atomic
+    // claim above already moved this transaction from 'pending' to
+    // 'processing' — without explicit recovery here it would be stuck there
+    // forever: the query-fallback below only ever re-checks 'pending'
+    // transactions, so 'processing' is a dead end no other code path can
+    // reach. The customer's money already left their account at this point,
+    // so we revert to 'pending' (not fail it) so the next poll's
+    // query-fallback gets a real chance to finish crediting it, and log this
+    // loudly since it means something is actually wrong with wallet writes.
+    let wallet;
+    try {
+      wallet = await walletService.confirmDeposit(tx.userId, amount, mpRef, { checkoutId: ref });
+    } catch (creditErr) {
+      console.error(`🚨 [mpesa/callback] CREDIT FAILED for tx ${tx._id} (user ${tx.userId}, KES ${amount}) — reverting to 'pending' for retry:`, creditErr.message);
+      await Transaction.findByIdAndUpdate(tx._id, { $set: { status: 'pending' } }).catch(() => {});
+      return;
+    }
 
     // Keep legacy User.balance in sync for any UI still reading it directly
     await User.findByIdAndUpdate(tx.userId, { $inc: { balance: amount } }).catch(() => {});
@@ -263,19 +279,34 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
             const meta = q.CallbackMetadata?.Item || [];
             const mpRef = meta.find(i => i.Name === 'MpesaReceiptNumber')?.Value || null;
             const walletService = require('../services/walletService');
-            const wallet = await walletService.confirmDeposit(tx.userId, tx.amount, mpRef || ('QUERY-' + tx.reference), { checkoutId: tx.reference, source: 'query-fallback' });
-            await User.findByIdAndUpdate(tx.userId, { $inc: { balance: tx.amount } }).catch(() => {});
-            tx = await Transaction.findByIdAndUpdate(tx._id, {
-              status: 'completed',
-              mpesaRef: mpRef,
-              balance: wallet.main,
-              description: `Deposit KES ${tx.amount} — M-Pesa ${mpRef || 'confirmed via query'} (recovered — callback never arrived)`
-            }, { new: true });
-            console.log(`✅ [mpesa/check] Recovered deposit via query fallback (callback missed): user ${tx.userId} +KES ${tx.amount}, new balance ${wallet.main}`);
-            require('../services/notificationService').notify(tx.userId, 'deposit_success', { amount: tx.amount }).catch(() => {});
-            const promotionService = require('../services/promotionService');
-            promotionService.tryGrantWelcomeBonus(tx.userId, tx.amount).catch(() => {});
-            promotionService.tryGrantReferralBonus(tx.userId, tx.amount).catch(() => {});
+            // Same "don't get stuck in processing" protection as the callback
+            // handler — if crediting throws here, revert to 'pending' so a
+            // later poll gets another chance instead of this transaction
+            // becoming permanently unreachable.
+            let wallet;
+            let creditOk = true;
+            try {
+              wallet = await walletService.confirmDeposit(tx.userId, tx.amount, mpRef || ('QUERY-' + tx.reference), { checkoutId: tx.reference, source: 'query-fallback' });
+            } catch (creditErr) {
+              creditOk = false;
+              console.error(`🚨 [mpesa/check] CREDIT FAILED (query-fallback) for tx ${tx._id} (user ${tx.userId}, KES ${tx.amount}) — reverting to 'pending' for retry:`, creditErr.message);
+              await Transaction.findByIdAndUpdate(tx._id, { $set: { status: 'pending' } }).catch(() => {});
+              tx = await Transaction.findById(tx._id);
+            }
+            if (creditOk) {
+              await User.findByIdAndUpdate(tx.userId, { $inc: { balance: tx.amount } }).catch(() => {});
+              tx = await Transaction.findByIdAndUpdate(tx._id, {
+                status: 'completed',
+                mpesaRef: mpRef,
+                balance: wallet.main,
+                description: `Deposit KES ${tx.amount} — M-Pesa ${mpRef || 'confirmed via query'} (recovered — callback never arrived)`
+              }, { new: true });
+              console.log(`✅ [mpesa/check] Recovered deposit via query fallback (callback missed): user ${tx.userId} +KES ${tx.amount}, new balance ${wallet.main}`);
+              require('../services/notificationService').notify(tx.userId, 'deposit_success', { amount: tx.amount }).catch(() => {});
+              const promotionService = require('../services/promotionService');
+              promotionService.tryGrantWelcomeBonus(tx.userId, tx.amount).catch(() => {});
+              promotionService.tryGrantReferralBonus(tx.userId, tx.amount).catch(() => {});
+            }
           } else {
             tx = await Transaction.findById(tx._id); // the real callback (or a concurrent poll) already resolved it — read the final result
             console.log(`[mpesa/check] ${tx.reference} already claimed by another path — current status: ${tx.status}`);
@@ -303,7 +334,16 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
     }
 
     const balance = await require('../services/walletService').getBalance(req.user._id);
-    res.json({ success: true, status: tx.status, balance: balance.spendable, wallet: balance });
+    res.json({
+      success: true,
+      status: tx.status,
+      balance: balance.spendable,
+      wallet: balance,
+      // Real failure reason from Safaricom when we have one (e.g. "insufficient
+      // funds", "request cancelled by user") — lets the client show the actual
+      // reason instead of a generic message.
+      message: tx.status === 'failed' ? (tx.description || null) : null
+    });
   } catch (e) {
     console.error('[mpesa/check] route error:', e.stack || e.message);
     res.status(500).json({ success: false, message: 'Check failed' });
