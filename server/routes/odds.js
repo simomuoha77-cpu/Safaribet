@@ -317,6 +317,25 @@ router.get('/debug', async (req, res) => {
     r.tests.live = `✅ ${live.length} matches`;
     r.tests.live_sample = live.slice(0, 3).map(m => `${m.homeTeam} ${m.score?.home}-${m.score?.away} ${m.awayTeam} (${m.score?.minute || 0}')`);
   } catch (e) { r.tests.live = `❌ ${e?.response?.status || ''} ${e.message}`; }
+
+  // Per-day breakdown, straight from JuanAI, bypassing our own merge/filter
+  // logic entirely — this is the direct answer to "is day N actually empty
+  // upstream, or is something on our side dropping it".
+  r.per_day = {};
+  const axios = require('axios');
+  for (let d = 0; d <= 5; d++) {
+    try {
+      const resp = await axios.get(`${process.env.JUANAI_URL}/api/fixtures`, {
+        params: { key: process.env.JUANAI_API_KEY, days: d },
+        timeout: 15000
+      });
+      const count = resp.data?.matches?.length || 0;
+      r.per_day[`day_${d}`] = `${count} matches` + (count ? ` | sample status: ${resp.data.matches[0].status}` : '');
+    } catch (e) {
+      r.per_day[`day_${d}`] = `❌ ${e?.response?.status || ''} ${e.message}`;
+    }
+  }
+
   res.json(r);
 });
 

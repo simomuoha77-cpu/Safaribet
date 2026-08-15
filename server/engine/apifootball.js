@@ -163,7 +163,18 @@ async function getFixtures(daysAhead = 7) {
           ...(process.env.REAL_ODDS_ONLY === '1' ? { realOddsOnly: 1 } : {})
         },
         timeout: 15000
-      }).then(r => { anySucceeded = true; return r.data?.matches || []; }).catch(() => [])
+      }).then(r => {
+        anySucceeded = true;
+        const count = r.data?.matches?.length || 0;
+        // Per-day visibility — without this, "days 1-7 silently return []" and
+        // "days 1-7 genuinely have no fixtures" were indistinguishable in the
+        // logs, which is exactly what made this regression hard to pin down.
+        console.log(`  [juan] day ${d}: ${count} matches`);
+        return r.data?.matches || [];
+      }).catch(e => {
+        console.warn(`  [juan] day ${d} FAILED: ${e?.response?.status || ''} ${e.message}`);
+        return [];
+      })
     );
   }
   const results = await Promise.all(requests);
