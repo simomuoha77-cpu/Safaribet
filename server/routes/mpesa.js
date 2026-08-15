@@ -131,6 +131,7 @@ const { isFromSafaricom } = require('../utils/safaricomCallback');
 // ── CALLBACK ──
 router.post('/callback', async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  console.log('[mpesa/callback] received:', JSON.stringify(req.body));
   try {
     if (!isFromSafaricom(req)) {
       // This is not a minor warning — it means a genuine Safaricom callback
@@ -237,8 +238,10 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
 
     if (shouldQuery) {
       queryThrottle.set(tx.reference, Date.now());
+      console.log(`[mpesa/check] querying Safaricom for ${tx.reference} (tx status: ${tx.status})`);
       try {
         const q = await queryStkStatus(tx.reference);
+        console.log(`[mpesa/check] Safaricom query response for ${tx.reference}:`, JSON.stringify(q));
         if (String(q.ResultCode) === '0') {
           // Payment succeeded on Safaricom's side. Same atomic claim pattern as
           // the callback handler — if the real callback lands at the same
@@ -251,6 +254,12 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
             { new: false }
           );
           if (claimed) {
+            // Note: unlike the callback payload, Safaricom's STK Push Query
+            // response does NOT include CallbackMetadata/MpesaReceiptNumber —
+            // that's expected, not a bug. We credit without it if needed; the
+            // real callback (if it arrives later) won't re-credit (claim above
+            // already flipped status away from 'pending'), but we do let it
+            // backfill the receipt number below if it lands after us.
             const meta = q.CallbackMetadata?.Item || [];
             const mpRef = meta.find(i => i.Name === 'MpesaReceiptNumber')?.Value || null;
             const walletService = require('../services/walletService');
@@ -262,38 +271,41 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
               balance: wallet.main,
               description: `Deposit KES ${tx.amount} — M-Pesa ${mpRef || 'confirmed via query'} (recovered — callback never arrived)`
             }, { new: true });
-            console.log(`✅ [mpesa/check] Recovered deposit via query fallback (callback missed): user ${tx.userId} +KES ${tx.amount}`);
+            console.log(`✅ [mpesa/check] Recovered deposit via query fallback (callback missed): user ${tx.userId} +KES ${tx.amount}, new balance ${wallet.main}`);
             require('../services/notificationService').notify(tx.userId, 'deposit_success', { amount: tx.amount }).catch(() => {});
             const promotionService = require('../services/promotionService');
             promotionService.tryGrantWelcomeBonus(tx.userId, tx.amount).catch(() => {});
             promotionService.tryGrantReferralBonus(tx.userId, tx.amount).catch(() => {});
           } else {
             tx = await Transaction.findById(tx._id); // the real callback (or a concurrent poll) already resolved it — read the final result
+            console.log(`[mpesa/check] ${tx.reference} already claimed by another path — current status: ${tx.status}`);
           }
         } else if (q.ResultCode !== undefined && String(q.ResultCode) !== '1032' && String(q.ResultCode) !== '1037') {
           // A definitive non-zero code (other than "still awaiting PIN entry" /
           // "user unreachable, still trying") means Safaricom has genuinely
           // concluded this failed (e.g. cancelled, insufficient funds).
+          console.log(`[mpesa/check] ${tx.reference} definitively failed per Safaricom: ResultCode=${q.ResultCode} ${q.ResultDesc}`);
           await Transaction.findOneAndUpdate(
             { _id: tx._id, status: 'pending' },
             { $set: { status: 'failed', description: `Deposit failed: ${q.ResultDesc || 'declined'}` } }
           );
           tx = await Transaction.findById(tx._id);
+        } else {
+          console.log(`[mpesa/check] ${tx.reference} still in-flight per Safaricom: ResultCode=${q.ResultCode}`);
         }
-        // else: genuinely still in-flight (customer hasn't entered their PIN
-        // yet) — leave as pending, the next poll checks again.
       } catch (qErr) {
         // The query call itself failed (network blip, Safaricom transiently
         // down, or "transaction still being processed" before Safaricom has
         // an answer yet) — not fatal. The callback, or the next poll's query,
         // still has a full chance to resolve this correctly.
-        console.warn('[mpesa/check] query fallback failed:', qErr?.response?.data?.errorMessage || qErr.message);
+        console.warn(`[mpesa/check] query call FAILED for ${tx.reference}:`, qErr?.response?.status, qErr?.response?.data ? JSON.stringify(qErr.response.data) : qErr.message);
       }
     }
 
     const balance = await require('../services/walletService').getBalance(req.user._id);
     res.json({ success: true, status: tx.status, balance: balance.spendable, wallet: balance });
   } catch (e) {
+    console.error('[mpesa/check] route error:', e.stack || e.message);
     res.status(500).json({ success: false, message: 'Check failed' });
   }
 });
