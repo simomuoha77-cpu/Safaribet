@@ -1248,6 +1248,28 @@ window.addEventListener('pageshow', function(e){
   }
 });
 
+// ── RESYNC WHEN THE APP COMES BACK TO THE FOREGROUND ──
+// Covers a case bfcache/pageshow above doesn't: this site is also wrapped as
+// an Android app (WebView), where switching away and back (home button, app
+// switcher, screen off/on) does NOT trigger a page reload OR a bfcache
+// restore — the page just sits frozen exactly as it was, for however long
+// the app was in the background. Its normal 20s refresh timer is throttled
+// by the OS while backgrounded too, so on a long-idle reopen the matches on
+// screen could be stale. visibilitychange is the one event that reliably
+// fires the moment the app is foregrounded again regardless of how it got
+// backgrounded, so this is what actually guarantees 'reopen the app, see
+// fresh matches' rather than relying on the last 20s refresh window.
+let lastForegroundSync = Date.now();
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    const awayMs = Date.now() - lastForegroundSync;
+    lastForegroundSync = Date.now();
+    if(awayMs < 2000) return;
+    loadAllMatches(true);
+    applyFilters(true);
+  }
+});
+
 // ── PULL TO REFRESH ──
 // Lets the user force an immediate refresh (rather than waiting for the 20s
 // background cycle) by pulling down at the very top of the page — the same
@@ -1300,7 +1322,7 @@ function pickFilter(el){
   currentFilter=el.dataset.filter;
   currentLeague='';
   document.getElementById('leagueSelect').value='';
-  applyFilters();
+  requestAnimationFrame(()=>requestAnimationFrame(()=>applyFilters()));
 }
 
 function pickLeagueFilter(){
@@ -1467,8 +1489,15 @@ function applyFilters(silent=false){
   // Time/status filter
   if(currentFilter==='highlights'){
     // Live matches belong only in the Live tab now — Highlights shows
-    // upcoming matches with odds, soonest kickoff first.
-    filtered=filtered.filter(m=>m.status==='upcoming');
+    // upcoming matches with odds, soonest kickoff first. Also requires
+    // commenceTime to still be in the future — status alone isn't enough to
+    // trust here, because it comes from a third-party sync that can briefly
+    // lag behind the real kickoff time. Without this, a match whose kickoff
+    // has already passed but whose status hasn't flipped to 'live'/'finished'
+    // yet would keep showing here looking like an 'expired'/already-started
+    // game — this is the one spot that check was missing (Upcoming already
+    // had it below).
+    filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
     filtered.sort((a,b)=>{
       const hasOddsA=a.odds?.home&&a.odds?.away?1:0;
       const hasOddsB=b.odds?.home&&b.odds?.away?1:0;
