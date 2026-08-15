@@ -311,7 +311,26 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
             tx = await Transaction.findById(tx._id); // the real callback (or a concurrent poll) already resolved it — read the final result
             console.log(`[mpesa/check] ${tx.reference} already claimed by another path — current status: ${tx.status}`);
           }
-        } else if (q.ResultCode !== undefined && String(q.ResultCode) !== '1032' && String(q.ResultCode) !== '1037') {
+        } else if (
+          q.ResultCode !== undefined &&
+          String(q.ResultCode) !== '1032' &&
+          String(q.ResultCode) !== '1037' &&
+          // Guard against exactly what happened here: Safaricom returned a
+          // non-zero, non-1032/1037 code while the PIN prompt was still
+          // sitting open on the customer's phone, with ResultDesc literally
+          // saying the transaction was still being processed — and the old
+          // logic (only recognizing 1032/1037 as "not done yet") treated
+          // that as a definitive failure. Declaring failure while a payment
+          // is still actually live is the worst possible mistake here: it
+          // can push someone to pay a second time while the first is still
+          // in flight. So beyond the two known "still going" codes, we also
+          // trust Safaricom's own wording — if ResultDesc says anything like
+          // "processing"/"pending"/"in progress"/"queued", that overrides
+          // the code and we keep waiting instead of failing it. Worst case
+          // this costs a few extra seconds of polling; the alternative risks
+          // real money.
+          !/process|pending|progress|queue/i.test(String(q.ResultDesc || ''))
+        ) {
           // A definitive non-zero code (other than "still awaiting PIN entry" /
           // "user unreachable, still trying") means Safaricom has genuinely
           // concluded this failed (e.g. cancelled, insufficient funds).
@@ -322,7 +341,7 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
           );
           tx = await Transaction.findById(tx._id);
         } else {
-          console.log(`[mpesa/check] ${tx.reference} still in-flight per Safaricom: ResultCode=${q.ResultCode}`);
+          console.log(`[mpesa/check] ${tx.reference} still in-flight per Safaricom: ResultCode=${q.ResultCode} ${q.ResultDesc || ''}`);
         }
       } catch (qErr) {
         // The query call itself failed (network blip, Safaricom transiently
