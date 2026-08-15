@@ -1826,8 +1826,16 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
 }
 
 function pickSportByKey(key){
-  const tab = document.querySelector(`.stab[data-sport="${key}"]`);
-  if(tab) pickSport(tab);
+  // The old hidden nav (#stabs / .stab) this used to target is not the tab row
+  // actually visible on screen anymore — that's .sp-tab, driven by pickCat().
+  // Calling the old path changed what data loaded (currentSport) without ever
+  // updating which tab looks selected, so "Live Now" could load live matches
+  // while the Highlights pill stayed lit green. Drive the real, visible tabs.
+  const tab = document.querySelector(`.sp-tab[data-cat="${key}"]`);
+  if(tab){ pickCat(tab); return; }
+  // Fallback for the legacy nav, only if it's ever actually shown.
+  const legacyTab = document.querySelector(`.stab[data-sport="${key}"]`);
+  if(legacyTab) pickSport(legacyTab);
 }
 
 function pickSport(el){
