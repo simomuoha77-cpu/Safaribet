@@ -169,17 +169,47 @@ function renderMarkets(){
   }
   document.getElementById('modeToggle').style.display = markets.length >= 2 ? 'flex' : 'none';
 
+  const REASON_LABELS = {
+    stale_data: 'Live data updating',
+    goal_event: 'Odds recalculating after goal',
+    mathematically_certain: 'Outcome decided',
+    lead_rule: 'Selection suspended',
+    draw_late: 'Selection suspended'
+  };
+
   container.innerHTML = markets.map(mk => {
-    const openOptions = mk.options.filter(o => !o.suspended);
-    const hasSuspended = mk.options.some(o => o.suspended);
+    // Whole market suspended (every outcome locked) — show one clear banner
+    // instead of a row of individually greyed-out buttons. This is the exact
+    // "🔒 Odds Updating" state: temporary if it's a stale-data/goal-event
+    // reason, otherwise the market is suspended because the risk rules judge
+    // it effectively decided.
+    if (mk.wholeMarketSuspended) {
+      const anyReason = (mk.options.find(o => o.reason) || {}).reason;
+      const isTemporary = anyReason === 'stale_data' || anyReason === 'goal_event';
+      return `
+      <div class="market-card">
+        <div class="market-hd"><span class="market-name">${mk.label}</span></div>
+        <div class="market-body" style="justify-content:center">
+          <div class="odd-btn" style="opacity:.6;cursor:default;flex:0 0 auto;min-width:200px;text-align:center" onclick="event.stopPropagation()">
+            <div class="odd-lbl">🔒 Odds Updating</div>
+          </div>
+        </div>
+        <div class="suspended-note">${isTemporary ? 'Recalculating odds for this match — selections will reopen automatically once fresh prices are confirmed.' : 'This market is suspended — the outcome is already effectively decided.'}</div>
+      </div>`;
+    }
+
     return `
     <div class="market-card">
       <div class="market-hd">
         <span class="market-name">${mk.label}</span>
       </div>
-      ${openOptions.length ? `
       <div class="market-body">
-        ${openOptions.map(opt => `
+        ${mk.options.map(opt => opt.suspended ? `
+          <div class="odd-btn" style="opacity:.5;cursor:default" onclick="event.stopPropagation()" title="${REASON_LABELS[opt.reason] || 'Selection suspended'}">
+            <div class="odd-lbl">${pickLabel(mk.market, opt.pick)}</div>
+            <div class="odd-val">🔒</div>
+          </div>
+        ` : `
           <div class="odd-btn ${opt.boostedOdds?'boosted':''}" id="mkt_${mk.market}_${opt.pick}" onclick="toggleMarketPick('${mk.market}','${opt.pick}',${opt.boostedOdds||opt.odds},'${escapeAttr(pickLabel(mk.market,opt.pick))}')">
             ${opt.boostedOdds ? '<div class="boost-flag">⚡ BOOST</div>' : ''}
             <div class="odd-lbl">${pickLabel(mk.market, opt.pick)}</div>
@@ -189,9 +219,8 @@ function renderMarkets(){
           </div>
         `).join('')}
       </div>
-      ${hasSuspended ? `<div class="suspended-note">Some options on this market are no longer available — that outcome is already effectively decided.</div>` : ''}
-      ${openOptions.some(o=>o.boostedOdds) ? `<div class="boost-note">⚡ Boosted odds apply to stakes up to KES ${openOptions.find(o=>o.boostedOdds).maxQualifyingStake.toLocaleString()} on that selection — normal odds apply beyond that.</div>` : ''}
-      ` : `<div class="suspended-note">Betting closed on this market — the outcome is already effectively decided.</div>`}
+      ${mk.hasSuspendedPick ? `<div class="suspended-note">🔒 A selection on this market is suspended — that outcome is already effectively decided, or odds are being recalculated.</div>` : ''}
+      ${mk.options.some(o=>o.boostedOdds) ? `<div class="boost-note">⚡ Boosted odds apply to stakes up to KES ${mk.options.find(o=>o.boostedOdds).maxQualifyingStake.toLocaleString()} on that selection — normal odds apply beyond that.</div>` : ''}
     </div>
   `;}).join('');
 

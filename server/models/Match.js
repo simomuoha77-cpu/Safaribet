@@ -28,7 +28,12 @@ const matchSchema = new mongoose.Schema({
     home:   { type: Number, default: null },
     away:   { type: Number, default: null },
     minute: { type: Number, default: null },
-    period: { type: String, default: null }
+    period: { type: String, default: null },
+    // Set only when home/away actually changes (not on every ~10s live poll) —
+    // lets the live-risk engine detect "a goal was just scored" and briefly
+    // suspend markets while odds catch up, separate from the ongoing minute/
+    // score-margin based suspension rules. See server/services/marketResolver.js.
+    lastGoalAt: { type: Date, default: null }
   },
   aiOdds: {
     homeWin:      { type: Number, default: null },

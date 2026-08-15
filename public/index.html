@@ -1255,17 +1255,25 @@ window.addEventListener('pageshow', function(e){
 // restore — the page just sits frozen exactly as it was, for however long
 // the app was in the background. Its normal 20s refresh timer is throttled
 // by the OS while backgrounded too, so on a long-idle reopen the matches on
-// screen could be stale. visibilitychange is the one event that reliably
-// fires the moment the app is foregrounded again regardless of how it got
-// backgrounded, so this is what actually guarantees 'reopen the app, see
-// fresh matches' rather than relying on the last 20s refresh window.
+// screen could be stale — including, without the fix above, matches whose
+// kickoff time had already passed. visibilitychange is the one event that
+// reliably fires the moment the app is foregrounded again regardless of how
+// it got backgrounded, so this is what actually guarantees "reopen the app,
+// see fresh matches" rather than relying on the user happening to still be
+// within the last 20s refresh window.
 let lastForegroundSync = Date.now();
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'visible'){
     const awayMs = Date.now() - lastForegroundSync;
     lastForegroundSync = Date.now();
+    // Skip if we already synced very recently (e.g. a quick screen tap) —
+    // no need to hit the network for a sub-2-second glance.
     if(awayMs < 2000) return;
     loadAllMatches(true);
+    // Re-apply the current filter immediately too — even before the network
+    // call above resolves, this alone clears out anything that quietly
+    // expired (e.g. a Highlights match whose kickoff time passed) while the
+    // app was backgrounded, using data already in memory.
     applyFilters(true);
   }
 });
@@ -1322,6 +1330,16 @@ function pickFilter(el){
   currentFilter=el.dataset.filter;
   currentLeague='';
   document.getElementById('leagueSelect').value='';
+  // Defer the actual filter/sort/render to the next animation frame instead
+  // of running it synchronously in this same click handler. With hundreds of
+  // matches loaded (a week of fixtures across every league), building and
+  // injecting that much HTML is real work — done synchronously, it blocks
+  // the browser from painting ANYTHING until it finishes, including the tab
+  // highlight above. That's what made switching filters feel stuck showing
+  // the old tab's matches: the click was registered, but nothing could
+  // render until the heavy work was done. Yielding one frame first lets the
+  // browser paint the tab switch immediately, so it feels instant, before
+  // the list itself updates a moment later.
   requestAnimationFrame(()=>requestAnimationFrame(()=>applyFilters()));
 }
 
@@ -1494,7 +1512,7 @@ function applyFilters(silent=false){
     // trust here, because it comes from a third-party sync that can briefly
     // lag behind the real kickoff time. Without this, a match whose kickoff
     // has already passed but whose status hasn't flipped to 'live'/'finished'
-    // yet would keep showing here looking like an 'expired'/already-started
+    // yet would keep showing here looking like an "expired"/already-started
     // game — this is the one spot that check was missing (Upcoming already
     // had it below).
     filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
@@ -1665,9 +1683,9 @@ function renderNonFootball(matches) {
           <div class="mtime">${time}</div>
         </div>
         ${m.hasOdds
-          ? oddBtn(m.matchId,'home','1',m.odds?.home,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam)
-            + (m.odds?.draw ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw') : '')
-            + oddBtn(m.matchId,'away','2',m.odds?.away,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam)
+          ? oddBtn(m.matchId,'home','1',m.odds?.home,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)
+            + (m.odds?.draw ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m) : '')
+            + oddBtn(m.matchId,'away','2',m.odds?.away,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m)
           : '<div style="padding:12px 8px;font-size:11px;color:var(--mt)">Odds unavailable</div>'
         }
       </div>
@@ -2146,7 +2164,19 @@ function liveTimeLabel(score){
   return '0';
 }
 
-function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, commenceTime, pickLabel){
+// Maps a pick name to its market — lets oddBtn look up suspension state from
+// m.suspendedPicks (set server-side in applyOddsPipeline) without needing
+// every call site to also pass the market explicitly.
+const PICK_MARKET = {
+  home:'1x2', draw:'1x2', away:'1x2',
+  dc_1x:'dc', dc_12:'dc', dc_x2:'dc',
+  btts:'btts', btts_no:'btts',
+  over25:'ou25', under25:'ou25',
+  handicap_home:'handicap', handicap_away:'handicap'
+};
+function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, commenceTime, pickLabel, m){
+  const suspended = m && m.suspendedPicks && m.suspendedPicks[`${PICK_MARKET[pick]}:${pick}`];
+  if(suspended) return `<div class="odd disabled" title="Selection suspended — recalculating or effectively decided"><span class="ol">${label}</span><span class="ov">🔒</span></div>`;
   if(!odds) return `<div class="odd disabled"><span class="ol">${label}</span><span class="ov">-</span></div>`;
   const o=parseFloat(odds).toFixed(2);
   const args=`'${matchId}','${esc(homeTeam)}','${esc(awayTeam)}','${esc(league)}','${sport}','${pick}','${esc(pickLabel)}',${odds},'${commenceTime}'`;
@@ -2189,28 +2219,28 @@ function renderMatch(m){
   if(currentMarket==='dc'){
     rowClass='mc-row-3';
     oddsHtml=
-      oddBtn(m.matchId,'dc_1x','1X',ao.dc_home_draw||m.odds?.homeDraw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'1X (Home or Draw)')+
-      oddBtn(m.matchId,'dc_12','12',ao.dc_home_away||m.odds?.homeAway,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'12 (Home or Away)')+
-      oddBtn(m.matchId,'dc_x2','X2',ao.dc_draw_away||m.odds?.drawAway,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'X2 (Draw or Away)');
+      oddBtn(m.matchId,'dc_1x','1X',ao.dc_home_draw||m.odds?.homeDraw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'1X (Home or Draw)',m)+
+      oddBtn(m.matchId,'dc_12','12',ao.dc_home_away||m.odds?.homeAway,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'12 (Home or Away)',m)+
+      oddBtn(m.matchId,'dc_x2','X2',ao.dc_draw_away||m.odds?.drawAway,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'X2 (Draw or Away)',m);
   } else if(currentMarket==='btts'){
     rowClass='mc-row-dc';
     oddsHtml=
-      oddBtn(m.matchId,'btts','GG',ao.btts||m.odds?.btts,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Both Teams Score')+
-      oddBtn(m.matchId,'btts_no','NG',ao.bttsNo||m.odds?.bttsNo,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'No Both Teams Score');
+      oddBtn(m.matchId,'btts','GG',ao.btts||m.odds?.btts,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Both Teams Score',m)+
+      oddBtn(m.matchId,'btts_no','NG',ao.bttsNo||m.odds?.bttsNo,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'No Both Teams Score',m);
   } else if(currentMarket==='ou25'){
     rowClass='mc-row-dc';
     oddsHtml=
-      oddBtn(m.matchId,'over25','O2.5',ao.over25||m.odds?.over25,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Over 2.5 Goals')+
-      oddBtn(m.matchId,'under25','U2.5',ao.under25||m.odds?.under25,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Under 2.5 Goals');
+      oddBtn(m.matchId,'over25','O2.5',ao.over25||m.odds?.over25,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Over 2.5 Goals',m)+
+      oddBtn(m.matchId,'under25','U2.5',ao.under25||m.odds?.under25,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Under 2.5 Goals',m);
   } else {
     // 1x2 default — use real odds first, fall back to aiOdds
     const h = m.odds?.home || ao.homeWin;
     const d = m.odds?.draw || ao.draw;
     const a = m.odds?.away || ao.awayWin;
     oddsHtml=
-      oddBtn(m.matchId,'home','1',h,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam)+
-      oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw')+
-      oddBtn(m.matchId,'away','2',a,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam);
+      oddBtn(m.matchId,'home','1',h,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)+
+      oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m)+
+      oddBtn(m.matchId,'away','2',a,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m);
   }
 
   return `<div class="mc" id="mc_${m.matchId}">

@@ -20,7 +20,7 @@ const C = {
 };
 const FIXTURES_TTL = 20000; // 20 seconds
 const LIVE_TTL     = 8000;  // 8 seconds
-const { resolveOdds } = require('../services/marketResolver');
+const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services/marketResolver');
 
 // Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
 // fallback for when the upstream Juan API has a transient outage. Without
@@ -121,12 +121,20 @@ function applyOddsPipeline(match) {
     ['ou25','under25', ['odds','under25'],  ['aiOdds','under25']],
   ];
 
+  // Which specific picks are suspended right now (risk management), as
+  // opposed to just genuinely having no data — lets list views show a 🔒 lock
+  // icon rather than a bare "-" for a pick that's temporarily unavailable
+  // versus one this match simply never had a price for.
+  const suspendedPicks = {};
   for (const [market, pick, legacyPath, aiPath] of checks) {
+    if (isPickSuspended(match, market, pick)) suspendedPicks[`${market}:${pick}`] = true;
     const resolved = resolveOdds(match, market, pick);
     const value = resolved ? resolved.odds : null; // null if suspended or no data — same as before
     if (clone[legacyPath[0]] && legacyPath[1] in clone[legacyPath[0]]) clone[legacyPath[0]][legacyPath[1]] = value;
     if (clone[aiPath[0]] && aiPath[1] in clone[aiPath[0]]) clone[aiPath[0]][aiPath[1]] = value;
   }
+  if (Object.keys(suspendedPicks).length) clone.suspendedPicks = suspendedPicks;
+  if (match.status === 'live' && isMarketSuspended(match, '1x2')) clone.wholeMarketSuspended = true;
   return clone;
 }
 
@@ -244,7 +252,7 @@ router.get('/match/:matchId', async (req, res) => {
     const m = await Match.findOne({ matchId: req.params.matchId }).lean();
     if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    const { resolveOdds, isPickSuspended, REAL_MARKETS } = require('../services/marketResolver');
+    const { resolveOdds, isPickSuspended, getSuspensionReason, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
     const MARKETS = [
       { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
       { market: 'dc',       label: 'Double Chance',       picks: ['dc_1x','dc_x2','dc_12'] },
@@ -257,8 +265,8 @@ router.get('/match/:matchId', async (req, res) => {
       let anySuspended = false;
       const options = def.picks
         .map(pick => {
-          const suspended = isPickSuspended(m, def.market, pick);
-          if (suspended) { anySuspended = true; return { pick, suspended: true }; }
+          const reason = getSuspensionReason(m, def.market, pick);
+          if (reason) { anySuspended = true; return { pick, suspended: true, reason }; }
           const resolved = resolveOdds(m, def.market, pick);
           if (!resolved) return null; // genuinely no data for this pick — omit it entirely
           return { pick, odds: resolved.odds };
@@ -270,6 +278,9 @@ router.get('/match/:matchId', async (req, res) => {
         label: def.label,
         isSynthetic: !REAL_MARKETS.has(def.market),
         hasSuspendedPick: anySuspended,
+        // Whole market is suspended (every outcome locked) — frontend shows a
+        // single "🔒 Odds Updating" banner instead of per-button locks for this.
+        wholeMarketSuspended: isMarketSuspended(m, def.market),
         options
       };
     }).filter(Boolean);

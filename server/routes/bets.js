@@ -20,7 +20,7 @@ const router  = express.Router();
 // the homepage itself is still showing as valid.
 const ODDS_STALE_MS = 90 * 60 * 1000; // 90 minutes
 
-const { resolveOdds, isPickSuspended, MIN_VIABLE_ODDS } = require('../services/marketResolver');
+const { resolveOdds, isPickSuspended, getMinViableOdds } = require('../services/marketResolver');
 
 function pickLabelFor(market, pick, match) {
   const h = match.homeTeam, a = match.awayTeam;
@@ -42,7 +42,7 @@ function getFreshServerOdds(match, market, pick) {
     const updatedAt = match.odds.updatedAt;
     if (!updatedAt || (Date.now() - new Date(updatedAt).getTime()) > ODDS_STALE_MS) return null;
     const odds = match.odds[pick];
-    if (odds < MIN_VIABLE_ODDS) return null; // already repriced too thin to offer — same floor resolveOdds applies everywhere else
+    if (odds < getMinViableOdds()) return null; // already repriced too thin to offer — same floor resolveOdds applies everywhere else
     return odds;
   }
   const resolved = resolveOdds(match, market, pick);

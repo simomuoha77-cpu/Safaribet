@@ -252,6 +252,25 @@ async function updateLive() {
     const liveIds = new Set(live.map(m => m.matchId));
 
     for (const m of live) {
+      // Detect a real goal (score actually changed since our last poll) so the
+      // live-risk engine can briefly suspend markets while odds catch up — see
+      // marketResolver.js. Comparing against the currently-stored score BEFORE
+      // this write, since `$set: m` below replaces the whole `score` subdocument
+      // every ~10s regardless of whether anything changed, which would otherwise
+      // silently wipe out a previously-recorded lastGoalAt on every non-scoring poll.
+      try {
+        const existing = await Match.findOne({ matchId: m.matchId }, { score: 1 }).lean();
+        const prevH = existing?.score?.home, prevA = existing?.score?.away;
+        const knownBefore = existing && prevH != null && prevA != null; // false on the very first sync — not a real "goal event"
+        const scoreChanged = knownBefore && (prevH !== m.score?.home || prevA !== m.score?.away);
+        if (scoreChanged) {
+          m.score = { ...m.score, lastGoalAt: new Date() };
+          console.log(`  ⚽ Goal detected: ${m.homeTeam} ${prevH}-${prevA} → ${m.score.home}-${m.score.away} ${m.awayTeam} — live markets briefly suspended`);
+        } else if (existing?.score?.lastGoalAt) {
+          m.score = { ...m.score, lastGoalAt: existing.score.lastGoalAt };
+        }
+      } catch (e) { /* non-fatal — worst case lastGoalAt just doesn't carry forward this poll */ }
+
       await Match.findOneAndUpdate(
         { matchId: m.matchId },
         { $set: m },

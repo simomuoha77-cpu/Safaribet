@@ -42,7 +42,54 @@ const store = {
   settings:    { maintenanceMode: false, maintenanceMessage: '', allowRegistration: true, allowDeposits: true, allowWithdrawals: true, siteName: 'SafariBet' },
   limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0, withdrawalAutoApproveLimit: 1000 },
   bonusSettings:{ welcomeBonus: 20, minBonusDep: 0 },
-  notifications:[]
+  notifications:[],
+  // ── LIVE ODDS RISK MANAGEMENT ──
+  // Configurable rules for suspending live selections/markets when the score
+  // gives one side a lead strong enough that continuing to offer odds risks
+  // paying out on a stale/outdated price. See server/services/marketResolver.js
+  // for how these are actually evaluated — this is just the admin-editable
+  // config; the engine there re-evaluates match state fresh on every single
+  // odds request and bet placement (never a stored "unlock at time X" timer),
+  // so a selection only reopens once the underlying condition genuinely
+  // clears, never just because time passed or odds were recalculated.
+  liveRisk: {
+    // Markets covered by the "leading side" suspension rules below. ou25/btts
+    // have their own separate, always-on mathematically-certain checks
+    // (e.g. BTTS "No" is impossible once both teams have scored) that aren't
+    // part of this configurable list — those aren't judgment calls.
+    affectedMarkets: ['1x2', 'dc', 'handicap'],
+    // If a live match's score/minute data hasn't updated within this many
+    // seconds (sync stalled, feed down, etc.), every live market on it is
+    // suspended outright — uncertain state must default to LOCKED, never OPEN.
+    dataFreshnessMaxAgeSec: 45,
+    // After ANY goal, every live market on that match is suspended for this
+    // many seconds while odds catch up to the new score — independent of the
+    // minute/goal-diff rules below, since even a single goal invalidates the
+    // pricing basis for every market on that match, not just 1X2.
+    goalEventSuspensionSec: 45,
+    // Level-score matches this close to full time are treated as draw-heavy
+    // enough to suspend the Draw pick specifically (tighter window than the
+    // goal-lead rules below, since a single goal flips this instantly).
+    drawSuspendMinutesRemaining: 3,
+    // Floor odds — anything priced at or below this offers no genuine value
+    // and is suspended regardless of which rule (if any) triggered.
+    minAcceptableOdds: 1.05,
+    // Tiered rules, evaluated independently — ANY matching enabled rule
+    // applies its action. 'suspend_leading' locks only the currently-leading
+    // side's own win-pick (and any Double Chance/Handicap pick that leans on
+    // it) — that's deliberately the locked side, not the trailing one: a
+    // stale, too-generous price on the team that's ALREADY winning is what's
+    // actually exploitable, not a stale price on the team that's losing.
+    // 'suspend_market' locks the entire market (every outcome) for matches
+    // regarded as effectively over.
+    rules: [
+      { id: 'r60',  enabled: true, minMinute: 60, minGoalDiff: 2, action: 'suspend_leading', label: "60'+ & 2-goal lead — suspend leading side" },
+      { id: 'r70',  enabled: true, minMinute: 70, minGoalDiff: 2, action: 'suspend_leading', label: "70'+ & 2-goal lead — strong suspension" },
+      { id: 'r75',  enabled: true, minMinute: 75, minGoalDiff: 3, action: 'suspend_leading', label: "75'+ & 3-goal lead — suspend leading side" },
+      { id: 'r80',  enabled: true, minMinute: 80, minGoalDiff: 2, action: 'suspend_leading', label: "80'+ & 2-goal lead — very late, suspend leading side" },
+      { id: 'r85m', enabled: true, minMinute: 85, minGoalDiff: 4, action: 'suspend_market',  label: "85'+ & 4-goal lead — suspend entire market" }
+    ]
+  }
 };
 
 (async function loadPersistedContent() {
@@ -77,17 +124,19 @@ async function persistContent() {
 (async function loadPersistedConfig() {
   try {
     const settingsService = require('../models/Settings');
-    const [savedSettings, savedLimits, savedBonus, savedBlacklist] = await Promise.all([
+    const [savedSettings, savedLimits, savedBonus, savedBlacklist, savedLiveRisk] = await Promise.all([
       settingsService.get('admin_site_settings'),
       settingsService.get('admin_limits'),
       settingsService.get('admin_bonus_settings'),
-      settingsService.get('admin_blacklist')
+      settingsService.get('admin_blacklist'),
+      settingsService.get('admin_live_risk')
     ]);
     if (savedSettings) Object.assign(store.settings, savedSettings);
     if (savedLimits) Object.assign(store.limits, savedLimits);
     if (savedBonus) Object.assign(store.bonusSettings, savedBonus);
     if (Array.isArray(savedBlacklist)) store.blacklist = savedBlacklist;
-    console.log('[admin] Loaded persisted settings/limits/bonus/blacklist from database');
+    if (savedLiveRisk) Object.assign(store.liveRisk, savedLiveRisk); // shallow merge is enough — POST /live-risk below always sends the full object back, including a complete `rules` array, never a partial patch
+    console.log('[admin] Loaded persisted settings/limits/bonus/blacklist/live-risk from database');
   } catch (e) {
     console.error('[admin] Failed to load persisted config — using defaults:', e.message);
   }
@@ -96,6 +145,7 @@ async function persistSettings()     { try { await require('../models/Settings')
 async function persistLimits()       { try { await require('../models/Settings').set('admin_limits', store.limits); } catch(e) { console.error('[admin] persist limits failed:', e.message); } }
 async function persistBonusSettings(){ try { await require('../models/Settings').set('admin_bonus_settings', store.bonusSettings); } catch(e) { console.error('[admin] persist bonus settings failed:', e.message); } }
 async function persistBlacklist()    { try { await require('../models/Settings').set('admin_blacklist', store.blacklist); } catch(e) { console.error('[admin] persist blacklist failed:', e.message); } }
+async function persistLiveRisk()     { try { await require('../models/Settings').set('admin_live_risk', store.liveRisk); } catch(e) { console.error('[admin] persist live-risk failed:', e.message); } }
 
 function audit(action, data) {
   store.auditLog.unshift({ action, data, time: new Date().toISOString() });
@@ -643,6 +693,39 @@ router.post('/limits', async (req, res) => {
   await persistLimits();
   audit('UPDATE_LIMITS', { type, ...data });
   res.json({ success:true });
+});
+
+// ── LIVE ODDS RISK CONFIG ──
+// See store.liveRisk above and server/services/marketResolver.js for how this
+// is actually enforced (on both the odds display API and bet placement).
+router.get('/live-risk', async (req, res) => {
+  res.json({ success: true, data: store.liveRisk });
+});
+router.post('/live-risk', async (req, res) => {
+  const data = req.body || {};
+  // Basic shape validation — this directly controls real-money risk exposure,
+  // so a malformed save (e.g. a missing rules array from a buggy client) must
+  // be rejected outright rather than partially applied.
+  if (data.rules !== undefined) {
+    if (!Array.isArray(data.rules)) return res.status(400).json({ success: false, message: 'rules must be an array' });
+    for (const r of data.rules) {
+      if (typeof r.minMinute !== 'number' || r.minMinute < 0 || r.minMinute > 120) return res.status(400).json({ success: false, message: `Invalid minMinute in rule ${r.id || '?'}` });
+      if (typeof r.minGoalDiff !== 'number' || r.minGoalDiff < 1 || r.minGoalDiff > 10) return res.status(400).json({ success: false, message: `Invalid minGoalDiff in rule ${r.id || '?'}` });
+      if (!['suspend_leading', 'suspend_market'].includes(r.action)) return res.status(400).json({ success: false, message: `Invalid action in rule ${r.id || '?'}` });
+    }
+  }
+  if (data.affectedMarkets !== undefined && !Array.isArray(data.affectedMarkets)) {
+    return res.status(400).json({ success: false, message: 'affectedMarkets must be an array' });
+  }
+  for (const numField of ['dataFreshnessMaxAgeSec', 'goalEventSuspensionSec', 'drawSuspendMinutesRemaining', 'minAcceptableOdds']) {
+    if (data[numField] !== undefined && (typeof data[numField] !== 'number' || data[numField] < 0)) {
+      return res.status(400).json({ success: false, message: `Invalid ${numField}` });
+    }
+  }
+  Object.assign(store.liveRisk, data);
+  await persistLiveRisk();
+  audit('UPDATE_LIVE_RISK', data);
+  res.json({ success: true, data: store.liveRisk });
 });
 
 // ── BONUS SETTINGS ──
