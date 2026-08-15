@@ -509,6 +509,36 @@ header{
   </div>
 </header>
 
+<script>
+// ── APPLY AUTH HEADER STATE IMMEDIATELY ──
+// This runs the instant the parser reaches this point — right after the
+// header exists in the DOM — instead of waiting for DOMContentLoaded, which
+// only fires once the ENTIRE ~2300-line document (including everything the
+// match list needs) has been parsed. Previously the header sat in its raw
+// HTML default (Login/Join visible, balance hidden) for that whole window,
+// then flipped to Balance/Logout right around when matches finished loading
+// — looking like the user had been logged out and the page reloaded.
+// Auth state and match state are intentionally independent: this block only
+// ever touches the header. It does not fetch matches and does not wait on
+// anything match-related. Match loading is still kicked off later, in the
+// DOMContentLoaded handler below, and only ever touches the match section.
+(function(){
+  var t = localStorage.getItem('token'), u = localStorage.getItem('user');
+  if (!t || !u) return; // unauthenticated — header's HTML default (Login/Join) is already correct
+  try {
+    window.USER = JSON.parse(u);
+  } catch(e) { return; }
+  document.getElementById('loginBtn').style.display = 'none';
+  document.getElementById('joinBtn').style.display = 'none';
+  document.getElementById('logoutBtn').style.display = 'inline-block';
+  document.getElementById('balpill').style.display = 'flex';
+  // Paint the cached balance instantly (no blank flash); refreshBalance()
+  // (called from DOMContentLoaded once it's defined) corrects it from the
+  // server right after.
+  document.getElementById('balv').textContent = parseFloat(window.USER.balance || 0).toFixed(2);
+})();
+</script>
+
 <!-- NOTIFICATION DROPDOWN PANEL -->
 <div id="notifPanel" style="display:none;position:fixed;top:52px;right:8px;left:8px;max-width:360px;margin-left:auto;background:var(--s1);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:999;max-height:70vh;overflow-y:auto">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--bd)">
@@ -651,6 +681,26 @@ header{
   <div id="matchList">
     <div class="loading"><div class="spin"></div>Loading matches...</div>
   </div>
+
+  <script>
+  // ── EARLY MATCH-LIST PAINT ──
+  // Same idea as the header's early-paint script: this runs the instant the
+  // parser reaches this point, right after #matchList exists — not once
+  // DOMContentLoaded fires, which requires the entire rest of this ~2000-line
+  // document (footer, modals, bottom nav, the main JS block below) to
+  // finish parsing first. That gap is what still showed the raw HTML
+  // "Loading matches..." spinner for a beat on every return to Home, even
+  // though the real fix (instant paint from cached data) was already running
+  // correctly — it just wasn't running early enough. This block only ever
+  // touches #matchList; it doesn't fetch anything and doesn't affect the
+  // header or auth state at all.
+  (function(){
+    try {
+      var html = localStorage.getItem('matchListHTML');
+      if (html) document.getElementById('matchList').innerHTML = html;
+    } catch(e) {}
+  })();
+  </script>
 
   <!-- SITE FOOTER -->
   <footer id="siteFooter" style="margin-top:24px;border-top:1px solid var(--bd);padding:0 0 8px">
@@ -911,7 +961,11 @@ function toggleFaq(i){
 
 <script>
 // ── STATE ──
-let USER=null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
+// USER may already have been set by the early auth-header script right after
+// <header> (window.USER) — pick that up instead of resetting to null, or the
+// header would be visually correct but every USER-dependent function below
+// (placeBet, refreshBalance, etc.) would still see a logged-out state.
+let USER=window.USER||null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
 let oddsRefresh=null;
 let allMatches=[], currentFilter='highlights', currentMarket='1x2', currentLeague='';
 let matchesEtag=null; // last ETag /api/odds/featured sent us — lets the next refresh be a cheap conditional request
@@ -925,7 +979,14 @@ let homeScrollRestored=false; // guards against restoring scroll more than once 
 // ETag carried over here usually makes that refresh a tiny 304, not a full
 // re-download.
 try {
-  const cached = JSON.parse(sessionStorage.getItem('matchesCache') || 'null');
+  // localStorage, not sessionStorage — sessionStorage is scoped per browser
+  // TAB. On Android, backgrounding this tab while the user is on a different
+  // Chrome tab (or another app) can get it discarded and reloaded fresh under
+  // memory pressure, which can hand it a new sessionStorage context — the
+  // cache write was real, it just wasn't visible from that reload. Match
+  // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
+  // tab kills and full app restarts) is the right scope for this cache.
+  const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
   if (cached && cached.data && cached.data.length) {
     allMatches = cached.data;
   }
@@ -1123,21 +1184,17 @@ function closePopupAd(){
 window.addEventListener('DOMContentLoaded', ()=>{
   loadAdminBanner();
   loadDownloadAppBanner();
-  const t=localStorage.getItem('token'), u=localStorage.getItem('user');
-  if(t&&u){
-    USER=JSON.parse(u);
-    document.getElementById('loginBtn').style.display='none';
-    document.getElementById('joinBtn').style.display='none';
-    document.getElementById('logoutBtn').style.display='inline-block';
-    document.getElementById('balpill').style.display='flex';
+  // Auth header state (Login/Join vs Balance/Logout) was already applied
+  // synchronously right after <header> above — do NOT redo it here and do
+  // NOT let it gate on or wait for match loading below. This block only
+  // handles auth-dependent work that ISN'T the header itself: refreshing the
+  // live balance, notifications, favorites, and the bet slip action button.
+  if (window.USER) {
     // Show the LIVE wallet balance, not the snapshot cached at login — USER.balance
     // never updates after login, so it silently drifts from the real balance the
     // moment a bet is placed, a deposit lands, or a bet settles. This is what
     // caused the header and Account page to show two different numbers even
-    // though they're supposed to be the same value. Show the cached figure
-    // immediately (instant paint, no blank flash) then correct it from the
-    // server right away.
-    document.getElementById('balv').textContent=parseFloat(USER.balance||0).toFixed(2);
+    // though they're supposed to be the same value.
     refreshBalance();
     loadNotifications();
     loadFavorites();
@@ -1146,6 +1203,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('slipAction').innerHTML=
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
+  // Match loading is fully independent of auth state — runs regardless of
+  // whether the user is logged in, and never touches the header. If this
+  // takes 10s or fails outright, the header above is completely unaffected.
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
@@ -1304,7 +1364,7 @@ async function loadLeagueOptions(){
   }catch{}
 }
 
-async function loadAllMatches(silent=false){
+async function loadAllMatches(silent=false, retryAttempt=0){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
   const el=document.getElementById('matchList');
   // If we already have data from a previous load this session, render it
@@ -1315,7 +1375,7 @@ async function loadAllMatches(silent=false){
   if(!silent && hasExistingData){
     applyFilters(true); // repaint instantly from memory, no spinner, no blank flash
     silent = true; // still fetch fresh data below, just don't block the UI for it
-  } else if(!silent){
+  } else if(!silent && retryAttempt===0){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
   }
   // Only the small pill shows for a background refresh — never a full-page
@@ -1327,12 +1387,16 @@ async function loadAllMatches(silent=false){
     // re-downloading the full ~400+ match list every 20s just to find nothing
     // moved.
     const headers = matchesEtag ? { 'If-None-Match': matchesEtag } : {};
-    // Hard timeout so a slow/stalled connection can never leave the spinner
-    // spinning forever — the server keeps its own cache warmed in the
-    // background so this should normally resolve in well under a second, but
-    // this is the safety net for genuinely bad network conditions.
+    // Hard timeout per attempt — the free-tier host can cold-start on the very
+    // first request after a period of inactivity, which alone can take
+    // 20-40s+. 12s used to be a hard cutoff after which we just gave up and
+    // showed "Failed to load", even though the request was still genuinely in
+    // flight and would have succeeded seconds later — that's what pull-to-
+    // refresh was "fixing" (it just happened to land after the cold start
+    // finished). Now a slow/stalled first attempt retries automatically
+    // instead of dead-ending on an error.
     const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
       r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
@@ -1342,7 +1406,7 @@ async function loadAllMatches(silent=false){
     if (r.status === 304) {
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
-      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      try { localStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       setUpdatingIndicator(false);
       return;
     }
@@ -1357,7 +1421,7 @@ async function loadAllMatches(silent=false){
     if(d.success && d.data && (d.data.length || !hasExistingData)){
       allMatches=d.data;
       matchesEtag = newEtag || matchesEtag;
-      try { sessionStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       // Count today's matches
       const todayStr=new Date().toDateString();
       const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
@@ -1372,6 +1436,20 @@ async function loadAllMatches(silent=false){
     // will pick up real data once the upstream recovers.
     setUpdatingIndicator(false);
   }catch(e){
+    // On a genuine first load with nothing cached, a single failed/timed-out
+    // attempt is very likely just the server still waking up — retry quietly
+    // a few times (with backoff) instead of dead-ending on an error message.
+    // Only after real, repeated failures do we show the error state, and even
+    // then the 20s background poll (set up in DOMContentLoaded) keeps trying.
+    const MAX_RETRIES = 5;
+    if(!hasExistingData && retryAttempt < MAX_RETRIES){
+      el.innerHTML = '<div class="loading"><div class="spin"></div>'
+        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
+        + '</div>';
+      const delay = Math.min(3000 * (retryAttempt+1), 12000); // 3s,6s,9s,12s,12s
+      setTimeout(() => loadAllMatches(false, retryAttempt+1), delay);
+      return;
+    }
     if(!silent && !hasExistingData) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
@@ -1388,11 +1466,10 @@ function applyFilters(silent=false){
 
   // Time/status filter
   if(currentFilter==='highlights'){
-    // Most interesting: live first, then soonest upcoming with odds
-    filtered=filtered.filter(m=>m.status==='live'||m.status==='upcoming');
+    // Live matches belong only in the Live tab now — Highlights shows
+    // upcoming matches with odds, soonest kickoff first.
+    filtered=filtered.filter(m=>m.status==='upcoming');
     filtered.sort((a,b)=>{
-      if(a.status==='live'&&b.status!=='live') return -1;
-      if(b.status==='live'&&a.status!=='live') return 1;
       const hasOddsA=a.odds?.home&&a.odds?.away?1:0;
       const hasOddsB=b.odds?.home&&b.odds?.away?1:0;
       if(hasOddsA!==hasOddsB) return hasOddsB-hasOddsA;
@@ -1688,7 +1765,7 @@ async function loadUpcoming(silent=false){
 }
 
 // ── LOAD MATCHES (used for the Live tab) ──
-async function loadMatches(sport, silent=false){
+async function loadMatches(sport, silent=false, retryAttempt=0){
   const el=document.getElementById('matchList');
   const cacheKey = 'sb_matches_cache_' + sport;
   let usedCache = false;
@@ -1699,9 +1776,12 @@ async function loadMatches(sport, silent=false){
   // match list barely changes minute to minute. A short-lived cache (2 min)
   // renders instantly from what was already fetched, then quietly refreshes
   // in the background — no visible loading state, no scroll disruption.
-  if(!silent){
+  // localStorage, not sessionStorage — sessionStorage is scoped per browser
+  // TAB, so a backgrounded tab that Android discards/reloads under memory
+  // pressure can come back with no cache at all even though one was written.
+  if(!silent && retryAttempt===0){
     try{
-      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
       if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 120000) {
         renderMatches(cached.data, true);
         usedCache = true;
@@ -1716,10 +1796,10 @@ async function loadMatches(sport, silent=false){
     // network fetch that follows an instant cache-first paint) — show the
     // small pill, never the full-page loader.
     if(silent || usedCache) setUpdatingIndicator(true);
-    // Same hard timeout as the homepage feed — never let a stalled connection
-    // leave the spinner up forever.
+    // Same per-attempt timeout as the homepage feed, with the same auto-retry
+    // below covering a slow cold start instead of dead-ending on an error.
     const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
       r = await fetch(url, { signal: ctrl.signal });
@@ -1745,17 +1825,37 @@ async function loadMatches(sport, silent=false){
     }
 
     renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
-    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
+    // A failed/timed-out first attempt with nothing on screen yet is very
+    // likely just the server waking up from a cold start — retry quietly
+    // instead of dead-ending on "Failed to load".
+    const MAX_RETRIES = 5;
+    if(!usedCache && retryAttempt < MAX_RETRIES){
+      el.innerHTML = '<div class="loading"><div class="spin"></div>'
+        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
+        + '</div>';
+      const delay = Math.min(3000 * (retryAttempt+1), 12000);
+      setTimeout(() => loadMatches(sport, false, retryAttempt+1), delay);
+      return;
+    }
     if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
 }
 
 function pickSportByKey(key){
-  const tab = document.querySelector(`.stab[data-sport="${key}"]`);
-  if(tab) pickSport(tab);
+  // The old hidden nav (#stabs / .stab) this used to target is not the tab row
+  // actually visible on screen anymore — that's .sp-tab, driven by pickCat().
+  // Calling the old path changed what data loaded (currentSport) without ever
+  // updating which tab looks selected, so "Live Now" could load live matches
+  // while the Highlights pill stayed lit green. Drive the real, visible tabs.
+  const tab = document.querySelector(`.sp-tab[data-cat="${key}"]`);
+  if(tab){ pickCat(tab); return; }
+  // Fallback for the legacy nav, only if it's ever actually shown.
+  const legacyTab = document.querySelector(`.stab[data-sport="${key}"]`);
+  if(legacyTab) pickSport(legacyTab);
 }
 
 function pickSport(el){
@@ -1913,6 +2013,19 @@ function renderMatches(matches, silent=false){
 
   el.innerHTML=matches.map(m=>renderMatch(m)).join('');
   lastRenderedMatchIds = newIds;
+
+  // Cache the actual rendered HTML for the default Highlights view. Every
+  // "page" here is a full reload (not a SPA route), so on the next visit to
+  // Home this lets an early inline script (placed right after the empty
+  // #matchList div in the HTML) paint real content INSTANTLY as soon as the
+  // parser reaches it — instead of only repainting once DOMContentLoaded
+  // fires, which requires the ENTIRE ~2000-line document to finish parsing
+  // first. That parse-time gap is invisible on a slow network (masked by
+  // the request itself taking longer) but very visible on localhost/fast
+  // connections, which is exactly what was still showing a spinner flash.
+  if (currentFilter === 'highlights' && !currentLeague) {
+    try { localStorage.setItem('matchListHTML', el.innerHTML); } catch(e) {}
+  }
 
   // Start counting timers for all live match cards
   stopAllLiveTimers();
