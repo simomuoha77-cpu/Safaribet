@@ -1446,11 +1446,10 @@ function applyFilters(silent=false){
 
   // Time/status filter
   if(currentFilter==='highlights'){
-    // Most interesting: live first, then soonest upcoming with odds
-    filtered=filtered.filter(m=>m.status==='live'||m.status==='upcoming');
+    // Live matches belong only in the Live tab now — Highlights shows
+    // upcoming matches with odds, soonest kickoff first.
+    filtered=filtered.filter(m=>m.status==='upcoming');
     filtered.sort((a,b)=>{
-      if(a.status==='live'&&b.status!=='live') return -1;
-      if(b.status==='live'&&a.status!=='live') return 1;
       const hasOddsA=a.odds?.home&&a.odds?.away?1:0;
       const hasOddsB=b.odds?.home&&b.odds?.away?1:0;
       if(hasOddsA!==hasOddsB) return hasOddsB-hasOddsA;
