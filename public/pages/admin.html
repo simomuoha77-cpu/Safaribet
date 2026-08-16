@@ -1669,7 +1669,7 @@ async function loadUserBets(){
       <div style="padding:10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between"><strong style="color:var(--tx)">${b.betCode}</strong><span style="text-transform:capitalize">${b.status}</span></div>
         <div style="font-size:11px;margin:4px 0">Stake: KES ${b.stake} · Odds: ${b.totalOdds} · Potential: KES ${b.potentialWin.toLocaleString()}</div>
-        <div style="font-size:11px;color:var(--mt)">${b.selections.map(s=>`${s.homeTeam} vs ${s.awayTeam} — ${s.pickLabel||s.pick} @ ${s.odds}`).join('<br>')}</div>
+        <div style="font-size:11px;color:var(--mt)">${b.selections.map(s=>renderAdminSelectionLine(s)).join('')}</div>
         ${b.status==='pending' ? `
           <div style="margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
             <input class="inp" id="addSelInput-${b._id}" placeholder="Search team/league to add a selection..." oninput="searchAddSelFixtures('${b._id}', this.value)"/>
@@ -1811,6 +1811,22 @@ async function removeBlacklist(id){
 }
 
 // ══ BETS ══
+// Renders one selection line with a clear win/loss/pending/void indicator —
+// lets admin see, per individual match inside a bet, whether the user won or
+// lost that specific pick as soon as it finishes, without waiting for the
+// whole bet (which may have other still-pending matches) to settle.
+function renderAdminSelectionLine(s){
+  const r = s.result || 'pending';
+  const ICONS = { won: '✅', lost: '❌', void: '↩️', pending: '⏳' };
+  const COLORS = { won: 'var(--g)', lost: 'var(--r)', void: 'var(--mt)', pending: 'var(--y)' };
+  const scoreStr = (s.score?.home !== null && s.score?.home !== undefined && s.score?.away !== null && s.score?.away !== undefined)
+    ? ` <span style="color:var(--mt)">(FT ${s.score.home}-${s.score.away})</span>` : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 0">
+    <span>${ICONS[r]} ${s.homeTeam} vs ${s.awayTeam} → <b>${s.pickLabel || s.pick}</b> @ ${s.odds}x${scoreStr}</span>
+    <span style="color:${COLORS[r]};font-weight:700;text-transform:capitalize;white-space:nowrap">${r}</span>
+  </div>`;
+}
+
 async function loadBets(){
   const status=document.getElementById('betFilter').value;
   const search=document.getElementById('betSearch').value.trim();
@@ -1822,7 +1838,7 @@ async function loadBets(){
     <div class="b-row ${b.status}">
       <div class="b-top"><span class="b-code">${b.betCode}</span><span class="badge bg-${b.status==='won'?'g':b.status==='lost'?'r':'y'}">${b.status}</span></div>
       <div style="font-size:11px;color:var(--mt);margin-bottom:4px">👤 ${b.userId?.username || 'unknown'} (${fmtPhone(b.userId?.phone||'')})</div>
-      <div class="b-sels">${b.selections?.map(s=>`${s.homeTeam} vs ${s.awayTeam} → <b>${s.pick}</b> @ ${s.odds}x`).join('<br>')}</div>
+      <div class="b-sels">${b.selections?.map(s=>renderAdminSelectionLine(s)).join('')}</div>
       <div class="b-foot">
         <span>Stake: <b>KES ${b.stake?.toLocaleString()}</b></span>
         <span>Odds: <b>${b.totalOdds}x</b></span>
