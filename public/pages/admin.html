@@ -1377,7 +1377,18 @@ function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e
 function api(url,opts={}){
   return fetch(url,{...opts,headers:{'Content-Type':'application/json','Authorization':'Bearer '+ADMIN_TOKEN,...(opts.headers||{})}}).then(async r=>{
     if (r.status === 401) { doLogout(); return { success:false, message:'Session expired — please log in again.' }; }
-    return r.json();
+    // A non-JSON response (an HTML 404/502 page, a proxy timeout page, etc.)
+    // means something is actually wrong server-side — most commonly this
+    // specific endpoint hasn't been deployed/restarted yet. Surface that
+    // clearly with the real status code instead of letting r.json() throw a
+    // generic "Unexpected token <" parse error that every caller's catch
+    // block then has to guess the meaning of.
+    const text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch(e) {
+      throw new Error(`Server returned ${r.status} (not JSON) for ${url.split('?')[0]} — likely not deployed yet, or a server error. Check pm2 logs.`);
+    }
   });
 }
 
@@ -1867,7 +1878,8 @@ async function openOverrideSelection(betId, matchId, homeTeam, awayTeam, current
       toast('❌ ' + (d.message || 'Failed'), 'err');
     }
   } catch(e) {
-    toast('❌ Network error — check server logs', 'err');
+    toast('❌ ' + (e.message || 'Request failed — check server logs'), 'err');
+    console.error('[override-selection] request failed:', e);
   }
 }
 

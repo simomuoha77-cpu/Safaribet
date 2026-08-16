@@ -756,4 +756,128 @@ router.post('/admin/add-selection/:betId', requireAdmin, async (req, res) => {
   } catch (e) { return safeError(res, e, 'bets/admin/add-selection'); }
 });
 
+// ── ADMIN: CORRECT A WRONGLY-GRADED SELECTION ──
+// For fixing genuine grading errors — the automated settlement engine got a
+// result wrong (bad data from the odds/results feed, a match mismatch, etc.)
+// and the bet was settled incorrectly as a result. This is NOT a way to
+// change a real outcome after the fact; it recomputes the bet from the
+// selections' actual results using the exact same logic the automated
+// engine uses (see server/engine/settlementEngine.js), and reconciles the
+// user's wallet against whatever was already paid — crediting them if they
+// were underpaid, clawing back if they were overpaid. Every correction
+// requires a reason and is permanently logged to the audit trail.
+router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) => {
+  try {
+    const { matchId, result, reason } = req.body;
+    if (!matchId || !result) return res.status(400).json({ success:false, message:'matchId and result are required' });
+    if (!['won','lost','void'].includes(result)) return res.status(400).json({ success:false, message:"result must be 'won', 'lost', or 'void'" });
+    if (!reason || !reason.trim()) return res.status(400).json({ success:false, message:'A reason is required — this correction is permanently logged.' });
+
+    const bet = await Bet.findById(req.params.betId);
+    if (!bet) return res.status(404).json({ success:false, message:'Bet not found' });
+
+    const sel = bet.selections.find(s => s.matchId === matchId);
+    if (!sel) return res.status(404).json({ success:false, message:'That match is not a selection on this bet' });
+    if (sel.excludedFromPayout) return res.status(400).json({ success:false, message:'This selection was admin-added and never affects payout — there is nothing to correct here.' });
+    if (sel.result === result) return res.status(400).json({ success:false, message:`This selection is already marked '${result}' — no change made.` });
+
+    const oldSelResult = sel.result;
+    const oldBetStatus = bet.status;
+    const oldNetPayout = bet.netPayout || 0;
+
+    sel.result = result;
+    sel.settledAt = new Date();
+    sel.adminCorrected = true;
+
+    // Recompute the bet's outcome from scratch, exactly the same math
+    // settlementEngine.finalizeBet uses — so a manual correction can never
+    // diverge from what the automated engine would conclude given the same
+    // set of results. See that file for the canonical version.
+    const realSelections = bet.selections.filter(s => !s.excludedFromPayout);
+    const nonVoid = realSelections.filter(s => s.result !== 'void');
+    const anyLost = nonVoid.some(s => s.result === 'lost');
+    const anyPending = nonVoid.some(s => s.result === 'pending');
+
+    let newStatus, newPayout, newNetPayout;
+    if (anyPending) {
+      newStatus = 'pending'; newPayout = 0; newNetPayout = 0;
+    } else if (nonVoid.length === 0) {
+      newStatus = 'won'; newPayout = bet.stake; newNetPayout = bet.stake; // all void — full refund
+    } else if (anyLost) {
+      newStatus = 'lost'; newPayout = 0; newNetPayout = 0;
+    } else {
+      const wonOdds = nonVoid.reduce((acc, s) => acc * (s.result === 'won' ? s.odds : 1), 1);
+      newPayout = parseFloat((bet.stake * wonOdds).toFixed(2));
+      const winnings = newPayout - bet.stake;
+      const tax = parseFloat((Math.max(0, winnings) * 0.20).toFixed(2));
+      newNetPayout = parseFloat((newPayout - tax).toFixed(2));
+      newStatus = 'won';
+    }
+
+    bet.status = newStatus;
+    bet.payout = newPayout;
+    bet.netPayout = newNetPayout;
+    bet.settledAt = newStatus === 'pending' ? null : new Date();
+
+    // ── Reconcile the wallet against whatever was already paid ──
+    // financialAction describes exactly what happened to the wallet, both
+    // for the audit log and the response shown to the admin.
+    let financialAction = { type: 'none', amount: 0 };
+    const adminId = req.admin?.sub;
+    const adminName = req.admin?.username || 'admin';
+
+    if (oldBetStatus === 'won' && oldNetPayout > 0 && newStatus !== 'won') {
+      // Was paid out, shouldn't have been — claw back what we can.
+      const debited = await walletService.debit(bet.userId, 'main', oldNetPayout,
+        `Correction by ${adminName}: reversing incorrect payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
+      if (debited) {
+        financialAction = { type: 'clawback', amount: oldNetPayout, shortfall: 0 };
+      } else {
+        // User doesn't have the full amount available anymore (spent/withdrawn) —
+        // take what's there rather than blocking the correction outright; the
+        // grading itself must still be fixed. Shortfall is reported clearly so
+        // it can be pursued/written off manually.
+        const balance = await walletService.getBalance(bet.userId);
+        const available = Math.max(0, parseFloat(balance.main.toFixed(2)));
+        if (available > 0) {
+          await walletService.debit(bet.userId, 'main', available,
+            `Correction by ${adminName}: partial reversal for ${bet.betCode} (insufficient balance for full amount)`, bet.betCode, { adminId, reason });
+        }
+        financialAction = { type: 'clawback_partial', amount: available, shortfall: parseFloat((oldNetPayout - available).toFixed(2)) };
+      }
+    } else if (oldBetStatus !== 'won' && newStatus === 'won' && newNetPayout > 0) {
+      // Wasn't paid, should have been — pay it now.
+      await walletService.credit(bet.userId, 'main', newNetPayout,
+        `Correction by ${adminName}: paying out ${bet.betCode} after result correction`, bet.betCode, { adminId, reason });
+      financialAction = { type: 'payout', amount: newNetPayout };
+      require('../services/notificationService').notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: newNetPayout }).catch(() => {});
+    } else if (oldBetStatus === 'won' && newStatus === 'won' && newNetPayout !== oldNetPayout) {
+      // Still a win, but the payout amount changed — true up the difference.
+      const diff = parseFloat((newNetPayout - oldNetPayout).toFixed(2));
+      if (diff > 0) {
+        await walletService.credit(bet.userId, 'main', diff,
+          `Correction by ${adminName}: additional payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
+        financialAction = { type: 'topup', amount: diff };
+      } else if (diff < 0) {
+        const debited = await walletService.debit(bet.userId, 'main', -diff,
+          `Correction by ${adminName}: reducing payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
+        financialAction = debited
+          ? { type: 'reduction', amount: -diff, shortfall: 0 }
+          : { type: 'reduction_partial', amount: 0, shortfall: -diff };
+      }
+    }
+
+    await bet.save();
+
+    require('../services/auditService').log('admin.bet.override_selection', {
+      targetType: 'Bet', targetId: bet._id,
+      meta: { matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, oldSelResult, newSelResult: result, oldBetStatus, newBetStatus: newStatus, oldNetPayout, newNetPayout, financialAction, reason, adminId, adminName }
+    }).catch(() => {});
+
+    console.log(`  🛠️  [admin] ${adminName} corrected ${sel.homeTeam} vs ${sel.awayTeam} on bet ${bet.betCode}: ${oldSelResult} → ${result} (bet ${oldBetStatus} → ${newStatus}). Reason: ${reason}`);
+
+    res.json({ success:true, message:`Selection corrected to '${result}'. Bet is now '${newStatus}'.`, bet, financialAction });
+  } catch (e) { return safeError(res, e, 'bets/admin/override-selection'); }
+});
+
 module.exports = router;

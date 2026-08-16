@@ -31,7 +31,12 @@ const selectionSchema = new mongoose.Schema({
   // original payout, earned from their own picks at the odds they actually
   // agreed to, must stay exactly as it was regardless of what this added
   // match does. See server/engine/settlementEngine.js.
-  excludedFromPayout: { type: Boolean, default: false }
+  excludedFromPayout: { type: Boolean, default: false },
+  // True when an admin manually overrode this selection's result (see
+  // POST /api/bets/admin/override-selection). Purely a transparency marker —
+  // shown in the admin bet list so it's always visible at a glance that a
+  // result was corrected by a human rather than graded automatically.
+  adminCorrected: { type: Boolean, default: false }
 }, { _id: false });
 
 const betSchema = new mongoose.Schema({
