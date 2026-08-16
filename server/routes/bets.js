@@ -725,33 +725,34 @@ router.post('/admin/add-selection/:betId', requireAdmin, async (req, res) => {
       matchId, homeTeam: match.homeTeam, awayTeam: match.awayTeam,
       league: match.league, sport: match.sport, commenceTime: match.commenceTime,
       market: mkt, pick, pickLabel: pickLabelFor(mkt, pick, match),
-      odds: serverOdds, result: 'pending'
+      odds: serverOdds, result: 'pending',
+      // This is the whole point of this endpoint: the user's stake, totalOdds
+      // and potentialWin below are left completely untouched — the added game
+      // is purely extra, for it to show up in their bet list. It still gets
+      // graded on its own actual result at settlement (won/lost/void, same as
+      // any other selection) for display purposes, but that result can never
+      // change the payout or whether the rest of the bet wins or loses — see
+      // server/engine/settlementEngine.js, every place that computes totalOdds/
+      // status/winnings explicitly skips any selection with this flag set.
+      excludedFromPayout: true
     };
 
     bet.selections.push(newSelection);
     bet.betType = bet.selections.length > 1 ? 'multi' : bet.betType;
 
-    // Recalculate exactly like normal placement: totalOdds is the product of
-    // every selection's odds, then potentialWin/tax/netPayout derive from the
-    // bet's original stake (never changed here — only the odds/selections are).
-    const totalOdds = parseFloat(bet.selections.reduce((acc, s) => acc * s.odds, 1).toFixed(4));
-    const potentialWin = parseFloat((bet.stake * totalOdds).toFixed(2));
-    const winnings      = Math.max(0, potentialWin - bet.stake);
-    const tax            = parseFloat((winnings * 0.20).toFixed(2));
-    const netPayout      = parseFloat((potentialWin - tax).toFixed(2));
-
-    bet.totalOdds = totalOdds;
-    bet.potentialWin = netPayout;
-    bet.tax = tax;
+    // Deliberately NOT recalculating totalOdds/potentialWin/tax here — the
+    // whole point of this endpoint is that adding a game must never change
+    // what the user was already promised. bet.totalOdds, bet.potentialWin and
+    // bet.tax are left exactly as they were before this call.
     await bet.save();
 
     // Deliberately silent to the user — no notification is sent. This is
     // logged internally to the audit trail only, per admin instruction.
     require('../services/auditService')
-      .log('admin.bet.add_selection', { targetType:'Bet', targetId: bet._id, meta:{ matchId, market: mkt, pick, odds: serverOdds, newTotalOdds: totalOdds } })
+      .log('admin.bet.add_selection', { targetType:'Bet', targetId: bet._id, meta:{ matchId, market: mkt, pick, odds: serverOdds, note: 'excludedFromPayout — bet totalOdds/potentialWin unchanged' } })
       .catch(() => {});
 
-    res.json({ success:true, message:'Selection added.', bet });
+    res.json({ success:true, message:'Selection added — this bet\'s odds and potential win are unchanged.', bet });
   } catch (e) { return safeError(res, e, 'bets/admin/add-selection'); }
 });
 

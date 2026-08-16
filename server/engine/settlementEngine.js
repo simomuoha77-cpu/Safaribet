@@ -111,7 +111,12 @@ async function finalizeBetAsLost(bet) {
 
 // Fully grade and save one bet once all selections have results
 async function finalizeBet(bet) {
-  const nonVoid = bet.selections.filter(s => s.result !== 'void');
+  // Admin-added selections (see POST /api/bets/admin/add-selection) are
+  // deliberately excluded from every aggregate calculation below — they still
+  // get graded won/lost/void on their own for display, but must never affect
+  // whether the rest of the bet wins, or what it pays out.
+  const realSelections = bet.selections.filter(s => !s.excludedFromPayout);
+  const nonVoid = realSelections.filter(s => s.result !== 'void');
   const anyLost = nonVoid.some(s => s.result === 'lost');
 
   let status, payout, netPayout;
@@ -359,7 +364,7 @@ async function _runSettlementInner(includeApiFetch) {
       // so a bet that was already settled-as-lost in an earlier run (and is
       // only here now because it still has pending selections to grade for
       // display) never gets finalized/notified a second time.
-      const hasLoss = bet.selections.some(s => s.result === 'lost');
+      const hasLoss = bet.selections.some(s => !s.excludedFromPayout && s.result === 'lost');
       if (hasLoss && bet.status === 'pending') {
         const { status, netPayout } = await finalizeBetAsLost(bet);
         totalSettled++;
@@ -374,8 +379,10 @@ async function _runSettlementInner(includeApiFetch) {
         continue;
       }
 
-      // Check if all selections are resolved
-      const allDone = bet.selections.every(s => s.result !== 'pending');
+      // Check if all selections are resolved — only the real, payout-affecting
+      // ones. An admin-added game left pending shouldn't hold up settling the
+      // user's actual bet; it keeps grading independently in later runs.
+      const allDone = bet.selections.filter(s => !s.excludedFromPayout).every(s => s.result !== 'pending');
       if (!allDone) {
         await bet.save(); // save partial progress
         continue;

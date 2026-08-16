@@ -23,7 +23,15 @@ const selectionSchema = new mongoose.Schema({
   pickLabel:  { type: String },
   odds:       { type: Number, required: true },
   result:     { type: String, enum: ['pending','won','lost','void'], default: 'pending' },
-  settledAt:  { type: Date }
+  settledAt:  { type: Date },
+  // True only for a selection an admin added to an already-placed bet (see
+  // POST /api/bets/admin/add-selection). It still gets graded normally for
+  // display, but is never multiplied into totalOdds/potentialWin and can
+  // never affect whether the bet as a whole wins or loses — the user's
+  // original payout, earned from their own picks at the odds they actually
+  // agreed to, must stay exactly as it was regardless of what this added
+  // match does. See server/engine/settlementEngine.js.
+  excludedFromPayout: { type: Boolean, default: false }
 }, { _id: false });
 
 const betSchema = new mongoose.Schema({
