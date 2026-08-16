@@ -1515,13 +1515,18 @@ function applyFilters(silent=false){
     // yet would keep showing here looking like an "expired"/already-started
     // game — this is the one spot that check was missing (Upcoming already
     // had it below).
-    filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
-    filtered.sort((a,b)=>{
-      const hasOddsA=a.odds?.home&&a.odds?.away?1:0;
-      const hasOddsB=b.odds?.home&&b.odds?.away?1:0;
-      if(hasOddsA!==hasOddsB) return hasOddsB-hasOddsA;
-      return new Date(a.commenceTime)-new Date(b.commenceTime);
-    });
+    //
+    // Also requires real 1X2 odds to already be present. Juan AI sometimes
+    // lists a fixture before it's finished generating that fixture's odds —
+    // previously we still showed the match card immediately with blank "-"
+    // placeholders, which then popped in for real odds up to ~30s later once
+    // a subsequent refresh caught up. That's the "shows the game but no odds,
+    // then odds appear later" behavior — fixed by simply not showing a match
+    // here at all until its odds are actually ready. It'll appear complete,
+    // with real odds, the moment they're available (next ~7-20s refresh),
+    // rather than appearing incomplete now and quietly filling in later.
+    filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now&&m.odds?.home!=null&&m.odds?.away!=null);
+    filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='upcoming'){
     filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
