@@ -768,10 +768,18 @@ router.post('/admin/add-selection/:betId', requireAdmin, async (req, res) => {
 // requires a reason and is permanently logged to the audit trail.
 router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) => {
   try {
-    const { matchId, result, reason } = req.body;
+    const { matchId, result, reason, homeScore, awayScore } = req.body;
     if (!matchId || !result) return res.status(400).json({ success:false, message:'matchId and result are required' });
     if (!['won','lost','void'].includes(result)) return res.status(400).json({ success:false, message:"result must be 'won', 'lost', or 'void'" });
     if (!reason || !reason.trim()) return res.status(400).json({ success:false, message:'A reason is required — this correction is permanently logged.' });
+    // Score correction is optional — only validate if the admin actually
+    // supplied one (rather than just correcting the verdict on its own).
+    const hasScoreCorrection = homeScore !== undefined && homeScore !== null && awayScore !== undefined && awayScore !== null;
+    if (hasScoreCorrection) {
+      if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0) {
+        return res.status(400).json({ success:false, message:'homeScore/awayScore must be non-negative whole numbers' });
+      }
+    }
 
     const bet = await Bet.findById(req.params.betId);
     if (!bet) return res.status(404).json({ success:false, message:'Bet not found' });
@@ -779,15 +787,18 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
     const sel = bet.selections.find(s => s.matchId === matchId);
     if (!sel) return res.status(404).json({ success:false, message:'That match is not a selection on this bet' });
     if (sel.excludedFromPayout) return res.status(400).json({ success:false, message:'This selection was admin-added and never affects payout — there is nothing to correct here.' });
-    if (sel.result === result) return res.status(400).json({ success:false, message:`This selection is already marked '${result}' — no change made.` });
+    const scoreUnchanged = !hasScoreCorrection || (sel.score?.home === homeScore && sel.score?.away === awayScore);
+    if (sel.result === result && scoreUnchanged) return res.status(400).json({ success:false, message:`This selection is already marked '${result}' with that score — no change made.` });
 
     const oldSelResult = sel.result;
+    const oldScoreStr = (sel.score?.home != null) ? `${sel.score.home}-${sel.score.away}` : null;
     const oldBetStatus = bet.status;
     const oldNetPayout = bet.netPayout || 0;
 
     sel.result = result;
     sel.settledAt = new Date();
     sel.adminCorrected = true;
+    if (hasScoreCorrection) sel.score = { home: homeScore, away: awayScore };
 
     // Recompute the bet's outcome from scratch, exactly the same math
     // settlementEngine.finalizeBet uses — so a manual correction can never
@@ -871,7 +882,7 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
 
     require('../services/auditService').log('admin.bet.override_selection', {
       targetType: 'Bet', targetId: bet._id,
-      meta: { matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, oldSelResult, newSelResult: result, oldBetStatus, newBetStatus: newStatus, oldNetPayout, newNetPayout, financialAction, reason, adminId, adminName }
+      meta: { matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, oldSelResult, newSelResult: result, oldScore: oldScoreStr, newScore: hasScoreCorrection ? `${homeScore}-${awayScore}` : oldScoreStr, oldBetStatus, newBetStatus: newStatus, oldNetPayout, newNetPayout, financialAction, reason, adminId, adminName }
     }).catch(() => {});
 
     console.log(`  🛠️  [admin] ${adminName} corrected ${sel.homeTeam} vs ${sel.awayTeam} on bet ${bet.betCode}: ${oldSelResult} → ${result} (bet ${oldBetStatus} → ${newStatus}). Reason: ${reason}`);

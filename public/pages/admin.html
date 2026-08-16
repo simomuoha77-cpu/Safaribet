@@ -1853,17 +1853,32 @@ async function openOverrideSelection(betId, matchId, homeTeam, awayTeam, current
   if (!newResult) return;
   const cleaned = newResult.trim().toLowerCase();
   if (!['won','lost','void'].includes(cleaned)) { toast("Must be 'won', 'lost', or 'void'", 'err'); return; }
-  if (cleaned === currentResult) { toast('Already marked as that — no change made', 'err'); return; }
+
+  const scoreInput = prompt(
+    `Correct final score for ${homeTeam} vs ${awayTeam}? (optional)\n\nFormat: home-away, e.g. "2-1"\n\nLeave blank if only the result/verdict was wrong, not the score itself.`
+  );
+  let homeScore = null, awayScore = null;
+  if (scoreInput && scoreInput.trim()) {
+    const m = scoreInput.trim().match(/^(\d+)\s*-\s*(\d+)$/);
+    if (!m) { toast('Score must be in the format "2-1" — correction cancelled', 'err'); return; }
+    homeScore = parseInt(m[1], 10);
+    awayScore = parseInt(m[2], 10);
+  }
+
+  if (cleaned === currentResult && homeScore === null) { toast('Already marked as that with no score change — no change made', 'err'); return; }
 
   const reason = prompt(
     `Why is this being corrected? (required — this is permanently logged)\n\nE.g. "Odds feed matched the wrong fixture" / "Score sync error — actual FT was 2-1 not 1-1"`
   );
   if (!reason || !reason.trim()) { toast('A reason is required — correction cancelled', 'err'); return; }
 
-  if (!confirm(`Confirm: mark ${homeTeam} vs ${awayTeam} as '${cleaned}' on this bet?\n\nReason: ${reason}\n\nIf this bet was already paid out and this correction changes the outcome, the user's wallet will be adjusted automatically (paid if underpaid, clawed back if overpaid).`)) return;
+  const scoreNote = homeScore !== null ? `\nCorrected score: ${homeScore}-${awayScore}` : '';
+  if (!confirm(`Confirm: mark ${homeTeam} vs ${awayTeam} as '${cleaned}' on this bet?${scoreNote}\n\nReason: ${reason}\n\nIf this bet was already paid out and this correction changes the outcome, the user's wallet will be adjusted automatically (paid if underpaid, clawed back if overpaid).`)) return;
 
   try {
-    const d = await api(`/api/bets/admin/override-selection/${betId}`, { method:'POST', body: JSON.stringify({ matchId, result: cleaned, reason: reason.trim() }) });
+    const body = { matchId, result: cleaned, reason: reason.trim() };
+    if (homeScore !== null) { body.homeScore = homeScore; body.awayScore = awayScore; }
+    const d = await api(`/api/bets/admin/override-selection/${betId}`, { method:'POST', body: JSON.stringify(body) });
     if (d.success) {
       let extra = '';
       if (d.financialAction?.type === 'clawback') extra = ` — KES ${d.financialAction.amount.toLocaleString()} clawed back`;
