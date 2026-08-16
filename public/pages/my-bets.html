@@ -64,7 +64,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .sel-match{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sel-detail{display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
 .sel-league{font-size:10px;color:var(--mt)}
-.sel-bonus-tag{font-size:9px;font-weight:700;color:var(--yl);background:rgba(255,214,0,0.1);border:1px solid rgba(255,214,0,0.25);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle}
 .sel-pick-lbl{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px}
 .sel-pick-lbl.won{background:rgba(0,200,83,0.1);color:var(--g)}
 .sel-pick-lbl.lost{background:rgba(255,59,59,0.08);color:var(--rd)}
@@ -223,7 +222,7 @@ function renderBets(bets){
       return `<div class="sel-row">
         <div class="sel-icon ${r}">${iconHtml}</div>
         <div class="sel-body">
-          <div class="sel-match">${s.homeTeam} vs ${s.awayTeam}${s.excludedFromPayout ? ' <span class="sel-bonus-tag">Bonus — doesn\'t affect payout</span>' : ''}</div>
+          <div class="sel-match">${s.homeTeam} vs ${s.awayTeam}</div>
           <div class="sel-detail">
             <span class="sel-pick-lbl ${r}">${
               r==='void' ? '↩ Void – Refunded' :
