@@ -1816,20 +1816,16 @@ function clearSearch() {
 
 function pickMatchFromSearch(matchId, sport) {
   clearSearch();
-  // Switch to the right category tab and scroll to match
-  const catMap = {
-    football:'football', featured:'featured',
-    basketball:'basketball', tennis:'tennis', cricket:'cricket',
-    rugby:'rugby', nfl:'nfl', baseball:'baseball', hockey:'hockey', mma:'mma'
-  };
-  const cat = catMap[sport] || 'featured';
-  const tab = document.querySelector(`.sp-tab[data-cat="${cat}"]`);
-  if (tab) pickCat(tab);
-  // After load, scroll to the match card
-  setTimeout(() => {
-    const card = document.getElementById(`mc_${matchId}`);
-    if (card) { card.scrollIntoView({ behavior:'smooth', block:'center' }); card.style.outline='2px solid var(--g)'; setTimeout(()=>card.style.outline='',2000); }
-  }, 1200);
+  // Take the user straight into the full match detail page — every market
+  // (1X2, Double Chance, Over/Under, BTTS, Handicap), not just the compact
+  // 1X2 buttons on the homepage card. Previously this tried to scroll to the
+  // match's card in whichever sport tab it belonged to, which only worked if
+  // that match happened to already be loaded in the currently-visible list —
+  // for anything further out, or a sport tab that hadn't loaded yet, nothing
+  // happened at all. openMatchDetail is the same navigation used everywhere
+  // else in the app (tapping any match card), so search now behaves exactly
+  // like normal browsing into a match.
+  openMatchDetail(matchId);
 }
 
 function logout(){
