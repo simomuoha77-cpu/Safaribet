@@ -919,7 +919,25 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 <!-- 18. CONTENT -->
 <div class="panel" id="panel-content">
   <div class="sec">
-    <div class="sec-hdr"><h3>🖼️ Banners / Notices</h3></div>
+    <div class="sec-hdr"><h3>🖼️ Banner Carousel (multiple, swipeable — like Betika)</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:12px;color:var(--mt)">
+      Add as many banners as you like — users can swipe or tap the arrows to browse them on the homepage, and they auto-advance every 5 seconds. Use the ↑↓ buttons to reorder. If you add at least one here, this replaces the single legacy banner further down.
+    </div>
+    <div id="bannerCarouselList" style="margin-bottom:12px"></div>
+    <label class="lbl">Add a banner</label>
+    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="newBannerFile" class="inp" style="padding:8px" onchange="previewNewBanner()"/>
+    <div class="mt" style="font-size:12px;margin:4px 0 12px;color:var(--mt)">
+      PNG, JPG, WEBP or GIF, max 4MB. Recommended size: 1200×400px.
+    </div>
+    <img id="newBannerPreview" style="display:none;width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:12px;border:1px solid var(--bd)"/>
+    <label class="lbl">Link (optional — where tapping this banner goes)</label>
+    <input class="inp" id="newBannerLink" placeholder="e.g. /promotions"/>
+    <button class="btn btn-g btn-full" onclick="addBannerToCarousel()">+ Add to Carousel</button>
+    <div class="res" id="bannerCarouselRes"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-hdr"><h3>🖼️ Legacy Single Banner</h3></div>
+    <div class="mt" style="font-size:12px;margin-bottom:8px;color:var(--mt)">Only used if the carousel above is empty. Kept for backward compatibility.</div>
     <label class="lbl">Banner Image</label>
     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="bannerImageFile" class="inp" style="padding:8px" onchange="previewBannerImage()"/>
     <div class="mt" style="font-size:12px;margin:4px 0 12px;color:var(--mt)">
@@ -2337,6 +2355,80 @@ async function sendNotif(){
   else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
 }
 
+// ══ BANNER CAROUSEL (multi-banner) ══
+let currentBanners = [];
+
+function renderBannerCarouselList(banners){
+  currentBanners = banners;
+  const el = document.getElementById('bannerCarouselList');
+  if (!banners.length) { el.innerHTML = '<div style="font-size:12px;color:var(--mt)">No carousel banners yet — the legacy single banner below is shown instead.</div>'; return; }
+  el.innerHTML = banners.map((b, i) => `
+    <div style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--bd);border-radius:8px;margin-bottom:6px">
+      <img src="${b.image}" style="width:64px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
+      <div style="flex:1;min-width:0;font-size:11px;color:var(--mt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link || '(no link)'}</div>
+      <button class="btn btn-ghost btn-sm" ${i===0?'disabled style="opacity:.3"':''} onclick="moveBanner(${i},-1)" title="Move up">↑</button>
+      <button class="btn btn-ghost btn-sm" ${i===banners.length-1?'disabled style="opacity:.3"':''} onclick="moveBanner(${i},1)" title="Move down">↓</button>
+      <button class="btn btn-r btn-sm" onclick="deleteBannerFromCarousel('${b.key}')" title="Remove">✕</button>
+    </div>
+  `).join('');
+}
+
+function previewNewBanner(){
+  const file = document.getElementById('newBannerFile').files[0];
+  const img = document.getElementById('newBannerPreview');
+  if (!file) { img.style.display = 'none'; return; }
+  const reader = new FileReader();
+  reader.onload = e => { img.src = e.target.result; img.style.display = 'block'; };
+  reader.readAsDataURL(file);
+}
+
+async function addBannerToCarousel(){
+  const el = document.getElementById('bannerCarouselRes');
+  const file = document.getElementById('newBannerFile').files[0];
+  if (!file) { el.style.display='block'; el.className='res er'; el.textContent='Choose an image first'; return; }
+  el.style.display='block'; el.className='res'; el.textContent='Uploading...';
+  try {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('link', document.getElementById('newBannerLink').value.trim());
+    const r = await fetch('/api/admin/banners', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer '+ADMIN_TOKEN },
+      body: fd
+    });
+    const d = await r.json();
+    if (d.success) {
+      el.className='res ok'; el.textContent='✅ Added to carousel — live on homepage now';
+      document.getElementById('newBannerFile').value = '';
+      document.getElementById('newBannerLink').value = '';
+      document.getElementById('newBannerPreview').style.display = 'none';
+      renderBannerCarouselList(d.banners);
+    } else {
+      el.className='res er'; el.textContent='❌ '+(d.message||'Upload failed');
+    }
+  } catch(e) {
+    el.className='res er'; el.textContent='❌ Upload failed — check connection';
+  }
+}
+
+async function deleteBannerFromCarousel(key){
+  if (!confirm('Remove this banner from the carousel?')) return;
+  const d = await api(`/api/admin/banners/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  if (d.success) { renderBannerCarouselList(d.banners); toast('Banner removed','ok'); }
+  else toast('❌ '+(d.message||'Failed'),'err');
+}
+
+async function moveBanner(index, dir){
+  const newIndex = index + dir;
+  if (newIndex < 0 || newIndex >= currentBanners.length) return;
+  const reordered = [...currentBanners];
+  [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
+  const keys = reordered.map(b => b.key);
+  const d = await api('/api/admin/banners/reorder', { method:'POST', body: JSON.stringify({ keys }) });
+  if (d.success) renderBannerCarouselList(d.banners);
+  else toast('❌ '+(d.message||'Reorder failed'),'err');
+}
+
 // ══ CONTENT ══
 function previewBannerImage(){
   const file = document.getElementById('bannerImageFile').files[0];
@@ -2387,6 +2479,7 @@ async function loadBannerForm(){
         const pimg=document.getElementById('popupImagePreview');
         pimg.src=d.data.popupImage; pimg.style.display='block';
       }
+      renderBannerCarouselList(Array.isArray(d.data.banners) ? d.data.banners : []);
     }
   }catch(e){}
   // Aviator thumbnail always shows current stored image, if any (regardless of banner content state)

@@ -11,6 +11,13 @@ const siteContentSchema = new mongoose.Schema({
   banner:       { type: String, default: '' },
   bannerLink:   { type: String, default: '' },
   bannerImage:  { type: String, default: '' },
+  // Multi-banner carousel (Betika-style swipeable strip), added alongside the
+  // legacy single-banner fields above rather than replacing them — an older
+  // deployment with only bannerImage set keeps working via the fallback in
+  // GET /api/content, no migration required. Each entry: { key, image, link }
+  // — `key` is the underlying SiteImage document key, needed to delete the
+  // stored image cleanly when a banner is removed from the carousel.
+  banners:      { type: [{ key: String, image: String, link: String }], default: [] },
   notice:       { type: String, default: '' },
   popupLink:    { type: String, default: '' },
   popupImage:   { type: String, default: '' },

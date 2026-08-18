@@ -38,7 +38,7 @@ const store = {
   blacklist:   [],
   auditLog:    [],
   loginLog:    [],
-  content:     { banner: '', notice: '', bannerLink: '', bannerImage: '', popupLink: '', popupImage: '', popupEnabled: false },
+  content:     { banner: '', notice: '', bannerLink: '', bannerImage: '', banners: [], popupLink: '', popupImage: '', popupEnabled: false },
   settings:    { maintenanceMode: false, maintenanceMessage: '', allowRegistration: true, allowDeposits: true, allowWithdrawals: true, siteName: 'SafariBet' },
   limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0, withdrawalAutoApproveLimit: 1000 },
   bonusSettings:{ welcomeBonus: 20, minBonusDep: 0 },
@@ -99,6 +99,7 @@ const store = {
     if (doc) {
       store.content = {
         banner: doc.banner || '', bannerLink: doc.bannerLink || '', bannerImage: doc.bannerImage || '',
+        banners: Array.isArray(doc.banners) ? doc.banners : [],
         notice: doc.notice || '', popupLink: doc.popupLink || '', popupImage: doc.popupImage || '',
         popupEnabled: !!doc.popupEnabled
       };
@@ -882,6 +883,65 @@ router.post('/upload-image', upload.single('image'), async (req, res) => {
     }
     return safeError(res, e, 'admin/upload-image', 400, e.message && e.message.includes('allowed') ? e.message : 'Upload failed');
   }
+});
+
+// ── MULTI-BANNER CAROUSEL ──
+// A Betika-style homepage strip the visitor can swipe/click through, rather
+// than the single static banner above. Each banner is its own SiteImage
+// document (own unique key) so they can be added/removed independently
+// without disturbing the others, and reordered without re-uploading anything.
+router.post('/banners', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No image file received' });
+    const key = `banner_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+    const SiteImage = require('../models/SiteImage');
+    await SiteImage.create({ key, dataUrl, mimeType: req.file.mimetype, sizeBytes: req.file.size, uploadedAt: new Date() });
+
+    const link = (req.body.link || '').toString().trim().slice(0, 500);
+    const url = `/api/content/image/${key}`;
+    if (!Array.isArray(store.content.banners)) store.content.banners = [];
+    store.content.banners.push({ key, image: url, link });
+    await persistContent();
+
+    audit('ADD_BANNER', { key, sizeBytes: req.file.size, link });
+    res.json({ success: true, banners: store.content.banners });
+  } catch (e) {
+    if (e.message && e.message.includes('File too large')) {
+      return res.status(400).json({ success: false, message: 'Image too large — max 4MB' });
+    }
+    return safeError(res, e, 'admin/banners', 400, e.message && e.message.includes('allowed') ? e.message : 'Upload failed');
+  }
+});
+
+router.delete('/banners/:key', async (req, res) => {
+  try {
+    const key = req.params.key;
+    if (!Array.isArray(store.content.banners)) store.content.banners = [];
+    const before = store.content.banners.length;
+    store.content.banners = store.content.banners.filter(b => b.key !== key);
+    if (store.content.banners.length === before) return res.status(404).json({ success: false, message: 'Banner not found' });
+    await persistContent();
+    require('../models/SiteImage').deleteOne({ key }).catch(() => {}); // best-effort cleanup of the underlying image doc
+    audit('DELETE_BANNER', { key });
+    res.json({ success: true, banners: store.content.banners });
+  } catch (e) { return safeError(res, e, 'admin/banners-delete'); }
+});
+
+router.post('/banners/reorder', async (req, res) => {
+  try {
+    const { keys } = req.body;
+    if (!Array.isArray(keys)) return res.status(400).json({ success: false, message: 'keys must be an array' });
+    const current = Array.isArray(store.content.banners) ? store.content.banners : [];
+    const map = new Map(current.map(b => [b.key, b]));
+    const reordered = keys.map(k => map.get(k)).filter(Boolean);
+    if (reordered.length !== current.length) return res.status(400).json({ success: false, message: 'keys do not match the current banner set' });
+    store.content.banners = reordered;
+    await persistContent();
+    audit('REORDER_BANNERS', { keys });
+    res.json({ success: true, banners: store.content.banners });
+  } catch (e) { return safeError(res, e, 'admin/banners-reorder'); }
 });
 
 // ── APK UPLOAD ── (separate, larger limit + GridFS since APKs run 5-80MB+)

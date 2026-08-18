@@ -170,11 +170,19 @@ app.use('/api/admin',   adminRoutes);
 app.get('/api/content', (req, res) => {
   const store = adminRoutes.getStore ? adminRoutes.getStore() : null;
   const content = store?.content || {};
+  // Prefer the new multi-banner carousel; if it's empty but the old
+  // single-banner fields are set (a deployment that hasn't touched the new
+  // admin UI yet), fall back to showing that one banner as a single-item
+  // carousel so nothing regresses for anyone who hasn't re-uploaded.
+  const banners = Array.isArray(content.banners) && content.banners.length
+    ? content.banners
+    : (content.bannerImage ? [{ key: 'legacy', image: content.bannerImage, link: content.bannerLink || '' }] : []);
   res.json({
     success: true,
     banner: content.banner || '',
     bannerLink: content.bannerLink || '',
     bannerImage: content.bannerImage || '',
+    banners,
     notice: content.notice || '',
     popupImage: content.popupImage || '',
     popupLink: content.popupLink || '',

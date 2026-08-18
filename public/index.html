@@ -611,9 +611,13 @@ header{
 
 <main class="main">
 
-  <!-- ADMIN PROMO BANNER (image, configured in admin panel) -->
-  <div id="adminBanner" style="display:none;margin:8px 10px 0;border-radius:10px;overflow:hidden;cursor:pointer;position:relative">
-    <img id="adminBannerImg" src="" alt="Promotion" style="width:100%;display:block;object-fit:cover;max-height:160px"/>
+  <!-- ADMIN PROMO BANNER CAROUSEL (images, configured in admin panel) — swipe or
+       use the arrows to browse multiple promos, Betika-style. -->
+  <div id="adminBanner" style="display:none;margin:8px 10px 0;border-radius:10px;overflow:hidden;position:relative;background:#111">
+    <div id="bannerTrack" style="display:flex;transition:transform .35s ease;touch-action:pan-y"></div>
+    <button id="bannerPrev" onclick="bannerNav(-1)" aria-label="Previous banner" style="display:none;position:absolute;left:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.5);color:#fff;border:none;font-size:16px;line-height:1;cursor:pointer;z-index:2">‹</button>
+    <button id="bannerNext" onclick="bannerNav(1)" aria-label="Next banner" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,0.5);color:#fff;border:none;font-size:16px;line-height:1;cursor:pointer;z-index:2">›</button>
+    <div id="bannerDots" style="display:none;position:absolute;bottom:8px;left:0;right:0;justify-content:center;gap:6px;z-index:2"></div>
   </div>
 
   <!-- DOWNLOAD APP BANNER (shown only when admin has uploaded an APK) -->
@@ -1139,18 +1143,79 @@ async function loadDownloadAppBanner(){
   }catch(e){ /* optional feature — fail silently */ }
 }
 
+// ── PROMO BANNER CAROUSEL ──
+// Betika-style: multiple admin-uploaded banners, swipeable and with tap
+// arrows, auto-advancing every 5s. Falls back gracefully to a single static
+// banner if the admin has only configured the old legacy single-banner field
+// (see the fallback in GET /api/content) — this code doesn't need to know
+// which case it's in, it just renders whatever array it's given.
+let bannerList = [];
+let bannerIndex = 0;
+let bannerAutoTimer = null;
+let bannerTouchStartX = null;
+
+function renderBannerTrack(){
+  const track = document.getElementById('bannerTrack');
+  track.innerHTML = bannerList.map(b => `
+    <a href="${b.link || '#'}" onclick="${b.link ? '' : 'return false;'}" style="flex:0 0 100%;display:block">
+      <img src="${b.image}" alt="Promotion" style="width:100%;display:block;object-fit:cover;max-height:160px" onerror="this.closest('a').style.display='none'"/>
+    </a>
+  `).join('');
+  const dotsEl = document.getElementById('bannerDots');
+  const multi = bannerList.length > 1;
+  document.getElementById('bannerPrev').style.display = multi ? 'block' : 'none';
+  document.getElementById('bannerNext').style.display = multi ? 'block' : 'none';
+  dotsEl.style.display = multi ? 'flex' : 'none';
+  dotsEl.innerHTML = multi ? bannerList.map((_, i) => `
+    <span onclick="bannerGoTo(${i})" style="width:6px;height:6px;border-radius:50%;cursor:pointer;background:${i===bannerIndex ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.4)'}"></span>
+  `).join('') : '';
+  bannerIndex = 0;
+  updateBannerTransform();
+  if (multi) startBannerAutoAdvance(); else stopBannerAutoAdvance();
+}
+
+function updateBannerTransform(){
+  document.getElementById('bannerTrack').style.transform = `translateX(-${bannerIndex * 100}%)`;
+  document.querySelectorAll('#bannerDots span').forEach((dot, i) => {
+    dot.style.background = i === bannerIndex ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.4)';
+  });
+}
+
+function bannerGoTo(i){
+  bannerIndex = ((i % bannerList.length) + bannerList.length) % bannerList.length;
+  updateBannerTransform();
+  startBannerAutoAdvance(); // any manual interaction resets the auto-advance clock
+}
+function bannerNav(dir){ bannerGoTo(bannerIndex + dir); }
+
+function startBannerAutoAdvance(){
+  stopBannerAutoAdvance();
+  if (bannerList.length <= 1) return;
+  bannerAutoTimer = setInterval(() => bannerGoTo(bannerIndex + 1), 5000);
+}
+function stopBannerAutoAdvance(){ if (bannerAutoTimer) { clearInterval(bannerAutoTimer); bannerAutoTimer = null; } }
+
+(function initBannerSwipe(){
+  const wrap = document.getElementById('adminBanner');
+  if (!wrap) return;
+  wrap.addEventListener('touchstart', e => { bannerTouchStartX = e.touches[0].clientX; }, { passive: true });
+  wrap.addEventListener('touchend', e => {
+    if (bannerTouchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - bannerTouchStartX;
+    bannerTouchStartX = null;
+    if (Math.abs(dx) < 40) return; // not a deliberate swipe
+    bannerNav(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+
 async function loadAdminBanner(){
   const cacheKey = 'sb_content_cache';
   const render = (d) => {
-    if (d.bannerImage) {
-      const wrap = document.getElementById('adminBanner');
-      const img  = document.getElementById('adminBannerImg');
-      img.src = d.bannerImage;
-      img.alt = d.banner || 'Promotion';
-      wrap.style.display = 'block';
-      wrap.onclick = () => { if (d.bannerLink) location.href = d.bannerLink; };
-      img.onerror = () => { wrap.style.display = 'none'; };
-    }
+    const list = Array.isArray(d.banners) ? d.banners.filter(b => b.image) : [];
+    if (!list.length) return;
+    bannerList = list;
+    document.getElementById('adminBanner').style.display = 'block';
+    renderBannerTrack();
   };
   try{
     const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
