@@ -830,12 +830,22 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
     bet.netPayout = newNetPayout;
     bet.settledAt = newStatus === 'pending' ? null : new Date();
 
+    // Fix the original settlement notification's own text too (see
+    // notificationService.correctBetNotification) — so a "Bet Won!" from the
+    // first settlement doesn't sit there being wrong if the status changed.
+    // Only relevant if the bet had actually reached a final state before, and
+    // that final state is different now.
+    if (oldBetStatus !== 'pending' && oldBetStatus !== newStatus) {
+      require('../services/notificationService').correctBetNotification(bet.userId, bet.betCode, newStatus).catch(() => {});
+    }
+
     // ── Reconcile the wallet against whatever was already paid ──
     // financialAction describes exactly what happened to the wallet, both
     // for the audit log and the response shown to the admin.
     let financialAction = { type: 'none', amount: 0 };
     const adminId = req.admin?.sub;
     const adminName = req.admin?.username || 'admin';
+    const notificationService = require('../services/notificationService');
 
     if (oldBetStatus === 'won' && oldNetPayout > 0 && newStatus !== 'won') {
       // Was paid out, shouldn't have been — claw back what we can.
@@ -843,6 +853,7 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
         `Correction by ${adminName}: reversing incorrect payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
       if (debited) {
         financialAction = { type: 'clawback', amount: oldNetPayout, shortfall: 0 };
+        notificationService.notify(bet.userId, 'bet_correction_now_lost', { betCode: bet.betCode, amount: oldNetPayout }).catch(() => {});
       } else {
         // User doesn't have the full amount available anymore (spent/withdrawn) —
         // take what's there rather than blocking the correction outright; the
@@ -855,13 +866,14 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
             `Correction by ${adminName}: partial reversal for ${bet.betCode} (insufficient balance for full amount)`, bet.betCode, { adminId, reason });
         }
         financialAction = { type: 'clawback_partial', amount: available, shortfall: parseFloat((oldNetPayout - available).toFixed(2)) };
+        notificationService.notify(bet.userId, 'bet_correction_shortfall', { betCode: bet.betCode, amount: available, shortfall: financialAction.shortfall }).catch(() => {});
       }
     } else if (oldBetStatus !== 'won' && newStatus === 'won' && newNetPayout > 0) {
       // Wasn't paid, should have been — pay it now.
       await walletService.credit(bet.userId, 'main', newNetPayout,
         `Correction by ${adminName}: paying out ${bet.betCode} after result correction`, bet.betCode, { adminId, reason });
       financialAction = { type: 'payout', amount: newNetPayout };
-      require('../services/notificationService').notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: newNetPayout }).catch(() => {});
+      notificationService.notify(bet.userId, 'bet_correction_now_won', { betCode: bet.betCode, amount: newNetPayout }).catch(() => {});
     } else if (oldBetStatus === 'won' && newStatus === 'won' && newNetPayout !== oldNetPayout) {
       // Still a win, but the payout amount changed — true up the difference.
       const diff = parseFloat((newNetPayout - oldNetPayout).toFixed(2));
@@ -869,12 +881,14 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
         await walletService.credit(bet.userId, 'main', diff,
           `Correction by ${adminName}: additional payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
         financialAction = { type: 'topup', amount: diff };
+        notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: diff }).catch(() => {});
       } else if (diff < 0) {
         const debited = await walletService.debit(bet.userId, 'main', -diff,
           `Correction by ${adminName}: reducing payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
         financialAction = debited
           ? { type: 'reduction', amount: -diff, shortfall: 0 }
           : { type: 'reduction_partial', amount: 0, shortfall: -diff };
+        notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: diff }).catch(() => {});
       }
     }
 
