@@ -40,7 +40,7 @@ const store = {
   loginLog:    [],
   content:     { banner: '', notice: '', bannerLink: '', bannerImage: '', banners: [], popupLink: '', popupImage: '', popupEnabled: false },
   settings:    { maintenanceMode: false, maintenanceMessage: '', allowRegistration: true, allowDeposits: true, allowWithdrawals: true, siteName: 'SafariBet' },
-  limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0, withdrawalAutoApproveLimit: 1000 },
+  limits:      { minBet: 10, maxBet: 500000, maxSelections: 20, maxPayout: 1000000, minDeposit: 10, maxDeposit: 150000, minWithdrawal: 100, maxWithdrawal: 70000, wdPerDay: 3, platformMarginPercent: 0, liveMarginPercent: 0, withdrawalAutoApproveLimit: 1000 },
   bonusSettings:{ welcomeBonus: 20, minBonusDep: 0 },
   notifications:[],
   // ── LIVE ODDS RISK MANAGEMENT ──

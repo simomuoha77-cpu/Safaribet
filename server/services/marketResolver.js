@@ -202,11 +202,20 @@ function isMarketSuspended(match, market) {
 // what lets the platform actually manage its own edge — e.g. against known
 // soft spots like friendly-match draws being systematically stacked into large
 // accumulators — rather than being fully dependent on the source feed's pricing.
-function applyPlatformMargin(rawOdds) {
+//
+// Live odds get their OWN separate margin (liveMarginPercent), independent of
+// the pre-match one above. Live pricing is inherently more volatile — a
+// second-away goal, a red card, or the feed simply being a few seconds behind
+// the real game state can all leave a price briefly too generous — so it
+// warrants its own, typically tighter, admin-controlled cushion rather than
+// sharing whatever margin was set for calm pre-match markets. Also defaults
+// to 0% (opt-in) so nothing changes for anyone until the admin sets it.
+function applyPlatformMargin(rawOdds, isLive) {
   if (rawOdds == null) return rawOdds;
   try {
     const adminRoutes = require('../routes/admin');
-    const marginPercent = (adminRoutes.getStore ? adminRoutes.getStore().limits.platformMarginPercent : 0) || 0;
+    const limits = adminRoutes.getStore ? adminRoutes.getStore().limits : null;
+    const marginPercent = (isLive ? limits?.liveMarginPercent : limits?.platformMarginPercent) || 0;
     if (marginPercent <= 0) return rawOdds;
     // Reduce only the "winnings" portion (odds - 1), never the stake-return
     // portion — keeps odds mathematically valid (always >= 1) at any margin %.
@@ -218,22 +227,23 @@ function applyPlatformMargin(rawOdds) {
 }
 
 function getRealOdds(match, market, pick) {
+  const isLive = match.status === 'live';
   if (market === '1x2') {
     const src = match.hasOdds ? match.odds : null;
-    if (src && src[pick] != null) return applyPlatformMargin(src[pick]);
+    if (src && src[pick] != null) return applyPlatformMargin(src[pick], isLive);
     // fall back to aiOdds naming (homeWin/draw/awayWin) if legacy odds object is empty
     const ai = match.aiOdds;
     if (!ai) return null;
-    if (pick === 'home') return applyPlatformMargin(ai.homeWin ?? null);
-    if (pick === 'draw') return applyPlatformMargin(ai.draw ?? null);
-    if (pick === 'away') return applyPlatformMargin(ai.awayWin ?? null);
+    if (pick === 'home') return applyPlatformMargin(ai.homeWin ?? null, isLive);
+    if (pick === 'draw') return applyPlatformMargin(ai.draw ?? null, isLive);
+    if (pick === 'away') return applyPlatformMargin(ai.awayWin ?? null, isLive);
     return null;
   }
   const ai = match.aiOdds;
   if (!ai) return null;
-  if (market === 'ou25') return applyPlatformMargin(pick === 'over25' ? ai.over25 : pick === 'under25' ? ai.under25 : null);
-  if (market === 'btts') return applyPlatformMargin(pick === 'btts' ? ai.btts : pick === 'btts_no' ? ai.bttsNo : null);
-  if (market === 'dc')   return applyPlatformMargin(pick === 'dc_1x' ? ai.dc_home_draw : pick === 'dc_x2' ? ai.dc_draw_away : pick === 'dc_12' ? ai.dc_home_away : null);
+  if (market === 'ou25') return applyPlatformMargin(pick === 'over25' ? ai.over25 : pick === 'under25' ? ai.under25 : null, isLive);
+  if (market === 'btts') return applyPlatformMargin(pick === 'btts' ? ai.btts : pick === 'btts_no' ? ai.bttsNo : null, isLive);
+  if (market === 'dc')   return applyPlatformMargin(pick === 'dc_1x' ? ai.dc_home_draw : pick === 'dc_x2' ? ai.dc_draw_away : pick === 'dc_12' ? ai.dc_home_away : null, isLive);
   return null;
 }
 
