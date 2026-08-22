@@ -8,6 +8,13 @@
 //      previous version sent `to: phoneE164` (a field CommsGrid doesn't even
 //      recognize) instead of `recipient: [phoneE164]`
 //   3. Missing the required `Accept: application/json` header
+//   4. (Found via a live curl test against the real API) CommsGrid sends are
+//      ASYNCHRONOUS — a successful, healthy send comes back with per-message
+//      status "QUEUED" (sent:0, queued:1), not "SENT". The success check
+//      below previously only accepted "SENT", so every genuinely successful
+//      send was being reported as a failure — this is what caused
+//      registration to always say "Could not send verification SMS" even
+//      though CommsGrid was working correctly the whole time.
 
 const axios = require('axios');
 
@@ -56,9 +63,20 @@ async function sendSms(phoneE164, message) {
     );
 
     const data = r.data;
-    // Real response shape: { status: "success", data: { sent, failed, details: [{ to, status: "SENT", message_id }] } }
+    // Real response shape: { status: "success", data: { sent, queued, failed, details: [{ to, status, message_id }] } }
+    // CommsGrid processes sends ASYNCHRONOUSLY — a healthy, successful call
+    // comes back with status "QUEUED" (sent:0, queued:1) immediately, with
+    // the actual delivery happening moments later in the background. "SENT"
+    // is also accepted in case CommsGrid ever returns it synchronously for
+    // some message types. Only an explicit "FAILED" (or the top-level status
+    // not being "success" at all) counts as a real failure — treating
+    // "QUEUED" as a failure was the actual bug here: every legitimately
+    // successful send was being reported as failed because this code only
+    // recognized "SENT", not the normal "QUEUED" state CommsGrid actually
+    // uses for production sends.
     const detail = data?.data?.details?.[0];
-    const ok = data?.status === 'success' && (data?.data?.sent >= 1 || detail?.status === 'SENT');
+    const ok = data?.status === 'success' &&
+      (data?.data?.sent >= 1 || detail?.status === 'SENT' || detail?.status === 'QUEUED');
 
     if (!ok) {
       // The HTTP call succeeded (200) but CommsGrid reported the send itself
@@ -68,7 +86,7 @@ async function sendSms(phoneE164, message) {
       return { success: false, error: reason, raw: data };
     }
 
-    console.log(`[sms] Sent successfully to ${e164} — messageId: ${detail?.message_id || 'n/a'}`);
+    console.log(`[sms] Sent successfully to ${e164} — status: ${detail?.status || 'unknown'}, messageId: ${detail?.message_id || 'n/a'}`);
     return { success: true, messageId: detail?.message_id || null, raw: data };
   } catch (e) {
     console.error('[sms] CommsGrid send failed:', e.response?.data || e.message);
