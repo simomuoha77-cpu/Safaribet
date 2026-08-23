@@ -1590,7 +1590,22 @@ function applyFilters(silent=false){
     // here at all until its odds are actually ready. It'll appear complete,
     // with real odds, the moment they're available (next ~7-20s refresh),
     // rather than appearing incomplete now and quietly filling in later.
-    filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now&&m.odds?.home!=null&&m.odds?.away!=null);
+    //
+    // IMPORTANT: must check BOTH m.odds AND the m.aiOdds fallback here — the
+    // actual rendering (oddBtn calls further down) already falls back to
+    // aiOdds.homeWin/awayWin whenever m.odds.home/away is empty, so plenty of
+    // matches display a perfectly real price through that fallback alone.
+    // Checking only m.odds (as this used to) wrongly hid every one of those
+    // matches from Highlights entirely — not because they lacked odds, but
+    // because this filter was looking in the wrong place. That's what made
+    // it look like "the API has games but they're not showing" — real,
+    // ready-to-display matches were being filtered out by mistake.
+    filtered=filtered.filter(m=>{
+      if(m.status!=='upcoming'||new Date(m.commenceTime)<=now) return false;
+      const home=m.odds?.home??m.aiOdds?.homeWin;
+      const away=m.odds?.away??m.aiOdds?.awayWin;
+      return home!=null&&away!=null;
+    });
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='upcoming'){
     filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
