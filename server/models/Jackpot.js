@@ -16,7 +16,14 @@ const jackpotRoundSchema = new mongoose.Schema({
     awayTeam:     { type: String, required: true },
     league:       { type: String },
     commenceTime: { type: Date, required: true },
-    result:       { type: String, enum: ['home','draw','away',null], default: null } // filled in once the real match finishes
+    result:       { type: String, enum: ['home','draw','away',null], default: null }, // filled in once the real match finishes
+    // Real 1X2 odds, snapshotted from the live market at the moment the admin
+    // creates the round — shown next to each pick so predicting isn't a
+    // total guess (same as Betika/SportPesa jackpot boards). Deliberately a
+    // fixed snapshot, not live-updating: a jackpot's price board is meant to
+    // stay put for the whole round once published, not shift under users
+    // mid-week the way normal pre-match odds do.
+    odds: { home: Number, draw: Number, away: Number }
   }],
   poolAmount:      { type: Number, default: 0 }, // grows with every entry fee paid; carries over if no winner
   guaranteedPrize: { type: Number, default: 0 }, // admin-set fixed total prize (e.g. "Win up to KES 500,000") — if set, this is what's split among perfect-score winners at settlement instead of the real entry-fee pool, same as Betika/SportPesa-style guaranteed jackpots. 0 = no guarantee, fall back to the real pool.

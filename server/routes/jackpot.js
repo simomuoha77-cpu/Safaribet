@@ -102,6 +102,17 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'One or more matchIds do not correspond to a real fixture' });
     }
 
+    // Snapshot real 1X2 odds for the price board — same resolver used
+    // everywhere else on the site, so these are genuine current prices, not
+    // invented numbers. A match missing odds entirely just shows no price
+    // (frontend falls back to team-name-only buttons for that one fixture).
+    const { resolveOdds } = require('../services/marketResolver');
+    const oddsFor = (m) => ({
+      home: resolveOdds(m, '1x2', 'home')?.odds ?? null,
+      draw: resolveOdds(m, '1x2', 'draw')?.odds ?? null,
+      away: resolveOdds(m, '1x2', 'away')?.odds ?? null
+    });
+
     let poolAmount = 0;
     let carriedOverFrom = null;
     if (carryOverFromRoundId) {
@@ -117,7 +128,7 @@ router.post('/admin/create', requireAdmin, async (req, res) => {
       guaranteedPrize: guaranteedPrize ? Number(guaranteedPrize) : 0,
       fixtures: matches.map(m => ({
         matchId: m.matchId, homeTeam: m.homeTeam, awayTeam: m.awayTeam,
-        league: m.league, commenceTime: m.commenceTime
+        league: m.league, commenceTime: m.commenceTime, odds: oddsFor(m)
       }))
     });
     res.json({ success: true, round });

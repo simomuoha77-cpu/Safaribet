@@ -25,10 +25,24 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .fx-teams{font-weight:700;font-size:14px;margin-bottom:2px}
 .fx-league{font-size:10px;color:var(--mt);text-transform:uppercase;margin-bottom:10px}
 .fx-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.fx-pick{background:var(--s2);border:1.5px solid var(--bd);border-radius:8px;padding:10px 4px;text-align:center;font-size:12px;font-weight:700;cursor:pointer}
+.fx-pick{background:var(--s2);border:1.5px solid var(--bd);border-radius:8px;padding:8px 4px;text-align:center;cursor:pointer}
+.fx-pick-lbl{font-size:12px;font-weight:700}
+.fx-pick-odds{font-size:11px;font-weight:600;color:var(--mt);margin-top:2px}
 .fx-pick.sel{background:var(--g);border-color:var(--g);color:#04140a}
+.fx-pick.sel .fx-pick-odds{color:#04140a;opacity:0.75}
 .fx-pick.correct{background:rgba(0,200,83,0.18);border-color:var(--g);color:var(--g)}
+.fx-pick.correct .fx-pick-odds{color:var(--g);opacity:0.8}
 .fx-pick.wrong{background:rgba(255,59,59,0.12);border-color:var(--rd);color:var(--rd)}
+.fx-pick.wrong .fx-pick-odds{color:var(--rd);opacity:0.8}
+
+.countdown-bar{display:flex;justify-content:center;gap:10px;padding:0 16px 20px}
+.cd-unit{background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 12px;text-align:center;min-width:52px}
+.cd-num{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:800;color:var(--g)}
+.cd-lbl{font-size:9px;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px}
+
+.quick-actions{display:flex;justify-content:space-between;gap:10px;padding:0 14px 10px}
+.qa-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;background:var(--s2);border:1px solid var(--bd);border-radius:10px;font-size:12px;font-weight:700;color:var(--tx);cursor:pointer}
+.qa-btn:active{opacity:0.7}
 .fx-result-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:6px;display:inline-block}
 .fx-result-tag.pending{background:rgba(255,214,0,0.12);color:var(--yl)}
 .fx-result-tag.done{background:rgba(0,200,83,0.12);color:var(--g)}
@@ -66,6 +80,7 @@ let round = null;
 let myEntry = null;
 let picks = {}; // matchId -> pick
 let resultsMode = false; // true when showing a finished round's results rather than the picker
+let countdownTimer = null;
 
 async function init(){
   try {
@@ -119,8 +134,26 @@ function render(){
       <div class="pool-lbl">${round.name}${hasGuarantee ? ' · Guaranteed Prize' : ''}</div>
       <div class="pool-amt">KES ${potentialWinnings.toLocaleString()}</div>
       <div class="pool-sub">${round.entryCount || 0} entries so far · Entry fee KES ${round.entryFee} · Predict all ${round.fixtures.length} correctly to win a share</div>
-    </div>
-    <div class="main">`;
+    </div>`;
+
+  // Live countdown to when entries close (first fixture's kickoff) — only
+  // meaningful while the round is still actually open for entries.
+  if (round.status === 'open' && !myEntry) {
+    const firstKickoff = round.fixtures.reduce((min, f) => new Date(f.commenceTime) < new Date(min) ? f.commenceTime : min, round.fixtures[0]?.commenceTime);
+    html += `
+      <div class="countdown-bar" id="countdownBar" data-deadline="${firstKickoff}">
+        <div class="cd-unit"><div class="cd-num" id="cdD">--</div><div class="cd-lbl">Days</div></div>
+        <div class="cd-unit"><div class="cd-num" id="cdH">--</div><div class="cd-lbl">Hours</div></div>
+        <div class="cd-unit"><div class="cd-num" id="cdM">--</div><div class="cd-lbl">Mins</div></div>
+        <div class="cd-unit"><div class="cd-num" id="cdS">--</div><div class="cd-lbl">Secs</div></div>
+      </div>
+      <div class="quick-actions">
+        <div class="qa-btn" onclick="autoPick()">🎲 Auto Pick</div>
+        <div class="qa-btn" onclick="clearPicks()">🗑️ Clear All</div>
+      </div>`;
+  }
+
+  html += `<div class="main">`;
 
   // ── STATUS BANNER — the actual fix: tell the user clearly where things stand ──
   if (myEntry) {
@@ -148,6 +181,7 @@ function render(){
           ${['home','draw','away'].map(p => {
             const sel = myPick === p;
             const label = p==='home' ? fx.homeTeam : p==='away' ? fx.awayTeam : 'Draw';
+            const price = fx.odds ? fx.odds[p] : null;
             // Once this fixture has a real result: show green if this was the
             // actual outcome, red if the user picked this and it was wrong —
             // otherwise fall back to the plain "selected" look pre-result.
@@ -157,7 +191,10 @@ function render(){
               else if (sel) cls = 'wrong';
               else cls = '';
             }
-            return `<div class="fx-pick ${cls}" ${locked?'':`onclick="selectPick('${fx.matchId}','${p}')"`}>${label}</div>`;
+            return `<div class="fx-pick ${cls}" ${locked?'':`onclick="selectPick('${fx.matchId}','${p}')"`}>
+              <div class="fx-pick-lbl">${label}</div>
+              ${price != null ? `<div class="fx-pick-odds">${price.toFixed(2)}</div>` : ''}
+            </div>`;
           }).join('')}
         </div>
       </div>`;
@@ -176,6 +213,43 @@ function render(){
   }
 
   el.innerHTML = html;
+
+  if (round.status === 'open' && !myEntry) startCountdown();
+}
+
+// Fills every fixture with a random pick in one tap — same convenience
+// feature Betika's jackpot board offers, for anyone who just wants to get an
+// entry in without deliberating over all 15+ matches individually.
+function autoPick(){
+  const options = ['home','draw','away'];
+  round.fixtures.forEach(fx => {
+    picks[fx.matchId] = options[Math.floor(Math.random() * 3)];
+  });
+  render();
+}
+
+function clearPicks(){
+  picks = {};
+  render();
+}
+
+function startCountdown(){
+  if (countdownTimer) clearInterval(countdownTimer);
+  const bar = document.getElementById('countdownBar');
+  if (!bar) return;
+  const deadline = new Date(bar.dataset.deadline).getTime();
+  const tick = () => {
+    const diff = deadline - Date.now();
+    if (diff <= 0) { clearInterval(countdownTimer); init(); return; } // deadline passed — reload to pick up the now-locked state
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v).padStart(2,'0'); };
+    set('cdD', d); set('cdH', h); set('cdM', m); set('cdS', s);
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
 }
 
 function selectPick(matchId, pick){
