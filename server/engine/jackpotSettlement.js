@@ -16,6 +16,15 @@ function resultFromScore(home, away) {
   return 'draw';
 }
 
+// If a fixture still hasn't produced a finished result this long after its
+// kickoff time, something has gone wrong upstream (dropped from the feed,
+// postponed, a sync gap) — without a cutoff, a single such fixture would
+// block its entire round from ever resolving, leaving it stuck showing
+// expired matches indefinitely with no result and no way forward. Generous
+// enough to never trigger on a normal match (even with delays/extra time/a
+// slow settlement pass), but guarantees every round eventually resolves.
+const GRACE_MS = 6 * 60 * 60 * 1000; // 6 hours past kickoff
+
 async function settleJackpots() {
   const rounds = await JackpotRound.find({ status: { $in: ['open', 'locked'] } });
   for (const round of rounds) {
@@ -28,31 +37,55 @@ async function settleJackpots() {
         console.log(`  🔒 [jackpot] Round "${round.name}" locked — first fixture kicked off`);
       }
 
-      // Check if every fixture now has a real final score
+      // Check every fixture's current match data (not filtered to status:'finished'
+      // here — we need to see whatever state each one is actually in, so the grace-
+      // period check below can tell "still genuinely in progress" apart from
+      // "finished" apart from "never going to resolve").
       const matchIds = round.fixtures.map(f => f.matchId);
-      const matches = await Match.find({ matchId: { $in: matchIds }, status: 'finished' }).lean();
+      const matches = await Match.find({ matchId: { $in: matchIds } }).lean();
       const matchMap = {};
       matches.forEach(m => { matchMap[m.matchId] = m; });
 
-      const allFinished = round.fixtures.every(f => matchMap[f.matchId]);
-      if (!allFinished) continue;
+      const now = Date.now();
+      let allResolved = true;
+      const voidFixtures = [];
+      for (const f of round.fixtures) {
+        const m = matchMap[f.matchId];
+        const isFinished = m && m.status === 'finished' && m.score?.home != null && m.score?.away != null;
+        if (isFinished) continue;
+        const overdue = now - new Date(f.commenceTime).getTime() > GRACE_MS;
+        if (overdue) { voidFixtures.push(`${f.homeTeam} vs ${f.awayTeam}`); continue; } // stuck — void it below rather than block the round forever
+        allResolved = false; // still genuinely within a normal waiting window
+      }
+      if (!allResolved) continue;
 
-      // Fill in real results on the round document
+      if (voidFixtures.length) {
+        console.warn(`  ⚠️ [jackpot] Round "${round.name}": ${voidFixtures.length} fixture(s) never produced a result after 6h grace period, voiding (doesn't count for/against anyone): ${voidFixtures.join(', ')}`);
+      }
+
+      // Fill in real results — a voided fixture (never resolved) gets result=null
+      // and is excluded from the correctness count below entirely, rather than
+      // guessing an outcome. Standard practice for a postponed/abandoned/
+      // unresolvable fixture in a jackpot product.
       round.fixtures.forEach(f => {
         const m = matchMap[f.matchId];
-        f.result = resultFromScore(m.score?.home, m.score?.away);
+        f.result = (m && m.status === 'finished') ? resultFromScore(m.score?.home, m.score?.away) : null;
       });
+
+      const scorableFixtures = round.fixtures.filter(f => f.result !== null);
 
       const entries = await JackpotEntry.find({ roundId: round._id });
       let winners = [];
       for (const entry of entries) {
         let correct = 0;
         for (const pred of entry.predictions) {
-          const fixture = round.fixtures.find(f => f.matchId === pred.matchId);
-          if (fixture && fixture.result && fixture.result === pred.pick) correct++;
+          const fixture = scorableFixtures.find(f => f.matchId === pred.matchId);
+          if (fixture && fixture.result === pred.pick) correct++;
         }
         entry.correctCount = correct;
-        entry.isWinner = correct === round.fixtures.length; // perfect score required, standard jackpot rule
+        // Perfect score = correct on every fixture that actually resolved.
+        // Voided fixtures (see above) don't count for or against anyone.
+        entry.isWinner = scorableFixtures.length > 0 && correct === scorableFixtures.length;
         await entry.save();
         if (entry.isWinner) winners.push(entry);
       }

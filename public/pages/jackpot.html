@@ -27,6 +27,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .fx-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .fx-pick{background:var(--s2);border:1.5px solid var(--bd);border-radius:8px;padding:10px 4px;text-align:center;font-size:12px;font-weight:700;cursor:pointer}
 .fx-pick.sel{background:var(--g);border-color:var(--g);color:#04140a}
+.fx-pick.correct{background:rgba(0,200,83,0.18);border-color:var(--g);color:var(--g)}
+.fx-pick.wrong{background:rgba(255,59,59,0.12);border-color:var(--rd);color:var(--rd)}
+.fx-result-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:6px;display:inline-block}
+.fx-result-tag.pending{background:rgba(255,214,0,0.12);color:var(--yl)}
+.fx-result-tag.done{background:rgba(0,200,83,0.12);color:var(--g)}
+.status-banner{text-align:center;padding:16px;border-radius:12px;margin:14px;font-size:14px;font-weight:700}
+.status-banner.pending{background:rgba(255,214,0,0.08);border:1px solid rgba(255,214,0,0.25);color:var(--yl)}
+.status-banner.won{background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);color:var(--g)}
+.status-banner.lost{background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.25);color:var(--rd)}
+.status-banner .sub{font-size:12px;font-weight:400;color:var(--mt);margin-top:4px}
 
 .enter-bar{position:sticky;bottom:0;background:var(--s1);border-top:1px solid var(--bd);padding:14px 16px;margin-top:10px}
 .enter-progress{font-size:12px;color:var(--mt);margin-bottom:8px;text-align:center}
@@ -55,24 +65,44 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 let round = null;
 let myEntry = null;
 let picks = {}; // matchId -> pick
+let resultsMode = false; // true when showing a finished round's results rather than the picker
 
 async function init(){
   try {
     const r = await fetch('/api/jackpot/current');
     const d = await r.json();
-    if (!d.success || !d.round) {
-      document.getElementById('content').innerHTML = '<div class="empty">No active jackpot right now — check back soon.</div>';
+    const token = localStorage.getItem('token');
+
+    if (d.success && d.round) {
+      // There's an open/locked round right now — normal picker flow.
+      round = d.round;
+      resultsMode = false;
+      if (token) {
+        const er = await fetch(`/api/jackpot/my-entry/${round._id}`, { headers: { 'Authorization': 'Bearer '+token } });
+        const ed = await er.json();
+        if (ed.success) myEntry = ed.entry;
+      }
+      render();
       return;
     }
-    round = d.round;
 
-    const token = localStorage.getItem('token');
+    // No open/locked round right now — but if the user has a recent entry
+    // whose round has since moved to awaiting_approval/settled, show its
+    // results instead of just "no active jackpot". Without this, results
+    // become invisible the moment a round finishes.
     if (token) {
-      const er = await fetch(`/api/jackpot/my-entry/${round._id}`, { headers: { 'Authorization': 'Bearer '+token } });
-      const ed = await er.json();
-      if (ed.success) myEntry = ed.entry;
+      const lr = await fetch('/api/jackpot/my-latest-entry', { headers: { 'Authorization': 'Bearer '+token } });
+      const ld = await lr.json();
+      if (ld.success && ld.entry && ld.round && ld.round.status !== 'open' && ld.round.status !== 'locked') {
+        round = ld.round;
+        myEntry = ld.entry;
+        resultsMode = true;
+        render();
+        return;
+      }
     }
-    render();
+
+    document.getElementById('content').innerHTML = '<div class="empty">No active jackpot right now — check back soon.</div>';
   } catch(e) {
     document.getElementById('content').innerHTML = '<div class="empty">Failed to load — check connection.</div>';
   }
@@ -80,11 +110,9 @@ async function init(){
 
 function render(){
   const el = document.getElementById('content');
-  // If admin set a guaranteed prize, that's the headline figure users see and
-  // what actually gets split at settlement — otherwise fall back to the real,
-  // live entry-fee pool (which keeps growing as more people enter).
   const hasGuarantee = round.guaranteedPrize > 0;
-  const potentialWinnings = hasGuarantee ? round.guaranteedPrize : round.poolAmount; // split among perfect scorers at settlement — shown as "up to" since split depends on final winner count
+  const potentialWinnings = hasGuarantee ? round.guaranteedPrize : round.poolAmount;
+  const graded = round.status === 'awaiting_approval' || round.status === 'settled'; // correctCount/isWinner are real by this point, even if payout is still pending admin approval
 
   let html = `
     <div class="pool-hero">
@@ -94,23 +122,42 @@ function render(){
     </div>
     <div class="main">`;
 
+  // ── STATUS BANNER — the actual fix: tell the user clearly where things stand ──
   if (myEntry) {
-    html += `<div class="already-entered">✅ You've entered this round with ${myEntry.predictions.length} predictions. Results will show once all fixtures finish.</div>`;
+    if (!graded) {
+      html += `<div class="status-banner pending">⏳ Entry placed — pending<div class="sub">Results will appear here once every fixture finishes.</div></div>`;
+    } else if (myEntry.isWinner) {
+      const paid = !!myEntry.creditedAt;
+      html += `<div class="status-banner won">🎉 You won! KES ${(myEntry.payout||0).toLocaleString()}<div class="sub">${paid ? 'Already credited to your wallet.' : 'Approved winners are credited shortly — check your wallet soon.'}</div></div>`;
+    } else {
+      html += `<div class="status-banner lost">Not this time<div class="sub">You got ${myEntry.correctCount}/${round.fixtures.length} correct — a perfect score is needed to win a share.</div></div>`;
+    }
   } else if (round.status !== 'open') {
     html += `<div class="already-entered">🔒 Entries closed — the first fixture has already kicked off.</div>`;
   }
 
   round.fixtures.forEach(fx => {
     const locked = myEntry || round.status !== 'open';
+    const myPick = myEntry ? myEntry.predictions.find(pr=>pr.matchId===fx.matchId)?.pick : picks[fx.matchId];
+    const fixtureDone = fx.result != null; // this specific fixture has a real result, independent of whether the whole round is graded yet
     html += `
       <div class="fx-card">
-        <div class="fx-teams">${fx.homeTeam} vs ${fx.awayTeam}</div>
+        <div class="fx-teams">${fx.homeTeam} vs ${fx.awayTeam}${fixtureDone ? `<span class="fx-result-tag done">FT</span>` : (round.status!=='open' ? `<span class="fx-result-tag pending">Pending</span>` : '')}</div>
         <div class="fx-league">${fx.league || ''} · ${new Date(fx.commenceTime).toLocaleString([], {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>
         <div class="fx-picks">
           ${['home','draw','away'].map(p => {
-            const sel = myEntry ? myEntry.predictions.find(pr=>pr.matchId===fx.matchId)?.pick === p : picks[fx.matchId] === p;
+            const sel = myPick === p;
             const label = p==='home' ? fx.homeTeam : p==='away' ? fx.awayTeam : 'Draw';
-            return `<div class="fx-pick ${sel?'sel':''}" ${locked?'':`onclick="selectPick('${fx.matchId}','${p}')"`}>${label}</div>`;
+            // Once this fixture has a real result: show green if this was the
+            // actual outcome, red if the user picked this and it was wrong —
+            // otherwise fall back to the plain "selected" look pre-result.
+            let cls = sel ? 'sel' : '';
+            if (fixtureDone) {
+              if (p === fx.result) cls = 'correct';
+              else if (sel) cls = 'wrong';
+              else cls = '';
+            }
+            return `<div class="fx-pick ${cls}" ${locked?'':`onclick="selectPick('${fx.matchId}','${p}')"`}>${label}</div>`;
           }).join('')}
         </div>
       </div>`;

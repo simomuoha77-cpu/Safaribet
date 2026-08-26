@@ -25,6 +25,23 @@ router.get('/my-entry/:roundId', auth, async (req, res) => {
   } catch (e) { return safeError(res, e, 'jackpot/my-entry'); }
 });
 
+// ── MY MOST RECENT ENTRY, ANY ROUND STATUS ──
+// /current only ever returns an open/locked round — the moment a round the
+// user entered moves to awaiting_approval or settled, it stops showing up
+// there at all. Without this, results (win/lose, correct count, payout)
+// become permanently invisible the instant a round finishes — the user just
+// sees "no active jackpot" with zero indication of how their entry did. This
+// finds their latest entry regardless of round status, so the page can show
+// real results for as long as it takes them to check back.
+router.get('/my-latest-entry', auth, async (req, res) => {
+  try {
+    const entry = await JackpotEntry.findOne({ userId: req.user._id }).sort({ createdAt: -1 }).lean();
+    if (!entry) return res.json({ success: true, entry: null, round: null });
+    const round = await JackpotRound.findById(entry.roundId).lean();
+    res.json({ success: true, entry, round: round || null });
+  } catch (e) { return safeError(res, e, 'jackpot/my-latest-entry'); }
+});
+
 // ── ENTER JACKPOT ──
 router.post('/enter', auth, async (req, res) => {
   try {
