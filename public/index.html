@@ -581,6 +581,7 @@ header{
 <!-- FILTER BAR -->
 <div class="fbar" id="fbar">
   <div class="ftab on" data-filter="highlights" onclick="pickFilter(this)">Highlights</div>
+  <div class="ftab" data-filter="popular" onclick="pickFilter(this)">🔥 Popular</div>
   <div class="ftab" data-filter="upcoming" onclick="pickFilter(this)">Upcoming</div>
   <div class="ftab today-pill" data-filter="today" onclick="pickFilter(this)">
     Today <span id="todayCount" style="background:var(--g);color:#000;border-radius:8px;padding:1px 6px;font-size:10px;min-width:18px;text-align:center">0</span>
@@ -1560,6 +1561,23 @@ async function loadAllMatches(silent=false, retryAttempt=0){
   }
 }
 
+// Major, widely-followed leagues/competitions for the "Popular" tab —
+// matched case-insensitively against whatever's in m.league (which comes
+// through as free text like "England - Premier League" or "Spain - LaLiga",
+// so substring matching is the reliable way to catch these regardless of
+// exact formatting/country prefix).
+const POPULAR_LEAGUE_KEYWORDS = [
+  'premier league','la liga','laliga','serie a','bundesliga','ligue 1',
+  'champions league','europa league','conference league','world cup',
+  'euro ','uefa nations','copa america','copa libertadores','fa cup',
+  'dfb pokal','coppa italia','eredivisie','primeira liga','super lig','mls'
+];
+function isPopularLeague(leagueName){
+  if(!leagueName) return false;
+  const l=leagueName.toLowerCase();
+  return POPULAR_LEAGUE_KEYWORDS.some(k=>l.includes(k));
+}
+
 function applyFilters(silent=false){
   let filtered=[...allMatches];
   const now=new Date();
@@ -1607,6 +1625,20 @@ function applyFilters(silent=false){
       return home!=null&&away!=null;
     });
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
+  } else if(currentFilter==='popular'){
+    // Matches from major, widely-followed leagues/competitions — same idea
+    // as every big sportsbook's "Popular" tab: not every fixture, just the
+    // ones people are actually likely to be looking for. Same odds-ready and
+    // not-yet-kicked-off requirements as Highlights, just narrowed further
+    // by league.
+    filtered=filtered.filter(m=>{
+      if(m.status!=='upcoming'||new Date(m.commenceTime)<=now) return false;
+      if(!isPopularLeague(m.league)) return false;
+      const home=m.odds?.home??m.aiOdds?.homeWin;
+      const away=m.odds?.away??m.aiOdds?.awayWin;
+      return home!=null&&away!=null;
+    });
+    filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='upcoming'){
     filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
@@ -1631,6 +1663,7 @@ function applyFilters(silent=false){
   document.getElementById('secTtl').textContent=
     currentLeague ? (document.getElementById('leagueSelect').options[document.getElementById('leagueSelect').selectedIndex]?.text||'Matches') :
     currentFilter==='highlights' ? 'Highlights' :
+    currentFilter==='popular' ? '🔥 Popular' :
     currentFilter==='upcoming' ? 'Upcoming Matches' :
     currentFilter==='today' ? "Today's Matches" :
     currentFilter==='favorites' ? '⭐ Your Favorite Teams' : 'Matches';
