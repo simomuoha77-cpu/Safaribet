@@ -1578,6 +1578,39 @@ function isPopularLeague(leagueName){
   return POPULAR_LEAGUE_KEYWORDS.some(k=>l.includes(k));
 }
 
+// Globally recognizable clubs/national teams — a match is "Popular" if
+// EITHER side is one of these, regardless of which league or competition
+// it's actually in (this is what actually makes the tab useful: an Arsenal
+// friendly or a Brazil qualifier belongs here even though the competition
+// itself isn't necessarily one of the big leagues above). Kept as short,
+// distinctive substrings so they match however the feed formats full names
+// (e.g. "arsenal" catches "Arsenal FC", "Arsenal", "Arsenal W" etc.).
+const POPULAR_TEAM_KEYWORDS = [
+  // England
+  'arsenal','man utd','man united','manchester united','man city','manchester city',
+  'liverpool','chelsea','tottenham','spurs','newcastle','west ham','aston villa','everton',
+  // Spain
+  'real madrid','barcelona','atletico madrid','atl. madrid','sevilla','real sociedad','villarreal',
+  // Italy
+  'juventus','ac milan','inter milan','internazionale','napoli','roma','lazio','atalanta',
+  // Germany
+  'bayern munich','bayern','borussia dortmund','dortmund','rb leipzig','bayer leverkusen','schalke',
+  // France
+  'psg','paris saint-germain','marseille','monaco','lyon',
+  // Netherlands / Portugal / Scotland / Turkey
+  'ajax','psv','feyenoord','porto','benfica','sporting cp','celtic','rangers','galatasaray','fenerbahce',
+  // National teams (World Cup / Euros / Copa America etc.)
+  'brazil','argentina','france','england','germany','spain','portugal','italy',
+  'netherlands','belgium','croatia','uruguay','usa','mexico','japan','morocco'
+];
+function isPopularTeam(homeTeam, awayTeam){
+  const h=(homeTeam||'').toLowerCase(), a=(awayTeam||'').toLowerCase();
+  return POPULAR_TEAM_KEYWORDS.some(k=>h.includes(k)||a.includes(k));
+}
+function isPopularMatch(m){
+  return isPopularTeam(m.homeTeam, m.awayTeam) || isPopularLeague(m.league);
+}
+
 function applyFilters(silent=false){
   let filtered=[...allMatches];
   const now=new Date();
@@ -1626,14 +1659,17 @@ function applyFilters(silent=false){
     });
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='popular'){
-    // Matches from major, widely-followed leagues/competitions — same idea
-    // as every big sportsbook's "Popular" tab: not every fixture, just the
-    // ones people are actually likely to be looking for. Same odds-ready and
-    // not-yet-kicked-off requirements as Highlights, just narrowed further
-    // by league.
+    // A match is "Popular" if either team is a globally recognizable club or
+    // national team (Arsenal, Real Madrid, Brazil, etc.) — that's the actual
+    // point of this tab, regardless of which league/competition the match is
+    // technically in. Matches from the biggest leagues overall (Premier
+    // League, Champions League, etc.) are included too even if neither side
+    // individually is a "big name" club, same as any real sportsbook's
+    // Popular tab. Same odds-ready and not-yet-kicked-off requirements as
+    // Highlights.
     filtered=filtered.filter(m=>{
       if(m.status!=='upcoming'||new Date(m.commenceTime)<=now) return false;
-      if(!isPopularLeague(m.league)) return false;
+      if(!isPopularMatch(m)) return false;
       const home=m.odds?.home??m.aiOdds?.homeWin;
       const away=m.odds?.away??m.aiOdds?.awayWin;
       return home!=null&&away!=null;
