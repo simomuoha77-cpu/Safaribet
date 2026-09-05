@@ -32,6 +32,24 @@ function asStr(v) {
   return String(v);
 }
 
+// Parses a score from either shape Juan might send it in — an object
+// ({home, away} / {homeScore, awayScore}) or a "H-A"/"H:A" string.
+function parseScorePair(s) {
+  if (s == null) return null;
+  if (typeof s === 'string') {
+    const m = s.match(/(\d+)\s*[-:]\s*(\d+)/);
+    return m ? { home: +m[1], away: +m[2] } : null;
+  }
+  if (typeof s === 'object') {
+    const h = s.home ?? s.homeScore, a = s.away ?? s.awayScore;
+    return (h == null || a == null) ? null : { home: +h, away: +a };
+  }
+  return null;
+}
+function scoresMatch(a, b) {
+  return !!a && !!b && a.home === b.home && a.away === b.away;
+}
+
 // ── Normalize a Juan API match into our internal Match shape ──
 function normalize(m) {
   const home = asStr(m.homeTeam) || 'TBD', away = asStr(m.awayTeam) || 'TBD';
@@ -39,18 +57,43 @@ function normalize(m) {
 
   const matchId = `juanai_${m.id || [home,away,m.utcDate].join('_').replace(/\s+/g,'')}`;
 
-  // Real odds only — from Juan API's aiOdds. If any price is missing, the whole
-  // market is marked unavailable. We never synthesize or estimate prices.
-  const ho = m.aiOdds?.homeWin !== undefined ? parseFloat(m.aiOdds.homeWin) : null;
-  const dr = m.aiOdds?.draw    !== undefined ? parseFloat(m.aiOdds.draw)    : null;
-  const ao = m.aiOdds?.awayWin !== undefined ? parseFloat(m.aiOdds.awayWin) : null;
-  const hasOdds = Number.isFinite(ho) && Number.isFinite(ao); // draw can be absent in some formats
-
   const s = (m.status || '').toUpperCase();
   const status =
     ['IN_PLAY','LIVE','PAUSED','1H','2H','HT','ET','P','BT'].includes(s) ? 'live' :
     ['FINISHED','FT','AET','PEN'].includes(s)                   ? 'finished' :
     ['CANCELLED','POSTPONED','PST','CANC','ABD'].includes(s)     ? 'cancelled' : 'upcoming';
+
+  // ── ODDS-VS-SCORE FRESHNESS CHECK ──
+  // Juan re-prices a live match's odds automatically whenever the score
+  // changes (usually within ~60s), and tells us exactly what score each
+  // price was computed against via aiAnalyzedAtScore. Without checking this,
+  // we'd trust whatever aiOdds came back in the SAME payload as the CURRENT
+  // score — but if Juan's own backend hasn't finished re-pricing yet right
+  // after a goal (a real race condition on their side, not ours), that
+  // payload can still be carrying odds priced against the score BEFORE the
+  // goal. This is exactly what produced a flat 3.95/3.95 draw price on a
+  // team already leading 3-0: correct moments earlier, stale the instant the
+  // score moved, with nothing catching the mismatch. Comparing the two
+  // scores here means a live match briefly shows no price during that
+  // narrow re-pricing window rather than a wrong one — matches the
+  // "uncertain state = locked, never open" rule the rest of live risk
+  // management already follows.
+  let oddsAreStale = false;
+  if (status === 'live' && m.aiAnalyzedAtScore !== undefined) {
+    const currentScore = parseScorePair(m.score?.fullTime ?? m.score);
+    const pricedAgainst = parseScorePair(m.aiAnalyzedAtScore);
+    if (currentScore && pricedAgainst && !scoresMatch(currentScore, pricedAgainst)) {
+      oddsAreStale = true;
+      console.warn(`  ⚠️ [juanai] Stale odds detected for ${home} vs ${away}: priced against ${pricedAgainst.home}-${pricedAgainst.away}, current score is ${currentScore.home}-${currentScore.away} — suppressing until re-priced`);
+    }
+  }
+
+  // Real odds only — from Juan API's aiOdds. If any price is missing, the whole
+  // market is marked unavailable. We never synthesize or estimate prices.
+  const ho = (!oddsAreStale && m.aiOdds?.homeWin !== undefined) ? parseFloat(m.aiOdds.homeWin) : null;
+  const dr = (!oddsAreStale && m.aiOdds?.draw    !== undefined) ? parseFloat(m.aiOdds.draw)    : null;
+  const ao = (!oddsAreStale && m.aiOdds?.awayWin !== undefined) ? parseFloat(m.aiOdds.awayWin) : null;
+  const hasOdds = Number.isFinite(ho) && Number.isFinite(ao); // draw can be absent in some formats
 
   return {
     matchId,
@@ -83,8 +126,13 @@ function normalize(m) {
         })()
       : null,
     // Pass Juan API's full aiOdds through so the frontend can use
-    // Double Chance, BTTS, Over/Under markets directly.
-    aiOdds: m.aiOdds ? {
+    // Double Chance, BTTS, Over/Under markets directly. Suppressed entirely
+    // (not just the 1X2 fields above) when oddsAreStale — this object is the
+    // fallback source the frontend and marketResolver both use whenever the
+    // primary `odds` object is empty, so leaving THIS populated with stale
+    // prices while only clearing `odds` would let the stale price straight
+    // back in through that fallback path, defeating the check above entirely.
+    aiOdds: (m.aiOdds && !oddsAreStale) ? {
       homeWin:    m.aiOdds.homeWin    ?? null,
       draw:       m.aiOdds.draw       ?? null,
       awayWin:    m.aiOdds.awayWin    ?? null,

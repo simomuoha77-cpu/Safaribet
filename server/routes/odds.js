@@ -31,6 +31,21 @@ const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services
 let lastGoodFixtures = null;
 let lastGoodLive = [];
 
+// Persists the last known LIVE snapshot for each match individually — unlike
+// lastGoodLive above (an all-or-nothing fallback for when the ENTIRE live
+// fetch fails), this covers a single match briefly dropping out of Juan's
+// live list while genuinely still in progress. Most notably at halftime:
+// some providers exclude "ball not in play" matches from their live/in-play
+// endpoint, so a match at HT can vanish from `live` for a few minutes even
+// though it's obviously still a live match. Without this, the merge below
+// would fall all the way back to the general fixtures-list version of that
+// match for the gap — which can still say 'upcoming', or hold whatever
+// minute/score it had the last time it was fetched as a fixture rather than
+// live — making an in-progress match look like it stopped being live at
+// exactly the moment (halftime) it's most likely to actually still be live.
+const lastKnownLiveByMatch = new Map(); // matchId -> { data, lastSeenLiveAt }
+const LIVE_SNAPSHOT_MAX_AGE_MS = 20 * 60 * 1000; // generous enough for any realistic halftime break; short enough to never mask a genuinely finished/abandoned match forever
+
 // Fetches fixtures via the shared short-lived cache, falling back to the last
 // successful fetch if the upstream is currently down. Only throws if we have
 // never successfully fetched fixtures at all (e.g. right after server start
@@ -188,7 +203,23 @@ router.get('/featured', async (req, res) => {
     // Overlay live data on top
     const live = await liveWithFallback();
     const liveMap = new Map(live.map(m => [m.matchId, m]));
-    const merged = matches.map(m => liveMap.has(m.matchId) ? liveMap.get(m.matchId) : m);
+    // Remember every match we actually see live right now, so a brief
+    // disappearance from Juan's live list (e.g. during halftime) doesn't look
+    // like the match stopped being live — see lastKnownLiveByMatch above.
+    live.forEach(m => lastKnownLiveByMatch.set(m.matchId, { data: m, lastSeenLiveAt: Date.now() }));
+
+    const merged = matches.map(m => {
+      if (liveMap.has(m.matchId)) return liveMap.get(m.matchId);
+      // Not in the live list right now — but if the fixtures data hasn't
+      // already told us it finished/was cancelled, and we saw it live
+      // recently, keep showing that last known live state (e.g. "HT")
+      // instead of silently reverting to stale/pre-match fixture data.
+      if (m.status !== 'finished' && m.status !== 'cancelled') {
+        const snap = lastKnownLiveByMatch.get(m.matchId);
+        if (snap && (Date.now() - snap.lastSeenLiveAt) < LIVE_SNAPSHOT_MAX_AGE_MS) return snap.data;
+      }
+      return m;
+    });
     live.forEach(m => { if (!merged.find(x => x.matchId === m.matchId)) merged.push(m); });
 
     const sorted = smartSort(merged).map(applyOddsPipeline);
