@@ -2260,44 +2260,26 @@ function fmtTime(iso){
 // ── LIVE MATCH TIMERS ──
 const liveTimers = {}; // matchId → intervalId
 
-function estimateMinute(commenceTime, period) {
-  if (!commenceTime) return null;
-  const elapsed = (Date.now() - new Date(commenceTime).getTime()) / 60000;
+// Single source of truth for how a live match's minute/period gets displayed —
+// used both for the initial card render below AND by startLiveTimer when a
+// fresh poll comes in. Having this logic in two separate places before is
+// exactly how inconsistencies like this creep in; now there's only one
+// version of the rule "never show a minute Juan AI didn't actually give us."
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated){
   const p = (period || '').toUpperCase();
-  if (p === 'HT' || p === 'PAUSED') return 45;
-  if (elapsed <= 0) return 1;
-  if (elapsed <= 45) return Math.max(1, Math.min(45, Math.round(elapsed)));
-  if (elapsed <= 60) return 45; // halftime window
-  return Math.max(46, Math.min(90, Math.round(elapsed - 15)));
+  if (p === 'HT' || p === 'PAUSED') return 'HT';
+  if (p === 'ET') return 'ET';
+  if (p === 'PEN' || p === 'P') return 'Pen';
+  if (minute == null) return 'LIVE'; // never invent a number Juan AI didn't send
+  const cap = p.includes('ET') ? 120 : 90;
+  return `${minuteIsEstimated ? '~' : ''}${Math.min(minute, cap)}′`;
 }
 
 function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated) {
   if (liveTimers[matchId]) { clearInterval(liveTimers[matchId]); delete liveTimers[matchId]; }
-  const p = (period || '').toUpperCase();
   const el = () => document.getElementById(`ltimer_${matchId}`);
-  if (!el()) return;
-
-  // Static states
-  if (p === 'HT' || p === 'PAUSED') { if(el()) el().textContent = 'HT'; return; }
-  if (p === 'ET') { if(el()) el().textContent = 'ET'; return; }
-  if (p === 'PEN' || p === 'P') { if(el()) el().textContent = 'Pen'; return; }
-
-  // Always display the server-reported minute directly — this is the same value
-  // Juan AI's own dashboard shows, computed from the actual match clock (accounting
-  // for stoppage time, halftime pauses, etc). Previously this ran an independent
-  // client-side clock that just added 1 minute per 60 real seconds, which drifted
-  // further from the truth the longer a match went without a resync. Matches now
-  // resync every 15s (see the interval below), so the display stays close to live
-  // without inventing time the server never confirmed.
-  // If Juan AI itself flags the minute as an estimate (minuteIsEstimated), prefix
-  // with ~ so it's clear this isn't a confirmed real-time value even from their side.
-  const usingFallback = apiMinute == null;
-  const baseMin = apiMinute != null ? apiMinute : (estimateMinute(commenceTime, period) || 1);
-  const cap = p.includes('ET') ? 120 : 90;
-  const displayMin = Math.min(baseMin, cap);
   const timerEl = el();
-  const isEstimated = usingFallback || minuteIsEstimated;
-  if (timerEl) timerEl.textContent = `${isEstimated ? '~' : ''}${displayMin}′`;
+  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated);
 }
 
 function stopAllLiveTimers() {
@@ -2355,7 +2337,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${(m.score?.minute==null||m.score?.minuteIsEstimated)?'~':''}${m.score?.minute ?? '0'}′</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">
