@@ -2263,23 +2263,47 @@ const liveTimers = {}; // matchId → intervalId
 // Single source of truth for how a live match's minute/period gets displayed —
 // used both for the initial card render below AND by startLiveTimer when a
 // fresh poll comes in. Having this logic in two separate places before is
-// exactly how inconsistencies like this creep in; now there's only one
-// version of the rule "never show a minute Juan AI didn't actually give us."
-function formatLiveMinuteDisplay(minute, period, minuteIsEstimated){
+// exactly how inconsistencies like this creep in.
+//
+// IMPORTANT: Juan AI's OWN dashboard shows its live minutes with a "~" prefix
+// too (confirmed directly against their UI) — meaning even THEY don't have a
+// guaranteed precise minute for most matches; their number is itself an
+// estimate. So there's no "real" authoritative minute being withheld from us
+// to go fetch — some estimation is normal and expected on both sides. A
+// small gap between our estimate and theirs (a minute or two) is inherent to
+// two independently-computed estimates and isn't something to eliminate by
+// showing nothing — that just trades a minor number mismatch for no number
+// at all, which is strictly less useful. So: use Juan's own minute whenever
+// they send one, and fall back to our own kickoff-based estimate otherwise —
+// always marked with ~ either way, matching Juan's own honesty convention
+// about it being approximate rather than confirmed.
+function estimateMinute(commenceTime, period) {
+  if (!commenceTime) return null;
+  const elapsed = (Date.now() - new Date(commenceTime).getTime()) / 60000;
+  const p = (period || '').toUpperCase();
+  if (p === 'HT' || p === 'PAUSED') return 45;
+  if (elapsed <= 0) return 1;
+  if (elapsed <= 45) return Math.max(1, Math.min(45, Math.round(elapsed)));
+  if (elapsed <= 60) return 45; // halftime window
+  return Math.max(46, Math.min(90, Math.round(elapsed - 15)));
+}
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime){
   const p = (period || '').toUpperCase();
   if (p === 'HT' || p === 'PAUSED') return 'HT';
   if (p === 'ET') return 'ET';
   if (p === 'PEN' || p === 'P') return 'Pen';
-  if (minute == null) return 'LIVE'; // never invent a number Juan AI didn't send
+  const usingFallback = minute == null;
+  const baseMin = usingFallback ? (estimateMinute(commenceTime, period) || 1) : minute;
   const cap = p.includes('ET') ? 120 : 90;
-  return `${minuteIsEstimated ? '~' : ''}${Math.min(minute, cap)}′`;
+  const isEstimated = usingFallback || minuteIsEstimated;
+  return `${isEstimated ? '~' : ''}${Math.min(baseMin, cap)}′`;
 }
 
 function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated) {
   if (liveTimers[matchId]) { clearInterval(liveTimers[matchId]); delete liveTimers[matchId]; }
   const el = () => document.getElementById(`ltimer_${matchId}`);
   const timerEl = el();
-  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated);
+  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated, commenceTime);
 }
 
 function stopAllLiveTimers() {
@@ -2337,7 +2361,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated, m.commenceTime)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">
