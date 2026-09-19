@@ -470,10 +470,11 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   return empty;
 }
 
-async function getMatchById(providerMatchId, sportName = 'football') {
+async function getMatchById(providerMatchId, sportName = 'football', options = {}) {
+  const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
   if (!id) return null;
-  const details = await getMatchMarkets(id, sportName);
+  const details = rich ? await getMatchMarkets(id, sportName) : { markets: [], bookmakers: [] };
   // Re-use the normal fixture catalogue as a safe fallback for the match
   // metadata; the detail call above supplies the richer market list.
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[String(sportName).toLowerCase()] || []), SPORT_IDS[String(sportName).toLowerCase()]].filter(Number.isFinite)));
