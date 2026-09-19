@@ -2310,7 +2310,7 @@ function patchMatchesInPlace(matches){
 let progressiveObserver = null;
 let progressiveMatches = [];
 let progressiveRendered = 0;
-const PROGRESSIVE_BATCH = 12;
+const PROGRESSIVE_BATCH = 24;
 
 function sportBadgeForMatch(m){
   const key = String(m?.sport || '').toLowerCase();
@@ -2343,8 +2343,17 @@ function appendProgressiveBatch(){
   while(frag.firstChild) el.insertBefore(frag.firstChild, sentinel || null);
   progressiveRendered=end;
   if(sentinel){
-    sentinel.textContent = progressiveRendered < progressiveMatches.length ? `Loading more… ${progressiveRendered}/${progressiveMatches.length}` : '';
-    sentinel.style.display = progressiveRendered < progressiveMatches.length ? 'block' : 'none';
+    // Keep the sentinel invisible. More cards are appended automatically as the
+    // user scrolls, but NEVER show a loading message or replace the cards already
+    // on screen. This makes scrolling through a long Live/Football list feel like
+    // one continuous list instead of a second load operation.
+    sentinel.textContent = '';
+    sentinel.style.display = 'block';
+    sentinel.style.height = progressiveRendered < progressiveMatches.length ? '1px' : '0px';
+    sentinel.style.padding = '0';
+    sentinel.style.margin = '0';
+    sentinel.style.opacity = '0';
+    sentinel.style.pointerEvents = 'none';
   }
   if(progressiveRendered < progressiveMatches.length && !progressiveObserver){
     const s=document.getElementById('matchLoadMore');
@@ -2398,6 +2407,44 @@ function renderMatches(matches, silent=false){
 
   const newIds = matches.map(m=>m.matchId).join(',');
   const sameMatchSet = silent && lastRenderedMatchIds === newIds;
+
+  if(silent && !sameMatchSet && lastRenderedMatchIds){
+    // Background refreshes must NEVER destroy the list the user is currently
+    // scrolling. Keep every already-rendered match, update matching records with
+    // fresh odds/scores, and append only genuinely new matches. A temporary feed
+    // response that omits a game therefore cannot make that game disappear.
+    const incoming = new Map(matches.map(m => [String(m.matchId), m]));
+    const merged = [];
+    const seen = new Set();
+    progressiveMatches.forEach(oldMatch => {
+      const id = String(oldMatch.matchId);
+      const fresh = incoming.get(id);
+      merged.push(fresh || oldMatch);
+      seen.add(id);
+    });
+    matches.forEach(m => {
+      const id = String(m.matchId);
+      if(!seen.has(id)){ merged.push(m); seen.add(id); }
+    });
+    progressiveMatches = merged;
+    patchMatchesInPlace(matches);
+
+    // Append newly arrived games without rebuilding or moving anything already
+    // visible. Existing scroll position and cards stay exactly where they are.
+    const existingIds = new Set(
+      Array.from(document.querySelectorAll('[id^="mc_"]')).map(el => el.id.slice(3))
+    );
+    const newMatches = matches.filter(m => !existingIds.has(String(m.matchId)));
+    if(newMatches.length){
+      const sentinel = document.getElementById('matchLoadMore');
+      const frag = document.createElement('div');
+      frag.innerHTML = newMatches.map(m => renderMatch(m)).join('');
+      while(frag.firstChild) document.getElementById('matchList').insertBefore(frag.firstChild, sentinel || null);
+      progressiveRendered += newMatches.length;
+    }
+    lastRenderedMatchIds = merged.map(m=>m.matchId).join(',');
+    return;
+  }
 
   if(sameMatchSet){
     // Same match set — update the backing progressive list too, so matches
