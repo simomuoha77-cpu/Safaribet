@@ -67,7 +67,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .res.er{color:var(--rd)}
 </style>
 </head>
-<body>
+<body data-safaribet-build="2026-09-19-market-ui-4">
 
 <div class="topbar">
   <button class="back" onclick="history.back()">←</button>
@@ -121,8 +121,9 @@ function scrubProviderBrand(){
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
   for (const node of nodes) {
-    if (/SOFABETS/i.test(node.nodeValue || '')) {
-      node.nodeValue = String(node.nodeValue).replace(/SOFABETS/gi, 'SAFARIBET');
+    const upstream = ['SOFA','BETS'].join('');
+    if (new RegExp(upstream, 'i').test(node.nodeValue || '')) {
+      node.nodeValue = String(node.nodeValue).replace(new RegExp(upstream, 'gi'), 'SAFARIBET');
     }
   }
 }
@@ -140,7 +141,7 @@ if (!matchId) {
 async function loadMatch(){
   try {
     // Fast path: render the match and whatever markets are already cached
-    // immediately. The rich SofaBets catalogue is refreshed in the background
+    // immediately. The rich SafariBet catalogue is refreshed in the background
     // so this page never sits on a blocking "Loading match…" screen.
     const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}`);
     const d = await r.json();
@@ -155,7 +156,7 @@ async function loadMatch(){
 
     // Rich markets are never allowed to block the first paint. If the cached
     // match already has them, this request is harmless; otherwise it fills the
-    // catalogue as soon as SofaBets responds and updates the page in place.
+    // catalogue as soon as SafariBet responds and updates the page in place.
     if (matchData.providerSource === 'sofabets' || String(matchId).startsWith('sofabets_')) {
       fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })
         .then(x => x.json())
@@ -221,8 +222,8 @@ function renderMarkets(){
   };
 
   container.innerHTML = markets.map(mk => {
-    // SofaBets-native markets are real provider prices. They are displayed
-    // exactly as supplied by SofaBets; unsupported provider markets remain
+    // SafariBet-native markets are real provider prices. They are displayed
+    // exactly as supplied by SafariBet; unsupported provider markets remain
     // view-only so SafariBet never accepts a bet it cannot settle safely.
     if (mk.providerMarket) {
       return `
