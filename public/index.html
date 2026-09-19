@@ -2002,7 +2002,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   }
 
   try{
-    const url = sport==='live' ? '/api/odds/live' : `/api/odds/matches/${sport}`;
+    const url = sport==='live' ? '/api/sports/live' : `/api/odds/matches/${sport}`;
     // Background refresh in progress (either an explicit silent poll, or the
     // network fetch that follows an instant cache-first paint) — show the
     // small pill, never the full-page loader.
@@ -2176,10 +2176,70 @@ function patchMatchesInPlace(matches){
 // are attached (odds show as "-" via oddBtn until a real source or admin
 // sets them, same as SportPesa/other books display an unpriced game before
 // markets open). We don't hide games just because odds aren't ready yet.
+let progressiveObserver = null;
+let progressiveMatches = [];
+let progressiveRendered = 0;
+const PROGRESSIVE_BATCH = 12;
+
+function sportBadgeForMatch(m){
+  const key = String(m?.sport || '').toLowerCase();
+  const map = {
+    football:['⚽','Football'], soccer:['⚽','Football'], basketball:['🏀','Basketball'],
+    tennis:['🎾','Tennis'], cricket:['🏏','Cricket'], rugby:['🏉','Rugby'],
+    hockey:['🏒','Ice Hockey'], volleyball:['🏐','Volleyball'], handball:['🤾','Handball']
+  };
+  if(map[key]) return map[key];
+  if(m?.sportIcon || m?.sportLabel) return [m.sportIcon || '🏆', m.sportLabel || 'Sport'];
+  if(key.startsWith('soccer_')) return ['⚽','Football'];
+  return ['🏆', key ? key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) : 'Sport'];
+}
+
+function stopProgressiveRender(){
+  if(progressiveObserver){ progressiveObserver.disconnect(); progressiveObserver=null; }
+  progressiveMatches=[];
+  progressiveRendered=0;
+  const old=document.getElementById('matchLoadMore');
+  if(old) old.remove();
+}
+
+function appendProgressiveBatch(){
+  const el=document.getElementById('matchList');
+  if(!el || progressiveRendered >= progressiveMatches.length) return;
+  const end=Math.min(progressiveRendered + PROGRESSIVE_BATCH, progressiveMatches.length);
+  const frag=document.createElement('div');
+  frag.innerHTML=progressiveMatches.slice(progressiveRendered,end).map(m=>renderMatch(m)).join('');
+  const sentinel=document.getElementById('matchLoadMore');
+  while(frag.firstChild) el.insertBefore(frag.firstChild, sentinel || null);
+  progressiveRendered=end;
+  if(sentinel){
+    sentinel.textContent = progressiveRendered < progressiveMatches.length ? `Loading more… ${progressiveRendered}/${progressiveMatches.length}` : '';
+    sentinel.style.display = progressiveRendered < progressiveMatches.length ? 'block' : 'none';
+  }
+  if(progressiveRendered < progressiveMatches.length && !progressiveObserver){
+    const s=document.getElementById('matchLoadMore');
+    if(s && 'IntersectionObserver' in window){
+      progressiveObserver=new IntersectionObserver(entries=>{
+        if(entries.some(e=>e.isIntersecting)) appendProgressiveBatch();
+      }, {rootMargin:'500px 0px'});
+      progressiveObserver.observe(s);
+    }
+  }
+}
+
+function renderMatchesProgressively(matches){
+  stopProgressiveRender();
+  const el=document.getElementById('matchList');
+  progressiveMatches=matches.slice();
+  progressiveRendered=0;
+  el.innerHTML='<div id="matchLoadMore" style="text-align:center;padding:12px;color:var(--mt);font-size:11px"></div>';
+  appendProgressiveBatch();
+}
+
 function renderMatches(matches, silent=false){
   const el=document.getElementById('matchList');
 
   if(!matches.length){
+    stopProgressiveRender();
     if (currentFilter === 'favorites') {
       const hasFavs = (window.__favTeams||[]).length > 0;
       el.innerHTML = hasFavs
@@ -2209,6 +2269,9 @@ function renderMatches(matches, silent=false){
   const sameMatchSet = silent && lastRenderedMatchIds === newIds;
 
   if(sameMatchSet){
+    // Same match set — update the backing progressive list too, so matches
+    // that have not been scrolled into view yet receive the freshest odds.
+    progressiveMatches = matches.slice();
     // Same matches still on screen — patch odds/scores in place instead of
     // destroying and recreating every DOM node. This is the fix: no more
     // rebuilding the whole list (and losing whatever button the user's
@@ -2222,7 +2285,7 @@ function renderMatches(matches, silent=false){
     document.querySelectorAll('[data-odds]').forEach(b=>{ prevOdds[b.id]=parseFloat(b.dataset.odds); });
   }
 
-  el.innerHTML=matches.map(m=>renderMatch(m)).join('');
+  renderMatchesProgressively(matches);
   lastRenderedMatchIds = newIds;
 
   // Cache the actual rendered HTML for the default Highlights view. Every
@@ -2367,8 +2430,9 @@ function renderMatch(m){
   const homeIsFav = window.__favTeams && window.__favTeams.includes(m.homeTeam);
   const awayIsFav = window.__favTeams && window.__favTeams.includes(m.awayTeam);
   const starActive = homeIsFav || awayIsFav;
+  const [sportIcon, sportLabel] = sportBadgeForMatch(m);
   const metaHtml=`<div class="mc-meta">
-    <span class="mc-league">${m.league}</span>
+    <span class="mc-league"><span style="margin-right:4px">${sportIcon}</span>${sportLabel} · ${m.league}</span>
     ${isLive?`<span class="live-dot"></span><span class="live-lbl">LIVE</span><span class="live-score">${scoreStr}</span>`:''}
     ${isAiOdds?'<span style="font-size:9px;font-weight:700;color:var(--mt);background:rgba(150,150,150,0.1);padding:1px 5px;border-radius:4px;margin-left:4px">AI</span>':''}
     <span onclick="event.stopPropagation();toggleFavorite('${esc(m.homeTeam)}','${m.sport||'football'}')" style="margin-left:auto;cursor:pointer;font-size:15px;color:${starActive?'var(--yl)':'var(--mt)'}">${starActive?'★':'☆'}</span>

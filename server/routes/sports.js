@@ -80,6 +80,85 @@ function normalizeSofaSportMatch(m, sport) {
   };
 }
 
+
+function sportBadge(sport) {
+  if (sport === 'football') return { label:'Football', icon:'⚽' };
+  return SPORT_CONFIG[sport] || { label:String(sport || 'Sport'), icon:'🏆' };
+}
+
+// Live is one mixed feed: football + every SofaBets sport SafariBet supports.
+// Keep it cached briefly so opening Live never waits for a fresh upstream call
+// on every tap/refresh, while the frontend can refresh it silently in the background.
+router.get('/live', async (req, res) => {
+  const key = 'sofa_live_all';
+  try {
+    let live = C.get(key, 8000);
+    if (!live) {
+      const sports = ['football', ...Object.keys(SPORT_CONFIG)];
+      const today = new Intl.DateTimeFormat('en-CA', {
+        timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
+      }).format(new Date());
+      const lists = await Promise.all(sports.map(async sport => {
+        try {
+          return { sport, matches: await sofaBets.getMatchesForDate(today, { sport }) };
+        } catch (e) {
+          console.warn(`[sports/live/${sport}]`, e.message);
+          return { sport, matches: [] };
+        }
+      }));
+
+      const seen = new Set();
+      live = lists.flatMap(({sport, matches}) => matches.map(m => ({ sport, m })))
+        .filter(({m}) => String(m?.status || '').toUpperCase() === 'IN_PLAY' || String(m?.status || '').toUpperCase() === 'LIVE')
+        .map(({sport, m}) => {
+          const badge = sportBadge(sport);
+          const o = m.odds || m.providerOdds || {};
+          const home = Number(o.homeWin), away = Number(o.awayWin), draw = Number(o.draw);
+          const hasOdds = Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1;
+          return {
+            matchId: `sofabets_live_${sport}_${m.providerMatchId}`,
+            sport,
+            sportIcon: badge.icon,
+            sportLabel: badge.label,
+            league: m.competition || badge.label,
+            homeTeam: m.homeTeam,
+            awayTeam: m.awayTeam,
+            commenceTime: m.utcDate ? new Date(m.utcDate) : null,
+            status: 'live',
+            hasOdds,
+            odds: {
+              home: hasOdds ? +home.toFixed(2) : null,
+              draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+              away: hasOdds ? +away.toFixed(2) : null,
+              updatedAt: new Date()
+            },
+            providerOdds: o,
+            markets: m.markets || [],
+            score: m.score || null,
+            source: 'sofabets',
+            oddsSource: m.oddsSource || 'SofaBets',
+            realOddsSource: m.realOddsSource || 'SofaBets',
+            isRealMarketOdds: !!m.isRealMarketOdds,
+            fetchedAt: new Date()
+          };
+        })
+        .filter(m => {
+          if (!m.homeTeam || !m.awayTeam || seen.has(m.matchId)) return false;
+          seen.add(m.matchId);
+          return true;
+        })
+        .sort((a,b) => new Date(a.commenceTime || 0) - new Date(b.commenceTime || 0));
+
+      C.set(key, live);
+      console.log(`[sports/live] ${live.length} mixed live matches`);
+    }
+    res.json({ success:true, data:live, count:live.length, source:'SofaBets' });
+  } catch (e) {
+    console.error('[sports/live]', e.message);
+    res.status(502).json({ success:false, data:[], message:'SofaBets live feed unavailable' });
+  }
+});
+
 router.get('/category/:sport', async (req, res) => {
   const sport = String(req.params.sport || '').toLowerCase();
   if (!SPORT_CONFIG[sport]) {
