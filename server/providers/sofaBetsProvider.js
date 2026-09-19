@@ -186,12 +186,13 @@ function paginationInfo(payload) {
     nextPage: root.nextPage ?? root.next_page ?? p.nextPage ?? p.next_page ?? payload?.nextPage ?? payload?.next_page
   };
 }
-async function fetchPages(base, path, sportId, sportName) {
+async function fetchPages(base, path, sportId, sportName, maxPagesOverride) {
   const all = [];
   let page = 1;
   let first = true;
 
-  while (page <= MAX_PAGES_PER_FETCH) {
+  const pageLimit = Number.isFinite(Number(maxPagesOverride)) ? Math.max(1, Number(maxPagesOverride)) : MAX_PAGES_PER_FETCH;
+  while (page <= pageLimit) {
     // Do NOT require marketType=match result. That filter can hide fixtures
     // before JuanAi has even discovered them.
     // Match the public SofaBets frontend contract exactly. The frontend uses
@@ -510,7 +511,8 @@ function sameRequestedDate(iso, dateStr) {
 const allFixturesCache = new Map();
 const allFixturesInFlight = new Map();
 
-async function fetchAllFixturesForSport(sportId, sportName) {
+async function fetchAllFixturesForSport(sportId, sportName, options) {
+  options = options || {};
   const name = String(sportName || '').toLowerCase();
   const candidates = Array.from(new Set([
     Number(sportId),
@@ -527,7 +529,7 @@ async function fetchAllFixturesForSport(sportId, sportName) {
       for (const base of BASES) {
         for (const path of FIXTURE_PATHS) {
           try {
-            const rawItems = await fetchPages(base, path, candidateId, name);
+            const rawItems = await fetchPages(base, path, candidateId, name, options.maxPages);
             const matches = rawItems.map(safeNormalizeMatch).filter(Boolean);
             if (!matches.length && rawItems.length) {
               throw new Error('SofaBets returned ' + rawItems.length + ' records but none could be normalized');
@@ -612,7 +614,7 @@ async function getMatchesForDate(dateStr, options) {
   options = options || {};
   const sportName = String(options.sport || 'football').toLowerCase();
   const sportId = Number(options.sportId || SPORT_IDS[sportName] || FOOTBALL_SPORT_ID);
-  const all = await fetchAllFixturesForSport(sportId, sportName);
+  const all = await fetchAllFixturesForSport(sportId, sportName, options.fast ? { maxPages: 2 } : {});
   let result = all.filter(m => sameRequestedDate(m.utcDate, dateStr));
 
   // SofaBets exposes live matches through a separate endpoint. Always merge

@@ -1798,20 +1798,39 @@ async function loadSportTabs() {
       container.appendChild(el);
     });
 
-    // Warm the two most commonly opened sports after the homepage is painted.
-    // This runs in the background and never blocks the initial football list.
+    // Warm every real sport quietly after the homepage is painted. Each tab
+    // gets a local cache entry before the user taps it, so Football/Basketball/
+    // Tennis/etc. do not feel like a new page load. Only two requests run at
+    // once so this does not flood SofaBets or the user's connection.
+    const warmSports = d.data.map(t => t.key).filter(k => !['featured','live','football'].includes(k));
     setTimeout(() => {
-      ['basketball','tennis'].forEach((sport, i) => {
-        setTimeout(() => {
-          if (!sportTabCache.has(sport) && !sportTabRequests.has(sport)) {
-            fetch(`/api/sports/category/${sport}`, { cache:'no-store' })
-              .then(r => r.json())
-              .then(d => { if (d.success && Array.isArray(d.data) && d.data.length) sportTabCache.set(sport, d.data); })
-              .catch(() => {});
+      let wi = 0;
+      const worker = () => {
+        const sport = warmSports[wi++];
+        if (!sport) return;
+        if (sportTabCache.has(sport) || sportTabRequests.has(sport)) { worker(); return; }
+        let local = null;
+        try {
+          const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
+          if (cached?.data?.length && (Date.now() - cached.ts) < 900000) {
+            local = cached.data;
+            sportTabCache.set(sport, local);
           }
-        }, i * 900);
-      });
-    }, 700);
+        } catch(e) {}
+        fetch(`/api/sports/category/${sport}`, { cache:'no-store' })
+          .then(r => r.json())
+          .then(d2 => {
+            if (d2.success && Array.isArray(d2.data) && d2.data.length) {
+              sportTabCache.set(sport, d2.data);
+              try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:d2.data, ts:Date.now()})); } catch(e) {}
+              if (currentCat === sport) renderNonFootball(d2.data);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setTimeout(worker, 120));
+      };
+      worker(); worker();
+    }, 500);
   } catch(e) {
     // Fallback: add all sports as coming soon
     const fallback = [
@@ -1874,6 +1893,15 @@ async function loadCat(cat) {
         liveTabCache.ts = Date.now();
       }
     }
+    if (!liveTabCache.data?.length) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
+        if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
+          liveTabCache.data = stored.data;
+          liveTabCache.ts = stored.ts;
+        }
+      } catch(e) {}
+    }
     if (liveTabCache.data && liveTabCache.data.length) {
       renderMatches(liveTabCache.data, true);
       loadMatches('live', true).catch(() => {});
@@ -1904,39 +1932,56 @@ async function loadCat(cat) {
     return;
   }
 
-  // Non-football sports come directly from SofaBets. If this sport was already
-  // opened, paint the existing games immediately and refresh silently.
-  const cachedSport = sportTabCache.get(cat);
+  // Non-football sports come directly from SofaBets. First use the in-memory
+  // cache, then localStorage, then the network. Never blank the current list
+  // just because a new tab needs a refresh.
+  let cachedSport = sportTabCache.get(cat) || null;
+  if (!cachedSport?.length) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('sb_sport_cache_' + cat) || 'null');
+      if (stored?.data?.length) {
+        cachedSport = stored.data;
+        sportTabCache.set(cat, cachedSport);
+        renderNonFootball(cachedSport);
+      }
+    } catch(e) {}
+  }
   if (cachedSport?.length) {
     renderNonFootball(cachedSport);
   } else {
-    el.innerHTML = `<div class="loading"><div class="spin"></div>Loading ${cat}...</div>`;
+    // No cache yet: keep whatever is currently painted and show only the small
+    // updating indicator. The moment SofaBets returns, games replace it.
+    setUpdatingIndicator(true);
   }
 
   if (sportTabRequests.has(cat)) return;
   const request = (async () => {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), cachedSport?.length ? 8000 : 3500);
+      const timer = setTimeout(() => ctrl.abort(), cachedSport?.length ? 10000 : 5000);
       let r;
       try { r = await fetch(`/api/sports/category/${cat}`, { signal: ctrl.signal }); }
       finally { clearTimeout(timer); }
       const d = await r.json();
       if (!d.success) throw new Error(d.message || 'SofaBets sport feed failed');
       if (Array.isArray(d.data) && d.data.length) {
-        sportTabCache.set(cat, d.data);
-        if (currentCat === cat) renderNonFootball(d.data);
+        const old = sportTabCache.get(cat) || cachedSport || [];
+        const byId = new Map(old.map(m => [String(m.matchId), m]));
+        d.data.forEach(m => byId.set(String(m.matchId), m));
+        const merged = Array.from(byId.values());
+        sportTabCache.set(cat, merged);
+        try { localStorage.setItem('sb_sport_cache_' + cat, JSON.stringify({data:merged, ts:Date.now()})); } catch(e) {}
+        if (currentCat === cat) renderNonFootball(merged);
       } else if (!cachedSport && currentCat === cat) {
         const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
         showComingSoon(cat.charAt(0).toUpperCase()+cat.slice(1), icons[cat]||'🏆');
       }
     } catch(e) {
-      if (!cachedSport && currentCat === cat) {
-        const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
-        el.innerHTML = noMatchesHTML(icons[cat]||'🏆', `${cat.charAt(0).toUpperCase()+cat.slice(1)} is loading`, 'Please try again in a moment');
-      }
+      // Never turn a tab into an error/loading page because a background fetch
+      // was slow. Keep the last good content (if any) and retry on the next tap.
     } finally {
       sportTabRequests.delete(cat);
+      setUpdatingIndicator(false);
     }
   })();
   sportTabRequests.set(cat, request);
@@ -2123,7 +2168,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   if(!silent && retryAttempt===0){
     try{
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 120000) {
+      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 600000) {
         renderMatches(cached.data, true);
         usedCache = true;
       }
@@ -2310,7 +2355,7 @@ function patchMatchesInPlace(matches){
 let progressiveObserver = null;
 let progressiveMatches = [];
 let progressiveRendered = 0;
-const PROGRESSIVE_BATCH = 24;
+const PROGRESSIVE_BATCH = 10;
 
 function sportBadgeForMatch(m){
   const key = String(m?.sport || '').toLowerCase();
@@ -2360,7 +2405,7 @@ function appendProgressiveBatch(){
     if(s && 'IntersectionObserver' in window){
       progressiveObserver=new IntersectionObserver(entries=>{
         if(entries.some(e=>e.isIntersecting)) appendProgressiveBatch();
-      }, {rootMargin:'500px 0px'});
+      }, {rootMargin:'900px 0px'});
       progressiveObserver.observe(s);
     }
   }
