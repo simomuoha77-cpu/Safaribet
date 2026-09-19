@@ -2322,14 +2322,15 @@ function patchMatchesInPlace(matches){
     if(!card) return;
 
     if(m.status==='live'){
+      const liveScore = m.score?.fullTime || m.score || {};
       const scoreEl = card.querySelector('.live-score');
-      if(scoreEl && m.score?.home!=null && m.score?.away!=null) scoreEl.textContent = `${m.score.home} - ${m.score.away}`;
+      if(scoreEl && liveScore.home!=null && liveScore.away!=null) scoreEl.textContent = `${liveScore.home} - ${liveScore.away}`;
       // Reuse the exact same trusted logic as the full render path (cap,
       // estimateMinute fallback, HT/ET/Pen states) instead of a simplified
       // duplicate — a divergent copy here was the cause of incorrect/frozen
       // minute displays.
-      startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated);
-      const hs=m.score?.home, as=m.score?.away;
+      startLiveTimer(m.matchId, m.commenceTime, liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated);
+      const hs=liveScore.home, as=liveScore.away;
       const tnames = card.querySelectorAll('.tname');
       if(tnames.length===2 && hs!=null && as!=null){
         tnames[0].classList.toggle('losing', hs<as);
@@ -2673,10 +2674,14 @@ function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, c
 
 function renderMatch(m){
   const isLive   = m.status==='live';
-  const scoreStr = isLive && m.score?.home != null && m.score?.away != null ? `${m.score.home} - ${m.score.away}` : '';
-  const hs=m.score?.home, as=m.score?.away;
-  const homeLosing= isLive&&hs!==null&&hs<as;
-  const awayLosing= isLive&&as!==null&&as<hs;
+  // Accept both the current flat Live shape and older cached/provider data
+  // shaped as { score: { fullTime: { home, away } } }. This makes the Live
+  // score appear immediately even if the phone still has an older cache.
+  const liveScore = m.score?.fullTime || m.score || {};
+  const hs=liveScore.home, as=liveScore.away;
+  const scoreStr = isLive && hs != null && as != null ? `${hs} - ${as}` : '';
+  const homeLosing= isLive&&hs!=null&&as!=null&&hs<as;
+  const awayLosing= isLive&&hs!=null&&as!=null&&as<hs;
   const ao=m.aiOdds||m.odds||m.providerOdds||{}; // Direct SofaBets is the football source
 
   const isAiOdds = !m.odds?.home && (ao.homeWin || ao.home);
@@ -2692,7 +2697,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated, m.commenceTime)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">

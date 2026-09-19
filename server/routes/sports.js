@@ -119,7 +119,20 @@ router.get('/live', async (req, res) => {
         },
         providerOdds: o,
         markets: m.markets || [],
-        score: m.score || null,
+        // The provider normalizes scores as { fullTime: { home, away } }.
+        // The SafariBet Live UI expects the flat { home, away, minute, period }
+        // shape. Keep this conversion here so Live always receives the REAL
+        // SofaBets score, including when the browser is using cached matches.
+        score: (() => {
+          const s = m.score?.fullTime || m.score || {};
+          return {
+            home: s.home ?? null,
+            away: s.away ?? null,
+            minute: m.minute ?? m.score?.minute ?? null,
+            minuteIsEstimated: !!m.minuteIsEstimated,
+            period: m.status || null
+          };
+        })(),
         source: 'sofabets',
         oddsSource: m.oddsSource || 'SofaBets',
         realOddsSource: m.realOddsSource || 'SofaBets',
