@@ -403,12 +403,41 @@ function normalizeMatch(raw) {
   // Scores can arrive under score/liveScore/scores/scoreboard/result or as
   // flat home_score/away_score fields. Normalize all common forms here so
   // the UI receives the REAL live score instead of only the LIVE label.
+  function numericScore(value, depth = 0) {
+    if (value == null || depth > 4) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return Number(value);
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (!text) return null;
+      // Some live SofaBets payloads expose a score as a compact string such as
+      // "1", "1.0", or "1 - 0". The pair form is handled by scorePair.
+      const n = Number(text);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const nested = pick(value, [
+        'current', 'value', 'score', 'goals', 'goal', 'total', 'display',
+        'currentScore', 'current_score', 'number'
+      ]);
+      return numericScore(nested, depth + 1);
+    }
+    return null;
+  }
   function scorePair(node) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
-    const h = pick(node, ['home', 'Home', 'homeScore', 'home_score', 'scoreHome', 'score_home', 'home_score_live', 'live_home_score', 'homeGoals', 'home_goals']);
-    const a = pick(node, ['away', 'Away', 'awayScore', 'away_score', 'scoreAway', 'score_away', 'away_score_live', 'live_away_score', 'awayGoals', 'away_goals']);
-    if (h != null && a != null && Number.isFinite(Number(h)) && Number.isFinite(Number(a))) {
-      return { home: Number(h), away: Number(a) };
+    const hRaw = pick(node, ['home', 'Home', 'homeScore', 'home_score', 'scoreHome', 'score_home', 'home_score_live', 'live_home_score', 'homeGoals', 'home_goals', 'home_score_current']);
+    const aRaw = pick(node, ['away', 'Away', 'awayScore', 'away_score', 'scoreAway', 'score_away', 'away_score_live', 'live_away_score', 'awayGoals', 'away_goals', 'away_score_current']);
+    const h = numericScore(hRaw);
+    const a = numericScore(aRaw);
+    if (h != null && a != null) return { home: h, away: a };
+
+    // Also accept a score string/object with a compact result like "2-1".
+    for (const key of ['score', 'liveScore', 'live_score', 'currentScore', 'current_score', 'result']) {
+      const value = node[key];
+      if (typeof value === 'string') {
+        const m = value.match(/(\d+)\s*[-:]\s*(\d+)/);
+        if (m) return { home: Number(m[1]), away: Number(m[2]) };
+      }
     }
     return null;
   }

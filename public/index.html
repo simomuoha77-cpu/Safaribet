@@ -2317,7 +2317,7 @@ function patchMatchesInPlace(matches){
 
     if(m.status==='live'){
       const scoreEl = card.querySelector('.live-score');
-      if(scoreEl && m.score?.home!=null) scoreEl.textContent = `${m.score.home} - ${m.score.away}`;
+      if(scoreEl && m.score?.home!=null && m.score?.away!=null) scoreEl.textContent = `${m.score.home} - ${m.score.away}`;
       // Reuse the exact same trusted logic as the full render path (cap,
       // estimateMinute fallback, HT/ET/Pen states) instead of a simplified
       // duplicate — a divergent copy here was the cause of incorrect/frozen
