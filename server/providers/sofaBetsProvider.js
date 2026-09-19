@@ -1,4 +1,5 @@
-// SofaBets football provider for JuanAi.
+// Direct multi-sport SofaBets provider.
+// Football and supported non-football sports use the same upstream feed.
 //
 // Goals of this version:
 // 1. Try the current SofaBets backend host first, then the older feed host.
@@ -274,7 +275,9 @@ function parseOdds(raw, homeTeamName, awayTeamName) {
 
   for (const market of markets) {
     const marketName = String(pick(market, ['name', 'marketType', 'marketName', 'market_name', 'type', 'key']) || '').toLowerCase();
-    if (!(marketName.includes('1x2') || marketName.includes('match result') || marketName.includes('match_winner') || marketName.includes('match winner'))) continue;
+    const isThreeWay = marketName.includes('1x2') || marketName.includes('match result');
+    const isTwoWay = marketName.includes('match_winner') || marketName.includes('match winner') || marketName.includes('moneyline') || marketName.includes('game winner') || marketName.includes('winner');
+    if (!isThreeWay && !isTwoWay) continue;
     const outcomes = market.outcomes || market.selections || market.options || market.betOffers;
     if (!Array.isArray(outcomes)) continue;
 
@@ -296,8 +299,13 @@ function parseOdds(raw, homeTeamName, awayTeamName) {
     if (outcomes.length === 3) {
       if (!Number.isFinite(homeWin)) homeWin = oddsOf(outcomes[0]);
       if (!Number.isFinite(awayWin)) awayWin = oddsOf(outcomes[2]);
+    } else if (isTwoWay && outcomes.length >= 2) {
+      if (!Number.isFinite(homeWin)) homeWin = oddsOf(outcomes[0]);
+      if (!Number.isFinite(awayWin)) awayWin = oddsOf(outcomes[1]);
     }
-    if ([homeWin, draw, awayWin].every(Number.isFinite)) return { homeWin, draw, awayWin };
+    if (Number.isFinite(homeWin) && Number.isFinite(awayWin)) {
+      return { homeWin, draw: Number.isFinite(draw) ? draw : null, awayWin };
+    }
   }
   return null;
 }

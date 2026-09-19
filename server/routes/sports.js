@@ -1,8 +1,7 @@
 const express = require('express');
-const safeError = require('../utils/safeError');
-const sportsApi = require('../engine/sportsApi');
-const { getFixtures, getLive } = require('../engine/apifootball');
-const router    = express.Router();
+const { getFixtures } = require('../engine/apifootball');
+const sofaBets = require('../providers/sofaBetsProvider');
+const router = express.Router();
 
 const cache = {};
 const C = {
@@ -10,82 +9,107 @@ const C = {
   set:(k,d)=>{cache[k]={data:d,ts:Date.now()};}
 };
 
-// ── SPORT TABS — tells frontend which sports exist + which are live on Juan ──
+const SPORT_CONFIG = {
+  basketball: { label:'Basketball', icon:'🏀' },
+  tennis:     { label:'Tennis',     icon:'🎾' },
+  cricket:    { label:'Cricket',    icon:'🏏' },
+  rugby:      { label:'Rugby',      icon:'🏉' },
+  hockey:     { label:'Ice Hockey', icon:'🏒' },
+  volleyball: { label:'Volleyball', icon:'🏐' },
+  handball:   { label:'Handball',   icon:'🤾' }
+};
+
+// SofaBets is now the source for these sports too. Keep the tab list local so
+// opening the homepage never waits on JuanAi just to discover sport tabs.
 router.get('/tabs', async (req, res) => {
-  try {
-    // Football always available
-    const tabs = [
-      { key:'featured',   label:'Highlights', icon:'⭐', available:true },
-      { key:'live',       label:'Live',        icon:'🔴', available:true },
-      { key:'football',   label:'Football',    icon:'⚽', available:true },
-    ];
-    // Check all other sports against Juan API
-    const others = await sportsApi.getAvailableSports();
-    others.forEach(s => tabs.push({
-      key:       s.key,
-      label:     s.label,
-      icon:      s.icon,
-      available: s.live,   // true = Juan API has it, false = coming soon
-      comingSoon: !s.live
-    }));
-    res.json({ success:true, data:tabs });
-  } catch(e) {
-    // If check fails just return all tabs as coming soon
-    const { SPORT_CONFIG } = require('../engine/sportsApi');
-    const fallback = [
-      { key:'featured',  label:'Highlights', icon:'⭐', available:true },
-      { key:'live',      label:'Live',        icon:'🔴', available:true },
-      { key:'football',  label:'Football',    icon:'⚽', available:true },
-      ...Object.entries(SPORT_CONFIG).map(([k,v])=>({key:k,...v,available:false,comingSoon:true}))
-    ];
-    res.json({ success:true, data:fallback });
-  }
+  const tabs = [
+    { key:'featured', label:'Highlights', icon:'⭐', available:true },
+    { key:'live',     label:'Live',       icon:'🔴', available:true },
+    { key:'football', label:'Football',   icon:'⚽', available:true },
+    ...Object.entries(SPORT_CONFIG).map(([key,v]) => ({ key, ...v, available:true }))
+  ];
+  res.json({ success:true, data:tabs });
 });
 
-// ── FOOTBALL ──
 router.get('/football', async (req, res) => {
   try {
     let m = C.get('football', 20000);
-    if (!m) { m = await getFixtures(7); C.set('football', m); }
+    if (!m) { m = await getFixtures(0); C.set('football', m); }
     res.json({ success:true, data:m, count:m.length });
-  } catch(e) { console.error('[sports]', e.message); res.status(502).json({ success:false, data:[], message:'Failed to load fixtures' }); }
+  } catch(e) {
+    console.error('[sports/football]', e.message);
+    res.status(502).json({ success:false, data:[], message:'Failed to load football fixtures' });
+  }
 });
 
-// ── OTHER SPORTS (basketball, tennis, cricket etc.) ──
+function normalizeSofaSportMatch(m, sport) {
+  const cfg = SPORT_CONFIG[sport];
+  if (!m || !cfg) return null;
+  const o = m.odds || m.providerOdds || {};
+  const home = Number(o.homeWin);
+  const away = Number(o.awayWin);
+  const draw = Number(o.draw);
+  const hasOdds = Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1;
+  const status = String(m.status || '').toUpperCase();
+  return {
+    matchId: `sofabets_${sport}_${m.providerMatchId}`,
+    sport,
+    sportIcon: cfg.icon,
+    league: m.competition || cfg.label,
+    leagueKey: sport,
+    homeTeam: m.homeTeam,
+    awayTeam: m.awayTeam,
+    commenceTime: m.utcDate ? new Date(m.utcDate) : null,
+    status: ['IN_PLAY','LIVE','PAUSED','1H','2H','HT','Q1','Q2','Q3','Q4','SET1','SET2','SET3'].includes(status) ? 'live' :
+      ['FINISHED','FT','COMPLETED','ENDED'].includes(status) ? 'finished' : 'upcoming',
+    hasOdds,
+    odds: {
+      home: hasOdds ? +home.toFixed(2) : null,
+      draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+      away: hasOdds ? +away.toFixed(2) : null,
+      updatedAt: new Date()
+    },
+    providerOdds: o,
+    markets: m.markets || [],
+    score: m.score || null,
+    source: 'sofabets',
+    oddsSource: m.oddsSource || 'sofabets',
+    realOddsSource: m.realOddsSource || 'SofaBets',
+    isRealMarketOdds: !!m.isRealMarketOdds,
+    fetchedAt: new Date()
+  };
+}
+
 router.get('/category/:sport', async (req, res) => {
-  const sport = req.params.sport;
-  const { SPORT_CONFIG } = require('../engine/sportsApi');
-  if (!SPORT_CONFIG[sport]) return res.status(404).json({ success:false, data:[], message:'Unknown sport' });
-
+  const sport = String(req.params.sport || '').toLowerCase();
+  if (!SPORT_CONFIG[sport]) {
+    return res.status(404).json({ success:false, data:[], message:'Unknown or unsupported SofaBets sport' });
+  }
   try {
-    let m = C.get(`sport_${sport}`, 300000); // 5min cache
-    if (!m) { m = await sportsApi.fetchSport(sport, 3); C.set(`sport_${sport}`, m); }
-    res.json({ success:true, data:m, count:m.length, sport });
-  } catch(e) { console.error('[sports]', e.message); res.status(502).json({ success:false, data:[], message:'Failed to load fixtures' }); }
-});
-
-// ── SEARCH across football + all other sports ──
-router.get('/search', async (req, res) => {
-  const q = (req.query.q || '').trim();
-  if (q.length < 2) return res.json({ success:true, data:[], message:'Query too short' });
-  try {
-    // Football
-    let footballMatches = C.get('football', 20000);
-    if (!footballMatches) {
-      footballMatches = await getFixtures(7).catch(()=>[]);
-      C.set('football', footballMatches);
+    const dates = [];
+    const now = new Date();
+    for (let d = 0; d <= 3; d++) {
+      const x = new Date(now.getTime() + d * 86400000);
+      dates.push(new Intl.DateTimeFormat('en-CA', { timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit' }).format(x));
     }
-    const ql = q.toLowerCase();
-    const footballHits = footballMatches.filter(m =>
-      m.homeTeam?.toLowerCase().includes(ql) ||
-      m.awayTeam?.toLowerCase().includes(ql) ||
-      m.league?.toLowerCase().includes(ql)
-    );
-    // Other sports
-    const otherHits = await sportsApi.searchAll(q, 3);
-    const all = [...footballHits, ...otherHits];
-    res.json({ success:true, data:all, count:all.length, query:q });
-  } catch(e) { console.error('[sports/search]', e.message); res.status(500).json({ success:false, data:[], message:'Search failed' }); }
+    const key = `sofa_${sport}_${dates[0]}`;
+    let m = C.get(key, 20000);
+    if (!m) {
+      const lists = await Promise.all(dates.map(date => sofaBets.getMatchesForDate(date, { sport })));
+      const seen = new Set();
+      m = lists.flat().map(x => normalizeSofaSportMatch(x, sport)).filter(Boolean).filter(x => {
+        if (seen.has(x.matchId)) return false;
+        seen.add(x.matchId);
+        return true;
+      });
+      C.set(key, m);
+      console.log(`[sports/sofabets] ${sport}: ${m.length} matches`);
+    }
+    res.json({ success:true, data:m, count:m.length, sport, source:'SofaBets' });
+  } catch(e) {
+    console.error(`[sports/sofabets/${sport}]`, e.message);
+    res.status(502).json({ success:false, data:[], message:'SofaBets sport feed unavailable' });
+  }
 });
 
 module.exports = router;
