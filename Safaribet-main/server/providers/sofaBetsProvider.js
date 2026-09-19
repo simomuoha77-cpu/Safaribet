@@ -432,15 +432,24 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
     { markets: 'all' }
   ];
 
+  let best = null;
+
+  // IMPORTANT: a normal fixture/detail endpoint may legally return only the
+  // main Match Result market. Do NOT stop at the first market list. Search
+  // for the richest catalogue and keep the largest one we find.
   for (const base of BASES) {
     for (const path of detailPaths) {
       for (const query of queries) {
         try {
           const payload = await sofaFetch(base, path, query);
           const markets = normalizeMarketList(payload);
-          if (markets.length) {
-            const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-            const data = { markets, bookmakers, base, path };
+          if (!markets.length) continue;
+          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+          const data = { markets, bookmakers, base, path };
+          if (!best || markets.length > best.markets.length) best = data;
+          // A rich fixture catalogue is normally far above the single main
+          // market. Once we have a genuinely rich response, use it immediately.
+          if (markets.length >= 6) {
             matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
             return data;
           }
@@ -476,15 +485,18 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
           if (!markets.length) continue;
           const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
           const data = { markets, bookmakers, base, path: '/api/fixtures-by-sport' };
-          matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
-          return data;
+          if (!best || markets.length > best.markets.length) best = data;
+          if (markets.length >= 6) {
+            matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
+            return data;
+          }
         }
       } catch (_) {}
     }
   }
-  const empty = { markets: [], bookmakers: [] };
-  matchMarketsCache.set(cacheKey, { ts: Date.now(), data: empty });
-  return empty;
+  const finalData = best || { markets: [], bookmakers: [] };
+  matchMarketsCache.set(cacheKey, { ts: Date.now(), data: finalData });
+  return finalData;
 }
 
 async function getMatchById(providerMatchId, sportName = 'football', options = {}) {

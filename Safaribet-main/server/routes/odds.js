@@ -397,7 +397,7 @@ router.get('/match/:matchId', async (req, res) => {
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,
-        bookmaker: mk.bookmaker || 'SofaBets',
+        bookmaker: 'SafariBet',
         hasSuspendedPick: false,
         wholeMarketSuspended: false,
         options

@@ -320,6 +320,7 @@ const PAGE_MAP = {
 // Serve clean URLs
 Object.entries(PAGE_MAP).forEach(([route, file]) => {
   app.get(route, (req, res) => {
+    if (route === '/match') res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.sendFile(path.join(__dirname, '../public/pages', file));
   });
 });
