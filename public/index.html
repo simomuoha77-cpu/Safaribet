@@ -2667,7 +2667,7 @@ function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, c
 
 function renderMatch(m){
   const isLive   = m.status==='live';
-  const scoreStr = isLive&&m.score?.home!==null ? `${m.score.home} - ${m.score.away}` : '';
+  const scoreStr = isLive && m.score?.home != null && m.score?.away != null ? `${m.score.home} - ${m.score.away}` : '';
   const hs=m.score?.home, as=m.score?.away;
   const homeLosing= isLive&&hs!==null&&hs<as;
   const awayLosing= isLive&&as!==null&&as<hs;
