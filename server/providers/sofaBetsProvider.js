@@ -19,7 +19,21 @@ const BASES = Array.from(new Set([
   'https://feed.sofabets.com'
 ].filter(Boolean).map(v => String(v).replace(/\/+$/, ''))));
 
-const SPORT_IDS = Object.freeze({ football: 1, basketball: 4, tennis: 24, hockey: 15, cricket: 6, volleyball: 91189, rugby: 73744, handball: 99614 });
+const SPORT_IDS = Object.freeze({ football: 1, basketball: 2, tennis: 5, hockey: 4, cricket: 21, volleyball: 23, rugby: 12, handball: 6 });
+
+// Some SofaBets deployments use different internal sport ids. Keep known
+// alternatives so one deployment can still expose the same sports without
+// affecting the working football feed.
+const SPORT_ID_CANDIDATES = Object.freeze({
+  football: [1],
+  basketball: [2, 4],
+  tennis: [5, 24],
+  hockey: [4, 15],
+  cricket: [21, 6],
+  volleyball: [23, 91189],
+  rugby: [12, 73744],
+  handball: [6, 99614]
+});
 const FOOTBALL_SPORT_ID = SPORT_IDS.football;
 const REQUEST_TIMEOUT_MS = Number(process.env.SOFABETS_TIMEOUT_MS || 12000);
 const MAX_PAGES_PER_FETCH = Number(process.env.SOFABETS_MAX_PAGES || 30);
@@ -172,7 +186,7 @@ function paginationInfo(payload) {
     nextPage: root.nextPage ?? root.next_page ?? p.nextPage ?? p.next_page ?? payload?.nextPage ?? payload?.next_page
   };
 }
-async function fetchPages(base, path, sportId) {
+async function fetchPages(base, path, sportId, sportName) {
   const all = [];
   let page = 1;
   let first = true;
@@ -200,7 +214,18 @@ async function fetchPages(base, path, sportId) {
         page: String(page),
         limit: '100'
       };
-      payload = await sofaFetch(base, path, fallbackQuery);
+      try {
+        payload = await sofaFetch(base, path, fallbackQuery);
+      } catch (_) {
+        // A few SofaBets deployments accept the sport slug instead of the
+        // numeric id. Try that before declaring the sport unavailable.
+        const slugQuery = {
+          sport: String(sportName || ''),
+          page: String(page),
+          limit: '100'
+        };
+        payload = await sofaFetch(base, path, slugQuery);
+      }
     }
     const items = extractItems(payload);
     if (!items.length) break;
@@ -485,55 +510,52 @@ function sameRequestedDate(iso, dateStr) {
 const allFixturesCache = new Map();
 const allFixturesInFlight = new Map();
 
-async function fetchAllFixturesForSport(sportId) {
-  const key = String(sportId);
+async function fetchAllFixturesForSport(sportId, sportName) {
+  const name = String(sportName || '').toLowerCase();
+  const candidates = Array.from(new Set([
+    Number(sportId),
+    ...(SPORT_ID_CANDIDATES[name] || [])
+  ].filter(Number.isFinite)));
+  const key = name || String(sportId);
   const cache = allFixturesCache.get(key) || { fetchedAt: 0, matches: [], base: null, path: null };
   if (cache.matches.length && Date.now() - cache.fetchedAt < ALL_FIXTURES_CACHE_TTL_MS) return cache.matches;
   if (allFixturesInFlight.has(key)) return allFixturesInFlight.get(key);
 
   const run = (async () => {
     let lastError = null;
-    for (const base of BASES) {
-    for (const path of FIXTURE_PATHS) {
-      try {
-        const rawItems = await fetchPages(base, path, sportId);
-        const matches = rawItems.map(safeNormalizeMatch).filter(Boolean);
-        if (!matches.length && rawItems.length) {
-          throw new Error('SofaBets returned ' + rawItems.length + ' records but none could be normalized');
+    for (const candidateId of candidates) {
+      for (const base of BASES) {
+        for (const path of FIXTURE_PATHS) {
+          try {
+            const rawItems = await fetchPages(base, path, candidateId, name);
+            const matches = rawItems.map(safeNormalizeMatch).filter(Boolean);
+            if (!matches.length && rawItems.length) {
+              throw new Error('SofaBets returned ' + rawItems.length + ' records but none could be normalized');
+            }
+            if (!matches.length) {
+              lastError = new Error('SofaBets endpoint returned 0 fixtures for sport ' + name + ' (id ' + candidateId + '): ' + base + path);
+              continue;
+            }
+            allFixturesCache.set(key, { fetchedAt: Date.now(), matches, base, path });
+            const oddsCount = matches.filter(m => m._sofaProviderOdds).length;
+            const leaguesCount = new Set(matches.map(m => m.competition).filter(Boolean)).size;
+            recordSuccess(matches.length, 0, oddsCount, leaguesCount, base, path);
+            console.log(`[sofaBetsProvider] synced ${matches.length} ${name || candidateId} fixtures from ${base}${path} (sportId ${candidateId})`);
+            return matches;
+          } catch (e) {
+            lastError = e;
+          }
         }
-        // Do not treat an empty 200 response as a working fixture feed.
-        // Continue to the next known SofaBets endpoint/base until we actually
-        // obtain football fixtures. This is important because the backend has
-        // several public API families and some return 200 with an empty body.
-        if (!matches.length) {
-          lastError = new Error('SofaBets endpoint returned 0 fixtures for sport ' + sportId + ': ' + base + path);
-          console.warn('[sofaBetsProvider] ' + lastError.message);
-          continue;
-        }
-        allFixturesCache.set(String(sportId), { fetchedAt: Date.now(), matches, base, path });
-        const oddsCount = matches.filter(m => m._sofaProviderOdds).length;
-        const leaguesCount = new Set(matches.map(m => m.competition).filter(Boolean)).size;
-        recordSuccess(matches.length, 0, oddsCount, leaguesCount, base, path);
-        console.log(`[sofaBetsProvider] synced ${matches.length} fixtures from ${base}${path}`);
-        return matches;
-      } catch (e) {
-        lastError = e;
-        console.warn('[sofaBetsProvider] ' + base + path + ' failed: ' + e.message);
       }
     }
-  }
-
-    recordFailure(lastError || new Error('No SofaBets endpoint succeeded'));
+    recordFailure(lastError || new Error('No SofaBets endpoint succeeded for ' + name));
     if (cache.matches.length) return cache.matches;
     return [];
   })();
 
   allFixturesInFlight.set(key, run);
-  try {
-    return await run;
-  } finally {
-    allFixturesInFlight.delete(key);
-  }
+  try { return await run; }
+  finally { allFixturesInFlight.delete(key); }
 }
 
 async function fetchLiveFootballFixtures() {
@@ -590,7 +612,7 @@ async function getMatchesForDate(dateStr, options) {
   options = options || {};
   const sportName = String(options.sport || 'football').toLowerCase();
   const sportId = Number(options.sportId || SPORT_IDS[sportName] || FOOTBALL_SPORT_ID);
-  const all = await fetchAllFixturesForSport(sportId);
+  const all = await fetchAllFixturesForSport(sportId, sportName);
   let result = all.filter(m => sameRequestedDate(m.utcDate, dateStr));
 
   // SofaBets exposes live matches through a separate endpoint. Always merge
