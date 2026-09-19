@@ -399,11 +399,43 @@ function normalizeMatch(raw) {
   }
 
   const status = parseStatus(source, utcDate);
-  const scoreObj = source.score && typeof source.score === 'object' ? source.score : {};
-  const liveScore = source.live_score && typeof source.live_score === 'object' ? source.live_score : (source.liveScore && typeof source.liveScore === 'object' ? source.liveScore : {});
-  const homeScore = pick(source, ['homeScore', 'home_score', 'scoreHome', 'home_score_live', 'live_home_score']) ?? pick(liveScore, ['home', 'homeScore', 'home_score']) ?? pick(scoreObj, ['home', 'Home', 'homeScore']);
-  const awayScore = pick(source, ['awayScore', 'away_score', 'scoreAway', 'away_score_live', 'live_away_score']) ?? pick(liveScore, ['away', 'awayScore', 'away_score']) ?? pick(scoreObj, ['away', 'Away', 'awayScore']);
-  const hasScore = homeScore != null && awayScore != null;
+  // SofaBets live payloads are not always shaped like the fixture payload.
+  // Scores can arrive under score/liveScore/scores/scoreboard/result or as
+  // flat home_score/away_score fields. Normalize all common forms here so
+  // the UI receives the REAL live score instead of only the LIVE label.
+  function scorePair(node) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+    const h = pick(node, ['home', 'Home', 'homeScore', 'home_score', 'scoreHome', 'score_home', 'home_score_live', 'live_home_score', 'homeGoals', 'home_goals']);
+    const a = pick(node, ['away', 'Away', 'awayScore', 'away_score', 'scoreAway', 'score_away', 'away_score_live', 'live_away_score', 'awayGoals', 'away_goals']);
+    if (h != null && a != null && Number.isFinite(Number(h)) && Number.isFinite(Number(a))) {
+      return { home: Number(h), away: Number(a) };
+    }
+    return null;
+  }
+  function findScore(node, depth = 0) {
+    if (!node || typeof node !== 'object' || depth > 5) return null;
+    const direct = scorePair(node);
+    if (direct) return direct;
+    const preferred = ['score', 'liveScore', 'live_score', 'scores', 'scoreboard', 'currentScore', 'current_score', 'result', 'live', 'inPlay', 'in_play'];
+    for (const key of preferred) {
+      if (node[key] && typeof node[key] === 'object') {
+        const found = findScore(node[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (preferred.includes(key)) continue;
+      if (value && typeof value === 'object') {
+        const found = findScore(value, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  const parsedScore = findScore(source);
+  const homeScore = parsedScore ? parsedScore.home : null;
+  const awayScore = parsedScore ? parsedScore.away : null;
+  const hasScore = !!parsedScore;
 
   const odds = parseOdds(source, home, away);
   const rawMarkets = [];
