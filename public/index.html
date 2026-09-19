@@ -1276,6 +1276,19 @@ window.addEventListener('DOMContentLoaded', ()=>{
   loadLeagueOptions();
   loadSportTabs();
 
+  // Warm Football + Live quietly after the initial Highlights paint. If the
+  // user taps either tab later, the games are already in memory and render in
+  // the same frame; the network only refreshes them afterward.
+  setTimeout(() => {
+    if (!footballTabCache.data && allMatches && allMatches.length) {
+      footballTabCache.data = allMatches.slice();
+      footballTabCache.ts = Date.now();
+    }
+    if (!liveTabCache.data) {
+      loadMatches('live', true).catch(() => {});
+    }
+  }, 900);
+
   // Render the slip's actual content now — previously only user actions (adding/
   // removing a pick) triggered this, so a slip restored from storage on a fresh
   // page load never got painted into the modal. openSlip() below only toggles
@@ -1733,10 +1746,13 @@ function noMatchesHTML(icon,title,sub){
 // ── SPORT CATEGORY TABS ──
 let currentCat = 'featured';
 let srchTimer = null;
-// Non-football tabs keep their last good list in memory. This makes switching
-// Basketball -> Tennis -> Basketball instant instead of showing a fresh spinner.
+// Every main tab keeps its last good list in memory. Switching tabs must render
+// the existing DOM/data first, then refresh silently. This is what makes
+// Highlights -> Basketball -> Football -> Live -> Highlights effectively instant.
 const sportTabCache = new Map();
 const sportTabRequests = new Map();
+const footballTabCache = { data:null, ts:0 };
+const liveTabCache = { data:null, ts:0 };
 
 function pickCat(el) {
   document.querySelectorAll('.sp-tab').forEach(t => t.classList.remove('on'));
@@ -1750,6 +1766,8 @@ function pickCat(el) {
   document.getElementById('mkts').style.display = showFilters ? 'flex' : 'none';
 
   clearSearch();
+  // IMPORTANT: do not clear #matchList here. loadCat() is cache-first and
+  // paints an already-loaded tab synchronously before any network refresh.
   loadCat(currentCat);
 }
 
@@ -1823,24 +1841,53 @@ function showComingSoon(label, icon) {
 
 async function loadCat(cat) {
   const el = document.getElementById('matchList');
-  el.innerHTML = '<div class="loading"><div class="spin"></div>Loading...</div>';
 
-  if (cat === 'featured') { await loadAllMatches(); return; }
-  if (cat === 'live') { await loadMatches('live'); return; }
+  // NEVER put a loading screen over an already-loaded tab. Paint from memory
+  // first (same JS turn), then let the network update happen silently.
+  if (cat === 'featured') {
+    if (allMatches && allMatches.length) {
+      applyFilters(true);
+      loadAllMatches(true).catch(() => {});
+    } else {
+      loadAllMatches(false);
+    }
+    return;
+  }
+
+  if (cat === 'live') {
+    if (liveTabCache.data && liveTabCache.data.length) {
+      renderMatches(liveTabCache.data, true);
+      loadMatches('live', true).catch(() => {});
+    } else {
+      // localStorage cache inside loadMatches is still allowed on a cold tab.
+      loadMatches('live', false);
+    }
+    return;
+  }
 
   if (cat === 'football') {
-    try {
-      const r = await fetch('/api/sports/football');
-      const d = await r.json();
-      if (d.success && d.data.length) { allMatches = d.data; applyFilters(); }
-      else el.innerHTML = noMatchesHTML('⚽','No football matches right now','Check back soon');
-    } catch(e) { el.innerHTML = noMatchesHTML('⚽','Failed to load','Check connection'); }
+    if (footballTabCache.data && footballTabCache.data.length) {
+      allMatches = footballTabCache.data;
+      applyFilters(true);
+      refreshFootballTab(true).catch(() => {});
+      return;
+    }
+    if (allMatches && allMatches.length) {
+      // Highlights already loaded the exact same football feed. Reuse it
+      // immediately instead of making Football wait for another request.
+      footballTabCache.data = allMatches.slice();
+      footballTabCache.ts = Date.now();
+      applyFilters(true);
+      refreshFootballTab(true).catch(() => {});
+      return;
+    }
+    el.innerHTML = '<div class="loading"><div class="spin"></div>Loading Football...</div>';
+    refreshFootballTab(false).catch(() => {});
     return;
   }
 
   // Non-football sports come directly from SofaBets. If this sport was already
-  // opened, paint the existing games immediately and refresh silently. The
-  // user should never see a loading spinner just because they changed tabs.
+  // opened, paint the existing games immediately and refresh silently.
   const cachedSport = sportTabCache.get(cat);
   if (cachedSport?.length) {
     renderNonFootball(cachedSport);
@@ -1860,15 +1907,12 @@ async function loadCat(cat) {
       if (!d.success) throw new Error(d.message || 'SofaBets sport feed failed');
       if (Array.isArray(d.data) && d.data.length) {
         sportTabCache.set(cat, d.data);
-        // Only repaint if the user is still looking at this sport.
         if (currentCat === cat) renderNonFootball(d.data);
       } else if (!cachedSport && currentCat === cat) {
         const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
         showComingSoon(cat.charAt(0).toUpperCase()+cat.slice(1), icons[cat]||'🏆');
       }
     } catch(e) {
-      // Keep any good list already on screen. Only show an error/empty state on
-      // a genuine cold load, and let the next background refresh try again.
       if (!cachedSport && currentCat === cat) {
         const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
         el.innerHTML = noMatchesHTML(icons[cat]||'🏆', `${cat.charAt(0).toUpperCase()+cat.slice(1)} is loading`, 'Please try again in a moment');
@@ -1878,6 +1922,27 @@ async function loadCat(cat) {
     }
   })();
   sportTabRequests.set(cat, request);
+}
+
+// Football uses the exact same direct SofaBets-powered feed as Highlights.
+// Keep it separately cached so Football is also a zero-wait tab after the
+// first Highlights load.
+async function refreshFootballTab(silent=false){
+  try {
+    const r = await fetch('/api/sports/football', { cache:'no-store' });
+    const d = await r.json();
+    if (d.success && Array.isArray(d.data) && d.data.length) {
+      footballTabCache.data = d.data;
+      footballTabCache.ts = Date.now();
+      if (currentCat === 'football') {
+        allMatches = d.data;
+        applyFilters(!!silent);
+      }
+    }
+  } catch(e) {
+    // Never destroy an already-rendered football list because a background
+    // refresh failed. The next refresh will try again.
+  }
 }
 
 // Render non-football matches from the direct SofaBets feed.
@@ -2083,6 +2148,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     }
 
     renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
     try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
