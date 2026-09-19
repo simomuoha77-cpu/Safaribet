@@ -151,8 +151,8 @@ router.get('/live', async (req, res) => {
     // Critical path: football only. This returns as soon as the first useful
     // live feed is ready instead of waiting for basketball/tennis/cricket/etc.
     // to finish their much larger fixture catalogues.
-    const footballRaw = await sofaBets.getMatchesForDate(today, { sport:'football', fast:true });
-    const initial = buildLive('football', footballRaw);
+    const footballLiveRaw = await sofaBets.getLiveFootballFixtures();
+    const initial = buildLive('football', footballLiveRaw);
 
     // Include any non-football live games already warmed in the category cache.
     for (const sport of Object.keys(SPORT_CONFIG)) {

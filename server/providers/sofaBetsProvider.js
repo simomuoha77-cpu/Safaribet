@@ -623,7 +623,7 @@ async function getMatchesForDate(dateStr, options) {
   const todayNairobi = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date());
-  if (sportId === FOOTBALL_SPORT_ID && dateStr === todayNairobi) {
+  if (sportId === FOOTBALL_SPORT_ID && dateStr === todayNairobi && !options.fast) {
     const live = await fetchLiveFootballFixtures();
     const seen = new Set(result.map(m => String(m.providerMatchId)));
     const liveById = new Map(live.map(m => [String(m.providerMatchId), m]));
@@ -652,4 +652,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getLiveFootballFixtures: fetchLiveFootballFixtures };
