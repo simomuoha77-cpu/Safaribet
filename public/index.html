@@ -1276,18 +1276,24 @@ window.addEventListener('DOMContentLoaded', ()=>{
   loadLeagueOptions();
   loadSportTabs();
 
-  // Warm Football + Live quietly after the initial Highlights paint. If the
-  // user taps either tab later, the games are already in memory and render in
-  // the same frame; the network only refreshes them afterward.
-  setTimeout(() => {
-    if (!footballTabCache.data && allMatches && allMatches.length) {
-      footballTabCache.data = allMatches.slice();
-      footballTabCache.ts = Date.now();
-    }
-    if (!liveTabCache.data) {
-      loadMatches('live', true).catch(() => {});
-    }
-  }, 900);
+  // Warm Football + Live immediately, in parallel with the initial Highlights
+  // request. LIVE must already be in memory before the user taps the tab; do
+  // not make the click wait for a fresh network request. Nothing else in the
+  // tab/loading logic is changed.
+  if (!footballTabCache.data && allMatches && allMatches.length) {
+    footballTabCache.data = allMatches.slice();
+    footballTabCache.ts = Date.now();
+  }
+  if (!liveTabCache.data) {
+    try {
+      const cachedLive = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
+      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < 600000) {
+        liveTabCache.data = cachedLive.data;
+        liveTabCache.ts = cachedLive.ts;
+      }
+    } catch(e) {}
+  }
+  loadMatches('live', true).catch(() => {});
 
   // Render the slip's actual content now — previously only user actions (adding/
   // removing a pick) triggered this, so a slip restored from storage on a fresh
