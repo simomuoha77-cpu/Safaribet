@@ -178,6 +178,26 @@ function renderMarkets(){
   };
 
   container.innerHTML = markets.map(mk => {
+    // SofaBets-native markets are real provider prices. They are displayed
+    // exactly as supplied by SofaBets; unsupported provider markets remain
+    // view-only so SafariBet never accepts a bet it cannot settle safely.
+    if (mk.providerMarket) {
+      return `
+      <div class="market-card">
+        <div class="market-hd">
+          <span class="market-name">${escapeHtml(mk.label)}</span>
+          <span style="font-size:9px;color:var(--g);font-weight:700">SOFABETS</span>
+        </div>
+        <div class="market-body">
+          ${mk.options.map(opt => `
+            <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${Number(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}')\"` : ''}>
+              <div class="odd-lbl">${escapeHtml(opt.pickLabel || opt.pick)}</div>
+              <div class="odd-val">${Number(opt.boostedOdds || opt.odds).toFixed(2)}</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
     // Whole market suspended (every outcome locked) — show one clear banner
     // instead of a row of individually greyed-out buttons. This is the exact
     // "🔒 Odds Updating" state: temporary if it's a stale-data/goal-event
@@ -206,13 +226,13 @@ function renderMarkets(){
       <div class="market-body">
         ${mk.options.map(opt => opt.suspended ? `
           <div class="odd-btn" style="opacity:.5;cursor:default" onclick="event.stopPropagation()" title="${REASON_LABELS[opt.reason] || 'Selection suspended'}">
-            <div class="odd-lbl">${pickLabel(mk.market, opt.pick)}</div>
+            <div class="odd-lbl">${escapeHtml(opt.pickLabel || pickLabel(mk.market, opt.pick))}</div>
             <div class="odd-val">🔒</div>
           </div>
         ` : `
           <div class="odd-btn ${opt.boostedOdds?'boosted':''}" id="mkt_${mk.market}_${opt.pick}" onclick="toggleMarketPick('${mk.market}','${opt.pick}',${opt.boostedOdds||opt.odds},'${escapeAttr(pickLabel(mk.market,opt.pick))}')">
             ${opt.boostedOdds ? '<div class="boost-flag">⚡ BOOST</div>' : ''}
-            <div class="odd-lbl">${pickLabel(mk.market, opt.pick)}</div>
+            <div class="odd-lbl">${escapeHtml(opt.pickLabel || pickLabel(mk.market, opt.pick))}</div>
             ${opt.boostedOdds
               ? `<div class="odd-val-old">${opt.odds.toFixed(2)}</div><div class="odd-val boosted-val">${opt.boostedOdds.toFixed(2)}</div>`
               : `<div class="odd-val">${opt.odds.toFixed(2)}</div>`}
@@ -245,6 +265,7 @@ function pickLabel(market, pick){
   return LABELS[market]?.[pick] || pick;
 }
 
+function escapeHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 function escapeAttr(s){ return String(s).replace(/'/g, "\\'"); }
 
 let mode = 'slip';

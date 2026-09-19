@@ -8,6 +8,7 @@ const { requireAdmin } = require('../utils/adminAuth');
 const safeError = require('../utils/safeError');
 const Match   = require('../models/Match');
 const { getFixtures, getLive, competitionKey } = require('../engine/apifootball');
+const sofaBets = require('../providers/sofaBetsProvider');
 const router  = express.Router();
 
 // Short request-coalescing cache to avoid duplicate upstream calls within the
@@ -303,10 +304,106 @@ router.get('/history/:matchId', async (req, res) => {
 // frontend can show a clear "estimated, not live bookmaker odds" indicator.
 router.get('/match/:matchId', async (req, res) => {
   try {
-    const m = await Match.findOne({ matchId: req.params.matchId }).lean();
+    let m = await Match.findOne({ matchId: req.params.matchId }).lean();
+
+    // Non-football SofaBets tabs are served directly and are not persisted in
+    // the football Match collection. Allow the same More markets page to work
+    // for tennis, basketball, cricket, rugby, hockey, volleyball and handball.
+    if (!m && String(req.params.matchId).startsWith('sofabets_')) {
+      const parts = String(req.params.matchId).split('_');
+      const isLiveId = parts[1] === 'live';
+      const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
+      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
+      const direct = await sofaBets.getMatchById(providerId, sport);
+      if (direct && direct.homeTeam && direct.awayTeam) {
+        m = {
+          matchId: req.params.matchId,
+          sport,
+          league: direct.competition || sport,
+          homeTeam: direct.homeTeam,
+          awayTeam: direct.awayTeam,
+          commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
+          status: String(direct.status || '').toUpperCase() === 'IN_PLAY' ? 'live' : 'upcoming',
+          odds: {
+            home: Number(direct.odds?.homeWin) || null,
+            draw: Number(direct.odds?.draw) || null,
+            away: Number(direct.odds?.awayWin) || null,
+            updatedAt: new Date()
+          },
+          hasOdds: !!direct.odds,
+          score: {
+            home: direct.score?.fullTime?.home ?? null,
+            away: direct.score?.fullTime?.away ?? null,
+            minute: direct.minute ?? null,
+            period: direct.status || null
+          },
+          markets: direct.markets || [],
+          bookmakers: direct.bookmakers || [],
+          providerOdds: direct.odds || null,
+          providerSource: 'sofabets',
+          realOddsSource: 'SofaBets'
+        };
+      }
+    }
+
     if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    const { resolveOdds, isPickSuspended, getSuspensionReason, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
+    // A normal fixture sync intentionally loads the fast Match Result market.
+    // Fetch the complete SofaBets market catalogue only when the user opens
+    // More markets. This keeps the homepage/live tabs fast while the detail
+    // page gets the same rich market list shown by SofaBets.
+    let providerMarkets = Array.isArray(m.markets) ? m.markets : [];
+    if (String(m.providerSource || '').toLowerCase() === 'sofabets' || String(req.params.matchId).startsWith('sofabets_')) {
+      const providerId = String(req.params.matchId).replace(/^sofabets_(?:live_)?/, '');
+      if (providerMarkets.length < 6) {
+        try {
+          const sportKeys = new Set(['football','basketball','tennis','cricket','rugby','hockey','volleyball','handball']);
+          const providerSport = sportKeys.has(String(m.sport || '').toLowerCase()) ? String(m.sport).toLowerCase() : 'football';
+          const detail = await sofaBets.getMatchMarkets(providerId, providerSport);
+          if (detail.markets.length > providerMarkets.length) {
+            providerMarkets = detail.markets;
+            m = { ...m, markets: providerMarkets, bookmakers: detail.bookmakers };
+            // Store the rich catalogue so reopening the same match is instant.
+            if (m.matchId) {
+              await Match.updateOne({ matchId: m.matchId }, {
+                $set: { markets: providerMarkets, bookmakers: detail.bookmakers || [] }
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('[odds/match] SofaBets markets unavailable:', e.message);
+        }
+      }
+    }
+
+    const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
+
+    // Provider-native markets are the source of truth for the More markets
+    // page. They are intentionally kept separate from SafariBet's legacy
+    // synthetic market resolver so we never invent bookmaker prices.
+    const richMarkets = providerMarkets.map((mk, index) => {
+      const options = (mk.selections || [])
+        .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
+        .map(o => ({
+          pick: String(o.key),
+          odds: Number(o.odds),
+          pickLabel: String(o.name || o.key),
+          bettable: false,
+          providerMarket: true
+        }));
+      if (!options.length) return null;
+      return {
+        market: 'sb:' + String(mk.key || ('market_' + index)),
+        label: String(mk.name || 'Market'),
+        isSynthetic: false,
+        providerMarket: true,
+        bookmaker: mk.bookmaker || 'SofaBets',
+        hasSuspendedPick: false,
+        wholeMarketSuspended: false,
+        options
+      };
+    }).filter(Boolean);
+
     const MARKETS = [
       { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
       { market: 'dc',       label: 'Double Chance',       picks: ['dc_1x','dc_x2','dc_12'] },
@@ -315,39 +412,38 @@ router.get('/match/:matchId', async (req, res) => {
       { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] }
     ];
 
-    const markets = MARKETS.map(def => {
+    const legacyMarkets = MARKETS.map(def => {
       let anySuspended = false;
-      const options = def.picks
-        .map(pick => {
-          const reason = getSuspensionReason(m, def.market, pick);
-          if (reason) { anySuspended = true; return { pick, suspended: true, reason }; }
-          const resolved = resolveOdds(m, def.market, pick);
-          if (!resolved) return null; // genuinely no data for this pick — omit it entirely
-          return { pick, odds: resolved.odds };
-        })
-        .filter(Boolean);
-      if (!options.length) return null; // nothing at all to show for this market — hide it entirely
+      const options = def.picks.map(pick => {
+        const reason = require('../services/marketResolver').getSuspensionReason(m, def.market, pick);
+        if (reason) { anySuspended = true; return { pick, suspended: true, reason }; }
+        const resolved = resolveOdds(m, def.market, pick);
+        if (!resolved) return null;
+        return { pick, odds: resolved.odds, bettable: true };
+      }).filter(Boolean);
+      if (!options.length) return null;
       return {
         market: def.market,
         label: def.label,
         isSynthetic: !REAL_MARKETS.has(def.market),
         hasSuspendedPick: anySuspended,
-        // Whole market is suspended (every outcome locked) — frontend shows a
-        // single "🔒 Odds Updating" banner instead of per-button locks for this.
         wholeMarketSuspended: isMarketSuspended(m, def.market),
         options
       };
     }).filter(Boolean);
 
-    // Attach any active odds boosts so the frontend can show the promotional
-    // price and the stake cap it applies up to.
+    // When SofaBets supplied its real catalogue, show that catalogue only.
+    // Otherwise retain the existing SafariBet markets as a safe fallback.
+    const markets = richMarkets.length ? richMarkets : legacyMarkets;
+
+    // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');
     const boosts = await OddsBoost.find({
       matchId: req.params.matchId, active: true,
       $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
     }).lean();
     for (const boost of boosts) {
-      const mk = markets.find(mk => mk.market === boost.market);
+      const mk = markets.find(x => x.market === boost.market);
       if (!mk) continue;
       const opt = mk.options.find(o => o.pick === boost.pick);
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }

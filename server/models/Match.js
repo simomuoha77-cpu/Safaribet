@@ -35,6 +35,13 @@ const matchSchema = new mongoose.Schema({
     // score-margin based suspension rules. See server/services/marketResolver.js.
     lastGoalAt: { type: Date, default: null }
   },
+  // Provider-native SofaBets markets. Stored as Mixed because market
+  // names/options differ by sport (football, tennis, basketball, etc.).
+  // This preserves the real bookmaker markets instead of reducing every
+  // sport to SafariBet's small legacy 1X2 set.
+  markets:   { type: mongoose.Schema.Types.Mixed, default: [] },
+  bookmakers:{ type: mongoose.Schema.Types.Mixed, default: [] },
+  providerOdds: { type: mongoose.Schema.Types.Mixed, default: null },
   aiOdds: {
     homeWin:      { type: Number, default: null },
     draw:         { type: Number, default: null },

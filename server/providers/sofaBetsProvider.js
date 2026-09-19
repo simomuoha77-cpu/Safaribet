@@ -346,6 +346,161 @@ function parseStatus(raw, utcDate) {
   return 'SCHEDULED';
 }
 
+function extractMarketArrays(root) {
+  const found = [];
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length) {
+    const node = queue.shift();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      const marketLike = node.filter(x => x && typeof x === 'object' && (
+        x.outcomes || x.selections || x.options || x.choices || x.bets || x.betOffers ||
+        x.marketType || x.marketName || x.market_name
+      ));
+      if (marketLike.length >= 1 && marketLike.length >= Math.min(3, node.length)) found.push(...marketLike);
+      for (const v of node) if (v && typeof v === 'object') queue.push(v);
+      continue;
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (v && typeof v === 'object') {
+        if (['markets','market','betOffers','betoffers','odds','choices'].includes(k) && Array.isArray(v)) {
+          found.push(...v);
+        }
+        queue.push(v);
+      }
+    }
+  }
+  const dedupe = new Map();
+  for (const m of found) {
+    if (!m || typeof m !== 'object') continue;
+    const key = String(pick(m, ['id','key','marketId','market_id','type','name','marketType','marketName']) || JSON.stringify(m).slice(0,180));
+    if (!dedupe.has(key)) dedupe.set(key, m);
+  }
+  return Array.from(dedupe.values());
+}
+
+function normalizeMarketList(payload) {
+  const raw = extractMarketArrays(payload);
+  return raw.map((market, index) => {
+    const selections = market.outcomes || market.selections || market.options || market.choices || market.bets || market.betOffers || [];
+    const normalizedSelections = Array.isArray(selections) ? selections.map((selection, si) => {
+      if (!selection || typeof selection !== 'object') return null;
+      const price = pick(selection, ['odds','odd','price','value','decimalOdds','decimalValue','decimal_value','oddsDecimal']);
+      const n = Number(price);
+      return {
+        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId']) || ('selection_' + si)),
+        name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
+        odds: Number.isFinite(n) ? n : null,
+        bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
+      };
+    }).filter(Boolean) : [];
+    return {
+      key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
+      name: String(pick(market, ['name','marketType','marketName','market_name','type','title']) || 'Market'),
+      selections: normalizedSelections,
+      bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
+    };
+  }).filter(m => m.selections.some(s => Number.isFinite(s.odds)));
+}
+
+const matchMarketsCache = new Map();
+
+async function getMatchMarkets(providerMatchId, sportName = 'football') {
+  const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
+  const cached = matchMarketsCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 60000) return cached.data;
+  const id = String(providerMatchId || '').trim();
+  if (!id) return { markets: [], bookmakers: [] };
+  const name = String(sportName || 'football').toLowerCase();
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  const detailPaths = [
+    `/api/fixture/${encodeURIComponent(id)}`,
+    `/api/fixtures/${encodeURIComponent(id)}`,
+    `/api/match/${encodeURIComponent(id)}`,
+    `/api/matches/${encodeURIComponent(id)}`,
+    `/api/event/${encodeURIComponent(id)}`,
+    `/api/events/${encodeURIComponent(id)}`,
+    `/api/fixture/${encodeURIComponent(id)}/markets`,
+    `/api/fixtures/${encodeURIComponent(id)}/markets`
+  ];
+  const queries = [
+    {},
+    { include: 'markets' },
+    { marketType: 'all' },
+    { markets: 'all' }
+  ];
+
+  for (const base of BASES) {
+    for (const path of detailPaths) {
+      for (const query of queries) {
+        try {
+          const payload = await sofaFetch(base, path, query);
+          const markets = normalizeMarketList(payload);
+          if (markets.length) {
+            const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+            const data = { markets, bookmakers, base, path };
+            matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
+            return data;
+          }
+        } catch (_) {}
+      }
+    }
+    // Some deployments expose only the catalogue endpoint. Ask it for the
+    // exact fixture without the match-result filter so the full market list is
+    // returned when that backend supports fixtureId/eventId filtering.
+    for (const sportId of candidates) {
+      try {
+        const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
+          sportId: String(sportId), fixtureId: id, eventId: id, matchId: id, page: '1', limit: '1'
+        });
+        const items = extractItems(payload);
+        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id) || items[0];
+        const markets = normalizeMarketList(item || payload);
+        if (markets.length) {
+          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+          return { markets, bookmakers, base, path: '/api/fixtures-by-sport' };
+        }
+      } catch (_) {}
+    }
+  }
+  const empty = { markets: [], bookmakers: [] };
+  matchMarketsCache.set(cacheKey, { ts: Date.now(), data: empty });
+  return empty;
+}
+
+async function getMatchById(providerMatchId, sportName = 'football') {
+  const id = String(providerMatchId || '').trim();
+  if (!id) return null;
+  const details = await getMatchMarkets(id, sportName);
+  // Re-use the normal fixture catalogue as a safe fallback for the match
+  // metadata; the detail call above supplies the richer market list.
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[String(sportName).toLowerCase()] || []), SPORT_IDS[String(sportName).toLowerCase()]].filter(Number.isFinite)));
+  for (const sportId of candidates) {
+    for (const base of BASES) {
+      try {
+        const payload = await sofaFetch(base, '/api/fixtures-by-sport', { sportId: String(sportId), fixtureId: id, page: '1', limit: '1' });
+        const items = extractItems(payload);
+        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id) || items[0];
+        if (item) {
+          const normalized = safeNormalizeMatch(item);
+          if (normalized) {
+            if (details.markets.length) {
+              normalized.markets = details.markets;
+              normalized.bookmakers = details.bookmakers;
+              normalized.odds = normalized.odds || { markets: details.markets, bookmakers: details.bookmakers };
+              if (normalized.odds && !normalized.odds.markets) normalized.odds.markets = details.markets;
+            }
+            return normalized;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+  return details.markets.length ? { providerMatchId: id, markets: details.markets, bookmakers: details.bookmakers } : null;
+}
+
 function normalizeMatch(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -467,16 +622,13 @@ function normalizeMatch(raw) {
   const hasScore = !!parsedScore;
 
   const odds = parseOdds(source, home, away);
-  const rawMarkets = [];
-  for (const key of ['markets', 'odds', 'market', 'betOffers', 'betoffers']) {
-    if (Array.isArray(source[key])) rawMarkets.push(...source[key]);
-  }
+  const rawMarkets = extractMarketArrays(source);
   const markets = rawMarkets.map((market, index) => {
     if (!market || typeof market !== 'object') return null;
-    const selections = market.outcomes || market.selections || market.options || market.betOffers || [];
+    const selections = market.outcomes || market.selections || market.options || market.choices || market.bets || market.betOffers || [];
     const normalizedSelections = Array.isArray(selections) ? selections.map((selection, si) => {
       if (!selection || typeof selection !== 'object') return null;
-      const price = pick(selection, ['odds', 'odd', 'price', 'value', 'decimalOdds']);
+      const price = pick(selection, ['odds', 'odd', 'price', 'value', 'decimalOdds', 'decimalValue', 'decimal_value', 'oddsDecimal']);
       return {
         key: String(pick(selection, ['id', 'key', 'selectionId', 'selection_id', 'name', 'label']) || ('selection_' + si)),
         name: String(pick(selection, ['name', 'label', 'selectionName', 'selection_name', 'outcomeName']) || ('Selection ' + (si + 1))),
@@ -713,4 +865,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures };
