@@ -83,6 +83,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <button class="mode-btn" id="modeBtnBuilder" onclick="setMode('builder')">🧩 Bet Builder</button>
 </div>
 
+<div id="marketSummary" style="padding:8px 12px 0;color:var(--mt);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px"></div>
 <div class="main" id="marketsContainer"></div>
 
 <div class="slip-bar" id="slipBar" onclick="location.href='/?openSlip=1'">
@@ -110,6 +111,23 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 const matchId = sessionStorage.getItem('currentMatchId') || new URLSearchParams(location.search).get('id');
 let matchData = null;
 let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
+
+// SafariBet is the customer-facing brand. Never expose the upstream provider
+// name in the visible match UI, even if an old cached response contains it.
+function scrubProviderBrand(){
+  const root = document.body;
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    if (/SOFABETS/i.test(node.nodeValue || '')) {
+      node.nodeValue = String(node.nodeValue).replace(/SOFABETS/gi, 'SAFARIBET');
+    }
+  }
+}
+new MutationObserver(scrubProviderBrand).observe(document.body, { childList:true, subtree:true, characterData:true });
+
 
 if (!matchId) {
   document.getElementById('matchHeader').innerHTML = '<div class="loading">No match specified. <a href="/" style="color:var(--g)">Go back home</a></div>';
@@ -185,6 +203,8 @@ function renderHeader(){
 function renderMarkets(){
   const markets = matchData.markets || [];
   const container = document.getElementById('marketsContainer');
+  const summary = document.getElementById('marketSummary');
+  if (summary) summary.textContent = markets.length ? `SAFARIBET • ${markets.length} MARKETS` : '';
   if (!markets.length) {
     container.innerHTML = '<div class="loading">No odds available for this match right now.</div>';
     document.getElementById('modeToggle').style.display = 'none';

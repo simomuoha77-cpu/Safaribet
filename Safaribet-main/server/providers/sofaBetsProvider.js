@@ -346,6 +346,22 @@ function parseStatus(raw, utcDate) {
   return 'SCHEDULED';
 }
 
+function isMarketObject(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+  const hasSelections = node.outcomes || node.selections || node.options || node.choices || node.bets || node.betOffers;
+  if (!hasSelections) return false;
+  return !!pick(node, [
+    'marketId','market_id','marketType','marketName','market_name',
+    'name','title','type','key','id'
+  ]);
+}
+
+function toValueArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+
 function extractMarketArrays(root) {
   const found = [];
   const seen = new Set();
@@ -354,28 +370,35 @@ function extractMarketArrays(root) {
     const node = queue.shift();
     if (!node || typeof node !== 'object' || seen.has(node)) continue;
     seen.add(node);
+
+    // Some SofaBets responses return each market as an object instead of
+    // wrapping all markets in a `markets: []` array. The old parser missed
+    // those objects completely, which is why only Match Result survived.
+    if (isMarketObject(node)) found.push(node);
+
     if (Array.isArray(node)) {
-      const marketLike = node.filter(x => x && typeof x === 'object' && (
-        x.outcomes || x.selections || x.options || x.choices || x.bets || x.betOffers ||
-        x.marketType || x.marketName || x.market_name
-      ));
-      if (marketLike.length >= 1 && marketLike.length >= Math.min(3, node.length)) found.push(...marketLike);
       for (const v of node) if (v && typeof v === 'object') queue.push(v);
       continue;
     }
+
     for (const [k, v] of Object.entries(node)) {
-      if (v && typeof v === 'object') {
-        if (['markets','market','betOffers','betoffers','odds','choices'].includes(k) && Array.isArray(v)) {
-          found.push(...v);
-        }
+      if (!v || typeof v !== 'object') continue;
+      if (['markets','market','betOffers','betoffers','odds','choices','marketData','market_data'].includes(k)) {
+        for (const item of toValueArray(v)) if (item && typeof item === 'object') queue.push(item);
+      } else {
         queue.push(v);
       }
     }
   }
+
   const dedupe = new Map();
   for (const m of found) {
     if (!m || typeof m !== 'object') continue;
-    const key = String(pick(m, ['id','key','marketId','market_id','type','name','marketType','marketName']) || JSON.stringify(m).slice(0,180));
+    const id = pick(m, ['marketId','market_id','id','key']);
+    const name = pick(m, ['marketType','marketName','market_name','name','title','type']);
+    const selections = toValueArray(m.outcomes || m.selections || m.options || m.choices || m.bets || m.betOffers);
+    if (!selections.length) continue;
+    const key = id != null ? String(id) : `${String(name || 'market')}|${selections.map(x => String(pick(x, ['id','key','name','label','selectionName']) || '')).join('|')}`;
     if (!dedupe.has(key)) dedupe.set(key, m);
   }
   return Array.from(dedupe.values());
@@ -384,21 +407,27 @@ function extractMarketArrays(root) {
 function normalizeMarketList(payload) {
   const raw = extractMarketArrays(payload);
   return raw.map((market, index) => {
-    const selections = market.outcomes || market.selections || market.options || market.choices || market.bets || market.betOffers || [];
-    const normalizedSelections = Array.isArray(selections) ? selections.map((selection, si) => {
+    const selections = toValueArray(market.outcomes || market.selections || market.options || market.choices || market.bets || market.betOffers);
+    const normalizedSelections = selections.map((selection, si) => {
       if (!selection || typeof selection !== 'object') return null;
-      const price = pick(selection, ['odds','odd','price','value','decimalOdds','decimalValue','decimal_value','oddsDecimal']);
-      const n = Number(price);
+      const priceValue = pick(selection, [
+        'odds','odd','price','value','decimalOdds','decimalValue','decimal_value',
+        'oddsDecimal','decimal','rate','coefficient'
+      ]);
+      const priceObject = priceValue && typeof priceValue === 'object'
+        ? pick(priceValue, ['decimal','value','odds','price','current'])
+        : priceValue;
+      const n = Number(priceObject);
       return {
-        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId']) || ('selection_' + si)),
-        name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
+        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId','outcomeId']) || ('selection_' + si)),
+        name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title','displayName']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
       };
-    }).filter(Boolean) : [];
+    }).filter(Boolean);
     return {
-      key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
-      name: String(pick(market, ['name','marketType','marketName','market_name','type','title']) || 'Market'),
+      key: String(pick(market, ['marketId','market_id','id','key','type']) || ('market_' + index)),
+      name: String(pick(market, ['name','marketType','marketName','market_name','type','title','displayName']) || 'Market'),
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
@@ -410,90 +439,84 @@ const matchMarketsCache = new Map();
 async function getMatchMarkets(providerMatchId, sportName = 'football') {
   const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
   const cached = matchMarketsCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 60000) return cached.data;
+  if (cached && Date.now() - cached.ts < 60000 && cached.data.markets.length >= 10) return cached.data;
+
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
   const name = String(sportName || 'football').toLowerCase();
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
-  const detailPaths = [
-    `/api/fixture/${encodeURIComponent(id)}`,
-    `/api/fixtures/${encodeURIComponent(id)}`,
-    `/api/match/${encodeURIComponent(id)}`,
-    `/api/matches/${encodeURIComponent(id)}`,
-    `/api/event/${encodeURIComponent(id)}`,
-    `/api/events/${encodeURIComponent(id)}`,
-    `/api/fixture/${encodeURIComponent(id)}/markets`,
-    `/api/fixtures/${encodeURIComponent(id)}/markets`
-  ];
-  const queries = [
-    {},
-    { include: 'markets' },
-    { marketType: 'all' },
-    { markets: 'all' }
-  ];
 
-  let best = null;
-
-  // IMPORTANT: a normal fixture/detail endpoint may legally return only the
-  // main Match Result market. Do NOT stop at the first market list. Search
-  // for the richest catalogue and keep the largest one we find.
+  // The provider has more than one fixture/detail endpoint. Some return only
+  // Match Result while another returns the complete market catalogue. We must
+  // compare responses and keep the RICHEST exact-match response — never stop
+  // at the first response containing a few markets.
+  const detailRequests = [];
   for (const base of BASES) {
-    for (const path of detailPaths) {
-      for (const query of queries) {
-        try {
-          const payload = await sofaFetch(base, path, query);
-          const markets = normalizeMarketList(payload);
-          if (!markets.length) continue;
-          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-          const data = { markets, bookmakers, base, path };
-          if (!best || markets.length > best.markets.length) best = data;
-          // A rich fixture catalogue is normally far above the single main
-          // market. Once we have a genuinely rich response, use it immediately.
-          if (markets.length >= 6) {
-            matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
-            return data;
-          }
-        } catch (_) {}
+    for (const path of [
+      `/api/fixture/${encodeURIComponent(id)}/markets`,
+      `/api/fixtures/${encodeURIComponent(id)}/markets`,
+      `/api/fixture/${encodeURIComponent(id)}`,
+      `/api/fixtures/${encodeURIComponent(id)}`,
+      `/api/match/${encodeURIComponent(id)}`,
+      `/api/matches/${encodeURIComponent(id)}`,
+      `/api/event/${encodeURIComponent(id)}`,
+      `/api/events/${encodeURIComponent(id)}`
+    ]) {
+      for (const query of [{markets:'all'}, {marketType:'all'}, {include:'markets'}, {}]) {
+        detailRequests.push({ base, path, query });
       }
-    }
-    // Some SofaBets deployments expose the complete market catalogue through
-    // the normal fixture feed when the market filter is removed or set to
-    // `all`. Try the exact fixture id first, then the common aliases. NEVER
-    // accept the first returned fixture unless its id actually matches the
-    // requested match — that can otherwise display another game's markets.
-    const catalogueQueries = [];
-    for (const sportId of candidates) {
-      for (const idKey of ['fixtureId', 'eventId', 'matchId']) {
-        for (const marketKey of ['marketType', 'markets', 'market']) {
-          const q = { sportId: String(sportId), page: '1', limit: '100', [idKey]: id };
-          q[marketKey] = 'all';
-          catalogueQueries.push(q);
-        }
-        catalogueQueries.push({ sportId: String(sportId), page: '1', limit: '100', [idKey]: id, include: 'markets' });
-      }
-      catalogueQueries.push({ sportId: String(sportId), page: '1', limit: '100', marketType: 'all' });
-    }
-
-    for (const query of catalogueQueries) {
-      try {
-        const payload = await sofaFetch(base, '/api/fixtures-by-sport', query);
-        const items = extractItems(payload);
-        const exact = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
-        const candidatesToParse = exact.length ? exact : [payload];
-        for (const item of candidatesToParse) {
-          const markets = normalizeMarketList(item);
-          if (!markets.length) continue;
-          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-          const data = { markets, bookmakers, base, path: '/api/fixtures-by-sport' };
-          if (!best || markets.length > best.markets.length) best = data;
-          if (markets.length >= 6) {
-            matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
-            return data;
-          }
-        }
-      } catch (_) {}
     }
   }
+
+  // Also try the normal fixture feed with an exact fixture/event/match id.
+  for (const base of BASES) {
+    for (const sportId of candidates) {
+      for (const idKey of ['fixtureId','eventId','matchId']) {
+        for (const marketKey of ['marketType','markets','market']) {
+          const q = { sportId: String(sportId), page:'1', limit:'100', [idKey]: id, [marketKey]:'all' };
+          detailRequests.push({ base, path:'/api/fixtures-by-sport', query:q });
+        }
+        detailRequests.push({ base, path:'/api/fixtures-by-sport', query:{sportId:String(sportId), page:'1', limit:'100', [idKey]:id, include:'markets'} });
+      }
+    }
+  }
+
+  let best = null;
+  // Limit concurrency so opening one match cannot hammer the upstream feed.
+  const concurrency = 6;
+  for (let i = 0; i < detailRequests.length; i += concurrency) {
+    const batch = detailRequests.slice(i, i + concurrency);
+    const results = await Promise.allSettled(batch.map(async ({base, path, query}) => {
+      const payload = await sofaFetch(base, path, query);
+      return { base, path, payload };
+    }));
+
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const { base, path, payload } = result.value;
+      const items = extractItems(payload);
+      const exactItems = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+      const sources = exactItems.length ? exactItems : [payload];
+
+      for (const source of sources) {
+        const markets = normalizeMarketList(source);
+        if (!markets.length) continue;
+        const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+        const data = { markets, bookmakers, base, path };
+        if (!best || markets.length > best.markets.length) {
+          best = data;
+          // Keep searching. A response with 6 markets is not enough — SofaBets
+          // currently advertises fixture catalogues with well over 100 markets.
+          console.log(`[sofaBetsProvider] richer markets for ${id}: ${markets.length} via ${path}`);
+        }
+      }
+    }
+
+    // Once we've found a genuinely large catalogue, the remaining aliases are
+    // unlikely to improve it and continuing would only add latency/upstream load.
+    if (best && best.markets.length >= 100) break;
+  }
+
   const finalData = best || { markets: [], bookmakers: [] };
   matchMarketsCache.set(cacheKey, { ts: Date.now(), data: finalData });
   return finalData;
