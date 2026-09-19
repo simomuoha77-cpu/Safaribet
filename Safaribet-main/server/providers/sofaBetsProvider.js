@@ -410,46 +410,25 @@ const matchMarketsCache = new Map();
 async function getMatchMarkets(providerMatchId, sportName = 'football') {
   const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
   const cached = matchMarketsCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 60000) return cached.data;
+  if (cached && Date.now() - cached.ts < 60000 && cached.data && cached.data.markets?.length) return cached.data;
 
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
 
   const name = String(sportName || 'football').toLowerCase();
-  const candidates = Array.from(new Set([
-    ...(SPORT_ID_CANDIDATES[name] || []),
-    SPORT_IDS[name]
-  ].filter(Number.isFinite)));
-
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
   let best = { markets: [], bookmakers: [], base: null, path: null };
 
-  function consider(payload, base, path, exactIdOnly = false) {
-    const items = extractItems(payload);
-    const sourceItems = exactIdOnly
-      ? items.filter(x => String(pick(x, [
-          'id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'
-        ])) === id)
-      : items;
+  const consider = (payload, base, path) => {
+    const markets = normalizeMarketList(payload);
+    if (!markets.length) return 0;
+    const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+    if (markets.length > best.markets.length) best = { markets, bookmakers, base, path };
+    return markets.length;
+  };
 
-    const candidatesToParse = sourceItems.length ? sourceItems : (exactIdOnly ? [] : [payload]);
-
-    for (const item of candidatesToParse) {
-      const markets = normalizeMarketList(item);
-      if (!markets.length) continue;
-
-      const bookmakers = Array.from(new Set(
-        markets.flatMap(m => [
-          m.bookmaker,
-          ...m.selections.map(s => s.bookmaker)
-        ].filter(Boolean))
-      ));
-
-      if (markets.length > best.markets.length) {
-        best = { markets, bookmakers, base, path };
-      }
-    }
-  }
-
+  // Search every plausible detail endpoint/query. We deliberately do NOT
+  // return the first result because that is commonly only Match Result.
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
@@ -459,66 +438,63 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
     `/api/events/${encodeURIComponent(id)}`,
     `/api/fixture/${encodeURIComponent(id)}/markets`,
     `/api/fixtures/${encodeURIComponent(id)}/markets`,
-    `/api/match/${encodeURIComponent(id)}/markets`,
-    `/api/matches/${encodeURIComponent(id)}/markets`,
     `/api/event/${encodeURIComponent(id)}/markets`,
-    `/api/events/${encodeURIComponent(id)}/markets`
+    `/api/match/${encodeURIComponent(id)}/markets`
   ];
-
-  // Do not stop at the first Match Result response. Different SofaBets
-  // deployments expose different levels of the catalogue on different
-  // aliases/queries, so keep the richest exact response.
   const queries = [
     {},
     { include: 'markets' },
     { include: 'all' },
     { marketType: 'all' },
-    { marketType: 'ALL' },
     { markets: 'all' },
-    { markets: '1' },
     { market: 'all' },
-    { allMarkets: 'true' },
-    { full: 'true' }
+    { marketType: 'ALL' },
+    { markets: 'ALL' },
+    { includeMarkets: 'true' },
+    { includeAllMarkets: 'true' },
+    { allMarkets: 'true' }
   ];
 
   for (const base of BASES) {
     for (const path of detailPaths) {
       for (const query of queries) {
         try {
-          const payload = await sofaFetch(base, path, query);
-          consider(payload, base, path, false);
+          await sofaFetch(base, path, query).then(payload => consider(payload, base, path));
         } catch (_) {}
       }
     }
 
+    // Catalogue endpoint: require an exact ID match. Try each ID alias and
+    // market-expansion flag rather than accepting the first fixture returned.
     for (const sportId of candidates) {
-      const ids = ['fixtureId', 'eventId', 'matchId'];
-
-      for (const idKey of ids) {
-        const queries2 = [
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000' },
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000', marketType: 'all' },
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000', markets: 'all' },
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000', market: 'all' },
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000', include: 'markets' },
-          { sportId: String(sportId), [idKey]: id, page: '1', limit: '1000', include: 'all' }
-        ];
-
-        for (const query of queries2) {
+      for (const idKey of ['fixtureId', 'eventId', 'matchId']) {
+        for (const marketKey of ['marketType', 'markets', 'market']) {
+          for (const value of ['all', 'ALL']) {
+            try {
+              const q = { sportId: String(sportId), page: '1', limit: '1000', [idKey]: id, [marketKey]: value };
+              const payload = await sofaFetch(base, '/api/fixtures-by-sport', q);
+              const items = extractItems(payload);
+              const exact = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+              for (const item of exact) consider(item, base, '/api/fixtures-by-sport');
+            } catch (_) {}
+          }
+        }
+        for (const include of ['markets', 'all']) {
           try {
-            const payload = await sofaFetch(base, '/api/fixtures-by-sport', query);
-            consider(payload, base, '/api/fixtures-by-sport', true);
+            const q = { sportId: String(sportId), page: '1', limit: '1000', [idKey]: id, include };
+            const payload = await sofaFetch(base, '/api/fixtures-by-sport', q);
+            const items = extractItems(payload);
+            const exact = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+            for (const item of exact) consider(item, base, '/api/fixtures-by-sport');
           } catch (_) {}
         }
       }
     }
   }
 
-  const data = best.markets.length
-    ? best
-    : { markets: [], bookmakers: [] };
-
+  const data = best.markets.length ? best : { markets: [], bookmakers: [] };
   matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
+  console.log(`[sofaBetsProvider] rich markets ${id}: ${data.markets.length}`);
   return data;
 }
 
