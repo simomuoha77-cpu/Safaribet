@@ -354,12 +354,13 @@ router.get('/match/:matchId', async (req, res) => {
     // page gets the same rich market list shown by SofaBets.
     let providerMarkets = Array.isArray(m.markets) ? m.markets : [];
     if ((String(m.providerSource || '').toLowerCase() === 'sofabets' || String(req.params.matchId).startsWith('sofabets_')) && req.query.rich === '1') {
-      const providerId = String(req.params.matchId).replace(/^sofabets_(?:live_)?(?:football|basketball|tennis|cricket|rugby|hockey|volleyball|handball)_?/, '').replace(/^sofabets_(?:live_)?/, '');
-      try {
+      const providerId = String(req.params.matchId).replace(/^sofabets_(?:live_)?/, '');
+      if (providerMarkets.length < 6) {
+        try {
           const sportKeys = new Set(['football','basketball','tennis','cricket','rugby','hockey','volleyball','handball']);
           const providerSport = sportKeys.has(String(m.sport || '').toLowerCase()) ? String(m.sport).toLowerCase() : 'football';
           const detail = await sofaBets.getMatchMarkets(providerId, providerSport);
-          if (detail.markets.length > providerMarkets.length || (detail.markets.length && providerMarkets.length < 10)) {
+          if (detail.markets.length > providerMarkets.length) {
             providerMarkets = detail.markets;
             m = { ...m, markets: providerMarkets, bookmakers: detail.bookmakers };
             // Store the rich catalogue so reopening the same match is instant.
@@ -369,8 +370,9 @@ router.get('/match/:matchId', async (req, res) => {
               }).catch(() => {});
             }
           }
-      } catch (e) {
-        console.warn('[odds/match] SofaBets markets unavailable:', e.message);
+        } catch (e) {
+          console.warn('[odds/match] SofaBets markets unavailable:', e.message);
+        }
       }
     }
 
@@ -395,7 +397,7 @@ router.get('/match/:matchId', async (req, res) => {
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,
-        bookmaker: 'SafariBet',
+        bookmaker: mk.bookmaker || 'SofaBets',
         hasSuspendedPick: false,
         wholeMarketSuspended: false,
         options
