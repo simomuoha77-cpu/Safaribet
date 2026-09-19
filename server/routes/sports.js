@@ -159,32 +159,104 @@ router.get('/live', async (req, res) => {
   }
 });
 
+// Category cache is deliberately stale-while-revalidate. A sport tab must
+// never make the user wait for all upcoming dates just because they tapped it.
+// The first response is today's games; tomorrow/later games are merged in the
+// background. Once a sport has been opened once, switching tabs is effectively
+// instant because the existing list is returned before any upstream refresh.
+const SPORT_CATEGORY_TTL_MS = 20000;
+const sportCategoryCache = new Map();
+const sportCategoryRefresh = new Map();
+
+function nairobiDatePlus(days) {
+  const now = new Date();
+  const x = new Date(now.getTime() + days * 86400000);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
+  }).format(x);
+}
+
+function mergeSportMatches(sport, lists) {
+  const seen = new Set();
+  return lists.flat().map(x => normalizeSofaSportMatch(x, sport)).filter(Boolean).filter(x => {
+    if (seen.has(x.matchId)) return false;
+    seen.add(x.matchId);
+    return true;
+  }).sort((a,b) => new Date(a.commenceTime || 0) - new Date(b.commenceTime || 0));
+}
+
+async function refreshSportCategory(sport, dates, background) {
+  if (sportCategoryRefresh.has(sport)) return sportCategoryRefresh.get(sport);
+  const run = (async () => {
+    try {
+      // First fetch today's list only. This is the critical path and keeps a
+      // tab from waiting on 4 days of fixtures.
+      const todayRaw = await sofaBets.getMatchesForDate(dates[0], { sport });
+      const today = mergeSportMatches(sport, [todayRaw]);
+      const existing = sportCategoryCache.get(sport);
+      const seed = today.length ? today : (existing?.data || []);
+      sportCategoryCache.set(sport, { data: seed, ts: Date.now() });
+      console.log(`[sports/sofabets] ${sport}: ${seed.length} today matches`);
+
+      // Future dates are deliberately NOT awaited by the HTTP request.
+      // Start them after today's list has been cached so the first games can
+      // reach the browser immediately.
+      const futureDates = dates.slice(1);
+      if (futureDates.length) {
+        (async () => {
+          const futureLists = [];
+          for (const date of futureDates) {
+            try { futureLists.push(await sofaBets.getMatchesForDate(date, { sport })); }
+            catch (e) { console.warn(`[sports/sofabets/${sport}/${date}]`, e.message); }
+          }
+          if (futureLists.length) {
+            const latest = sportCategoryCache.get(sport)?.data || seed;
+            const merged = mergeSportMatches(sport, [latest, ...futureLists]);
+            sportCategoryCache.set(sport, { data: merged, ts: Date.now() });
+            console.log(`[sports/sofabets] ${sport}: ${merged.length} matches after background update`);
+          }
+        })().catch(() => {});
+      }
+      return seed;
+    } catch (e) {
+      const existing = sportCategoryCache.get(sport);
+      if (existing?.data?.length) return existing.data;
+      if (!background) throw e;
+      return [];
+    } finally {
+      sportCategoryRefresh.delete(sport);
+    }
+  })();
+  sportCategoryRefresh.set(sport, run);
+  return run;
+}
+
 router.get('/category/:sport', async (req, res) => {
   const sport = String(req.params.sport || '').toLowerCase();
   if (!SPORT_CONFIG[sport]) {
     return res.status(404).json({ success:false, data:[], message:'Unknown or unsupported SofaBets sport' });
   }
+
+  const dates = [0,1,2,3].map(nairobiDatePlus);
+  const cached = sportCategoryCache.get(sport);
+
   try {
-    const dates = [];
-    const now = new Date();
-    for (let d = 0; d <= 3; d++) {
-      const x = new Date(now.getTime() + d * 86400000);
-      dates.push(new Intl.DateTimeFormat('en-CA', { timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit' }).format(x));
+    // Fast path: return the already-rendered sport immediately. Refresh is
+    // silent in the background so a tab switch never shows a spinner.
+    if (cached?.data?.length) {
+      if (Date.now() - cached.ts >= SPORT_CATEGORY_TTL_MS) {
+        refreshSportCategory(sport, dates, true).catch(() => {});
+      }
+      res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=60');
+      return res.json({ success:true, data:cached.data, count:cached.data.length, sport, source:'SofaBets', cached:true });
     }
-    const key = `sofa_${sport}_${dates[0]}`;
-    let m = C.get(key, 20000);
-    if (!m) {
-      const lists = await Promise.all(dates.map(date => sofaBets.getMatchesForDate(date, { sport })));
-      const seen = new Set();
-      m = lists.flat().map(x => normalizeSofaSportMatch(x, sport)).filter(Boolean).filter(x => {
-        if (seen.has(x.matchId)) return false;
-        seen.add(x.matchId);
-        return true;
-      });
-      C.set(key, m);
-      console.log(`[sports/sofabets] ${sport}: ${m.length} matches`);
-    }
-    res.json({ success:true, data:m, count:m.length, sport, source:'SofaBets' });
+
+    // Cold tab: wait only for today's fixtures. Future dates are merged after
+    // the response, so the user gets the first games as soon as today's feed is
+    // ready instead of waiting for every date.
+    const data = await refreshSportCategory(sport, dates, false);
+    res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=60');
+    res.json({ success:true, data, count:data.length, sport, source:'SofaBets', cached:false });
   } catch(e) {
     console.error(`[sports/sofabets/${sport}]`, e.message);
     res.status(502).json({ success:false, data:[], message:'SofaBets sport feed unavailable' });
