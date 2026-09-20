@@ -14,6 +14,7 @@
 // offering those would mean either guessing outcomes or always voiding the bets.
 
 const REAL_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc']);
+const { getGeneratedOdds } = require('./safariMarketEngine');
 
 // ── RISK MANAGEMENT: SUSPEND NEAR-DECIDED MARKETS ──
 // Prevents users from betting on an outcome that's already effectively certain
@@ -412,9 +413,36 @@ function getLiveOddsCap(match, market, pick) {
   return Math.max(base, parseFloat((base + slack * 0.65).toFixed(2)));
 }
 
+function getProviderMarketOdds(match, market, pick) {
+  if (!String(market || '').startsWith('sb:')) return null;
+  const key = String(market).slice(3);
+  const list = Array.isArray(match?.markets) ? match.markets : [];
+  const mk = list.find(x => String(x?.key) === key);
+  if (!mk || !Array.isArray(mk.selections)) return null;
+  const sel = mk.selections.find(x => String(x?.key) === String(pick));
+  const odds = Number(sel?.odds);
+  if (!Number.isFinite(odds) || odds < 1.01) return null;
+  const updatedAt = match?.updatedAt || match?.odds?.updatedAt;
+  if (updatedAt && (Date.now() - new Date(updatedAt).getTime()) > 90 * 60 * 1000) return null;
+  return applyPlatformMargin(odds, match.status === 'live');
+}
+
 // Public entry point: resolve odds for any market+pick against a Match document.
 // Returns { odds, isSynthetic } or null if this match has no base data to price from.
 function resolveOdds(match, market, pick) {
+  if (String(market || '').startsWith('gen:')) {
+    if (isPickSuspended(match, market, pick)) return null;
+    const generated = getGeneratedOdds(match, market, pick);
+    if (generated == null || generated < getMinViableOdds()) return null;
+    let result = { odds: applyPlatformMargin(generated, match.status === 'live'), isSynthetic: true, generatedMarket: true };
+    const cap = getLiveOddsCap(match, market, pick);
+    if (cap != null && result.odds > cap) result = { ...result, odds: cap, riskCapped: true };
+    return result;
+  }
+  if (String(market || '').startsWith('sb:')) {
+    const providerOdds = getProviderMarketOdds(match, market, pick);
+    return providerOdds != null ? { odds: providerOdds, isSynthetic: false, providerMarket: true } : null;
+  }
   if (isPickSuspended(match, market, pick)) return null;
   let result;
   if (REAL_MARKETS.has(market)) {
@@ -459,7 +487,7 @@ async function getBoostedOdds(matchId, market, pick, stake) {
 }
 
 module.exports = {
-  REAL_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
+  REAL_MARKETS, resolveOdds, getProviderMarketOdds, isPickSuspended, getBoostedOdds,
   MIN_VIABLE_ODDS, getMinViableOdds,
   getSuspensionReason, isMarketSuspended, getLiveRiskConfig
 };

@@ -13,7 +13,8 @@
 // 0-10min) that would require data (half-time score) Juan AI's API doesn't send —
 // offering those would mean either guessing outcomes or always voiding the bets.
 
-const REAL_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc']);
+const REAL_MARKETS = new Set(['1x2', 'ou25', 'btts']);
+const DERIVED_MARKETS = new Set(['dc', 'dnb', 'handicap']);
 
 // ── RISK MANAGEMENT: SUSPEND NEAR-DECIDED MARKETS ──
 // Prevents users from betting on an outcome that's already effectively certain
@@ -183,7 +184,8 @@ const MARKET_PICKS = {
   'dc': ['dc_1x', 'dc_x2', 'dc_12'],
   'ou25': ['over25', 'under25'],
   'btts': ['btts', 'btts_no'],
-  'handicap': ['handicap_home', 'handicap_away']
+  'handicap': ['handicap_home', 'handicap_away'],
+  'dnb': ['dnb_home', 'dnb_away']
 };
 function isMarketSuspended(match, market) {
   const picks = MARKET_PICKS[market];
@@ -243,7 +245,10 @@ function getRealOdds(match, market, pick) {
   if (!ai) return null;
   if (market === 'ou25') return applyPlatformMargin(pick === 'over25' ? ai.over25 : pick === 'under25' ? ai.under25 : null, isLive);
   if (market === 'btts') return applyPlatformMargin(pick === 'btts' ? ai.btts : pick === 'btts_no' ? ai.bttsNo : null, isLive);
-  if (market === 'dc')   return applyPlatformMargin(pick === 'dc_1x' ? ai.dc_home_draw : pick === 'dc_x2' ? ai.dc_draw_away : pick === 'dc_12' ? ai.dc_home_away : null, isLive);
+  if (market === 'dc') {
+    const supplied = pick === 'dc_1x' ? ai.dc_home_draw : pick === 'dc_x2' ? ai.dc_draw_away : pick === 'dc_12' ? ai.dc_home_away : null;
+    return supplied != null ? applyPlatformMargin(supplied, isLive) : null;
+  }
   return null;
 }
 
@@ -261,11 +266,23 @@ function getSyntheticOdds(match, market, pick) {
   // Convert decimal odds to implied probabilities (roughly, ignoring overround)
   const pHome = 1 / home, pDraw = 1 / draw, pAway = 1 / away;
   const overround = pHome + pDraw + pAway;
-  const nHome = pHome / overround, nAway = pAway / overround;
+  const nHome = pHome / overround, nDraw = pDraw / overround, nAway = pAway / overround;
 
   const toOdds = p => p > 0 ? Math.max(1.01, parseFloat((1 / p).toFixed(2))) : null;
 
   switch (market) {
+    case 'dc': {
+      if (pick === 'dc_1x') return toOdds(nHome + nDraw);
+      if (pick === 'dc_x2') return toOdds(nDraw + nAway);
+      if (pick === 'dc_12') return toOdds(nHome + nAway);
+      return null;
+    }
+    case 'dnb': {
+      const sum = nHome + nAway;
+      if (pick === 'dnb_home') return toOdds(nHome / sum);
+      if (pick === 'dnb_away') return toOdds(nAway / sum);
+      return null;
+    }
     // Handicap 1X2 — shift the favorite's line by the implied goal-supremacy; simplistic linear model.
     // NOTE: this is the only synthetic market with a knowable outcome from final score
     // alone (home/away goal difference), so it's the only synthetic market that can
@@ -364,9 +381,12 @@ function resolveOdds(match, market, pick) {
   if (REAL_MARKETS.has(market)) {
     const odds = getRealOdds(match, market, pick);
     result = odds != null ? { odds, isSynthetic: false } : null;
+  } else if (DERIVED_MARKETS.has(market)) {
+    const supplied = market === 'dc' ? getRealOdds(match, market, pick) : null;
+    const odds = supplied != null ? supplied : getSyntheticOdds(match, market, pick);
+    result = odds != null ? { odds, isSynthetic: supplied == null } : null;
   } else {
-    const odds = getSyntheticOdds(match, market, pick);
-    result = odds != null ? { odds, isSynthetic: true } : null;
+    result = null;
   }
   if (result) {
     const cap = getLiveOddsCap(match, market, pick);
@@ -398,7 +418,7 @@ async function getBoostedOdds(matchId, market, pick, stake) {
 }
 
 module.exports = {
-  REAL_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
+  REAL_MARKETS, DERIVED_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
   MIN_VIABLE_ODDS, getMinViableOdds,
   getSuspensionReason, isMarketSuspended, getLiveRiskConfig
 };

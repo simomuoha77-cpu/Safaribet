@@ -135,25 +135,8 @@ async function loadMatch(){
     renderMarkets();
     updateSlipBar();
 
-    // Rich markets are never allowed to block the first paint. If the cached
-    // match already has them, this request is harmless; otherwise it fills the
-    // catalogue as soon as SofaBets responds and updates the page in place.
-    if (matchData.providerSource === 'sofabets' || String(matchId).startsWith('sofabets_')) {
-      fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })
-        .then(x => x.json())
-        .then(full => {
-          if (!full.success || !full.data) return;
-          const oldCount = Array.isArray(matchData.markets) ? matchData.markets.length : 0;
-          const newCount = Array.isArray(full.data.markets) ? full.data.markets.length : 0;
-          if (newCount >= oldCount && newCount > 0) {
-            matchData = full.data;
-            renderHeader();
-            renderMarkets();
-            updateSlipBar();
-          }
-        })
-        .catch(() => {});
-    }
+    // SafariBet builds its own markets from the odds already loaded above.
+    // No background provider-market request is needed.
   } catch(e) {
     document.getElementById('matchHeader').innerHTML = '<div class="loading">Failed to load match — check connection.</div>';
   }
@@ -244,7 +227,8 @@ function renderMarkets(){
     return `
     <div class="market-card">
       <div class="market-hd">
-        <span class="market-name">${mk.label}</span>
+        <span class="market-name">${escapeHtml(mk.label)}</span>
+        <span style="font-size:9px;color:var(--g);font-weight:700">${mk.isSynthetic ? 'CALCULATED' : 'SAFARIBET'}</span>
       </div>
       <div class="market-body">
         ${mk.options.map(opt => opt.suspended ? `
@@ -283,6 +267,7 @@ function pickLabel(market, pick){
     'ou25':     { over25: 'Over 2.5', under25: 'Under 2.5' },
     'btts':     { btts: 'Yes', btts_no: 'No' },
     'dc':       { dc_1x: `${h} or Draw`, dc_x2: `Draw or ${a}`, dc_12: `${h} or ${a}` },
+    'dnb':      { dnb_home: h, dnb_away: a },
     'handicap': { handicap_home: h, handicap_away: a }
   };
   return LABELS[market]?.[pick] || pick;

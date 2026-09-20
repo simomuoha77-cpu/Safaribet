@@ -29,6 +29,7 @@ function pickLabelFor(market, pick, match) {
     'ou25':     { over25: 'Over 2.5', under25: 'Under 2.5' },
     'btts':     { btts: 'Both Teams to Score', btts_no: 'Not Both Teams to Score' },
     'dc':       { dc_1x: `${h} or Draw`, dc_x2: `Draw or ${a}`, dc_12: `${h} or ${a}` },
+    'dnb':      { dnb_home: `${h} (Draw No Bet)`, dnb_away: `${a} (Draw No Bet)` },
     'handicap': { handicap_home: `${h} (Handicap)`, handicap_away: `${a} (Handicap)` }
   };
   return LABELS[market]?.[pick] || pick;
@@ -57,7 +58,7 @@ const betLimiter = rateLimit({
 
 // Validate selections
 const { REAL_MARKETS } = require('../services/marketResolver');
-const ALL_KNOWN_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc', 'handicap']);
+const ALL_KNOWN_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc', 'dnb', 'handicap']);
 const VALID_PICKS_BY_MARKET = {
   '1x2':     ['home','draw','away'],
   'ou25':    ['over25','under25'],

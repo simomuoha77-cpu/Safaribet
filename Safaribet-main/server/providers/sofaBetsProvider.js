@@ -186,7 +186,7 @@ function paginationInfo(payload) {
     nextPage: root.nextPage ?? root.next_page ?? p.nextPage ?? p.next_page ?? payload?.nextPage ?? payload?.next_page
   };
 }
-async function fetchPages(base, path, sportId, sportName, maxPagesOverride) {
+async function fetchPages(base, path, sportId, sportName, maxPagesOverride, marketType = 'match result') {
   const all = [];
   let page = 1;
   let first = true;
@@ -202,7 +202,7 @@ async function fetchPages(base, path, sportId, sportName, maxPagesOverride) {
       sportId: String(sportId),
       page: String(page),
       limit: '100',
-      marketType: 'match result'
+      marketType: String(marketType || 'match result')
     };
 
     let payload;
@@ -576,11 +576,40 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   return empty;
 }
 
+async function findFixtureFromAllMarkets(providerMatchId, sportName = 'football') {
+  const id = String(providerMatchId || '').trim();
+  const name = String(sportName || 'football').toLowerCase();
+  if (!id) return null;
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  for (const sportId of candidates) {
+    for (const base of BASES) {
+      for (const path of FIXTURE_PATHS) {
+        try {
+          const rawItems = await fetchPages(base, path, sportId, name, MAX_PAGES_PER_FETCH, 'all');
+          const item = rawItems.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+          if (item) {
+            const normalized = safeNormalizeMatch(item);
+            if (normalized && Array.isArray(normalized.markets) && normalized.markets.length) return normalized;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  return null;
+}
+
 async function getMatchById(providerMatchId, sportName = 'football', options = {}) {
   const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
   if (!id) return null;
-  const details = rich ? await getMatchMarkets(id, sportName) : { markets: [], bookmakers: [] };
+  // Build SafariBet's market catalogue from the same fixture feed that already
+  // supplies the match odds. No separate /markets endpoint and no invented
+  // prices are used here. The feed's marketType=all response is filtered to
+  // this exact fixture ID, then normalized locally.
+  const allMarketFixture = rich ? await findFixtureFromAllMarkets(id, sportName) : null;
+  const details = allMarketFixture?.markets?.length
+    ? { markets: allMarketFixture.markets, bookmakers: allMarketFixture.bookmakers || [] }
+    : { markets: [], bookmakers: [] };
   // Re-use the normal fixture catalogue as a safe fallback for the match
   // metadata; the detail call above supplies the richer market list.
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[String(sportName).toLowerCase()] || []), SPORT_IDS[String(sportName).toLowerCase()]].filter(Number.isFinite)));
@@ -593,11 +622,17 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
         if (item) {
           const normalized = safeNormalizeMatch(item);
           if (normalized) {
-            if (details.markets.length) {
+            if (allMarketFixture) {
+              normalized.markets = allMarketFixture.markets || [];
+              normalized.bookmakers = allMarketFixture.bookmakers || [];
+            } else if (details.markets.length) {
               normalized.markets = details.markets;
               normalized.bookmakers = details.bookmakers;
-              normalized.odds = normalized.odds || { markets: details.markets, bookmakers: details.bookmakers };
-              if (normalized.odds && !normalized.odds.markets) normalized.odds.markets = details.markets;
+            }
+            if (normalized.markets.length) {
+              normalized.odds = normalized.odds || {};
+              normalized.odds.markets = normalized.markets;
+              normalized.odds.bookmakers = normalized.bookmakers || [];
             }
             return normalized;
           }

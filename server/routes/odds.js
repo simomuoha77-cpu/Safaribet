@@ -348,33 +348,10 @@ router.get('/match/:matchId', async (req, res) => {
 
     if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    // A normal fixture sync intentionally loads the fast Match Result market.
-    // Fetch the complete SofaBets market catalogue only when the user opens
-    // More markets. This keeps the homepage/live tabs fast while the detail
-    // page gets the same rich market list shown by SofaBets.
-    let providerMarkets = Array.isArray(m.markets) ? m.markets : [];
-    if ((String(m.providerSource || '').toLowerCase() === 'sofabets' || String(req.params.matchId).startsWith('sofabets_')) && req.query.rich === '1') {
-      const providerId = String(req.params.matchId).replace(/^sofabets_(?:live_)?/, '');
-      if (providerMarkets.length < 6) {
-        try {
-          const sportKeys = new Set(['football','basketball','tennis','cricket','rugby','hockey','volleyball','handball']);
-          const providerSport = sportKeys.has(String(m.sport || '').toLowerCase()) ? String(m.sport).toLowerCase() : 'football';
-          const detail = await sofaBets.getMatchMarkets(providerId, providerSport);
-          if (detail.markets.length > providerMarkets.length) {
-            providerMarkets = detail.markets;
-            m = { ...m, markets: providerMarkets, bookmakers: detail.bookmakers };
-            // Store the rich catalogue so reopening the same match is instant.
-            if (m.matchId) {
-              await Match.updateOne({ matchId: m.matchId }, {
-                $set: { markets: providerMarkets, bookmakers: detail.bookmakers || [] }
-              }).catch(() => {});
-            }
-          }
-        } catch (e) {
-          console.warn('[odds/match] SofaBets markets unavailable:', e.message);
-        }
-      }
-    }
+    // SafariBet builds its own markets from the 1X2 odds already on the match.
+    // No extra SofaBets market request is made, so opening a match is immediate
+    // and the prices always come from data SafariBet already has.
+    const providerMarkets = [];
 
     const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
 
@@ -407,9 +384,10 @@ router.get('/match/:matchId', async (req, res) => {
     const MARKETS = [
       { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
       { market: 'dc',       label: 'Double Chance',       picks: ['dc_1x','dc_x2','dc_12'] },
+      { market: 'dnb',      label: 'Draw No Bet',         picks: ['dnb_home','dnb_away'] },
+      { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] },
       { market: 'ou25',     label: 'Over/Under 2.5',      picks: ['over25','under25'] },
-      { market: 'btts',     label: 'Both Teams to Score', picks: ['btts','btts_no'] },
-      { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] }
+      { market: 'btts',     label: 'Both Teams to Score', picks: ['btts','btts_no'] }
     ];
 
     const legacyMarkets = MARKETS.map(def => {
@@ -434,7 +412,7 @@ router.get('/match/:matchId', async (req, res) => {
 
     // When SofaBets supplied its real catalogue, show that catalogue only.
     // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = richMarkets.length ? richMarkets : legacyMarkets;
+    const markets = legacyMarkets;
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');
