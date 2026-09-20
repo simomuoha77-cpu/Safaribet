@@ -21,16 +21,6 @@ const router  = express.Router();
 const ODDS_STALE_MS = 90 * 60 * 1000; // 90 minutes
 
 const { resolveOdds, isPickSuspended, getMinViableOdds } = require('../services/marketResolver');
-const { getGeneratedOdds } = require('../services/safariMarketEngine');
-
-async function loadValidationMatches(selections) {
-  const ids = [...new Set((selections || []).map(s => String(s.matchId)).filter(Boolean))];
-  const map = new Map();
-  if (!ids.length) return map;
-  const docs = await Match.find({ matchId: { $in: ids } }).lean();
-  docs.forEach(m => map.set(String(m.matchId), m));
-  return map;
-}
 
 function pickLabelFor(market, pick, match) {
   const h = match.homeTeam, a = match.awayTeam;
@@ -76,28 +66,16 @@ const VALID_PICKS_BY_MARKET = {
   'handicap':['handicap_home','handicap_away']
 };
 
-function validateSelections(selections, maxSelections, matchesById = new Map()) {
+function validateSelections(selections, maxSelections) {
   if (!Array.isArray(selections) || !selections.length) return 'No selections provided';
   if (selections.length > maxSelections) return `Maximum ${maxSelections} selections per bet`;
   const seen = new Set();
   for (const s of selections) {
     if (!s.matchId || !s.pick || !s.odds) return 'Invalid selection data';
     const market = s.market || '1x2'; // default to 1x2 for older frontend calls that don't send market
-    const isProviderMarket = String(market).startsWith('sb:');
-    const isGeneratedMarket = String(market).startsWith('gen:');
-    if (!ALL_KNOWN_MARKETS.has(market) && !isProviderMarket && !isGeneratedMarket) return `Unknown market: ${market}`;
-    if (isGeneratedMarket) {
-      const match = matchesById.get(String(s.matchId));
-      const generatedOdds = match ? getGeneratedOdds(match, market, s.pick) : null;
-      if (generatedOdds == null) return `Invalid SafariBet market selection for ${market}`;
-    } else if (isProviderMarket) {
-      const match = matchesById.get(String(s.matchId));
-      const mk = match?.markets?.find(x => 'sb:' + String(x?.key) === market);
-      if (!mk || !mk.selections?.some(x => String(x?.key) === String(s.pick))) return `Invalid provider market selection for ${market}`;
-    } else {
-      const validPicks = VALID_PICKS_BY_MARKET[market] || [];
-      if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
-    }
+    if (!ALL_KNOWN_MARKETS.has(market)) return `Unknown market: ${market}`;
+    const validPicks = VALID_PICKS_BY_MARKET[market] || [];
+    if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
     if (s.odds < 1.01 || s.odds > 500) return 'Invalid odds';
     // Only ONE selection per MATCH is allowed in a regular multi-bet, regardless
     // of market. Multiple markets on the same match are correlated (e.g. a
@@ -127,13 +105,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
     const maxSelections = limits.maxSelections ?? 20;
     const maxPayout = limits.maxPayout ?? 1000000;
 
-    const validationMatchIds = [...new Set((selections || []).map(s => String(s.matchId)).filter(Boolean))];
-    const validationMatches = new Map();
-    if (validationMatchIds.length) {
-      const docs = await Match.find({ matchId: { $in: validationMatchIds } }).lean();
-      docs.forEach(m => validationMatches.set(String(m.matchId), m));
-    }
-    const err = validateSelections(selections, maxSelections, validationMatches);
+    const err = validateSelections(selections, maxSelections);
     if (err) return res.status(400).json({ success: false, message: err });
 
     const stakeAmt = parseFloat(stake);
@@ -463,8 +435,7 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
 
     const adminRoutes = require('./admin');
     const limits = (adminRoutes.getStore ? adminRoutes.getStore().limits : null) || {};
-    const validationMatches = await loadValidationMatches(selections);
-    const err = validateSelections(selections, limits.maxSelections ?? 20, validationMatches);
+    const err = validateSelections(selections, limits.maxSelections ?? 20);
     if (err) return res.status(400).json({ success: false, message: err });
 
     const pickNum = parseInt(pick);
@@ -634,8 +605,7 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
     const { selections } = req.body;
     const adminRoutes = require('./admin');
     const limits = (adminRoutes.getStore ? adminRoutes.getStore().limits : null) || {};
-    const validationMatches = await loadValidationMatches(selections);
-    const err = validateSelections(selections, limits.maxSelections ?? 20, validationMatches);
+    const err = validateSelections(selections, limits.maxSelections ?? 20);
     if (err) return res.status(400).json({ success: false, message: err });
 
     let code, exists = true;

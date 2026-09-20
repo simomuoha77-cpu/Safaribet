@@ -14,7 +14,6 @@
 // offering those would mean either guessing outcomes or always voiding the bets.
 
 const REAL_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc']);
-const { getGeneratedOdds } = require('./safariMarketEngine');
 
 // ── RISK MANAGEMENT: SUSPEND NEAR-DECIDED MARKETS ──
 // Prevents users from betting on an outcome that's already effectively certain
@@ -253,8 +252,6 @@ function getRealOdds(match, market, pick) {
 // real per-market data from Juan AI would replace this entirely (see
 // NOTE_FOR_JUANAI.md). Every synthetic market's UI label must show a
 // "not real bookmaker data" indicator; this function never runs silently.
-const SYNTHETIC_GOAL_CACHE = new Map();
-
 function getSyntheticOdds(match, market, pick) {
   const home = getRealOdds(match, '1x2', 'home');
   const draw = getRealOdds(match, '1x2', 'draw');
@@ -264,74 +261,20 @@ function getSyntheticOdds(match, market, pick) {
   // Convert decimal odds to implied probabilities (roughly, ignoring overround)
   const pHome = 1 / home, pDraw = 1 / draw, pAway = 1 / away;
   const overround = pHome + pDraw + pAway;
-  const nHome = pHome / overround, nDraw = pDraw / overround, nAway = pAway / overround;
+  const nHome = pHome / overround, nAway = pAway / overround;
 
   const toOdds = p => p > 0 ? Math.max(1.01, parseFloat((1 / p).toFixed(2))) : null;
 
-  // Estimate football goal rates from the existing 1X2 probabilities. This
-  // lets SafariBet create its own additional prices when the upstream feed only
-  // supplies Match Result. It is a mathematical estimate from the odds already
-  // present on the match, not a random bookmaker price.
-  function poisson(lambda, k) {
-    let fact = 1;
-    for (let i = 2; i <= k; i++) fact *= i;
-    return Math.exp(-lambda) * Math.pow(lambda, k) / fact;
-  }
-  function estimateGoals() {
-    const cacheKey = `${home}|${draw}|${away}`;
-    const cached = SYNTHETIC_GOAL_CACHE.get(cacheKey);
-    if (cached) return cached;
-    let best = null;
-    for (let lh = 0.15; lh <= 4.5; lh += 0.05) {
-      for (let la = 0.15; la <= 4.5; la += 0.05) {
-        let ph = 0, pd = 0;
-        for (let h = 0; h <= 10; h++) {
-          const phg = poisson(lh, h);
-          for (let a = 0; a <= 10; a++) {
-            const p = phg * poisson(la, a);
-            if (h > a) ph += p;
-            else if (h === a) pd += p;
-          }
-        }
-        const err = Math.pow(ph - nHome, 2) + Math.pow(pd - pDraw, 2);
-        if (!best || err < best.err) best = { lh, la, err };
-      }
-    }
-    if (best) {
-      SYNTHETIC_GOAL_CACHE.set(cacheKey, best);
-      if (SYNTHETIC_GOAL_CACHE.size > 500) SYNTHETIC_GOAL_CACHE.delete(SYNTHETIC_GOAL_CACHE.keys().next().value);
-    }
-    return best;
-  }
-
   switch (market) {
-    case 'dc': {
-      const p = pick === 'dc_1x' ? nHome + nDraw
-        : pick === 'dc_x2' ? nDraw + nAway
-        : pick === 'dc_12' ? nHome + nAway : 0;
-      return toOdds(p);
-    }
+    // Handicap 1X2 — shift the favorite's line by the implied goal-supremacy; simplistic linear model.
+    // NOTE: this is the only synthetic market with a knowable outcome from final score
+    // alone (home/away goal difference), so it's the only synthetic market that can
+    // actually be settled rather than always voided.
     case 'handicap': {
       const favHome = nHome >= nAway;
-      const adj = 0.15 * Math.abs(nHome - nAway) * 3;
+      const adj = 0.15 * Math.abs(nHome - nAway) * 3; // wider spread for bigger mismatches
       if (pick === 'handicap_home') return toOdds(favHome ? nHome - adj : nHome + adj);
       if (pick === 'handicap_away') return toOdds(favHome ? nAway + adj : nAway - adj);
-      return null;
-    }
-    case 'ou25':
-    case 'btts': {
-      const g = estimateGoals();
-      if (!g) return null;
-      const pBoth = (1 - Math.exp(-g.lh)) * (1 - Math.exp(-g.la));
-      const totalLambda = g.lh + g.la;
-      const pUnder = poisson(totalLambda, 0) + poisson(totalLambda, 1) + poisson(totalLambda, 2);
-      if (market === 'btts') {
-        if (pick === 'btts') return toOdds(pBoth);
-        if (pick === 'btts_no') return toOdds(1 - pBoth);
-      } else {
-        if (pick === 'over25') return toOdds(1 - pUnder);
-        if (pick === 'under25') return toOdds(pUnder);
-      }
       return null;
     }
     default:
@@ -413,46 +356,14 @@ function getLiveOddsCap(match, market, pick) {
   return Math.max(base, parseFloat((base + slack * 0.65).toFixed(2)));
 }
 
-function getProviderMarketOdds(match, market, pick) {
-  if (!String(market || '').startsWith('sb:')) return null;
-  const key = String(market).slice(3);
-  const list = Array.isArray(match?.markets) ? match.markets : [];
-  const mk = list.find(x => String(x?.key) === key);
-  if (!mk || !Array.isArray(mk.selections)) return null;
-  const sel = mk.selections.find(x => String(x?.key) === String(pick));
-  const odds = Number(sel?.odds);
-  if (!Number.isFinite(odds) || odds < 1.01) return null;
-  const updatedAt = match?.updatedAt || match?.odds?.updatedAt;
-  if (updatedAt && (Date.now() - new Date(updatedAt).getTime()) > 90 * 60 * 1000) return null;
-  return applyPlatformMargin(odds, match.status === 'live');
-}
-
 // Public entry point: resolve odds for any market+pick against a Match document.
 // Returns { odds, isSynthetic } or null if this match has no base data to price from.
 function resolveOdds(match, market, pick) {
-  if (String(market || '').startsWith('gen:')) {
-    if (isPickSuspended(match, market, pick)) return null;
-    const generated = getGeneratedOdds(match, market, pick);
-    if (generated == null || generated < getMinViableOdds()) return null;
-    let result = { odds: applyPlatformMargin(generated, match.status === 'live'), isSynthetic: true, generatedMarket: true };
-    const cap = getLiveOddsCap(match, market, pick);
-    if (cap != null && result.odds > cap) result = { ...result, odds: cap, riskCapped: true };
-    return result;
-  }
-  if (String(market || '').startsWith('sb:')) {
-    const providerOdds = getProviderMarketOdds(match, market, pick);
-    return providerOdds != null ? { odds: providerOdds, isSynthetic: false, providerMarket: true } : null;
-  }
   if (isPickSuspended(match, market, pick)) return null;
   let result;
   if (REAL_MARKETS.has(market)) {
     const odds = getRealOdds(match, market, pick);
-    if (odds != null) {
-      result = { odds, isSynthetic: false };
-    } else {
-      const ownOdds = getSyntheticOdds(match, market, pick);
-      result = ownOdds != null ? { odds: ownOdds, isSynthetic: true } : null;
-    }
+    result = odds != null ? { odds, isSynthetic: false } : null;
   } else {
     const odds = getSyntheticOdds(match, market, pick);
     result = odds != null ? { odds, isSynthetic: true } : null;
@@ -487,7 +398,7 @@ async function getBoostedOdds(matchId, market, pick, stake) {
 }
 
 module.exports = {
-  REAL_MARKETS, resolveOdds, getProviderMarketOdds, isPickSuspended, getBoostedOdds,
+  REAL_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
   MIN_VIABLE_ODDS, getMinViableOdds,
   getSuspensionReason, isMarketSuspended, getLiveRiskConfig
 };

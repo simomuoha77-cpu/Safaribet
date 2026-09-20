@@ -186,7 +186,7 @@ function paginationInfo(payload) {
     nextPage: root.nextPage ?? root.next_page ?? p.nextPage ?? p.next_page ?? payload?.nextPage ?? payload?.next_page
   };
 }
-async function fetchPages(base, path, sportId, sportName, maxPagesOverride, marketType = 'match result') {
+async function fetchPages(base, path, sportId, sportName, maxPagesOverride) {
   const all = [];
   let page = 1;
   let first = true;
@@ -202,7 +202,7 @@ async function fetchPages(base, path, sportId, sportName, maxPagesOverride, mark
       sportId: String(sportId),
       page: String(page),
       limit: '100',
-      marketType: String(marketType || 'match result')
+      marketType: 'match result'
     };
 
     let payload;
@@ -410,22 +410,18 @@ const matchMarketsCache = new Map();
 async function getMatchMarkets(providerMatchId, sportName = 'football') {
   const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
   const cached = matchMarketsCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 60000) return cached.data;
+  if (cached && Date.now() - cached.ts < 60000 && cached.data && cached.data.markets?.length) return cached.data;
+
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
+
   const name = String(sportName || 'football').toLowerCase();
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
-  // Do NOT accept the first market response. SofaBets can return only
-  // Match Result from the first endpoint while the complete catalogue is
-  // available from another endpoint/query.
   let best = { markets: [], bookmakers: [], base: null, path: null };
-  const keepRicher = (markets, bookmakers, base, path) => {
-    if (markets.length > best.markets.length) {
-      best = { markets, bookmakers, base, path };
-    }
-  };
-  // Exact SofaBets fixture-market endpoint.
-  // This returns the complete market catalogue for a specific fixture.
+
+  // EXACT SOFABETS MARKET FEED. This is the authoritative full market
+  // catalogue for a fixture. Do this first so SafariBet never falls back
+  // to the single Match Result market when the full catalogue is available.
   for (const base of BASES) {
     try {
       const payload = await sofaFetch(
@@ -433,65 +429,32 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
         `/api/events/${encodeURIComponent(id)}/markets`,
         {}
       );
-
       const rawMarkets = Array.isArray(payload)
         ? payload
         : (Array.isArray(payload?.markets) ? payload.markets : []);
 
       const markets = rawMarkets.map((m, index) => {
         if (!m || typeof m !== 'object') return null;
-
-        const outcomes = Array.isArray(m.outcomes) ? m.outcomes : [];
-
+        const outcomes = Array.isArray(m.outcomes)
+          ? m.outcomes
+          : (Array.isArray(m.selections) ? m.selections : []);
         const selections = outcomes.map((o, oi) => {
           if (!o || typeof o !== 'object') return null;
-
-          const odds = Number(
-            o.odds ??
-            o.odd ??
-            o.price ??
-            o.value
-          );
-
+          const odds = Number(o.odds ?? o.odd ?? o.price ?? o.value);
+          if (!Number.isFinite(odds)) return null;
           return {
-            key: String(
-              o.outcomeId ??
-              o.id ??
-              o.selectionId ??
-              ('selection_' + oi)
-            ),
-            name: String(
-              o.outcome_name ??
-              o.selection_name ??
-              o.name ??
-              o.label ??
-              o.outcomeId ??
-              ('Selection ' + (oi + 1))
-            ),
+            key: String(o.outcomeId ?? o.id ?? o.selectionId ?? ('selection_' + oi)),
+            name: String(o.outcome_name ?? o.selection_name ?? o.name ?? o.label ?? o.outcomeId ?? ('Selection ' + (oi + 1))),
             odds,
             bookmaker: o.bookmaker || null,
             active: o.active !== false,
             tradingStatus: o.trading_status ?? m.statusLabel ?? null
           };
-        }).filter(o => o && Number.isFinite(o.odds));
-
+        }).filter(Boolean);
         if (!selections.length) return null;
-
         return {
-          key: String(
-            m.marketId ??
-            m.id ??
-            m.market_id ??
-            m.type ??
-            ('market_' + index)
-          ),
-          name: String(
-            m.name ??
-            m.marketName ??
-            m.market_name ??
-            m.type ??
-            'Market'
-          ),
+          key: String(m.marketId ?? m.id ?? m.market_id ?? m.type ?? ('market_' + index)),
+          name: String(m.name ?? m.marketName ?? m.market_name ?? m.type ?? 'Market'),
           bookmaker: m.bookmaker || null,
           selections
         };
@@ -499,22 +462,28 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
 
       if (markets.length) {
         const bookmakers = Array.from(new Set(
-          markets.flatMap(m => [
-            m.bookmaker,
-            ...m.selections.map(s => s.bookmaker)
-          ].filter(Boolean))
+          markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))
         ));
-
-        keepRicher(
-          markets,
-          bookmakers,
-          base,
-          `/api/events/${encodeURIComponent(id)}/markets`
-        );
+        if (markets.length > best.markets.length) {
+          best = { markets, bookmakers, base, path: `/api/events/${encodeURIComponent(id)}/markets` };
+        }
+        // This exact endpoint is the complete fixture catalogue; no need to
+        // risk replacing it with a smaller detail response.
+        if (markets.length >= 2) break;
       }
     } catch (_) {}
   }
 
+  const consider = (payload, base, path) => {
+    const markets = normalizeMarketList(payload);
+    if (!markets.length) return 0;
+    const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+    if (markets.length > best.markets.length) best = { markets, bookmakers, base, path };
+    return markets.length;
+  };
+
+  // Search every plausible detail endpoint/query. We deliberately do NOT
+  // return the first result because that is commonly only Match Result.
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
@@ -523,126 +492,124 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
     `/api/event/${encodeURIComponent(id)}`,
     `/api/events/${encodeURIComponent(id)}`,
     `/api/fixture/${encodeURIComponent(id)}/markets`,
-    `/api/fixtures/${encodeURIComponent(id)}/markets`
+    `/api/fixtures/${encodeURIComponent(id)}/markets`,
+    `/api/event/${encodeURIComponent(id)}/markets`,
+    `/api/match/${encodeURIComponent(id)}/markets`
   ];
   const queries = [
     {},
     { include: 'markets' },
+    { include: 'all' },
     { marketType: 'all' },
-    { markets: 'all' }
+    { markets: 'all' },
+    { market: 'all' },
+    { marketType: 'ALL' },
+    { markets: 'ALL' },
+    { includeMarkets: 'true' },
+    { includeAllMarkets: 'true' },
+    { allMarkets: 'true' }
   ];
 
   for (const base of BASES) {
     for (const path of detailPaths) {
       for (const query of queries) {
         try {
-          const payload = await sofaFetch(base, path, query);
-          const markets = normalizeMarketList(payload);
-          if (markets.length) {
-            const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-            keepRicher(markets, bookmakers, base, path);
-            // Keep searching. The first response is often only Match Result.
-            // A later endpoint can contain the complete market catalogue.
-          }
+          await sofaFetch(base, path, query).then(payload => consider(payload, base, path));
         } catch (_) {}
       }
     }
-    // Some deployments expose only the catalogue endpoint. Ask it for the
-    // exact fixture without the match-result filter so the full market list is
-    // returned when that backend supports fixtureId/eventId filtering.
+
+    // Catalogue endpoint: require an exact ID match. Try each ID alias and
+    // market-expansion flag rather than accepting the first fixture returned.
     for (const sportId of candidates) {
-      try {
-        const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
-          sportId: String(sportId), fixtureId: id, eventId: id, matchId: id, page: '1', limit: '1'
-        });
-        const items = extractItems(payload);
-        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
-        // Never use items[0] here. It can be another fixture.
-        const markets = normalizeMarketList(item || null);
-        if (markets.length) {
-          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-          keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport');
-        }
-      } catch (_) {}
-    }
-  }
-  if (best.markets.length) {
-    matchMarketsCache.set(cacheKey, { ts: Date.now(), data: best });
-    return best;
-  }
-
-  const empty = { markets: [], bookmakers: [] };
-  matchMarketsCache.set(cacheKey, { ts: Date.now(), data: empty });
-  return empty;
-}
-
-async function findFixtureFromAllMarkets(providerMatchId, sportName = 'football') {
-  const id = String(providerMatchId || '').trim();
-  const name = String(sportName || 'football').toLowerCase();
-  if (!id) return null;
-  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
-  for (const sportId of candidates) {
-    for (const base of BASES) {
-      for (const path of FIXTURE_PATHS) {
-        try {
-          const rawItems = await fetchPages(base, path, sportId, name, MAX_PAGES_PER_FETCH, 'all');
-          const item = rawItems.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
-          if (item) {
-            const normalized = safeNormalizeMatch(item);
-            if (normalized && Array.isArray(normalized.markets) && normalized.markets.length) return normalized;
+      for (const idKey of ['fixtureId', 'eventId', 'matchId']) {
+        for (const marketKey of ['marketType', 'markets', 'market']) {
+          for (const value of ['all', 'ALL']) {
+            try {
+              const q = { sportId: String(sportId), page: '1', limit: '1000', [idKey]: id, [marketKey]: value };
+              const payload = await sofaFetch(base, '/api/fixtures-by-sport', q);
+              const items = extractItems(payload);
+              const exact = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+              for (const item of exact) consider(item, base, '/api/fixtures-by-sport');
+            } catch (_) {}
           }
-        } catch (_) {}
+        }
+        for (const include of ['markets', 'all']) {
+          try {
+            const q = { sportId: String(sportId), page: '1', limit: '1000', [idKey]: id, include };
+            const payload = await sofaFetch(base, '/api/fixtures-by-sport', q);
+            const items = extractItems(payload);
+            const exact = items.filter(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+            for (const item of exact) consider(item, base, '/api/fixtures-by-sport');
+          } catch (_) {}
+        }
       }
     }
   }
-  return null;
+
+  const data = best.markets.length ? best : { markets: [], bookmakers: [] };
+  matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
+  console.log(`[sofaBetsProvider] rich markets ${id}: ${data.markets.length}`);
+  return data;
 }
 
 async function getMatchById(providerMatchId, sportName = 'football', options = {}) {
   const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
   if (!id) return null;
-  // Build SafariBet's market catalogue from the same fixture feed that already
-  // supplies the match odds. No separate /markets endpoint and no invented
-  // prices are used here. The feed's marketType=all response is filtered to
-  // this exact fixture ID, then normalized locally.
-  const allMarketFixture = rich ? await findFixtureFromAllMarkets(id, sportName) : null;
-  const details = allMarketFixture?.markets?.length
-    ? { markets: allMarketFixture.markets, bookmakers: allMarketFixture.bookmakers || [] }
+
+  const details = rich
+    ? await getMatchMarkets(id, sportName)
     : { markets: [], bookmakers: [] };
-  // Re-use the normal fixture catalogue as a safe fallback for the match
-  // metadata; the detail call above supplies the richer market list.
-  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[String(sportName).toLowerCase()] || []), SPORT_IDS[String(sportName).toLowerCase()]].filter(Number.isFinite)));
-  for (const sportId of candidates) {
-    for (const base of BASES) {
-      try {
-        const payload = await sofaFetch(base, '/api/fixtures-by-sport', { sportId: String(sportId), fixtureId: id, page: '1', limit: '1' });
-        const items = extractItems(payload);
-        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id) || items[0];
-        if (item) {
-          const normalized = safeNormalizeMatch(item);
-          if (normalized) {
-            if (allMarketFixture) {
-              normalized.markets = allMarketFixture.markets || [];
-              normalized.bookmakers = allMarketFixture.bookmakers || [];
-            } else if (details.markets.length) {
-              normalized.markets = details.markets;
-              normalized.bookmakers = details.bookmakers;
-            }
-            if (normalized.markets.length) {
-              normalized.odds = normalized.odds || {};
-              normalized.odds.markets = normalized.markets;
-              normalized.odds.bookmakers = normalized.bookmakers || [];
-            }
-            return normalized;
+
+  // SofaBets exposes exact fixture metadata at /api/events/:id.
+  // Do not use fixtures-by-sport here because that endpoint can ignore
+  // fixtureId/eventId filters and return a different fixture.
+  for (const base of BASES) {
+    try {
+      const payload = await sofaFetch(
+        base,
+        `/api/events/${encodeURIComponent(id)}`,
+        {}
+      );
+
+      if (!payload || typeof payload !== 'object') continue;
+
+      const raw = {
+        ...payload,
+        id: payload.id ?? id,
+        fixtureId: payload.fixtureId ?? id,
+        fixture_id: payload.fixture_id ?? id,
+        homeTeam: payload.homeTeam ?? payload.homeCompetitor,
+        awayTeam: payload.awayTeam ?? payload.awayCompetitor,
+        competition: payload.competition ?? payload.tournamentName,
+        utcDate: payload.utcDate ?? payload.scheduled,
+        status: payload.status,
+        score: {
+          fullTime: {
+            home: payload.homeScore ?? null,
+            away: payload.awayScore ?? null
           }
         }
-      } catch (_) {}
-    }
-  }
-  return details.markets.length ? { providerMatchId: id, markets: details.markets, bookmakers: details.bookmakers } : null;
-}
+      };
 
+      const normalized = safeNormalizeMatch(raw);
+      if (!normalized) continue;
+
+      if (details.markets.length) {
+        normalized.markets = details.markets;
+        normalized.bookmakers = details.bookmakers;
+        normalized.odds = normalized.odds || {};
+        normalized.odds.markets = details.markets;
+        normalized.odds.bookmakers = details.bookmakers;
+      }
+
+      return normalized;
+    } catch (_) {}
+  }
+
+  return null;
+}
 function normalizeMatch(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
