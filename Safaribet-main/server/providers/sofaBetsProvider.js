@@ -419,61 +419,6 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
   let best = { markets: [], bookmakers: [], base: null, path: null };
 
-  // EXACT SOFABETS MARKET FEED. This is the authoritative full market
-  // catalogue for a fixture. Do this first so SafariBet never falls back
-  // to the single Match Result market when the full catalogue is available.
-  for (const base of BASES) {
-    try {
-      const payload = await sofaFetch(
-        base,
-        `/api/events/${encodeURIComponent(id)}/markets`,
-        {}
-      );
-      const rawMarkets = Array.isArray(payload)
-        ? payload
-        : (Array.isArray(payload?.markets) ? payload.markets : []);
-
-      const markets = rawMarkets.map((m, index) => {
-        if (!m || typeof m !== 'object') return null;
-        const outcomes = Array.isArray(m.outcomes)
-          ? m.outcomes
-          : (Array.isArray(m.selections) ? m.selections : []);
-        const selections = outcomes.map((o, oi) => {
-          if (!o || typeof o !== 'object') return null;
-          const odds = Number(o.odds ?? o.odd ?? o.price ?? o.value);
-          if (!Number.isFinite(odds)) return null;
-          return {
-            key: String(o.outcomeId ?? o.id ?? o.selectionId ?? ('selection_' + oi)),
-            name: String(o.outcome_name ?? o.selection_name ?? o.name ?? o.label ?? o.outcomeId ?? ('Selection ' + (oi + 1))),
-            odds,
-            bookmaker: o.bookmaker || null,
-            active: o.active !== false,
-            tradingStatus: o.trading_status ?? m.statusLabel ?? null
-          };
-        }).filter(Boolean);
-        if (!selections.length) return null;
-        return {
-          key: String(m.marketId ?? m.id ?? m.market_id ?? m.type ?? ('market_' + index)),
-          name: String(m.name ?? m.marketName ?? m.market_name ?? m.type ?? 'Market'),
-          bookmaker: m.bookmaker || null,
-          selections
-        };
-      }).filter(Boolean);
-
-      if (markets.length) {
-        const bookmakers = Array.from(new Set(
-          markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))
-        ));
-        if (markets.length > best.markets.length) {
-          best = { markets, bookmakers, base, path: `/api/events/${encodeURIComponent(id)}/markets` };
-        }
-        // This exact endpoint is the complete fixture catalogue; no need to
-        // risk replacing it with a smaller detail response.
-        if (markets.length >= 2) break;
-      }
-    } catch (_) {}
-  }
-
   const consider = (payload, base, path) => {
     const markets = normalizeMarketList(payload);
     if (!markets.length) return 0;
