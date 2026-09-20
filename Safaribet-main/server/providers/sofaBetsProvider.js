@@ -442,6 +442,18 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   ];
 
   for (const base of BASES) {
+    // Live fixtures have a dedicated endpoint that returns the expanded
+    // in-play market catalogue (the normal /api/live-games feed only
+    // includes Match Result while reporting a larger total_markets count).
+    try {
+      const livePayload = await sofaFetch(base, `/api/live-games/markets/${encodeURIComponent(id)}`, {});
+      const liveMarkets = normalizeMarketList(livePayload);
+      if (liveMarkets.length) {
+        const bookmakers = Array.from(new Set(liveMarkets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+        keepRicher(liveMarkets, bookmakers, base, '/api/live-games/markets');
+      }
+    } catch (_) {}
+
     for (const path of detailPaths) {
       for (const query of queries) {
         try {
@@ -461,19 +473,18 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
     // returned when that backend supports fixtureId/eventId filtering.
     for (const sportId of candidates) {
       try {
-        const idKeys = ['fixtureId', 'eventId', 'matchId'];
-        for (const idKey of idKeys) {
-          const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
-            sportId: String(sportId), [idKey]: id, page: '1', limit: '1', marketType: 'all'
-          });
-          const items = extractItems(payload);
-          const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
-          // Never use items[0] here. It can be another fixture.
-          const markets = normalizeMarketList(item || null);
-          if (markets.length) {
-            const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-            keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport?marketType=all');
-          }
+        // IMPORTANT: keep the normal homepage feed on `match result` for
+        // speed, but request `all` only for the exact match-detail lookup.
+        const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
+          sportId: String(sportId), fixtureId: id, page: '1', limit: '1', marketType: 'all'
+        });
+        const items = extractItems(payload);
+        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+        // Never use items[0] here. It can be another fixture.
+        const markets = normalizeMarketList(item || null);
+        if (markets.length) {
+          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+          keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport');
         }
       } catch (_) {}
     }
