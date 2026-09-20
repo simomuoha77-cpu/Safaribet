@@ -67,7 +67,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .res.er{color:var(--rd)}
 </style>
 </head>
-<body data-safaribet-build="2026-09-19-market-ui-4">
+<body>
 
 <div class="topbar">
   <button class="back" onclick="history.back()">←</button>
@@ -83,7 +83,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <button class="mode-btn" id="modeBtnBuilder" onclick="setMode('builder')">🧩 Bet Builder</button>
 </div>
 
-<div id="marketSummary" style="padding:8px 12px 0;color:var(--mt);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px"></div>
 <div class="main" id="marketsContainer"></div>
 
 <div class="slip-bar" id="slipBar" onclick="location.href='/?openSlip=1'">
@@ -112,24 +111,6 @@ const matchId = sessionStorage.getItem('currentMatchId') || new URLSearchParams(
 let matchData = null;
 let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
 
-// SafariBet is the customer-facing brand. Never expose the upstream provider
-// name in the visible match UI, even if an old cached response contains it.
-function scrubProviderBrand(){
-  const root = document.body;
-  if (!root) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
-  for (const node of nodes) {
-    const upstream = ['SOFA','BETS'].join('');
-    if (new RegExp(upstream, 'i').test(node.nodeValue || '')) {
-      node.nodeValue = String(node.nodeValue).replace(new RegExp(upstream, 'gi'), 'SAFARIBET');
-    }
-  }
-}
-new MutationObserver(scrubProviderBrand).observe(document.body, { childList:true, subtree:true, characterData:true });
-
-
 if (!matchId) {
   document.getElementById('matchHeader').innerHTML = '<div class="loading">No match specified. <a href="/" style="color:var(--g)">Go back home</a></div>';
 } else {
@@ -141,7 +122,7 @@ if (!matchId) {
 async function loadMatch(){
   try {
     // Fast path: render the match and whatever markets are already cached
-    // immediately. The rich SafariBet catalogue is refreshed in the background
+    // immediately. The rich SofaBets catalogue is refreshed in the background
     // so this page never sits on a blocking "Loading match…" screen.
     const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}`);
     const d = await r.json();
@@ -156,7 +137,7 @@ async function loadMatch(){
 
     // Rich markets are never allowed to block the first paint. If the cached
     // match already has them, this request is harmless; otherwise it fills the
-    // catalogue as soon as SafariBet responds and updates the page in place.
+    // catalogue as soon as SofaBets responds and updates the page in place.
     if (matchData.providerSource === 'sofabets' || String(matchId).startsWith('sofabets_')) {
       fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })
         .then(x => x.json())
@@ -204,8 +185,6 @@ function renderHeader(){
 function renderMarkets(){
   const markets = matchData.markets || [];
   const container = document.getElementById('marketsContainer');
-  const summary = document.getElementById('marketSummary');
-  if (summary) summary.textContent = markets.length ? `SAFARIBET • ${markets.length} MARKETS` : '';
   if (!markets.length) {
     container.innerHTML = '<div class="loading">No odds available for this match right now.</div>';
     document.getElementById('modeToggle').style.display = 'none';
@@ -222,15 +201,15 @@ function renderMarkets(){
   };
 
   container.innerHTML = markets.map(mk => {
-    // SafariBet-native markets are real provider prices. They are displayed
-    // exactly as supplied by SafariBet; unsupported provider markets remain
+    // SofaBets-native markets are real provider prices. They are displayed
+    // exactly as supplied by SofaBets; unsupported provider markets remain
     // view-only so SafariBet never accepts a bet it cannot settle safely.
     if (mk.providerMarket) {
       return `
       <div class="market-card">
         <div class="market-hd">
           <span class="market-name">${escapeHtml(mk.label)}</span>
-          
+          <span style="font-size:9px;color:var(--g);font-weight:700">SAFARIBET</span>
         </div>
         <div class="market-body">
           ${mk.options.map(opt => `

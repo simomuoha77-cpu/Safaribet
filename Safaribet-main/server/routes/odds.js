@@ -355,7 +355,7 @@ router.get('/match/:matchId', async (req, res) => {
     let providerMarkets = Array.isArray(m.markets) ? m.markets : [];
     if ((String(m.providerSource || '').toLowerCase() === 'sofabets' || String(req.params.matchId).startsWith('sofabets_')) && req.query.rich === '1') {
       const providerId = String(req.params.matchId).replace(/^sofabets_(?:live_)?/, '');
-      if (req.query.rich === '1') {
+      if (providerMarkets.length < 6) {
         try {
           const sportKeys = new Set(['football','basketball','tennis','cricket','rugby','hockey','volleyball','handball']);
           const providerSport = sportKeys.has(String(m.sport || '').toLowerCase()) ? String(m.sport).toLowerCase() : 'football';
@@ -397,7 +397,7 @@ router.get('/match/:matchId', async (req, res) => {
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,
-        bookmaker: mk.bookmaker || 'SafariBet',
+        bookmaker: mk.bookmaker || 'SofaBets',
         hasSuspendedPick: false,
         wholeMarketSuspended: false,
         options

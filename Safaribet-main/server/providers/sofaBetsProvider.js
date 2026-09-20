@@ -456,30 +456,52 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
         } catch (_) {}
       }
     }
-    // Some deployments expose only the catalogue endpoint. Ask it for the
-    // exact fixture without the match-result filter so the full market list is
-    // returned when that backend supports fixtureId/eventId filtering.
+    // The full SofaBets catalogue is exposed by fixtures-by-sport when
+    // marketType=all. The normal homepage feed intentionally uses Match Result
+    // only for speed, so NEVER change that feed. For a single opened match,
+    // request the exact fixture with the full catalogue.
     for (const sportId of candidates) {
-      // The fixture feed returns the full catalogue only when marketType=all.
-      // Keep this limited to the match-detail request so the homepage stays fast.
-      for (const idField of ['fixtureId', 'eventId', 'matchId']) {
+      const exactQueries = [
+        { sportId: String(sportId), fixtureId: id, page: '1', limit: '1', marketType: 'all' },
+        { sportId: String(sportId), eventId: id, page: '1', limit: '1', marketType: 'all' },
+        { sportId: String(sportId), matchId: id, page: '1', limit: '1', marketType: 'all' }
+      ];
+      for (const query of exactQueries) {
         try {
-          const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
-            sportId: String(sportId),
-            [idField]: id,
-            page: '1',
-            limit: '1',
-            marketType: 'all'
-          });
+          const payload = await sofaFetch(base, '/api/fixtures-by-sport', query);
           const items = extractItems(payload);
           const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
-          // Never use items[0] here. It can be another fixture.
           const markets = normalizeMarketList(item || null);
           if (markets.length) {
             const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
             keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport?marketType=all');
           }
+          if (item && markets.length > 1) continue;
         } catch (_) {}
+      }
+
+      // If the backend ignores fixtureId/eventId/matchId, walk its paginated
+      // full-catalogue feed until the requested fixture is actually found.
+      const maxPages = Math.min(Number(process.env.SOFABETS_MAX_PAGES || 30), 30);
+      for (let page = 1; page <= maxPages; page++) {
+        try {
+          const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
+            sportId: String(sportId), page: String(page), limit: '100', marketType: 'all'
+          });
+          const items = extractItems(payload);
+          const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+          if (item) {
+            const markets = normalizeMarketList(item);
+            if (markets.length) {
+              const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+              keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport?marketType=all');
+            }
+            break;
+          }
+          if (!items.length || items.length < 100) break;
+        } catch (_) {
+          break;
+        }
       }
     }
   }
