@@ -411,111 +411,70 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
   const cached = matchMarketsCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < 60000) return cached.data;
-
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
-
   const name = String(sportName || 'football').toLowerCase();
-  const candidates = Array.from(new Set([
-    ...(SPORT_ID_CANDIDATES[name] || []),
-    SPORT_IDS[name]
-  ].filter(Number.isFinite)));
-
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  // Do NOT accept the first market response. SofaBets can return only
+  // Match Result from the first endpoint while the complete catalogue is
+  // available from another endpoint/query.
   let best = { markets: [], bookmakers: [], base: null, path: null };
   const keepRicher = (markets, bookmakers, base, path) => {
     if (markets.length > best.markets.length) {
       best = { markets, bookmakers, base, path };
     }
   };
+  const detailPaths = [
+    `/api/fixture/${encodeURIComponent(id)}`,
+    `/api/fixtures/${encodeURIComponent(id)}`,
+    `/api/match/${encodeURIComponent(id)}`,
+    `/api/matches/${encodeURIComponent(id)}`,
+    `/api/event/${encodeURIComponent(id)}`,
+    `/api/events/${encodeURIComponent(id)}`,
+    `/api/fixture/${encodeURIComponent(id)}/markets`,
+    `/api/fixtures/${encodeURIComponent(id)}/markets`
+  ];
+  const queries = [
+    {},
+    { include: 'markets' },
+    { marketType: 'all' },
+    { markets: 'all' }
+  ];
 
-  // LIVE fixtures have a dedicated endpoint which returns the expanded
-  // market catalogue. The normal /api/live-games feed intentionally contains
-  // only Match Result, so never use that feed as the rich-market source.
-  const richBases = Array.from(new Set([
-    BASES.find(b => String(b).includes('feed.sofabets.com')),
-    ...BASES
-  ].filter(Boolean)));
-
-  for (const base of richBases) {
-    try {
-      const payload = await sofaFetch(base, `/api/live-games/markets/${encodeURIComponent(id)}`, {});
-      const markets = normalizeMarketList(payload);
-      if (markets.length) {
-        const bookmakers = Array.from(new Set(markets.flatMap(m => [
-          m.bookmaker,
-          ...m.selections.map(s => s.bookmaker)
-        ].filter(Boolean))));
-        keepRicher(markets, bookmakers, base, '/api/live-games/markets/:fixtureId');
-      }
-    } catch (_) {}
-  }
-
-  // PRE-MATCH fixtures expose the full catalogue through fixtures-by-sport
-  // when marketType=all is requested. IMPORTANT: fixtureId/eventId/matchId
-  // query parameters are ignored by the public endpoint, so requesting
-  // limit=1 with the requested ID can return an unrelated first fixture.
-  // Instead, walk the paginated fixture catalogue until the exact fixture ID
-  // is found, then use that fixture's complete markets array. The normal
-  // homepage feed remains Match Result only, so this extra work happens only
-  // when a user opens a match detail page.
-  const richPageLimit = Math.max(1, Math.min(MAX_PAGES_PER_FETCH, 30));
-  const fixtureIdKeys = ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'];
-  for (const sportId of candidates) {
-    for (const base of richBases) {
-      let page = 1;
-      while (page <= richPageLimit && best.markets.length <= 1) {
-        let payload;
+  for (const base of BASES) {
+    for (const path of detailPaths) {
+      for (const query of queries) {
         try {
-          payload = await sofaFetch(base, '/api/fixtures-by-sport', {
-            sportId: String(sportId),
-            page: String(page),
-            limit: '100',
-            marketType: 'all'
-          });
-        } catch (_) {
-          break;
-        }
-
-        const items = extractItems(payload);
-        if (!items.length) break;
-
-        const item = items.find(x => String(pick(x, fixtureIdKeys)) === id);
-        if (item) {
-          const markets = normalizeMarketList(item);
+          const payload = await sofaFetch(base, path, query);
+          const markets = normalizeMarketList(payload);
           if (markets.length) {
-            const bookmakers = Array.from(new Set(markets.flatMap(m => [
-              m.bookmaker,
-              ...m.selections.map(s => s.bookmaker)
-            ].filter(Boolean))));
-            keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport?marketType=all');
-            if (best.markets.length > 1) break;
+            const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+            keepRicher(markets, bookmakers, base, path);
+            // Keep searching. The first response is often only Match Result.
+            // A later endpoint can contain the complete market catalogue.
           }
-        }
-
-        const pg = paginationInfo(payload);
-        if (pg.hasMore === false) break;
-        if (pg.totalPages && page >= Number(pg.totalPages)) break;
-
-        let nextPage = null;
-        if (pg.nextPage != null && Number(pg.nextPage) > page) {
-          nextPage = Number(pg.nextPage);
-        } else if (pg.totalPages && page < Number(pg.totalPages)) {
-          nextPage = page + 1;
-        } else if (items.length >= 100) {
-          // Some SofaBets responses omit pagination metadata. A full page
-          // means another page may exist, so continue until a short page.
-          nextPage = page + 1;
-        }
-
-        if (!nextPage || nextPage <= page) break;
-        page = nextPage;
-        await sleep(PAGE_FETCH_GAP_MS);
+        } catch (_) {}
       }
-      if (best.markets.length > 1) break;
     }
-    if (best.markets.length > 1) break;
+    // Some deployments expose only the catalogue endpoint. Ask it for the
+    // exact fixture without the match-result filter so the full market list is
+    // returned when that backend supports fixtureId/eventId filtering.
+    for (const sportId of candidates) {
+      try {
+        const payload = await sofaFetch(base, '/api/fixtures-by-sport', {
+          sportId: String(sportId), fixtureId: id, eventId: id, matchId: id, page: '1', limit: '1'
+        });
+        const items = extractItems(payload);
+        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+        // Never use items[0] here. It can be another fixture.
+        const markets = normalizeMarketList(item || null);
+        if (markets.length) {
+          const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
+          keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport');
+        }
+      } catch (_) {}
+    }
   }
-
   if (best.markets.length) {
     matchMarketsCache.set(cacheKey, { ts: Date.now(), data: best });
     return best;

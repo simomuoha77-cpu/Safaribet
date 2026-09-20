@@ -256,23 +256,42 @@ function getSyntheticOdds(match, market, pick) {
   const home = getRealOdds(match, '1x2', 'home');
   const draw = getRealOdds(match, '1x2', 'draw');
   const away = getRealOdds(match, '1x2', 'away');
-  if (!home || !draw || !away) return null; // no base odds to derive from — can't synthesize
+  if (!home || !away) return null;
 
-  // Convert decimal odds to implied probabilities (roughly, ignoring overround)
-  const pHome = 1 / home, pDraw = 1 / draw, pAway = 1 / away;
+  // Convert the available winner odds to normalized implied probabilities.
+  // Some sports (tennis, basketball, etc.) are two-way and have no draw.
+  const pHome = 1 / home, pAway = 1 / away;
+  const pDraw = draw ? 1 / draw : 0;
   const overround = pHome + pDraw + pAway;
-  const nHome = pHome / overround, nAway = pAway / overround;
+  const nHome = pHome / overround, nDraw = pDraw / overround, nAway = pAway / overround;
 
   const toOdds = p => p > 0 ? Math.max(1.01, parseFloat((1 / p).toFixed(2))) : null;
 
   switch (market) {
-    // Handicap 1X2 — shift the favorite's line by the implied goal-supremacy; simplistic linear model.
-    // NOTE: this is the only synthetic market with a knowable outcome from final score
-    // alone (home/away goal difference), so it's the only synthetic market that can
-    // actually be settled rather than always voided.
+    case 'dc': {
+      if (!draw) return null;
+      if (pick === 'dc_1x') return toOdds(Math.min(0.97, nHome + nDraw));
+      if (pick === 'dc_x2') return toOdds(Math.min(0.97, nDraw + nAway));
+      if (pick === 'dc_12') return toOdds(Math.min(0.97, nHome + nAway));
+      return null;
+    }
+    case 'ou25': {
+      if (!draw) return null;
+      const pOver = Math.min(0.82, Math.max(0.38, 0.74 - (nDraw * 0.55)));
+      if (pick === 'over25') return toOdds(pOver);
+      if (pick === 'under25') return toOdds(1 - pOver);
+      return null;
+    }
+    case 'btts': {
+      if (!draw) return null;
+      const pYes = Math.min(0.78, Math.max(0.40, 0.76 - (nDraw * 0.70)));
+      if (pick === 'btts') return toOdds(pYes);
+      if (pick === 'btts_no') return toOdds(1 - pYes);
+      return null;
+    }
     case 'handicap': {
       const favHome = nHome >= nAway;
-      const adj = 0.15 * Math.abs(nHome - nAway) * 3; // wider spread for bigger mismatches
+      const adj = 0.15 * Math.abs(nHome - nAway) * 3;
       if (pick === 'handicap_home') return toOdds(favHome ? nHome - adj : nHome + adj);
       if (pick === 'handicap_away') return toOdds(favHome ? nAway + adj : nAway - adj);
       return null;
@@ -363,7 +382,11 @@ function resolveOdds(match, market, pick) {
   let result;
   if (REAL_MARKETS.has(market)) {
     const odds = getRealOdds(match, market, pick);
-    result = odds != null ? { odds, isSynthetic: false } : null;
+    if (odds != null) result = { odds, isSynthetic: false };
+    else {
+      const synthetic = getSyntheticOdds(match, market, pick);
+      result = synthetic != null ? { odds: synthetic, isSynthetic: true } : null;
+    }
   } else {
     const odds = getSyntheticOdds(match, market, pick);
     result = odds != null ? { odds, isSynthetic: true } : null;
@@ -397,8 +420,41 @@ async function getBoostedOdds(matchId, market, pick, stake) {
   return { odds: boost.boostedOdds, maxQualifyingStake: boost.maxQualifyingStake };
 }
 
+function buildSafariBetMarkets(match) {
+  const hasDraw = getRealOdds(match, '1x2', 'draw') != null;
+  const defs = hasDraw ? [
+    { market: '1x2', label: '1X2 / Winner', picks: [['home', match.homeTeam || 'Home'], ['draw', 'Draw'], ['away', match.awayTeam || 'Away']] },
+    { market: 'dc', label: 'Double Chance', picks: [['dc_1x', '1X'], ['dc_x2', 'X2'], ['dc_12', '12']] },
+    { market: 'ou25', label: 'Over/Under 2.5', picks: [['over25', 'Over 2.5'], ['under25', 'Under 2.5']] },
+    { market: 'btts', label: 'Both Teams to Score', picks: [['btts', 'Yes'], ['btts_no', 'No']] },
+    { market: 'handicap', label: 'Handicap', picks: [['handicap_home', match.homeTeam || 'Home'], ['handicap_away', match.awayTeam || 'Away']] }
+  ] : [
+    { market: '1x2', label: 'Winner', picks: [['home', match.homeTeam || 'Home'], ['away', match.awayTeam || 'Away']] },
+    { market: 'handicap', label: 'Handicap', picks: [['handicap_home', match.homeTeam || 'Home'], ['handicap_away', match.awayTeam || 'Away']] }
+  ];
+  return defs.map(def => {
+    const options = def.picks.map(([pick, pickLabel]) => {
+      const resolved = resolveOdds(match, def.market, pick);
+      if (!resolved) return null;
+      const reason = getSuspensionReason(match, def.market, pick);
+      return { pick, pickLabel, odds: resolved.odds, bettable: !reason, ...(reason ? { suspended: true, reason } : {}) };
+    }).filter(Boolean);
+    if (!options.length) return null;
+    return {
+      market: def.market,
+      label: def.label,
+      isSynthetic: true,
+      safariBetMarket: true,
+      bookmaker: 'SafariBet',
+      hasSuspendedPick: options.some(o => o.suspended),
+      wholeMarketSuspended: isMarketSuspended(match, def.market),
+      options
+    };
+  }).filter(Boolean);
+}
+
 module.exports = {
-  REAL_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
+  REAL_MARKETS, resolveOdds, buildSafariBetMarkets, isPickSuspended, getBoostedOdds,
   MIN_VIABLE_ODDS, getMinViableOdds,
   getSuspensionReason, isMarketSuspended, getLiveRiskConfig
 };

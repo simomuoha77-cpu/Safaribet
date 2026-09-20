@@ -21,7 +21,7 @@ const C = {
 };
 const FIXTURES_TTL = 20000; // 20 seconds
 const LIVE_TTL     = 8000;  // 8 seconds
-const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services/marketResolver');
+const { resolveOdds, isPickSuspended, isMarketSuspended, buildSafariBetMarkets } = require('../services/marketResolver');
 
 // Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
 // fallback for when the upstream SofaBets feed has a transient outage. Without
@@ -151,6 +151,15 @@ function applyOddsPipeline(match) {
   }
   if (Object.keys(suspendedPicks).length) clone.suspendedPicks = suspendedPicks;
   if (match.status === 'live' && isMarketSuspended(match, '1x2')) clone.wholeMarketSuspended = true;
+
+  // SafariBet owns a guaranteed fallback market catalogue. If SofaBets only
+  // supplied Match Result (or no catalogue at all), build SafariBet's own
+  // priced markets from the 1X2 odds already on this match. This is used for
+  // live AND scheduled games, so a provider market hiccup never leaves the
+  // match with only one market.
+  if (!Array.isArray(clone.markets) || clone.markets.length <= 1) {
+    clone.markets = buildSafariBetMarkets(clone);
+  }
   return clone;
 }
 
@@ -432,9 +441,12 @@ router.get('/match/:matchId', async (req, res) => {
       };
     }).filter(Boolean);
 
-    // When SofaBets supplied its real catalogue, show that catalogue only.
-    // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = richMarkets.length ? richMarkets : legacyMarkets;
+    // If SofaBets returned only its basic Match Result market, SafariBet
+    // creates its own market catalogue from the odds already available. If
+    // SofaBets returned a genuinely richer catalogue, keep that catalogue.
+    const markets = richMarkets.length > 1
+      ? richMarkets
+      : (legacyMarkets.length ? legacyMarkets : richMarkets);
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');
