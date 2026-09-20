@@ -135,25 +135,9 @@ async function loadMatch(){
     renderMarkets();
     updateSlipBar();
 
-    // Rich markets are never allowed to block the first paint. If the cached
-    // match already has them, this request is harmless; otherwise it fills the
-    // catalogue as soon as SofaBets responds and updates the page in place.
-    if (matchData.providerSource === 'sofabets' || String(matchId).startsWith('sofabets_')) {
-      fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })
-        .then(x => x.json())
-        .then(full => {
-          if (!full.success || !full.data) return;
-          const oldCount = Array.isArray(matchData.markets) ? matchData.markets.length : 0;
-          const newCount = Array.isArray(full.data.markets) ? full.data.markets.length : 0;
-          if (newCount >= oldCount && newCount > 0) {
-            matchData = full.data;
-            renderHeader();
-            renderMarkets();
-            updateSlipBar();
-          }
-        })
-        .catch(() => {});
-    }
+    // SafariBet markets are generated locally from the match data; no
+    // provider-market refresh is performed here.
+
   } catch(e) {
     document.getElementById('matchHeader').innerHTML = '<div class="loading">Failed to load match — check connection.</div>';
   }
