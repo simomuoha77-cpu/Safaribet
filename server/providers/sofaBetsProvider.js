@@ -415,6 +415,15 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
   if (!id) return { markets: [], bookmakers: [] };
   const name = String(sportName || 'football').toLowerCase();
   const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  // Do NOT accept the first market response. SofaBets can return only
+  // Match Result from the first endpoint while the complete catalogue is
+  // available from another endpoint/query.
+  let best = { markets: [], bookmakers: [], base: null, path: null };
+  const keepRicher = (markets, bookmakers, base, path) => {
+    if (markets.length > best.markets.length) {
+      best = { markets, bookmakers, base, path };
+    }
+  };
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
@@ -440,9 +449,9 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
           const markets = normalizeMarketList(payload);
           if (markets.length) {
             const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-            const data = { markets, bookmakers, base, path };
-            matchMarketsCache.set(cacheKey, { ts: Date.now(), data });
-            return data;
+            keepRicher(markets, bookmakers, base, path);
+            // Keep searching. The first response is often only Match Result.
+            // A later endpoint can contain the complete market catalogue.
           }
         } catch (_) {}
       }
@@ -456,15 +465,21 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
           sportId: String(sportId), fixtureId: id, eventId: id, matchId: id, page: '1', limit: '1'
         });
         const items = extractItems(payload);
-        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id) || items[0];
-        const markets = normalizeMarketList(item || payload);
+        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id);
+        // Never use items[0] here. It can be another fixture.
+        const markets = normalizeMarketList(item || null);
         if (markets.length) {
           const bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...m.selections.map(s => s.bookmaker)].filter(Boolean))));
-          return { markets, bookmakers, base, path: '/api/fixtures-by-sport' };
+          keepRicher(markets, bookmakers, base, '/api/fixtures-by-sport');
         }
       } catch (_) {}
     }
   }
+  if (best.markets.length) {
+    matchMarketsCache.set(cacheKey, { ts: Date.now(), data: best });
+    return best;
+  }
+
   const empty = { markets: [], bookmakers: [] };
   matchMarketsCache.set(cacheKey, { ts: Date.now(), data: empty });
   return empty;
