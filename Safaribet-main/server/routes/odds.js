@@ -313,7 +313,7 @@ router.get('/match/:matchId', async (req, res) => {
       const parts = String(req.params.matchId).split('_');
       const isLiveId = parts[1] === 'live';
       const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
-      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
+      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(1).join('_');
       const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
       if (direct && direct.homeTeam && direct.awayTeam) {
         m = {

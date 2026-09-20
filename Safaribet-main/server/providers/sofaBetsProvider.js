@@ -424,6 +424,97 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
       best = { markets, bookmakers, base, path };
     }
   };
+  // Exact SofaBets fixture-market endpoint.
+  // This returns the complete market catalogue for a specific fixture.
+  for (const base of BASES) {
+    try {
+      const payload = await sofaFetch(
+        base,
+        `/api/events/${encodeURIComponent(id)}/markets`,
+        {}
+      );
+
+      const rawMarkets = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.markets) ? payload.markets : []);
+
+      const markets = rawMarkets.map((m, index) => {
+        if (!m || typeof m !== 'object') return null;
+
+        const outcomes = Array.isArray(m.outcomes) ? m.outcomes : [];
+
+        const selections = outcomes.map((o, oi) => {
+          if (!o || typeof o !== 'object') return null;
+
+          const odds = Number(
+            o.odds ??
+            o.odd ??
+            o.price ??
+            o.value
+          );
+
+          return {
+            key: String(
+              o.outcomeId ??
+              o.id ??
+              o.selectionId ??
+              ('selection_' + oi)
+            ),
+            name: String(
+              o.outcome_name ??
+              o.selection_name ??
+              o.name ??
+              o.label ??
+              o.outcomeId ??
+              ('Selection ' + (oi + 1))
+            ),
+            odds,
+            bookmaker: o.bookmaker || null,
+            active: o.active !== false,
+            tradingStatus: o.trading_status ?? m.statusLabel ?? null
+          };
+        }).filter(o => o && Number.isFinite(o.odds));
+
+        if (!selections.length) return null;
+
+        return {
+          key: String(
+            m.marketId ??
+            m.id ??
+            m.market_id ??
+            m.type ??
+            ('market_' + index)
+          ),
+          name: String(
+            m.name ??
+            m.marketName ??
+            m.market_name ??
+            m.type ??
+            'Market'
+          ),
+          bookmaker: m.bookmaker || null,
+          selections
+        };
+      }).filter(Boolean);
+
+      if (markets.length) {
+        const bookmakers = Array.from(new Set(
+          markets.flatMap(m => [
+            m.bookmaker,
+            ...m.selections.map(s => s.bookmaker)
+          ].filter(Boolean))
+        ));
+
+        keepRicher(
+          markets,
+          bookmakers,
+          base,
+          `/api/events/${encodeURIComponent(id)}/markets`
+        );
+      }
+    } catch (_) {}
+  }
+
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
