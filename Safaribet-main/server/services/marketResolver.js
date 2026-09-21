@@ -80,15 +80,33 @@ function getLiveRiskConfig() {
   return LIVE_RISK_DEFAULTS;
 }
 
+// Map SafariBet-generated markets onto the small set of live-risk families
+// that use score/minute lead rules. This keeps the entire generated market board
+// live-bettable by default while still locking outcomes that have become too
+// close to certain.
+function generatedRiskFamily(market, pick) {
+  if (!String(market || '').startsWith('gen:')) return market;
+  if (market === 'gen:ft:1x2' || market === 'gen:bb:winner' || market === 'gen:tn:winner' || market === 'gen:winner') return '1x2';
+  if (market === 'gen:ft:dc') return 'dc';
+  if (market === 'gen:ft:dnb') return '1x2';
+  if (market.startsWith('gen:ft:ah:') || market.startsWith('gen:ft:eh:')) return '1x2';
+  if (market === 'gen:ft:resultou25' || market === 'gen:ft:resultbtts') return '1x2';
+  if (market === 'gen:ft:margin') return '1x2';
+  return null;
+}
+
 // Returns a reason string (never used for display copy directly, just for
 // admin/debugging visibility and for the frontend to distinguish a durable
 // rule-based lock from a temporary "still recalculating" one) or null if not
 // suspended. `isPickSuspended` below is a thin wrapper that just checks
 // whether this returns non-null.
 function getSuspensionReason(match, market, pick) {
+  // Finished/cancelled matches are never bettable, including direct SofaBets
+  // live IDs that were not previously present in MongoDB.
+  if (match.status === 'finished' || match.status === 'cancelled') return 'match_finished';
   if (match.status !== 'live') return null;
   const h = match.score?.home, a = match.score?.away, minute = match.score?.minute;
-  if (h == null || a == null) return null;
+  if (h == null || a == null) return 'missing_live_score';
 
   const cfg = getLiveRiskConfig();
 
@@ -109,21 +127,58 @@ function getSuspensionReason(match, market, pick) {
     if (sinceGoalSec < (cfg.goalEventSuspensionSec ?? 45)) return 'goal_event';
   }
 
-  // 3. MATHEMATICALLY CERTAIN — not configurable, not a judgment call.
+  // 3. MATHEMATICALLY CERTAIN / IMPOSSIBLE LIVE PICKS. These rules apply to
+  // SafariBet-generated markets too, not just the old legacy market names.
+  // Once a live outcome is already settled or impossible, it must be locked.
+  const total = h + a;
+  const isGen = String(market || '').startsWith('gen:');
   if (market === 'ou25') {
-    const total = h + a;
-    return total > 2.5 ? 'mathematically_certain' : null; // Over guaranteed win, Under guaranteed loss — both suspended
+    return total > 2.5 ? 'mathematically_certain' : null;
   }
   if (market === 'btts') {
-    return (h > 0 && a > 0) ? 'mathematically_certain' : null; // both already scored — nothing left undecided
+    return (h > 0 && a > 0) ? 'mathematically_certain' : null;
+  }
+  if (isGen) {
+    if (market === 'gen:ft:btts' && h > 0 && a > 0) return 'mathematically_certain';
+
+    const ou = market.match(/^gen:ft:ou:(\d+(?:\.5)?)$/);
+    if (ou) {
+      const line = Number(ou[1]);
+      if (total > line) return 'mathematically_certain';
+    }
+
+    const tt = market.match(/^gen:ft:teamtotal:(home|away):(\d+(?:\.5)?)$/);
+    if (tt) {
+      const goals = tt[1] === 'home' ? h : a;
+      if (goals > Number(tt[2])) return 'mathematically_certain';
+    }
+
+    if (market === 'gen:ft:totalexact') {
+      const target = Number(pick);
+      if (Number.isFinite(target) && target <= total) return 'mathematically_certain';
+    }
+
+    if (market === 'gen:ft:correctscore') {
+      const m = String(pick || '').match(/^(\d+)-(\d+)$/);
+      if (m) {
+        const targetH = Number(m[1]), targetA = Number(m[2]);
+        // A score below the current score on either side is impossible.
+        if (targetH < h || targetA < a) return 'mathematically_certain';
+      }
+    }
   }
 
   // 4. CONFIGURABLE LEAD/MINUTE RULES — only for markets the admin has opted
   // into (affectedMarkets); everything else falls through unsuspended here.
   const affected = cfg.affectedMarkets || LIVE_RISK_DEFAULTS.affectedMarkets;
-  if (!affected.includes(market)) return null;
+  const riskMarket = isGen ? generatedRiskFamily(market, pick) : market;
+  if (!affected.includes(riskMarket)) return null;
 
-  // If Juan AI hasn't sent a real live minute for this match (common for
+  // If the generated market contains a result component, the same leading-side
+  // protection applies to that component. Other live markets remain OPEN unless
+  // their own outcome is already decided/impossible or the whole match is in a
+  // temporary goal-event/stale-data suspension above.
+  // If SofaBets hasn't sent a real live minute for this match (common for lower-tier/friendly fixtures), estimate it from kickoff time + elapsed real-world time — same fallback the frontend already uses to display
   // lower-tier/friendly fixtures), estimate it from kickoff time + elapsed
   // real-world time — same fallback the frontend already uses to display
   // "~90'". Without this, these rules would silently never apply to any
@@ -155,10 +210,17 @@ function getSuspensionReason(match, market, pick) {
 
   if (matchedAction === 'suspend_market') return 'lead_rule';
   if (matchedAction === 'suspend_leading') {
-    const leadingPickSuspended =
-      (market === '1x2'      && ((pick === 'home' && leadingSide === 'home') || (pick === 'away' && leadingSide === 'away'))) ||
-      (market === 'dc'       && ((pick === 'dc_1x' && leadingSide === 'home') || (pick === 'dc_x2' && leadingSide === 'away') || (pick === 'dc_12'))) ||
-      (market === 'handicap' && ((pick === 'handicap_home' && leadingSide === 'home') || (pick === 'handicap_away' && leadingSide === 'away')));
+    const rm = riskMarket;
+    let leadingPickSuspended = false;
+    if (rm === '1x2') {
+      if (market === '1x2' || market === 'gen:ft:1x2' || market === 'gen:bb:winner' || market === 'gen:tn:winner' || market === 'gen:winner') leadingPickSuspended = (pick === 'home' && leadingSide === 'home') || (pick === 'away' && leadingSide === 'away');
+      else if (market === 'gen:ft:dnb') leadingPickSuspended = (pick === 'dnb_home' && leadingSide === 'home') || (pick === 'dnb_away' && leadingSide === 'away');
+      else if (market.startsWith('gen:ft:ah:') || market.startsWith('gen:ft:eh:')) leadingPickSuspended = (pick === 'home' && leadingSide === 'home') || (pick === 'away' && leadingSide === 'away');
+      else if (market === 'gen:ft:margin') leadingPickSuspended = (pick.startsWith('home') && leadingSide === 'home') || (pick.startsWith('away') && leadingSide === 'away');
+      else if (market === 'gen:ft:resultou25' || market === 'gen:ft:resultbtts') leadingPickSuspended = ((pick.startsWith('home') && leadingSide === 'home') || (pick.startsWith('away') && leadingSide === 'away'));
+    } else if (rm === 'dc') {
+      leadingPickSuspended = (pick === 'dc_1x' && leadingSide === 'home') || (pick === 'dc_x2' && leadingSide === 'away') || pick === 'dc_12';
+    }
     if (leadingPickSuspended) return 'lead_rule';
   }
 

@@ -22,6 +22,74 @@ const ODDS_STALE_MS = 90 * 60 * 1000; // 90 minutes
 
 const { resolveOdds, isPickSuspended, getMinViableOdds } = require('../services/marketResolver');
 const { getGeneratedOdds } = require('../services/safariMarketEngine');
+const sofaBets = require('../providers/sofaBetsProvider');
+
+function parseDirectSofaId(matchId) {
+  const raw = String(matchId || '');
+  if (!raw.startsWith('sofabets_')) return null;
+  const parts = raw.split('_');
+  if (parts[1] === 'live') {
+    return { sport: parts[2] || 'football', providerId: parts.slice(3).join('_') };
+  }
+  if (parts.length >= 3) {
+    return { sport: parts[1] || 'football', providerId: parts.slice(2).join('_') };
+  }
+  return { sport: 'football', providerId: parts.slice(1).join('_') };
+}
+
+async function hydrateDirectSofaMatches(ids, map) {
+  const missing = ids.filter(id => !map.has(String(id))).map(String);
+  if (!missing.length) return map;
+  await Promise.all(missing.map(async id => {
+    const parsed = parseDirectSofaId(id);
+    if (!parsed?.providerId) return;
+    try {
+      const direct = await sofaBets.getMatchById(parsed.providerId, parsed.sport, { rich: false });
+      if (!direct?.homeTeam || !direct?.awayTeam) return;
+      const score = direct.score?.fullTime || direct.score || {};
+      const home = Number(direct.odds?.homeWin ?? direct.providerOdds?.homeWin);
+      const draw = Number(direct.odds?.draw ?? direct.providerOdds?.draw);
+      const away = Number(direct.odds?.awayWin ?? direct.providerOdds?.awayWin);
+      const statusRaw = String(direct.status || '').toUpperCase();
+      const status = ['IN_PLAY','LIVE','PAUSED'].includes(statusRaw) ? 'live' :
+        ['FINISHED','FT','COMPLETED','ENDED'].includes(statusRaw) ? 'finished' : 'upcoming';
+      const doc = {
+        matchId: id,
+        sport: parsed.sport === 'football' ? (direct.competition || 'football') : parsed.sport,
+        league: direct.competition || parsed.sport,
+        homeTeam: direct.homeTeam,
+        awayTeam: direct.awayTeam,
+        commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
+        status,
+        hasOdds: Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1,
+        odds: {
+          home: Number.isFinite(home) ? home : null,
+          draw: Number.isFinite(draw) ? draw : null,
+          away: Number.isFinite(away) ? away : null,
+          updatedAt: new Date()
+        },
+        score: {
+          home: score.home ?? null, away: score.away ?? null,
+          minute: direct.minute ?? null, period: direct.status || null,
+          lastGoalAt: null
+        },
+        providerOdds: direct.odds || direct.providerOdds || null,
+        markets: direct.markets || [],
+        bookmakers: direct.bookmakers || [],
+        source: 'juanai',
+        isStatic: false,
+        result: status === 'finished' && score.home != null && score.away != null
+          ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null,
+        settled: false
+      };
+      const saved = await Match.findOneAndUpdate({ matchId: id }, { $set: doc }, { upsert: true, new: true, setDefaultsOnInsert: true }).lean();
+      if (saved) map.set(id, saved);
+    } catch (e) {
+      console.warn('[bets] direct SofaBets match hydrate failed:', id, e.message);
+    }
+  }));
+  return map;
+}
 
 async function loadValidationMatches(selections) {
   const ids = [...new Set((selections || []).map(s => String(s.matchId)).filter(Boolean))];
@@ -29,7 +97,7 @@ async function loadValidationMatches(selections) {
   if (!ids.length) return map;
   const docs = await Match.find({ matchId: { $in: ids } }).lean();
   docs.forEach(m => map.set(String(m.matchId), m));
-  return map;
+  return hydrateDirectSofaMatches(ids, map);
 }
 
 function pickLabelFor(market, pick, match) {
@@ -155,6 +223,8 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
+    const hydratedMap = await hydrateDirectSofaMatches(matchIds, new Map(Object.entries(matchMap)));
+    hydratedMap.forEach((m, id) => { matchMap[id] = m; });
 
     const verifiedSelections = [];
     let totalOdds = 1;
@@ -388,7 +458,11 @@ router.post('/place-builder', auth, betLimiter, async (req, res) => {
     const err = bettingService.validateBetBuilderLegs(legs);
     if (err) return res.status(400).json({ success: false, message: err });
 
-    const match = await Match.findOne({ matchId: legs[0].matchId }).lean();
+    let match = await Match.findOne({ matchId: legs[0].matchId }).lean();
+    if (!match) {
+      const hydrated = await hydrateDirectSofaMatches([legs[0].matchId], new Map());
+      match = hydrated.get(String(legs[0].matchId)) || null;
+    }
     if (!match) return res.status(400).json({ success: false, message: 'Match not found' });
 
     const adminRoutes = require('./admin');
@@ -489,6 +563,8 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
     const matches = await Match.find({ matchId: { $in: matchIds } });
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
+    const hydratedMap = await hydrateDirectSofaMatches(matchIds, new Map(Object.entries(matchMap)));
+    hydratedMap.forEach((m, id) => { matchMap[id] = m; });
 
     const verifiedSelections = [];
     for (const s of selections) {

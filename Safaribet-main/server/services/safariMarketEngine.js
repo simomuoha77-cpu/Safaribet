@@ -12,7 +12,18 @@ function num(v, fallback = null) {
 function clampProb(p) { return Math.max(0.0005, Math.min(0.9995, Number(p) || 0)); }
 function oddsFromProb(p, margin = 0.065) {
   p = clampProb(p);
-  return Math.max(1.05, Number((1 / (p * (1 + margin))).toFixed(2)));
+  return Math.min(100, Math.max(1.05, Number((1 / (p * (1 + margin))).toFixed(2))));
+}
+
+// Long-shot markets such as Correct Score contain extremely small model
+// probabilities. A straight 1/p conversion creates four-digit prices that
+// are not practical sportsbook prices. SafariBet compresses only these
+// long-shot prices and hard-caps every generated price at 100.00.
+function longshotOddsFromProb(p, margin = 0.065) {
+  p = clampProb(p);
+  const raw = 1 / (p * (1 + margin));
+  const compressed = 1 + Math.pow(Math.max(0, raw - 1), 0.62);
+  return Math.min(100, Math.max(1.05, Number(compressed.toFixed(2))));
 }
 function poisson(lambda, k) {
   let fact = 1;
@@ -184,9 +195,9 @@ function footballMarkets(match) {
 
   // Correct score and exact total goals.
   const cs=[];
-  for(let x=0;x<=5;x++) for(let y=0;y<=5;y++) cs.push({pick:`${x}-${y}`,pickLabel:`${x} - ${y}`,odds:oddsFromProb(poisson(lh,x)*poisson(la,y))});
+  for(let x=0;x<=5;x++) for(let y=0;y<=5;y++) cs.push({pick:`${x}-${y}`,pickLabel:`${x} - ${y}`,odds:longshotOddsFromProb(poisson(lh,x)*poisson(la,y))});
   addMarket(out,'gen:ft:correctscore','Correct Score',cs);
-  addMarket(out,'gen:ft:totalexact','Exact Total Goals',Array.from({length:8},(_,k)=>({pick:String(k),pickLabel:String(k),odds:oddsFromProb(poisson(total,k))})));
+  addMarket(out,'gen:ft:totalexact','Exact Total Goals',Array.from({length:8},(_,k)=>({pick:String(k),pickLabel:String(k),odds:longshotOddsFromProb(poisson(total,k))})));
 
   // Winning margin.
   let home1=0,home2=0,home3=0,away1=0,away2=0,away3=0;

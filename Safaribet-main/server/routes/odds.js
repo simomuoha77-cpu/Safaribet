@@ -21,7 +21,7 @@ const C = {
 };
 const FIXTURES_TTL = 20000; // 20 seconds
 const LIVE_TTL     = 8000;  // 8 seconds
-const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services/marketResolver');
+const { resolveOdds, isPickSuspended, isMarketSuspended, getSuspensionReason } = require('../services/marketResolver');
 
 // Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
 // fallback for when the upstream SofaBets feed has a transient outage. Without
@@ -335,14 +335,32 @@ router.get('/match/:matchId', async (req, res) => {
             home: direct.score?.fullTime?.home ?? null,
             away: direct.score?.fullTime?.away ?? null,
             minute: direct.minute ?? null,
-            period: direct.status || null
+            period: direct.status || null,
+            lastGoalAt: null
           },
+          updatedAt: new Date(),
           markets: direct.markets || [],
           bookmakers: direct.bookmakers || [],
           providerOdds: direct.odds || null,
           providerSource: 'sofabets',
           realOddsSource: 'SofaBets'
         };
+      }
+    }
+
+    // Persist direct live SofaBets matches the first time their detail page is
+    // opened. This gives live bets a real Match document for server-side odds
+    // validation/settlement instead of returning "match not found" for the
+    // transient sofabets_live_* ID used by the Live tab.
+    if (m && String(req.params.matchId).startsWith('sofabets_live_')) {
+      try {
+        await Match.findOneAndUpdate(
+          { matchId: m.matchId },
+          { $set: { ...m, source: 'juanai', isStatic: false } },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (persistErr) {
+        console.warn('[odds/match] live SofaBets persist failed:', persistErr.message);
       }
     }
 
@@ -356,7 +374,7 @@ router.get('/match/:matchId', async (req, res) => {
     // from the match's base winner odds/score; SofaBets is never used as the
     // market catalogue and no provider market IDs/prices are exposed here.
     const { generateMarkets } = require('../services/safariMarketEngine');
-    const markets = generateMarkets(m).map(mk => ({
+    let markets = generateMarkets(m).map(mk => ({
       ...mk,
       options: (mk.options || []).map(o => ({
         ...o,
@@ -378,6 +396,32 @@ router.get('/match/:matchId', async (req, res) => {
       const opt = mk.options.find(o => o.pick === boost.pick);
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }
     }
+
+    // Live betting is OPEN by default. Only selections that are stale,
+    // immediately after a goal, already decided/impossible, or caught by the
+    // score/minute lead rules are locked. This mirrors sportsbook behaviour: a
+    // live match does not become globally unbettable just because one outcome
+    // has become too risky. Finished/cancelled matches are fully locked.
+    markets = markets.map(mk => {
+      const options = (mk.options || []).map(opt => {
+        const reason = getSuspensionReason(m, mk.market, opt.pick);
+        return {
+          ...opt,
+          suspended: !!reason,
+          bettable: !reason,
+          suspensionReason: reason || null
+        };
+      });
+      const whole = options.length > 0 && options.every(o => o.suspended);
+      const reasons = options.map(o => o.suspensionReason).filter(Boolean);
+      return {
+        ...mk,
+        options,
+        hasSuspendedPick: options.some(o => o.suspended),
+        wholeMarketSuspended: whole,
+        suspensionReason: whole ? (reasons[0] || null) : null
+      };
+    });
 
     res.json({ success: true, data: { ...m, markets } });
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }

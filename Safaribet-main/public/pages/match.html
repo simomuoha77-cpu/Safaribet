@@ -181,7 +181,9 @@ function renderMarkets(){
     goal_event: 'Odds recalculating after goal',
     mathematically_certain: 'Outcome decided',
     lead_rule: 'Selection suspended',
-    draw_late: 'Selection suspended'
+    draw_late: 'Selection suspended',
+    match_finished: 'Match finished',
+    missing_live_score: 'Live score unavailable'
   };
 
   container.innerHTML = markets.map(mk => {
@@ -211,7 +213,7 @@ function renderMarkets(){
     // reason, otherwise the market is suspended because the risk rules judge
     // it effectively decided.
     if (mk.wholeMarketSuspended) {
-      const anyReason = (mk.options.find(o => o.reason) || {}).reason;
+      const anyReason = (mk.options.find(o => o.suspensionReason) || {}).suspensionReason;
       const isTemporary = anyReason === 'stale_data' || anyReason === 'goal_event';
       return `
       <div class="market-card">
@@ -232,7 +234,7 @@ function renderMarkets(){
       </div>
       <div class="market-body">
         ${mk.options.map(opt => opt.suspended ? `
-          <div class="odd-btn" style="opacity:.5;cursor:default" onclick="event.stopPropagation()" title="${REASON_LABELS[opt.reason] || 'Selection suspended'}">
+          <div class="odd-btn" style="opacity:.5;cursor:default" onclick="event.stopPropagation()" title="${REASON_LABELS[opt.suspensionReason] || 'Selection suspended'}">
             <div class="odd-lbl">${escapeHtml(opt.pickLabel || pickLabel(mk.market, opt.pick))}</div>
             <div class="odd-val">🔒</div>
           </div>
