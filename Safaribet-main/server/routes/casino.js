@@ -357,23 +357,61 @@ router.get('/history', auth, async (req, res) => {
 
 module.exports = router;
 
-// ── SOFABETS GAME LAUNCHER ──
-// Uses the public SofaBets game path. This does not expose SafariBet wallet
-// credentials to the provider; it simply opens the provider game in SafariBet's
-// authenticated casino shell.
+// ── SOFABETS CATALOG → SAFARIBET GAME LAUNCHER ──
+// SofaBets is catalog/metadata only. The playable game must stay inside
+// SafariBet so the existing SafariBet/JuanAI casino session and wallet are used.
 router.get('/sofa-play/:provider/:ref', require('../middleware/authFlexible'), async (req, res) => {
   const provider = String(req.params.provider || '').trim();
   const ref = String(req.params.ref || '').trim();
   if (!provider || !ref || !/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
     return res.status(400).send('Invalid game');
   }
-  const gameUrl = `https://www.sofabets.com/casino/play/${encodeURIComponent(provider)}/${encodeURIComponent(ref)}`;
-  // SofaBets casino games must be opened as a top-level page. Embedding the
-  // provider game inside an iframe causes its game shell to reject the frame
-  // or navigate back to its home page on mobile browsers.
-  // Keep SafariBet authentication on this launcher, then hand the browser to
-  // the actual SofaBets game URL. The provider/ref are validated above.
-  res.redirect(302, gameUrl);
+
+  try {
+    if (!JUAN_KEY()) return res.status(503).send('Casino service not configured');
+
+    // Pull SafariBet's playable catalogue from JuanAI. SofaBets only supplied
+    // the lobby/provider/ref; it must never become the wallet or game host.
+    const gamesRes = await axios.get(`${JUAN_URL()}/api/casino/games`, {
+      params: { key: JUAN_KEY() },
+      timeout: 10000
+    });
+    const games = gamesRes.data?.data || gamesRes.data?.games || [];
+
+    const norm = v => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const providerKey = norm(provider);
+    const refKey = norm(ref);
+
+    // Prefer an exact provider/ref match when JuanAI exposes those fields.
+    let game = games.find(g =>
+      norm(g.provider) === providerKey &&
+      norm(g.ref || g.reference || g.gameRef || g.slug) === refKey
+    );
+
+    // Then match the common casino identity fields. This covers games such as
+    // Aviator where the SofaBets feed and JuanAI catalogue use the same title
+    // but different internal IDs.
+    if (!game) {
+      game = games.find(g => {
+        const gp = norm(g.provider || g.vendor || g.gameProvider);
+        const gr = norm(g.ref || g.reference || g.gameRef || g.slug || g.code);
+        const gn = norm(g.name || g.title || g.gameName);
+        return (gp && gp === providerKey && gr === refKey) || gn === refKey;
+      });
+    }
+
+    if (!game?.id) {
+      return res.status(404).send(`Game is not available in SafariBet yet. <a href="/casino">← Back to Casino</a>`);
+    }
+
+    // IMPORTANT: redirect only to SafariBet's own launcher. That launcher
+    // creates the authenticated JuanAI session and passes SafariBet's wallet
+    // webhook, so the user's SafariBet balance is used for debit/credit.
+    return res.redirect(302, `/casino/play/${encodeURIComponent(String(game.id))}`);
+  } catch (e) {
+    console.error('[casino/sofa-play]', e.message);
+    return res.status(502).send(`Casino game unavailable. <a href="/casino">← Back to Casino</a>`);
+  }
 });
 
 // ── GAME LAUNCHER PAGE — requires user auth, gets session from Juan AI server-side ──
