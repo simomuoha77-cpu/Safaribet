@@ -247,7 +247,7 @@ async function loadGames() {
   document.getElementById('gamesList').style.display = 'none';
 
   try {
-    const r = await fetch('/api/casino/juan-games');
+    const r = await fetch('/api/casino/games');
     const d = await r.json();
 
     document.getElementById('gamesLoading').style.display = 'none';

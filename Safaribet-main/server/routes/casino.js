@@ -25,6 +25,39 @@ const router = express.Router();
 const JUAN_KEY = () => process.env.JUANAI_API_KEY;
 const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
 
+// ── SOFABETS CASINO GAME FEED ──
+// SofaBets exposes provider availability publicly. The actual game catalogue is
+// provider/ref based in the SofaBets frontend; keep this route independent of
+// the sports SofaBets provider and do not require JUANAI settings.
+router.get('/games', async (req, res) => {
+  try {
+    const base = process.env.SOFABETS_BACKEND_URL || 'https://backendapi.sofabets.com';
+    const r = await axios.get(`${base}/api/casino/providers`, {
+      headers: { Accept: 'application/json' },
+      timeout: 10000
+    });
+    const p = r.data?.providers || {};
+    const games = [
+      ['aviator','Aviator','Aviator','aviator','crash','spribe'],
+      ['spribe','Spribe','Spribe','spribe','crash','spribe'],
+      ['smartsoft','Smartsoft','Smartsoft','smartsoft','instant','smartsoft'],
+      ['pragmatic','Pragmatic Play','Pragmatic Play','pragmatic','slots','pragmatic'],
+      ['aviatrix','Aviatrix','Aviatrix','aviatrix','crash','aviatrix'],
+      ['pascal','Pascal Gaming','Pascal Gaming','pascal','table','pascal'],
+      ['bazooka','Bazooka','Bazooka','bazooka','instant','bazooka'],
+      ['amusnet','Amusnet','Amusnet','amusnet','slots','amusnet'],
+      ['kaga','KA Gaming','KA Gaming','kaga','slots','kaga'],
+      ['kiron','Kiron','Kiron','kiron','instant','kiron']
+    ].filter(x => p[x[5]] === true).map(([id,name,provider,ref,category]) => ({
+      id,name,provider,ref,category,status:'active',rtp:96,source:'sofabets'
+    }));
+    res.json({success:true,data:games,count:games.length,source:'sofabets'});
+  } catch (e) {
+    console.error('[casino/games][sofabets]', e.message);
+    res.status(502).json({success:false,message:'Casino service unavailable',data:[]});
+  }
+});
+
 // ── JUAN AI CASINO GAMES LIST ──
 router.get('/juan-games', async (req, res) => {
   try {
@@ -230,67 +263,38 @@ router.get('/history', auth, async (req, res) => {
 
 module.exports = router;
 
-// ── GAME LAUNCHER PAGE — requires user auth, gets session from Juan AI server-side ──
+// ── SOFABETS GAME LAUNCHER ──
 router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, res) => {
   const { gameId } = req.params;
-  const user = req.user;
-
+  const games = {
+    aviator:{name:'Aviator',provider:'Aviator',ref:'aviator',endpoint:'/aviator_launch'},
+    spribe:{name:'Spribe',provider:'Spribe',ref:'spribe',endpoint:'/Spribe_launch'},
+    smartsoft:{name:'Smartsoft',provider:'Smartsoft',ref:'smartsoft',endpoint:'/smartsoft_launch'},
+    pragmatic:{name:'Pragmatic Play',provider:'Pragmatic Play',ref:'pragmatic',endpoint:'/Pragmatic_launch'},
+    aviatrix:{name:'Aviatrix',provider:'Aviatrix',ref:'aviatrix',endpoint:'/aviatrix_launch'},
+    pascal:{name:'Pascal Gaming',provider:'Pascal Gaming',ref:'pascal',endpoint:'/pascal_launch'},
+    bazooka:{name:'Bazooka',provider:'Bazooka',ref:'bazooka',endpoint:'/bazooka_launch'},
+    amusnet:{name:'Amusnet',provider:'Amusnet',ref:'amusnet',endpoint:'/amusnet_launch'},
+    kaga:{name:'KA Gaming',provider:'KA Gaming',ref:'kaga',endpoint:'/kaga_launch'},
+    kiron:{name:'Kiron',provider:'Kiron',ref:'kiron',endpoint:'/kiron_launch'}
+  };
+  const game=games[gameId];
+  if(!game) return res.status(404).send('Game not found');
+  const base=process.env.SOFABETS_BACKEND_URL || 'https://backendapi.sofabets.com';
+  const sofaToken=process.env.SOFABETS_PLAYER_TOKEN || req.headers['x-sofabets-token'] || '';
+  if(!sofaToken) return res.status(503).send('SofaBets casino session is not configured');
   try {
-    // Get game info from Juan AI
-    const gamesRes = await axios.get(`${JUAN_URL()}/api/casino/games`, {
-      params: { key: JUAN_KEY() },
-      timeout: 8000
-    });
-    const games = gamesRes.data?.data || [];
-    const game = games.find(g => g.id === gameId);
-    if (!game) return res.status(404).send('Game not found');
-
-    // Get real utoken from Juan AI for this user
-    let utoken = '';
-    try {
-      const sessionRes = await axios.post(`${JUAN_URL()}/api/casino/session`, {
-        key:      JUAN_KEY(),
-        userId:   user._id.toString(),
-        username: user.username
-      }, { timeout: 8000 });
-      utoken = sessionRes.data?.utoken || '';
-    } catch(e) {
-      console.error('[casino/play] session failed:', e.message);
-    }
-
-    const baseUrl = game.gameUrl?.startsWith('http') ? game.gameUrl : `${JUAN_URL()}${game.gameUrl}`;
-    const sep = baseUrl.includes('?') ? '&' : '?';
-    const webhookBase = `${process.env.APP_URL || 'https://safaribet.top'}/api/casino/wallet`;
-    const gameUrl = `${baseUrl}${sep}key=${JUAN_KEY()}&utoken=${encodeURIComponent(utoken)}&userId=${encodeURIComponent(user._id.toString())}&username=${encodeURIComponent(user.username)}&currency=KES&walletUrl=${encodeURIComponent(webhookBase)}`;
-
-    res.send(`<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
-<title>${game.name} – SafariBet</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%;background:#000}
-.header{position:fixed;top:0;left:0;right:0;height:44px;background:rgba(0,0,0,0.9);display:flex;align-items:center;padding:0 12px;gap:10px;z-index:999;border-bottom:1px solid rgba(0,200,83,0.2)}
-.back{color:#00c853;font-size:18px;text-decoration:none;font-weight:700}
-.gtitle{color:#fff;font-size:14px;font-weight:700;flex:1}
-.gbal{color:#00c853;font-size:13px;font-weight:800;background:rgba(0,200,83,0.1);padding:4px 10px;border-radius:8px;border:1px solid rgba(0,200,83,0.3)}
-iframe{position:fixed;top:44px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 44px);border:none}
-</style></head>
-<body>
-<div class="header">
-  <a class="back" href="/casino">←</a>
-  <div class="gtitle">✈️ ${game.name}</div>
-  <div class="gbal" id="hbal">KES ${(user.balance||0).toFixed(2)}</div>
-</div>
-<iframe src="${gameUrl}" allowfullscreen allow="autoplay"></iframe>
-<script>
-const tok = localStorage.getItem('token');
-function refreshBal(){if(tok){fetch('/api/wallet/balance',{headers:{'Authorization':'Bearer '+tok}}).then(r=>r.json()).then(d=>{if(d.success)document.getElementById('hbal').textContent='KES '+(d.spendable??d.balance??0).toFixed(2)}).catch(()=>{})}}
-refreshBal();
-setInterval(refreshBal, 10000);
-</script>
-</body></html>`);
+    const r=await axios.post(`${base}${game.endpoint}`,{
+      ref:game.ref,provider:game.provider,
+      client:/Mobi|Android/i.test(req.headers['user-agent']||'')?'mobile':'desktop'
+    },{headers:{'Content-Type':'application/json',Authorization:`Bearer ${sofaToken}`},timeout:10000});
+    const src=r.data?.iframeSrc;
+    if(!src) return res.status(502).send('SofaBets did not return a game URL');
+    res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${game.name} – SafariBet</title><style>*{box-sizing:border-box}html,body{margin:0;height:100%;background:#000}.h{height:44px;display:flex;align-items:center;padding:0 12px;color:#fff;background:#090909}.h a{color:#00c853;text-decoration:none;font-weight:700;margin-right:12px}.t{font-weight:700}iframe{display:block;width:100%;height:calc(100% - 44px);border:0}</style></head><body><div class="h"><a href="/casino">←</a><div class="t">${game.name}</div></div><iframe src="${String(src).replace(/"/g,'&quot;')}" allow="autoplay;fullscreen;encrypted-media" allowfullscreen></iframe></body></html>`);
   } catch(e) {
-    console.error('[casino/play]', e.message);
-    res.status(502).send(`<h2 style="color:#fff;font-family:sans-serif;padding:40px">Game unavailable — please try again</h2><a href="/casino" style="color:#00c853">← Back to Casino</a>`);
+    console.error('[casino/play][sofabets]',e.response?.data||e.message);
+    res.status(502).send('Could not launch game');
   }
 });
+
+module.exports = router;
