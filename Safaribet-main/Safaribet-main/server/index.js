@@ -157,41 +157,16 @@ app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
     if (err) res.status(500).send('Error loading game');
   });
 });
-
-// ── SOFABETS CASINO GAME URL — keep SofaBets launch outside /api ──
-// casinoRoutes is mounted at /api/casino, so /casino/sofa-play/... must be
-// handled here explicitly. Otherwise the frontend URL falls through to the
-// normal site routing instead of launching the selected casino game.
-app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
+// Legacy SofaBets provider/ref URL. Resolve directly to SafariBet's
+// SofaBets-backed game id; no JuanAI casino lookup is used here.
+app.get('/casino/sofa-play/:provider/:ref', authFlexible, (req, res) => {
   const provider = String(req.params.provider || '').trim();
   const ref = String(req.params.ref || '').trim();
-  if (!provider || !ref || !/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
     return res.status(400).send('Invalid game');
   }
-  try {
-    const axios = require('axios');
-    const JUAN_KEY = process.env.JUANAI_API_KEY;
-    const JUAN_URL = process.env.JUANAI_URL || 'https://your-juanai-domain.com';
-    if (!JUAN_KEY) return res.status(503).send('Casino service not configured');
-
-    const r = await axios.get(`${JUAN_URL}/api/casino/games`, {
-      params: { key: JUAN_KEY }, timeout: 8000
-    });
-    const games = r.data?.data || r.data?.games || [];
-    const norm = v => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-    const game = games.find(g =>
-      norm(g.provider || g.vendor || g.gameProvider) === norm(provider) &&
-      norm(g.ref || g.reference || g.gameRef || g.slug || g.code) === norm(ref)
-    );
-    if (!game?.id) {
-      return res.status(404).send('Game is not configured for SafariBet yet. <a href="/casino">← Back to Casino</a>');
-    }
-    // This is an internal SafariBet route only. Never redirect the browser to SofaBets.
-    return res.redirect(302, `/casino/play/${encodeURIComponent(String(game.id))}`);
-  } catch (e) {
-    console.error('[casino/sofa-play]', e.message);
-    return res.status(502).send('Casino game unavailable. <a href="/casino">← Back to Casino</a>');
-  }
+  const gameId = `sofa_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
+  return res.redirect(302, `/casino/play/${encodeURIComponent(gameId)}`);
 });
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);

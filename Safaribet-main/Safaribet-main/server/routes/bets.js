@@ -21,84 +21,6 @@ const router  = express.Router();
 const ODDS_STALE_MS = 90 * 60 * 1000; // 90 minutes
 
 const { resolveOdds, isPickSuspended, getMinViableOdds } = require('../services/marketResolver');
-const { getGeneratedOdds } = require('../services/safariMarketEngine');
-const sofaBets = require('../providers/sofaBetsProvider');
-
-function parseDirectSofaId(matchId) {
-  const raw = String(matchId || '');
-  if (!raw.startsWith('sofabets_')) return null;
-  const parts = raw.split('_');
-  if (parts[1] === 'live') {
-    return { sport: parts[2] || 'football', providerId: parts.slice(3).join('_') };
-  }
-  if (parts.length >= 3) {
-    return { sport: parts[1] || 'football', providerId: parts.slice(2).join('_') };
-  }
-  return { sport: 'football', providerId: parts.slice(1).join('_') };
-}
-
-async function hydrateDirectSofaMatches(ids, map) {
-  const missing = ids.filter(id => !map.has(String(id))).map(String);
-  if (!missing.length) return map;
-  await Promise.all(missing.map(async id => {
-    const parsed = parseDirectSofaId(id);
-    if (!parsed?.providerId) return;
-    try {
-      const direct = await sofaBets.getMatchById(parsed.providerId, parsed.sport, { rich: false });
-      if (!direct?.homeTeam || !direct?.awayTeam) return;
-      const score = direct.score?.fullTime || direct.score || {};
-      const home = Number(direct.odds?.homeWin ?? direct.providerOdds?.homeWin);
-      const draw = Number(direct.odds?.draw ?? direct.providerOdds?.draw);
-      const away = Number(direct.odds?.awayWin ?? direct.providerOdds?.awayWin);
-      const statusRaw = String(direct.status || '').toUpperCase();
-      const status = ['IN_PLAY','LIVE','PAUSED'].includes(statusRaw) ? 'live' :
-        ['FINISHED','FT','COMPLETED','ENDED'].includes(statusRaw) ? 'finished' : 'upcoming';
-      const doc = {
-        matchId: id,
-        sport: parsed.sport === 'football' ? (direct.competition || 'football') : parsed.sport,
-        league: direct.competition || parsed.sport,
-        homeTeam: direct.homeTeam,
-        awayTeam: direct.awayTeam,
-        commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-        status,
-        hasOdds: Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1,
-        odds: {
-          home: Number.isFinite(home) ? home : null,
-          draw: Number.isFinite(draw) ? draw : null,
-          away: Number.isFinite(away) ? away : null,
-          updatedAt: new Date()
-        },
-        score: {
-          home: score.home ?? null, away: score.away ?? null,
-          minute: direct.minute ?? null, period: direct.status || null,
-          lastGoalAt: null
-        },
-        providerOdds: direct.odds || direct.providerOdds || null,
-        markets: direct.markets || [],
-        bookmakers: direct.bookmakers || [],
-        source: 'juanai',
-        isStatic: false,
-        result: status === 'finished' && score.home != null && score.away != null
-          ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null,
-        settled: false
-      };
-      const saved = await Match.findOneAndUpdate({ matchId: id }, { $set: doc }, { upsert: true, new: true, setDefaultsOnInsert: true }).lean();
-      if (saved) map.set(id, saved);
-    } catch (e) {
-      console.warn('[bets] direct SofaBets match hydrate failed:', id, e.message);
-    }
-  }));
-  return map;
-}
-
-async function loadValidationMatches(selections) {
-  const ids = [...new Set((selections || []).map(s => String(s.matchId)).filter(Boolean))];
-  const map = new Map();
-  if (!ids.length) return map;
-  const docs = await Match.find({ matchId: { $in: ids } }).lean();
-  docs.forEach(m => map.set(String(m.matchId), m));
-  return hydrateDirectSofaMatches(ids, map);
-}
 
 function pickLabelFor(market, pick, match) {
   const h = match.homeTeam, a = match.awayTeam;
@@ -107,6 +29,7 @@ function pickLabelFor(market, pick, match) {
     'ou25':     { over25: 'Over 2.5', under25: 'Under 2.5' },
     'btts':     { btts: 'Both Teams to Score', btts_no: 'Not Both Teams to Score' },
     'dc':       { dc_1x: `${h} or Draw`, dc_x2: `Draw or ${a}`, dc_12: `${h} or ${a}` },
+    'dnb':      { dnb_home: `${h} (Draw No Bet)`, dnb_away: `${a} (Draw No Bet)` },
     'handicap': { handicap_home: `${h} (Handicap)`, handicap_away: `${a} (Handicap)` }
   };
   return LABELS[market]?.[pick] || pick;
@@ -135,7 +58,7 @@ const betLimiter = rateLimit({
 
 // Validate selections
 const { REAL_MARKETS } = require('../services/marketResolver');
-const ALL_KNOWN_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc', 'handicap']);
+const ALL_KNOWN_MARKETS = new Set(['1x2', 'ou25', 'btts', 'dc', 'dnb', 'handicap']);
 const VALID_PICKS_BY_MARKET = {
   '1x2':     ['home','draw','away'],
   'ou25':    ['over25','under25'],
@@ -144,28 +67,16 @@ const VALID_PICKS_BY_MARKET = {
   'handicap':['handicap_home','handicap_away']
 };
 
-function validateSelections(selections, maxSelections, matchesById = new Map()) {
+function validateSelections(selections, maxSelections) {
   if (!Array.isArray(selections) || !selections.length) return 'No selections provided';
   if (selections.length > maxSelections) return `Maximum ${maxSelections} selections per bet`;
   const seen = new Set();
   for (const s of selections) {
     if (!s.matchId || !s.pick || !s.odds) return 'Invalid selection data';
     const market = s.market || '1x2'; // default to 1x2 for older frontend calls that don't send market
-    const isProviderMarket = String(market).startsWith('sb:');
-    const isGeneratedMarket = String(market).startsWith('gen:');
-    if (!ALL_KNOWN_MARKETS.has(market) && !isProviderMarket && !isGeneratedMarket) return `Unknown market: ${market}`;
-    if (isGeneratedMarket) {
-      const match = matchesById.get(String(s.matchId));
-      const generatedOdds = match ? getGeneratedOdds(match, market, s.pick) : null;
-      if (generatedOdds == null) return `Invalid SafariBet market selection for ${market}`;
-    } else if (isProviderMarket) {
-      const match = matchesById.get(String(s.matchId));
-      const mk = match?.markets?.find(x => 'sb:' + String(x?.key) === market);
-      if (!mk || !mk.selections?.some(x => String(x?.key) === String(s.pick))) return `Invalid provider market selection for ${market}`;
-    } else {
-      const validPicks = VALID_PICKS_BY_MARKET[market] || [];
-      if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
-    }
+    if (!ALL_KNOWN_MARKETS.has(market)) return `Unknown market: ${market}`;
+    const validPicks = VALID_PICKS_BY_MARKET[market] || [];
+    if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
     if (s.odds < 1.01 || s.odds > 500) return 'Invalid odds';
     // Only ONE selection per MATCH is allowed in a regular multi-bet, regardless
     // of market. Multiple markets on the same match are correlated (e.g. a
@@ -195,13 +106,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
     const maxSelections = limits.maxSelections ?? 20;
     const maxPayout = limits.maxPayout ?? 1000000;
 
-    const validationMatchIds = [...new Set((selections || []).map(s => String(s.matchId)).filter(Boolean))];
-    const validationMatches = new Map();
-    if (validationMatchIds.length) {
-      const docs = await Match.find({ matchId: { $in: validationMatchIds } }).lean();
-      docs.forEach(m => validationMatches.set(String(m.matchId), m));
-    }
-    const err = validateSelections(selections, maxSelections, validationMatches);
+    const err = validateSelections(selections, maxSelections);
     if (err) return res.status(400).json({ success: false, message: err });
 
     const stakeAmt = parseFloat(stake);
@@ -223,8 +128,6 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
-    const hydratedMap = await hydrateDirectSofaMatches(matchIds, new Map(Object.entries(matchMap)));
-    hydratedMap.forEach((m, id) => { matchMap[id] = m; });
 
     const verifiedSelections = [];
     let totalOdds = 1;
@@ -458,11 +361,7 @@ router.post('/place-builder', auth, betLimiter, async (req, res) => {
     const err = bettingService.validateBetBuilderLegs(legs);
     if (err) return res.status(400).json({ success: false, message: err });
 
-    let match = await Match.findOne({ matchId: legs[0].matchId }).lean();
-    if (!match) {
-      const hydrated = await hydrateDirectSofaMatches([legs[0].matchId], new Map());
-      match = hydrated.get(String(legs[0].matchId)) || null;
-    }
+    const match = await Match.findOne({ matchId: legs[0].matchId }).lean();
     if (!match) return res.status(400).json({ success: false, message: 'Match not found' });
 
     const adminRoutes = require('./admin');
@@ -537,8 +436,7 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
 
     const adminRoutes = require('./admin');
     const limits = (adminRoutes.getStore ? adminRoutes.getStore().limits : null) || {};
-    const validationMatches = await loadValidationMatches(selections);
-    const err = validateSelections(selections, limits.maxSelections ?? 20, validationMatches);
+    const err = validateSelections(selections, limits.maxSelections ?? 20);
     if (err) return res.status(400).json({ success: false, message: err });
 
     const pickNum = parseInt(pick);
@@ -563,8 +461,6 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
     const matches = await Match.find({ matchId: { $in: matchIds } });
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
-    const hydratedMap = await hydrateDirectSofaMatches(matchIds, new Map(Object.entries(matchMap)));
-    hydratedMap.forEach((m, id) => { matchMap[id] = m; });
 
     const verifiedSelections = [];
     for (const s of selections) {
@@ -710,8 +606,7 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
     const { selections } = req.body;
     const adminRoutes = require('./admin');
     const limits = (adminRoutes.getStore ? adminRoutes.getStore().limits : null) || {};
-    const validationMatches = await loadValidationMatches(selections);
-    const err = validateSelections(selections, limits.maxSelections ?? 20, validationMatches);
+    const err = validateSelections(selections, limits.maxSelections ?? 20);
     if (err) return res.status(400).json({ success: false, message: err });
 
     let code, exists = true;

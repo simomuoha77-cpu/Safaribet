@@ -148,6 +148,18 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
 
+// Legacy SofaBets provider/ref URL. Resolve directly to SafariBet's
+// SofaBets-backed game id; no JuanAI casino lookup is used here.
+app.get('/casino/sofa-play/:provider/:ref', authFlexible, (req, res) => {
+  const provider = String(req.params.provider || '').trim();
+  const ref = String(req.params.ref || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
+    return res.status(400).send('Invalid game');
+  }
+  const gameId = `sofa_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
+  return res.redirect(302, `/casino/play/${encodeURIComponent(gameId)}`);
+});
+
 // ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
 const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
@@ -156,36 +168,6 @@ app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
   casinoRoutes(req, res, (err) => {
     if (err) res.status(500).send('Error loading game');
   });
-});
-
-// Legacy SofaBets provider/ref launcher compatibility. This route never
-// redirects to SofaBets; it resolves the provider game to SafariBet's own
-// authenticated /casino/play/:gameId route.
-app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
-  const provider = String(req.params.provider || '').trim();
-  const ref = String(req.params.ref || '').trim();
-  if (!/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
-    return res.status(400).send('Invalid game');
-  }
-  try {
-    const axios = require('axios');
-    const key = process.env.JUANAI_API_KEY;
-    const base = process.env.JUANAI_URL || 'https://your-juanai-domain.com';
-    if (!key) return res.status(503).send('Casino service not configured');
-    const r = await axios.get(`${base}/api/casino/games`, {
-      params: { key }, timeout: 8000
-    });
-    const norm = v => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-    const game = (r.data?.data || r.data?.games || []).find(g =>
-      norm(g.provider || g.vendor || g.gameProvider) === norm(provider) &&
-      norm(g.ref || g.reference || g.gameRef || g.slug || g.code) === norm(ref)
-    );
-    if (!game?.id) return res.status(404).send('Game is not configured for SafariBet yet. <a href="/casino">← Back to Casino</a>');
-    return res.redirect(302, `/casino/play/${encodeURIComponent(String(game.id))}`);
-  } catch (e) {
-    console.error('[CASINO_LEGACY_LAUNCH_ERROR]', { provider, ref, error: e.message });
-    return res.status(502).send('Casino game unavailable. <a href="/casino">← Back to Casino</a>');
-  }
 });
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
