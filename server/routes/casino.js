@@ -137,26 +137,6 @@ function safeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-router.get('/juan-games', async (req, res) => {
-  try {
-    if (!JUAN_KEY()) return res.status(503).json({ success:false, message:'Casino API not configured', data:[] });
-    const r = await axios.get(`${JUAN_URL()}/api/casino/games`, {
-      params: { key: JUAN_KEY() }, timeout: 10000
-    });
-    const games = r.data?.data || r.data?.games || [];
-    const resolved = games.map(g => {
-      const { gameUrl, ...safe } = g;
-      return {
-        ...safe,
-        thumbnailFull: g.thumbnail?.startsWith('http') ? g.thumbnail : (g.thumbnail ? `${JUAN_URL()}${g.thumbnail}` : '')
-      };
-    });
-    res.json({ success:true, data:resolved, count:resolved.length });
-  } catch(e) {
-    console.error('[casino/juan-games]', e.message);
-    res.status(502).json({ success:false, message:'Casino service unavailable', data:[] });
-  }
-});
 
 router.get('/sofa-games', async (req,res) => {
   try {
