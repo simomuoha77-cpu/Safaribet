@@ -184,62 +184,8 @@ router.get('/sofa-games', async (req,res) => {
   }
 });
 
-const JUAN_KEY = () => process.env.JUANAI_API_KEY;
-const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
-
-// ── JUAN AI CASINO GAMES LIST ──
-router.get('/juan-games', async (req, res) => {
-  try {
-    if (!JUAN_KEY()) return res.status(503).json({ success: false, message: 'Casino API not configured' });
-    const r = await axios.get(`${JUAN_URL()}/api/casino/games`, {
-      params: { key: JUAN_KEY() },
-      timeout: 10000
-    });
-    const games = r.data?.data || r.data?.games || [];
-    // Resolve thumbnails only. Do NOT include the raw API key or a playable game URL here —
-    // this endpoint is public-facing (game list for the lobby). The real, authenticated
-    // game URL is built server-side only, inside GET /casino/play/:gameId, and never
-    // leaves the server as raw text — it's embedded directly into the HTML response
-    // the browser renders as an iframe, which is Juan AI's own session-auth requirement.
-    const resolved = games.map(g => {
-      const { gameUrl, ...safe } = g; // strip the raw relative gameUrl too — not needed by the lobby
-      return {
-        ...safe,
-        thumbnailFull: g.thumbnail?.startsWith('http') ? g.thumbnail : `${JUAN_URL()}${g.thumbnail}`
-      };
-    });
-    res.json({ success: true, data: resolved, count: resolved.length });
-  } catch(e) {
-    console.error('[casino/juan-games]', e.message);
-    res.status(502).json({ success: false, message: 'Casino service unavailable', data: [] });
-  }
-});
-
-// ── JUAN AI CASINO GAME HISTORY ──
-router.get('/juan-history', auth, async (req, res) => {
-  try {
-    if (!JUAN_KEY()) return res.status(503).json({ success: false, message: 'Casino API not configured' });
-    const r = await axios.get(`${JUAN_URL()}/api/casino/history`, {
-      params: { key: JUAN_KEY(), userId: req.user._id.toString() },
-      timeout: 10000
-    });
-    res.json(r.data);
-  } catch(e) {
-    console.error('[casino/juan-history]', e.message);
-    res.status(502).json({ success: false, message: 'History unavailable' });
-  }
-});
 
 
-
-// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
-// from firing hundreds of rounds per second, while still allowing normal fast play.
-const playLimiter = rateLimit({
-  windowMs: 1000, max: 5,
-  message: { success: false, message: 'Slow down — max 5 rounds per second' }
-});
-
-// ── DICE: PLAY A ROUND ──
 router.post('/dice/play', auth, playLimiter, async (req, res) => {
   try {
     const { stake, target, direction } = req.body;
@@ -392,156 +338,188 @@ router.get('/history', auth, async (req, res) => {
 
 module.exports = router;
 
-// ── SAFARIBET GAME LAUNCHER ──────────────────────────────────────────────────
-// The top-level document is always SafariBet. Provider metadata is resolved
-// server-side and the provider game is rendered in a constrained iframe.
-// No SofaBets website redirect is ever issued.
+// ── SOFABETS GAME LAUNCHER ────────────────────────────────────────────────────
+// SofaBets launch API:
+//   POST https://backendapi.sofabets.com/{provider}_launch
+//   Authorization: Bearer <authorized SofaBets player token>
+//   { ref, provider, client }
+// The token is supplied through SOFABETS_TOKEN and is never sent to the browser.
+
+const SOFABETS_BASE = () =>
+  String(process.env.SOFABETS_BASE || process.env.SOFABETS_BASE_URL ||
+    'https://backendapi.sofabets.com').replace(/\/+$/, '');
+
+const SOFABETS_TOKEN = () => String(process.env.SOFABETS_TOKEN || '').trim();
+
+const SOFA_LAUNCH_ENDPOINTS = {
+  aviator: '/aviator_launch',
+  spribe: '/Spribe_launch',
+  smartsoft: '/smartsoft_launch',
+  pragmatic: '/Pragmatic_launch',
+  imoon: '/imoon_launch',
+  aviatrix: '/aviatrix_launch',
+  avionix: '/api/hotcrash_launch',
+  turbogames: '/turbogames_launch',
+  tower: '/tower_launch',
+  hotcrash: '/api/hotcrash_launch',
+  imoongames: '/imoon_launch',
+  aviatrixgames: '/aviatrix_launch',
+  smartgames: '/smartsoft_launch',
+  avt: '/Spribe_launch',
+  pascal: '/pascal_launch',
+  pascalgaming: '/pascal_launch',
+  bazooka: '/bazooka_launch',
+  amusnet: '/amusnet_launch',
+  kaga: '/kaga_launch',
+  kiron: '/kiron_launch'
+};
+
+const SOFA_PROVIDER_NAMES = {
+  aviator: 'Aviator',
+  spribe: 'Spribe',
+  smartsoft: 'Smartsoft',
+  pragmatic: 'Pragmatic Play',
+  imoon: 'iMoon',
+  aviatrix: 'Aviatrix',
+  avionix: 'Avionix',
+  turbogames: 'TurboGames',
+  tower: 'Tower Games',
+  hotcrash: 'Hot Crash',
+  imoongames: 'iMoon',
+  aviatrixgames: 'Aviatrix',
+  smartgames: 'Smartsoft',
+  avt: 'Aviator',
+  pascal: 'Pascal Gaming',
+  pascalgaming: 'Pascal Gaming',
+  bazooka: 'Bazooka',
+  amusnet: 'Amusnet',
+  kaga: 'KA Gaming',
+  kiron: 'Kiron'
+};
+
 router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, res) => {
   const { gameId } = req.params;
-  const user = req.user;
 
   try {
-    const sofaIdentity = decodeSofaGameId(gameId);
-    if (!sofaIdentity) return res.status(404).send('Game not found');
+    const identity = decodeSofaGameId(gameId);
+    if (!identity) return res.status(404).send('Game not found');
 
-    // Validate the game against the current provider catalogue.
     const sofaGames = await fetchSofaCasinoGames();
     const norm = v => String(v || '').trim().toLowerCase();
+
     const sofaGame = sofaGames.find(g =>
-      norm(g.provider) === norm(sofaIdentity.provider) &&
-      norm(g.ref) === norm(sofaIdentity.ref)
+      norm(g.provider) === norm(identity.provider) &&
+      norm(g.ref) === norm(identity.ref)
     );
-    if (!sofaGame) return res.status(404).send('Game is no longer available');
 
-    if (!JUAN_KEY()) return res.status(503).send('Casino service not configured');
-
-    // Existing provider/session bridge. The SafariBet user is authoritative;
-    // provider/ref is supplied to the bridge for game resolution.
-    const gamesRes = await axios.get(`${JUAN_URL()}/api/casino/games`, {
-      params: { key: JUAN_KEY() },
-      timeout: 8000
-    });
-    const games = gamesRes.data?.data || gamesRes.data?.games || [];
-    const game = games.find(g =>
-      norm(g.provider || g.vendor || g.gameProvider) === norm(sofaGame.provider) &&
-      norm(g.ref || g.reference || g.gameRef || g.slug || g.code) === norm(sofaGame.ref)
-    ) || games.find(g => norm(g.name || g.title || g.gameName) === norm(sofaGame.name));
-
-    if (!game?.gameUrl) {
-      return res.status(503).send('This game is not configured for SafariBet yet.');
+    if (!sofaGame) {
+      return res.status(404).send('Game is no longer available');
     }
 
-    // Create/retrieve the provider session. Failure is fatal: never launch a
-    // game without an authenticated provider session.
-    const sessionRes = await axios.post(`${JUAN_URL()}/api/casino/session`, {
-      key: JUAN_KEY(),
-      userId: user._id.toString(),
-      username: user.username,
-      provider: sofaGame.provider,
-      gameId: sofaGame.ref
-    }, { timeout: 8000 });
+    const providerKey = norm(sofaGame.provider);
+    const endpoint = SOFA_LAUNCH_ENDPOINTS[providerKey];
 
-    const utoken = sessionRes.data?.utoken;
-    if (!sessionRes.data?.success || !utoken) {
-      return res.status(502).send('Unable to launch this game right now. <a href="/casino">← Back to Casino</a>');
+    if (!endpoint) {
+      return res.status(503).send(
+        'This SofaBets game provider is not configured yet. <a href="/casino">← Back to Casino</a>'
+      );
     }
 
-    const webhookBase = `${process.env.APP_URL || 'https://safaribet.top'}/api/casino/wallet`;
-    const baseUrl = game.gameUrl?.startsWith('http') ? game.gameUrl : `${JUAN_URL()}${game.gameUrl || ''}`;
-    const sep = baseUrl.includes('?') ? '&' : '?';
+    const token = SOFABETS_TOKEN();
 
-    // Prefer a provider-issued, short-lived launch URL. This is the only
-    // supported production path because the operator API key must never be
-    // exposed to the browser.
-    let launchUrl = sessionRes.data?.launchUrl || sessionRes.data?.launch_url || '';
-    if (!launchUrl) {
-      // Backward-compatible session-only launch: no operator key is sent to
-      // the browser. The provider must authenticate the game using utoken.
-      launchUrl =
-        `${baseUrl}${sep}` +
-        `utoken=${encodeURIComponent(utoken)}` +
-        `userId=${encodeURIComponent(user._id.toString())}` +
-        `username=${encodeURIComponent(user.username)}` +
-        `currency=KES&walletUrl=${encodeURIComponent(webhookBase)}`;
+    if (!token) {
+      console.error('[SOFA_LAUNCH] SOFABETS_TOKEN is not configured');
+      return res.status(503).send(
+        'SofaBets casino authorization is not configured. <a href="/casino">← Back to Casino</a>'
+      );
     }
 
-    // Fail closed if the provider contract still requires the operator key in
-    // the client URL. Never leak JUANAI_API_KEY to a page, iframe, referrer,
-    // browser history or client-side source.
-    if (launchUrl.includes(JUAN_KEY())) {
-      return res.status(502).send('Casino provider launch is not configured securely. Please try again later.');
+    const provider =
+      SOFA_PROVIDER_NAMES[providerKey] || sofaGame.provider;
+
+    const client = /Mobi|Android/i.test(req.headers['user-agent'] || '')
+      ? 'mobile'
+      : 'desktop';
+
+    const launchRes = await axios.post(
+      `${SOFABETS_BASE()}${endpoint}`,
+      {
+        ref: String(sofaGame.ref),
+        provider,
+        client
+      },
+      {
+        timeout: Number(process.env.SOFABETS_TIMEOUT_MS || 15000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    const iframeSrc =
+      launchRes.data?.iframeSrc ||
+      launchRes.data?.iframe_src ||
+      launchRes.data?.launchUrl ||
+      launchRes.data?.launch_url;
+
+    if (!iframeSrc || typeof iframeSrc !== 'string') {
+      console.error('[SOFA_LAUNCH] No iframeSrc returned', {
+        provider,
+        ref: sofaGame.ref,
+        status: launchRes.status
+      });
+      return res.status(502).send(
+        'SofaBets did not return a game URL. <a href="/casino">← Back to Casino</a>'
+      );
     }
 
+    // Never expose the SofaBets bearer token to the browser.
     const title = safeHtml(sofaGame.name);
-    const safeLaunchUrl = safeHtml(launchUrl);
-    const initialBalance = Number(user.balance || 0).toFixed(2);
+    const safeLaunchUrl = safeHtml(iframeSrc);
 
     res.setHeader('Cache-Control', 'no-store');
-    res.send(`<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
+
+    return res.send(`<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
 <title>${title} – SafariBet</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;background:#000}
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-.header{position:fixed;top:0;left:0;right:0;height:52px;background:rgba(0,0,0,.94);display:flex;align-items:center;padding:0 12px;gap:10px;z-index:999;border-bottom:1px solid rgba(0,200,83,.2)}
-.back{color:#00c853;font-size:18px;text-decoration:none;font-weight:700}
-.gtitle{color:#fff;font-size:14px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gbal{color:#00c853;font-size:13px;font-weight:800;background:rgba(0,200,83,.1);padding:4px 10px;border-radius:8px;border:1px solid rgba(0,200,83,.3)}
-#state{position:fixed;inset:52px 0 0;display:flex;align-items:center;justify-content:center;color:#aaa;background:#050505;z-index:2;font-size:14px}
-#state.err{color:#ff6b6b;flex-direction:column;gap:12px;text-align:center;padding:20px}
-#state a{color:#00c853;text-decoration:none;font-weight:700}
-iframe{position:fixed;top:52px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 52px);border:0;background:#000;z-index:1}
-</style></head>
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
+.top{position:fixed;top:0;left:0;right:0;height:52px;background:#111;color:#fff;
+display:flex;align-items:center;padding:0 14px;z-index:10;font-family:Arial,sans-serif}
+.back{color:#fff;text-decoration:none;margin-right:14px}
+.name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+iframe{position:fixed;top:52px;left:0;right:0;bottom:0;width:100%;
+height:calc(100% - 52px);border:0;background:#000}
+</style>
+</head>
 <body>
-<div class="header">
-  <a class="back" href="/casino" aria-label="Back to SafariBet Casino">←</a>
-  <div class="gtitle">🎰 ${title}</div>
-  <div class="gbal" id="hbal">KES ${initialBalance}</div>
+<div class="top">
+<a class="back" href="/casino">← Casino</a>
+<div class="name">${title}</div>
 </div>
-<div id="state">Loading game…</div>
 <iframe
-  id="game"
   src="${safeLaunchUrl}"
-  title="${title}"
-  allow="autoplay; fullscreen; clipboard-write"
-  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+  allow="fullscreen; autoplay; payment"
+  allowfullscreen
   referrerpolicy="strict-origin-when-cross-origin"></iframe>
-<script>
-const token = localStorage.getItem('token');
-const state = document.getElementById('state');
-const frame = document.getElementById('game');
-
-frame.addEventListener('load', () => {
-  state.style.display = 'none';
-});
-frame.addEventListener('error', () => {
-  state.className = 'err';
-  state.innerHTML = 'Unable to load this game.<br><a href="/casino">← Back to Casino</a>';
-});
-
-async function refreshBalance(){
-  if(!token) return;
-  try{
-    const r=await fetch('/api/wallet/balance',{headers:{Authorization:'Bearer '+token}});
-    const d=await r.json();
-    if(d.success) document.getElementById('hbal').textContent='KES '+Number(d.spendable??d.balance??0).toFixed(2);
-  }catch(_){}
-}
-refreshBalance();
-setInterval(refreshBalance,10000);
-</script>
-</body></html>`);
-  } catch(e) {
-    console.error('[CASINO_GAME_ERROR]', {
-      userId: user?._id?.toString(),
+</body>
+</html>`);
+  } catch (e) {
+    console.error('[SOFA_LAUNCH_ERROR]', {
       gameId,
+      status: e.response?.status || null,
       error: e.message
     });
-    res.status(502).send(`<!doctype html><title>SafariBet Casino</title><p style="font-family:sans-serif;padding:40px">Unable to launch this game right now. Please try again.</p><p><a href="/casino">← Back to Casino</a></p>`);
+
+    return res.status(502).send(
+      'Unable to launch this SofaBets game right now. <a href="/casino">← Back to Casino</a>'
+    );
   }
 });
 
 module.exports = router;
+
