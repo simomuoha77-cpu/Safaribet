@@ -27,7 +27,6 @@ const router = express.Router();
 // SofaBets is used as the provider catalogue (provider/ref). The browser never
 // navigates to the SofaBets website. A stable SafariBet gameId is generated
 // from provider/ref and resolved again on the server when the game is launched.
-const SOFA_CASINO_PAGE = () => process.env.SOFABETS_CASINO_PAGE || 'https://www.sofabets.com/casino';
 const SOFA_CASINO_TTL = () => Number(process.env.SOFABETS_CASINO_TTL_MS || 600000);
 const sofaCasinoCache = { ts: 0, games: [] };
 
