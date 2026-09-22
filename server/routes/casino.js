@@ -319,17 +319,16 @@ router.get('/history', auth, async (req, res) => {
 module.exports = router;
 
 // ── SOFABETS GAME LAUNCHER ────────────────────────────────────────────────────
-// SofaBets launch API:
-//   POST https://backendapi.sofabets.com/{provider}_launch
-//   Authorization: Bearer <authorized SofaBets player token>
-//   { ref, provider, client }
-// The token is supplied through SOFABETS_TOKEN and is never sent to the browser.
 
 const SOFABETS_BASE = () =>
-  String(process.env.SOFABETS_BASE || process.env.SOFABETS_BASE_URL ||
-    'https://backendapi.sofabets.com').replace(/\/+$/, '');
+  String(
+    process.env.SOFABETS_BASE ||
+    process.env.SOFABETS_BASE_URL ||
+    'https://backendapi.sofabets.com'
+  ).replace(/\/+$/, '');
 
-const SOFABETS_TOKEN = () => String(process.env.SOFABETS_TOKEN || '').trim();
+const SOFABETS_TOKEN = () =>
+  String(process.env.SOFABETS_TOKEN || '').trim();
 
 const SOFA_LAUNCH_ENDPOINTS = {
   aviator: '/aviator_launch',
@@ -382,7 +381,10 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
 
   try {
     const identity = decodeSofaGameId(gameId);
-    if (!identity) return res.status(404).send('Game not found');
+
+    if (!identity) {
+      return res.status(404).send('Game not found');
+    }
 
     const sofaGames = await fetchSofaCasinoGames();
     const norm = v => String(v || '').trim().toLowerCase();
@@ -409,17 +411,25 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
 
     if (!token) {
       console.error('[SOFA_LAUNCH] SOFABETS_TOKEN is not configured');
+
       return res.status(503).send(
-        'SofaBets casino authorization is not configured. <a href="/casino">← Back to Casino</a>'
+        'SofaBets authorization is not configured on the server. <a href="/casino">← Back to Casino</a>'
       );
     }
 
     const provider =
       SOFA_PROVIDER_NAMES[providerKey] || sofaGame.provider;
 
-    const client = /Mobi|Android/i.test(req.headers['user-agent'] || '')
-      ? 'mobile'
-      : 'desktop';
+    const client =
+      /Mobi|Android/i.test(req.headers['user-agent'] || '')
+        ? 'mobile'
+        : 'desktop';
+
+    console.log('[SOFA_LAUNCH] Request', {
+      provider,
+      ref: sofaGame.ref,
+      client
+    });
 
     const launchRes = await axios.post(
       `${SOFABETS_BASE()}${endpoint}`,
@@ -444,17 +454,18 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
       launchRes.data?.launch_url;
 
     if (!iframeSrc || typeof iframeSrc !== 'string') {
-      console.error('[SOFA_LAUNCH] No iframeSrc returned', {
+      console.error('[SOFA_LAUNCH] No iframe URL returned', {
         provider,
         ref: sofaGame.ref,
-        status: launchRes.status
+        status: launchRes.status,
+        responseKeys: Object.keys(launchRes.data || {})
       });
+
       return res.status(502).send(
-        'SofaBets did not return a game URL. <a href="/casino">← Back to Casino</a>'
+        'SofaBets returned no game URL. <a href="/casino">← Back to Casino</a>'
       );
     }
 
-    // Never expose the SofaBets bearer token to the browser.
     const title = safeHtml(sofaGame.name);
     const safeLaunchUrl = safeHtml(iframeSrc);
 
@@ -464,7 +475,7 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} – SafariBet</title>
 <style>
 html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
@@ -482,24 +493,52 @@ height:calc(100% - 52px);border:0;background:#000}
 <div class="name">${title}</div>
 </div>
 <iframe
-  src="${safeLaunchUrl}"
-  allow="fullscreen; autoplay; payment"
-  allowfullscreen
-  referrerpolicy="strict-origin-when-cross-origin"></iframe>
+src="${safeLaunchUrl}"
+allow="fullscreen; autoplay; payment"
+allowfullscreen
+referrerpolicy="strict-origin-when-cross-origin"></iframe>
 </body>
 </html>`);
   } catch (e) {
+    const status = e.response?.status || 502;
+    const data = e.response?.data;
+
     console.error('[SOFA_LAUNCH_ERROR]', {
       gameId,
-      status: e.response?.status || null,
-      error: e.message
+      status,
+      error: e.message,
+      upstream: typeof data === 'string'
+        ? data.slice(0, 1000)
+        : data
     });
 
-    return res.status(502).send(
-      'Unable to launch this SofaBets game right now. <a href="/casino">← Back to Casino</a>'
-    );
+    return res.status(502).send(`<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SofaBets Launch Error</title>
+<style>
+body{font-family:Arial,sans-serif;background:#111;color:#fff;padding:25px}
+.box{max-width:700px;margin:auto;background:#222;padding:20px;border-radius:12px}
+pre{white-space:pre-wrap;word-break:break-word;background:#000;padding:15px;border-radius:8px}
+a{color:#7dd3fc}
+</style>
+</head>
+<body>
+<div class="box">
+<h2>SofaBets Launch Error</h2>
+<p>Upstream status: <b>${status}</b></p>
+<pre>${safeHtml(
+      typeof data === 'string'
+        ? data.slice(0, 1000)
+        : JSON.stringify(data || { error: e.message })
+    )}</pre>
+<p><a href="/casino">← Back to Casino</a></p>
+</div>
+</body>
+</html>`);
   }
 });
 
 module.exports = router;
-
