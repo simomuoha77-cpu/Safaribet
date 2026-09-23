@@ -19,20 +19,20 @@ const BASES = Array.from(new Set([
   'https://feed.sofabets.com'
 ].filter(Boolean).map(v => String(v).replace(/\/+$/, ''))));
 
-const SPORT_IDS = Object.freeze({ football: 1, basketball: 2, tennis: 5, hockey: 4, cricket: 21, volleyball: 23, rugby: 12, handball: 6 });
+const SPORT_IDS = Object.freeze({ football: 1, basketball: 4, tennis: 24, hockey: 15, cricket: 6, volleyball: 91189, rugby: 73744, handball: 99614 });
 
 // Some SofaBets deployments use different internal sport ids. Keep known
 // alternatives so one deployment can still expose the same sports without
 // affecting the working football feed.
 const SPORT_ID_CANDIDATES = Object.freeze({
   football: [1],
-  basketball: [2, 4],
-  tennis: [5, 24],
-  hockey: [4, 15],
-  cricket: [21, 6],
-  volleyball: [23, 91189],
-  rugby: [12, 73744],
-  handball: [6, 99614]
+  basketball: [4],
+  tennis: [24],
+  hockey: [15],
+  cricket: [6],
+  volleyball: [91189],
+  rugby: [73744],
+  handball: [99614]
 });
 const FOOTBALL_SPORT_ID = SPORT_IDS.football;
 const REQUEST_TIMEOUT_MS = Number(process.env.SOFABETS_TIMEOUT_MS || 12000);
@@ -915,43 +915,29 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
   finally { allFixturesInFlight.delete(key); }
 }
 
-async function fetchLiveFootballFixtures() {
+async function fetchLiveFixtures(options = {}) {
   const livePaths = ['/api/live-games'];
   let lastError = null;
-
   for (const base of BASES) {
     for (const path of livePaths) {
       try {
         const all = [];
-        for (let page = 1; page <= MAX_PAGES_PER_FETCH; page += 1) {
-          const payload = await sofaFetch(base, path, {
-            page: String(page),
-            limit: '100',
-            marketType: 'match result',
-            sport: 'football'
-          });
+        for (let page = 1; page <= Math.min(3, MAX_PAGES_PER_FETCH); page += 1) {
+          const query = { page: String(page), limit: '100', marketType: 'match result' };
+          if (options.sport) query.sport = String(options.sport);
+          if (options.sportId != null) query.sportId = String(options.sportId);
+          const payload = await sofaFetch(base, path, query);
           const rawItems = extractItems(payload);
           if (!rawItems.length) break;
-
           all.push(...rawItems);
           const pg = paginationInfo(payload);
-          if (pg.hasMore === false) break;
-          if (pg.totalPages && page >= Number(pg.totalPages)) break;
-          if (pg.nextPage != null && Number(pg.nextPage) > page) {
-            page = Number(pg.nextPage) - 1;
-          } else if (!(pg.hasMore === true || pg.totalPages || pg.nextPage != null)) {
-            break;
-          }
-          await sleep(PAGE_FETCH_GAP_MS);
+          if (pg.hasMore === false || (pg.totalPages && page >= Number(pg.totalPages))) break;
+          if (pg.nextPage != null && Number(pg.nextPage) > page) page = Number(pg.nextPage) - 1;
+          else if (!(pg.hasMore === true || pg.totalPages || pg.nextPage != null)) break;
         }
-
-        const matches = all
-          .map(safeNormalizeMatch)
-          .filter(Boolean)
-          .map(m => Object.assign(m, { status: 'IN_PLAY' }));
-
-        if (matches.length) {
-          console.log(`[sofaBetsProvider] live sync: ${matches.length} live fixtures from ${base}${path}`);
+        const matches = all.map(safeNormalizeMatch).filter(Boolean).map(m => Object.assign(m, { status: 'IN_PLAY' }));
+        if (matches.length || options.allowEmpty) {
+          console.log(`[sofaBetsProvider] live sync: ${matches.length} live fixtures from ${base}${path}${options.sport ? ` (${options.sport})` : ''}`);
           return matches;
         }
       } catch (e) {
@@ -960,31 +946,13 @@ async function fetchLiveFootballFixtures() {
       }
     }
   }
-
   if (lastError) console.warn('[sofaBetsProvider] live feed unavailable: ' + lastError.message);
   return [];
 }
 
-
-async function getLiveFixturesForSport(sportName) {
-  const name = String(sportName || 'football').toLowerCase();
-  if (name === 'football') return fetchLiveFootballFixtures();
-  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
-  for (const sportId of candidates) {
-    try {
-      const all = await fetchAllFixturesForSport(sportId, name, { maxPages: MAX_PAGES_PER_FETCH });
-      const live = all.filter(m => {
-        const st = String(m?.status || '').toUpperCase();
-        return st === 'IN_PLAY' || st === 'LIVE' || st === 'PAUSED';
-      });
-      if (live.length) return live;
-    } catch (e) {
-      console.warn(`[sofaBetsProvider] live ${name} sportId ${sportId} failed: ${e.message}`);
-    }
-  }
-  return [];
+async function fetchLiveFootballFixtures() {
+  return fetchLiveFixtures({ sport: 'football', sportId: SPORT_IDS.football });
 }
-
 async function getMatchesForDate(dateStr, options) {
   options = options || {};
   const sportName = String(options.sport || 'football').toLowerCase();
@@ -1027,4 +995,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures, getLiveFixturesForSport };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures, getLiveFixtures: fetchLiveFixtures };
