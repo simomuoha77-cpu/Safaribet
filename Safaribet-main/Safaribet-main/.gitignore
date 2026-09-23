@@ -1,0 +1,11 @@
+env
+.env
+node_modules/
+
+.env.backup
+.env
+
+env
+.env
+env.backup
+.env.backup
