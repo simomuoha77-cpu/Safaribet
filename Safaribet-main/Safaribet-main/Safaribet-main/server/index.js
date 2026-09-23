@@ -157,7 +157,6 @@ app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
     if (err) res.status(500).send('Error loading game');
   });
 });
-
 // Legacy SofaBets provider/ref URL. Resolve directly to SafariBet's
 // SofaBets-backed game id; no JuanAI casino lookup is used here.
 app.get('/casino/sofa-play/:provider/:ref', authFlexible, (req, res) => {

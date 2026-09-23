@@ -201,7 +201,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 const token = localStorage.getItem('token');
 if (!token) location.href = '/login';
 
-const CASINO_BASE = '/api/casino'; // SafariBet-owned casino API; provider details stay server-side
+const JUAN_BASE = ''; // proxied through our server — see /api/casino/*
 
 const CAT_ICONS = {
   crash:   '✈️',
@@ -247,7 +247,7 @@ async function loadGames() {
   document.getElementById('gamesList').style.display = 'none';
 
   try {
-    const r = await fetch('/api/casino/sofa-games');
+    const r = await fetch('/api/casino/juan-games');
     const d = await r.json();
 
     document.getElementById('gamesLoading').style.display = 'none';
@@ -260,30 +260,29 @@ async function loadGames() {
 
     const games = d.data;
     document.getElementById('gamesCountLbl').textContent = `🎮 ${games.length} Game${games.length>1?'s':''} Available`;
-
+    
     const grid = document.getElementById('gameGrid');
-    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     grid.innerHTML = games.map(g => {
-      const cat = g.category || 'default';
-      const icon = CAT_ICONS[cat] || CAT_ICONS.default;
-      const bg = CAT_GRADIENTS[cat] || CAT_GRADIENTS.default;
-      const isAviator = /aviator/i.test(g.name || '');
-      const thumb = g.thumbnail
-        ? `<img src="${esc(g.thumbnail)}" style="width:100%;height:100%;object-fit:cover;opacity:.85" onerror="this.style.display='none'">`
-        : '';
-      return `<div class="game-card${cat==='crash'?' featured':''}" onclick="openGame('${esc(g.id)}','${esc(g.name)}')">
+      const icon = CAT_ICONS[g.category] || CAT_ICONS.default;
+      const bg   = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
+      const isAviator = (g.id === 'aviator' || /aviator/i.test(g.name));
+      const thumb = isAviator
+        ? `<img src="/api/content/image/aviator" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">`
+        : (g.thumbnail
+            ? `<img src="${g.thumbnailFull||g.thumbnail}" style="width:100%;height:100%;object-fit:cover;opacity:0.8" onerror="this.style.display='none'">`
+            : '');
+      return `<div class="game-card${g.category==='crash'?' featured':''}" onclick="openGame('${g.id}','${g.name}')">
         <div class="gc-banner" style="background:${bg}">
           ${thumb}
-          <div style="position:relative;z-index:1;font-size:${cat==='crash'?'64':'52'}px">${isAviator ? '' : icon}</div>
+          <div style="position:relative;z-index:1;font-size:${g.category==='crash'?'64':'52'}px">${isAviator ? '' : icon}</div>
         </div>
-        <div class="gc-rtp">RTP ${esc(g.rtp)}%</div>
+        <div class="gc-rtp">RTP ${g.rtp}%</div>
         <div class="gc-body">
-          <div class="gc-name">${esc(g.name)}</div>
-          <div class="gc-desc">${getCatDesc(cat)}</div>
+          <div class="gc-name">${g.name}</div>
+          <div class="gc-desc">${getCatDesc(g.category)}</div>
           <div class="gc-badges">
             <span class="badge badge-pf">Verified</span>
-            <span class="badge badge-mx">${esc(g.provider)}</span>
-            ${cat==='crash'?'<span class="badge badge-hot">🔥 HOT</span>':''}
+            ${g.category==='crash'?'<span class="badge badge-hot">🔥 HOT</span>':''}
             ${g.status==='active'?'<span class="badge" style="background:rgba(0,200,83,0.08);color:var(--g);border:1px solid rgba(0,200,83,0.2)">● Live</span>':'<span class="badge" style="color:var(--mt)">Maintenance</span>'}
           </div>
         </div>
@@ -314,10 +313,10 @@ function getCatDesc(cat) {
 }
 
 function openGame(id, name) {
-  // The browser navigates only to SafariBet. Provider/ref mapping and the
-  // provider session are resolved server-side from this stable gameId.
-  document.cookie = `sb_token=${encodeURIComponent(token)}; path=/; max-age=120; SameSite=Lax`;
-  location.href = `/casino/play/${encodeURIComponent(id.replace(/^sofa_/, 'game_'))}`;
+  // Set JWT as a short-lived cookie so the server can read it
+  // on the GET /api/casino/play/:gameId request
+  document.cookie = `sb_token=${token}; path=/; max-age=120; SameSite=Lax`;
+  location.href = `/casino/play/${id}`;
 }
 
 function closeGameScreen() {

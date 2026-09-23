@@ -148,15 +148,6 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
 
-// ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
-const authFlexible = require('./middleware/authFlexible');
-app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
-  // Forward to the casino route handler
-  req.url = `/play/${req.params.gameId}`;
-  casinoRoutes(req, res, (err) => {
-    if (err) res.status(500).send('Error loading game');
-  });
-});
 // Legacy SofaBets provider/ref URL. Resolve directly to SafariBet's
 // SofaBets-backed game id; no JuanAI casino lookup is used here.
 app.get('/casino/sofa-play/:provider/:ref', authFlexible, (req, res) => {
@@ -167,6 +158,16 @@ app.get('/casino/sofa-play/:provider/:ref', authFlexible, (req, res) => {
   }
   const gameId = `sofa_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
   return res.redirect(302, `/casino/play/${encodeURIComponent(gameId)}`);
+});
+
+// ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
+const authFlexible = require('./middleware/authFlexible');
+app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
+  // Forward to the casino route handler
+  req.url = `/play/${req.params.gameId}`;
+  casinoRoutes(req, res, (err) => {
+    if (err) res.status(500).send('Error loading game');
+  });
 });
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);

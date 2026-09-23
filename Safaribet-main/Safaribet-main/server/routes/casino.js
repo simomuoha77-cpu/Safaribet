@@ -17,6 +17,13 @@ function safeGameMessage(e) {
   return 'Failed to play';
 }
 const rateLimit = require('express-rate-limit');
+
+const playLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 const axios = require('axios');
 const auth = require('../middleware/auth');
 const casinoService = require('../services/casinoService');
