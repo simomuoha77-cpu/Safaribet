@@ -188,47 +188,34 @@ router.get('/live', async (req, res) => {
       timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
     }).format(new Date());
 
-    // SofaBets' live-games endpoint is the fast mixed-sport feed. Do NOT
-    // force sport=football here: that was why SafariBet could only show live
-    // football while SofaBets was showing live basketball/tennis/etc.
-    const rawLive = await sofaBets.getLiveFixtures({ allowEmpty: true });
-    const bySport = new Map();
-    for (const m of rawLive) {
-      const raw = m || {};
-      const sportText = String(raw.sport || raw.sportName || raw.sport_name || raw.sportType || '').toLowerCase();
-      const sport = sportText.includes('basket') ? 'basketball' :
-        sportText.includes('tennis') ? 'tennis' :
-        sportText.includes('cricket') ? 'cricket' :
-        sportText.includes('rugby') ? 'rugby' :
-        sportText.includes('hockey') ? 'hockey' :
-        sportText.includes('volley') ? 'volleyball' :
-        sportText.includes('handball') ? 'handball' : 'football';
-      if (!bySport.has(sport)) bySport.set(sport, []);
-      bySport.get(sport).push(raw);
-    }
-    const initial = [];
-    for (const [sport, matches] of bySport.entries()) initial.push(...buildLive(sport, matches));
-    // Keep any already-warmed category data as a fallback, but never replace
-    // fresh live results with it.
+    // Critical path: football only. This returns as soon as the first useful
+    // live feed is ready instead of waiting for basketball/tennis/cricket/etc.
+    // to finish their much larger fixture catalogues.
+    const footballLiveRaw = await sofaBets.getLiveFootballFixtures();
+    const initial = buildLive('football', footballLiveRaw);
+
+    // Include any non-football live games already warmed in the category cache.
     for (const sport of Object.keys(SPORT_CONFIG)) {
-      if (bySport.has(sport)) continue;
       const warmed = sportCategoryCache.get(sport)?.data;
       if (warmed?.length) initial.push(...buildLive(sport, warmed));
     }
     const immediate = save(initial);
     res.json({ success:true, data:immediate, count:immediate.length, source:'SofaBets', cached:false });
 
-    // Refresh the same mixed feed in the background. This keeps the next tap
-    // effectively instant without making eight upstream requests per visit.
-    sofaBets.getLiveFixtures({ allowEmpty: true }).then(latestRaw => {
-      const groups = new Map();
-      for (const m of latestRaw) {
-        const t = String(m.sport || m.sportName || m.sport_name || m.sportType || '').toLowerCase();
-        const sport = t.includes('basket') ? 'basketball' : t.includes('tennis') ? 'tennis' : t.includes('cricket') ? 'cricket' : t.includes('rugby') ? 'rugby' : t.includes('hockey') ? 'hockey' : t.includes('volley') ? 'volleyball' : t.includes('handball') ? 'handball' : 'football';
-        if (!groups.has(sport)) groups.set(sport, []);
-        groups.get(sport).push(m);
+    // Continue warming every sport AFTER the response has gone to the phone.
+    // When this finishes, the next silent refresh receives the complete list.
+    Promise.all(Object.keys(SPORT_CONFIG).map(async sport => {
+      try {
+        const raw = await sofaBets.getMatchesForDate(today, { sport, fast:true });
+        return buildLive(sport, raw);
+      } catch (e) {
+        console.warn(`[sports/live/${sport}/bg]`, e.message);
+        return [];
       }
-      save(Array.from(groups.entries()).flatMap(([sport, ms]) => buildLive(sport, ms)));
+    })).then(parts => {
+      const merged = [...immediate, ...parts.flat()];
+      save(merged);
+      console.log(`[sports/live] background refresh: ${merged.length} mixed live matches`);
     }).catch(() => {});
   } catch (e) {
     console.error('[sports/live]', e.message);

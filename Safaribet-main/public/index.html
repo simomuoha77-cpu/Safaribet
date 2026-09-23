@@ -2381,7 +2381,8 @@ let progressiveObserver = null;
 let progressiveMatches = [];
 let progressiveRendered = 0;
 const PROGRESSIVE_BATCH = 12;
-const PROGRESSIVE_AUTO_STEP_MS = 70;
+const PROGRESSIVE_ROOT_MARGIN = '700px';
+const PROGRESSIVE_MAX_BATCH_PER_TRIGGER = 1;
 
 function sportBadgeForMatch(m){
   const key = String(m?.sport || '').toLowerCase();
@@ -2431,14 +2432,20 @@ function appendProgressiveBatch(){
     sentinel.style.pointerEvents = 'none';
   }
   if(progressiveRendered < progressiveMatches.length && !progressiveObserver){
-    // Do not make the user scroll to trigger the next batch. Once the first
-    // cards arrive, keep filling the list in tiny background batches. This
-    // makes Live/Football feel like a stream: game 1-12 appear first, then
-    // the next games arrive ~70ms at a time without any loading screen.
-    progressiveObserver = { timer: setTimeout(() => {
+    // Render only what the user is approaching. Do NOT keep appending every
+    // match in the background: that made a tab switch/scroll look like a full
+    // reload and created hundreds of DOM nodes before the user ever reached
+    // them. The feed itself may refresh in the background, but rendering is
+    // demand-driven by this sentinel.
+    const sentinel = document.getElementById('matchLoadMore');
+    if(!sentinel) return;
+    progressiveObserver = new IntersectionObserver((entries) => {
+      if(!entries.some(e => e.isIntersecting)) return;
+      progressiveObserver.disconnect();
       progressiveObserver = null;
       appendProgressiveBatch();
-    }, PROGRESSIVE_AUTO_STEP_MS) };
+    }, { root:null, rootMargin: PROGRESSIVE_ROOT_MARGIN, threshold:0 });
+    progressiveObserver.observe(sentinel);
   }
 }
 
