@@ -23,11 +23,7 @@ const casinoService = require('../services/casinoService');
 const router = express.Router();
 
 
-// ── SOFABETS CASINO CATALOG ──
-// SofaBets publishes its casino catalogue in the Next.js bundle used by its
-// public casino page. We read that public catalogue and cache it locally so
-// SafariBet automatically picks up newly-added games without hard-coding a
-// fixed list.
+// ── JUAN AI IS THE ONLY CASINO PROVIDER ──
 const JUAN_KEY = () => process.env.JUANAI_API_KEY;
 const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
 
