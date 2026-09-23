@@ -157,6 +157,20 @@ app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
     if (err) res.status(500).send('Error loading game');
   });
 });
+
+// ── SOFABETS CASINO GAME URL — keep SofaBets launch outside /api ──
+// casinoRoutes is mounted at /api/casino, so /casino/sofa-play/... must be
+// handled here explicitly. Otherwise the frontend URL falls through to the
+// normal site routing instead of launching the selected casino game.
+app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
+  const provider = String(req.params.provider || '').trim();
+  const ref = String(req.params.ref || '').trim();
+  if (!provider || !ref || !/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
+    return res.status(400).send('Invalid game');
+  }
+  const gameUrl = `https://www.sofabets.com/casino/play/${encodeURIComponent(provider)}/${encodeURIComponent(ref)}`;
+  return res.redirect(302, gameUrl);
+});
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);

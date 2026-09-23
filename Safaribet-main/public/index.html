@@ -701,9 +701,8 @@ header{
   // header or auth state at all.
   (function(){
     try {
-      var html = localStorage.getItem('matchListHTML_v2');
+      var html = localStorage.getItem('matchListHTML');
       if (html) document.getElementById('matchList').innerHTML = html;
-      else localStorage.removeItem('matchListHTML');
     } catch(e) {}
   })();
   </script>
@@ -1409,13 +1408,6 @@ document.addEventListener('visibilitychange', function(){
 })();
 
 
-// A live match belongs ONLY in the Live tab. SofaBets can use several
-// status spellings depending on sport/feed, so keep the rule centralized.
-function isLiveMatch(m){
-  const s=String(m?.status||'').trim().toLowerCase().replace(/[- ]/g,'_');
-  return s==='live'||s==='in_play'||s==='inplay'||m?.isLive===true||m?.is_live===true;
-}
-
 // ── FILTER BAR ──
 function pickFilter(el){
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
@@ -1529,7 +1521,10 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // finished). Now a slow/stalled first attempt retries automatically
     // instead of dead-ending on an error.
     const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
+    // Live is a priority interaction: after the cached snapshot is painted,
+    // give the fresh live endpoint only about one second. Never block the tab
+    // behind a slow upstream request.
+    const timeoutId = setTimeout(() => ctrl.abort(), sport === 'live' ? 1200 : 15000);
     let r;
     try {
       r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
@@ -1651,11 +1646,6 @@ function applyFilters(silent=false){
   let filtered=[...allMatches];
   const now=new Date();
 
-  // Never let a live fixture leak into Highlights, Football, Today,
-  // Favorites, Popular, or any other non-Live view. The dedicated Live tab
-  // is the single home for games once they start.
-  if(currentCat !== 'live') filtered=filtered.filter(m=>!isLiveMatch(m));
-
   // League filter
   if(currentLeague){
     filtered=filtered.filter(m=>m.sport===currentLeague||m.leagueKey===currentLeague);
@@ -1693,7 +1683,7 @@ function applyFilters(silent=false){
     // it look like "the API has games but they're not showing" — real,
     // ready-to-display matches were being filtered out by mistake.
     filtered=filtered.filter(m=>{
-      if(isLiveMatch(m)) return false;
+      if(m.status==='live') return false;
       if(m.status!=='upcoming') return false;
       if(!m.commenceTime || new Date(m.commenceTime)<=now) return false;
       const home=m.odds?.home ?? m.aiOdds?.homeWin ?? m.providerOdds?.homeWin;
@@ -1794,8 +1784,13 @@ function pickCat(el) {
   document.getElementById('mkts').style.display = showFilters ? 'flex' : 'none';
 
   clearSearch();
-  // IMPORTANT: do not clear #matchList here. loadCat() is cache-first and
-  // paints an already-loaded tab synchronously before any network refresh.
+  // Each tab owns its own rendered list. Reset the progressive DOM identity
+  // when switching categories so Live can NEVER inherit Basketball/Tennis/etc.
+  // cards from the previous tab. loadCat() immediately paints the selected
+  // tab's cache, so this reset does not introduce a loading screen.
+  lastRenderedMatchIds = null;
+  progressiveMatches = [];
+  stopProgressiveRender();
   loadCat(currentCat);
 }
 
@@ -1832,7 +1827,7 @@ async function loadSportTabs() {
         try {
           const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
           if (cached?.data?.length && (Date.now() - cached.ts) < 900000) {
-            local = cached.data.filter(m => !isLiveMatch(m));
+            local = cached.data;
             sportTabCache.set(sport, local);
           }
         } catch(e) {}
@@ -1840,10 +1835,9 @@ async function loadSportTabs() {
           .then(r => r.json())
           .then(d2 => {
             if (d2.success && Array.isArray(d2.data) && d2.data.length) {
-              const cleanSport = d2.data.filter(m => !isLiveMatch(m));
-              sportTabCache.set(sport, cleanSport);
-              try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:cleanSport, ts:Date.now()})); } catch(e) {}
-              if (currentCat === sport) renderNonFootball(cleanSport);
+              sportTabCache.set(sport, d2.data);
+              try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:d2.data, ts:Date.now()})); } catch(e) {}
+              if (currentCat === sport) renderNonFootball(d2.data);
             }
           })
           .catch(() => {})
@@ -1978,7 +1972,7 @@ async function loadCat(cat) {
     try {
       const stored = JSON.parse(localStorage.getItem('sb_sport_cache_' + cat) || 'null');
       if (stored?.data?.length) {
-        cachedSport = stored.data.filter(m => !isLiveMatch(m));
+        cachedSport = stored.data;
         sportTabCache.set(cat, cachedSport);
         renderNonFootball(cachedSport);
       }
@@ -2005,7 +1999,7 @@ async function loadCat(cat) {
       if (Array.isArray(d.data) && d.data.length) {
         const old = sportTabCache.get(cat) || cachedSport || [];
         const byId = new Map(old.map(m => [String(m.matchId), m]));
-        d.data.filter(m => !isLiveMatch(m)).forEach(m => byId.set(String(m.matchId), m));
+        d.data.forEach(m => byId.set(String(m.matchId), m));
         const merged = Array.from(byId.values());
         sportTabCache.set(cat, merged);
         try { localStorage.setItem('sb_sport_cache_' + cat, JSON.stringify({data:merged, ts:Date.now()})); } catch(e) {}
@@ -2049,11 +2043,8 @@ async function refreshFootballTab(silent=false){
 // Render non-football matches from the direct SofaBets feed.
 function renderNonFootball(matches) {
   const el = document.getElementById('matchList');
-  // Sport tabs show upcoming/non-live games only. Once a game starts it is
-  // removed from this tab and belongs exclusively to Live.
-  const visible = (matches || []).filter(m => !isLiveMatch(m));
-  if (!visible.length) { el.innerHTML = noMatchesHTML('🏆','No matches','Check back later'); return; }
-  el.innerHTML = visible.map(m => {
+  if (!matches.length) { el.innerHTML = noMatchesHTML('🏆','No matches','Check back later'); return; }
+  el.innerHTML = matches.map(m => {
     const icon = m.sportIcon || '🏆';
     const time = m.commenceTime ? fmtTime(m.commenceTime) : 'TBD';
     return `<div class="mc" id="mc_${m.matchId}">
@@ -2210,8 +2201,8 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     try{
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
       if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 600000) {
-        const cachedData = sport === 'live' ? cached.data.filter(isLiveMatch) : cached.data.filter(m => !isLiveMatch(m));
-        if (cachedData.length) { renderMatches(cachedData, true); usedCache = true; }
+        renderMatches(cached.data, true);
+        usedCache = true;
       }
     }catch(e){ /* corrupt cache — ignore, fall through to normal load */ }
     if (!usedCache) el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
@@ -2259,6 +2250,13 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     // A failed/timed-out first attempt with nothing on screen yet is very
     // likely just the server waking up from a cold start — retry quietly
     // instead of dead-ending on "Failed to load".
+    if(sport === 'live'){
+      // Live must remain usable even when the fresh poll misses the 1.2s
+      // window. Keep the already-painted snapshot instead of replacing it
+      // with a spinner or retrying into a long wait.
+      setUpdatingIndicator(false);
+      return;
+    }
     const MAX_RETRIES = 5;
     if(!usedCache && retryAttempt < MAX_RETRIES){
       el.innerHTML = '<div class="loading"><div class="spin"></div>'
@@ -2569,7 +2567,7 @@ function renderMatches(matches, silent=false){
   // the request itself taking longer) but very visible on localhost/fast
   // connections, which is exactly what was still showing a spinner flash.
   if (currentFilter === 'highlights' && !currentLeague) {
-    try { localStorage.setItem('matchListHTML_v2', el.innerHTML); } catch(e) {}
+    try { localStorage.setItem('matchListHTML', el.innerHTML); } catch(e) {}
   }
 
   // Start counting timers for all live match cards
