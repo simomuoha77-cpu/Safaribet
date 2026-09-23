@@ -95,14 +95,15 @@ function parseSofaCasinoChunk(source) {
 }
 
 function sofaGameId(provider, ref) {
-  return `sofa_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
+  return `game_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
 }
 
 function decodeSofaGameId(id) {
   const raw=String(id || '');
-  if (!raw.startsWith('sofa_')) return null;
+  const prefix = raw.startsWith('game_') ? 'game_' : (raw.startsWith('sofa_') ? 'sofa_' : null);
+  if (!prefix) return null;
   try {
-    const decoded=Buffer.from(raw.slice(5), 'base64url').toString('utf8');
+    const decoded=Buffer.from(raw.slice(prefix.length), 'base64url').toString('utf8');
     const idx=decoded.indexOf(':');
     if (idx<1 || idx===decoded.length-1) return null;
     return { provider: decoded.slice(0,idx), ref: decoded.slice(idx+1) };
@@ -155,9 +156,9 @@ router.get('/sofa-games', async (req,res) => {
       status:'active',
       rtp:96,
       thumbnail:g.img?.startsWith('http') ? g.img : (g.img ? `https://www.sofabets.com${g.img}` : ''),
-      source:'sofabets'
+      source:'catalogue'
     }));
-    res.json({success:true,source:'sofabets',count:data.length,total:games.length,data});
+    res.json({success:true,source:'catalogue',count:data.length,total:games.length,data});
   } catch(e) {
     console.error('[casino/sofa-games]', e.message);
     res.status(502).json({success:false,message:'Casino catalogue unavailable',data:[]});
@@ -403,7 +404,7 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
 
     if (!endpoint) {
       return res.status(503).send(
-        'This SofaBets game provider is not configured yet. <a href="/casino">← Back to Casino</a>'
+        'This game provider is not configured yet. <a href="/casino">← Back to Casino</a>'
       );
     }
 
@@ -413,7 +414,7 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
       console.error('[SOFA_LAUNCH] SOFABETS_TOKEN is not configured');
 
       return res.status(503).send(
-        'SofaBets authorization is not configured on the server. <a href="/casino">← Back to Casino</a>'
+        'Casino service is not configured. <a href="/casino">← Back to Casino</a>'
       );
     }
 
@@ -464,7 +465,7 @@ router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, r
       });
 
       return res.status(502).send(
-        'SofaBets returned no game URL. <a href="/casino">← Back to Casino</a>'
+        'Game launch did not return a playable session. <a href="/casino">← Back to Casino</a>'
       );
     }
 
@@ -515,31 +516,7 @@ referrerpolicy="strict-origin-when-cross-origin"></iframe>
     });
 
     return res.status(502).send(`<!doctype html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SofaBets Launch Error</title>
-<style>
-body{font-family:Arial,sans-serif;background:#111;color:#fff;padding:25px}
-.box{max-width:700px;margin:auto;background:#222;padding:20px;border-radius:12px}
-pre{white-space:pre-wrap;word-break:break-word;background:#000;padding:15px;border-radius:8px}
-a{color:#7dd3fc}
-</style>
-</head>
-<body>
-<div class="box">
-<h2>SofaBets Launch Error</h2>
-<p>Upstream status: <b>${status}</b></p>
-<pre>${safeHtml(
-      typeof data === 'string'
-        ? data.slice(0, 1000)
-        : JSON.stringify(data || { error: e.message })
-    )}</pre>
-<p><a href="/casino">← Back to Casino</a></p>
-</div>
-</body>
-</html>`);
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game unavailable – SafariBet</title><style>body{font-family:Arial,sans-serif;background:#0a0e0a;color:#e8f5e9;padding:24px}.box{max-width:520px;margin:12vh auto;background:#111711;border:1px solid #263526;padding:22px;border-radius:14px}a{color:#00c853}</style></head><body><div class="box"><h2>Game temporarily unavailable</h2><p>We couldn't start this game. Please try again later.</p><p><a href="/casino">← Back to Casino</a></p></div></body></html>`);
   }
 });
 

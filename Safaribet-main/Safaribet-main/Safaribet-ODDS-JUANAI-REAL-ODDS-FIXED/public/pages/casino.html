@@ -317,7 +317,7 @@ function openGame(id, name) {
   // The browser navigates only to SafariBet. Provider/ref mapping and the
   // provider session are resolved server-side from this stable gameId.
   document.cookie = `sb_token=${encodeURIComponent(token)}; path=/; max-age=120; SameSite=Lax`;
-  location.href = `/casino/play/${encodeURIComponent(id)}`;
+  location.href = `/casino/play/${encodeURIComponent(id.replace(/^sofa_/, 'game_'))}`;
 }
 
 function closeGameScreen() {
