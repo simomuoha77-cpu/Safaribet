@@ -31,7 +31,7 @@ function scoreToResult(h, a) {
 
 // Grade a selection pick against the match result
 // Handles 1x2 picks (home/draw/away) AND extended markets (dc_1x, dc_12, dc_x2, btts, bttsNo, over25, under25)
-function gradeSelection(pick, result, homeScore, awayScore) {
+function gradeSelection(pick, result, homeScore, awayScore, market = '') {
   if (!result) return null;
   const h = Number(homeScore), a = Number(awayScore);
   const totalGoals = h + a;
@@ -62,6 +62,87 @@ function gradeSelection(pick, result, homeScore, awayScore) {
     // home/away but offered as its own market with different (derived) odds ──
     case 'handicap_home': return h > a ? 'won' : 'lost';
     case 'handicap_away': return a > h ? 'won' : 'lost';
+
+    // ── SafariBet-generated markets ──
+    // These are priced by SafariBet's own market engine and settled only from
+    // the final result/score stored on the match.
+    if (String(market || '').startsWith('gen:')) {
+      const mk = String(market);
+      if (mk === 'gen:ft:1x2') return result === pick ? 'won' : 'lost';
+      if (mk === 'gen:ft:dc') {
+        if (pick === 'dc_1x') return (result === 'home'||result==='draw')?'won':'lost';
+        if (pick === 'dc_x2') return (result === 'draw'||result==='away')?'won':'lost';
+        if (pick === 'dc_12') return result==='draw'?'lost':'won';
+      }
+      if (mk === 'gen:ft:dnb') {
+        if (result === 'draw') return 'void';
+        return (pick==='dnb_home' && result==='home') || (pick==='dnb_away' && result==='away') ? 'won' : 'lost';
+      }
+      let m;
+      if ((m=mk.match(/^gen:ft:ou:(\d+(?:\.5)?)$/))) {
+        const line=Number(m[1]); return pick==='over' ? (totalGoals>line?'won':'lost') : (totalGoals<line?'won':'lost');
+      }
+      if (mk === 'gen:ft:btts') return pick==='yes' ? (h>0&&a>0?'won':'lost') : (h===0||a===0?'won':'lost');
+      if (mk === 'gen:ft:oddeven') return ((totalGoals%2===1)?'odd':'even')===pick?'won':'lost';
+      if ((m=mk.match(/^gen:ft:teamtotal:(home|away):(\d+(?:\.5)?)$/))) {
+        const val=m[1]==='home'?h:a, line=Number(m[2]); return pick==='over' ? (val>line?'won':'lost') : (val<line?'won':'lost');
+      }
+      if ((m=mk.match(/^gen:ft:wintonil:(home|away)$/))) {
+        const win = m[1]==='home' ? (h>a&&a===0) : (a>h&&h===0); return (pick==='yes'?win:!win)?'won':'lost';
+      }
+      if (mk === 'gen:ft:correctscore') return `${h}-${a}`===String(pick)?'won':'lost';
+      if (mk === 'gen:ft:totalexact') return totalGoals===Number(pick)?'won':'lost';
+      if (mk === 'gen:ft:range') {
+        const ok = pick==='0-1' ? totalGoals<=1 : pick==='2-3' ? totalGoals>=2&&totalGoals<=3 : pick==='4-5' ? totalGoals>=4&&totalGoals<=5 : pick==='6+' ? totalGoals>=6 : false;
+        return ok?'won':'lost';
+      }
+      if ((m=mk.match(/^gen:ft:clean:(home|away)$/))) {
+        const clean = m[1]==='home' ? a===0 : h===0;
+        return (pick==='yes'?clean:!clean)?'won':'lost';
+      }
+      if ((m=mk.match(/^gen:ft:ah:(\d+(?:\.5)?)$/))) {
+        const line=Number(m[1]);
+        if (pick==='home') return h-a>line?'won':'lost';
+        return a-h>-line?'won':'lost';
+      }
+      if ((m=mk.match(/^gen:ft:eh:(\d+)$/))) {
+        const line=Number(m[1]);
+        const adjusted=h+line;
+        if (adjusted>a) return pick==='home'?'won':pick==='draw'?'lost':'lost';
+        if (adjusted===a) return pick==='draw'?'won':'lost';
+        return pick==='away'?'won':'lost';
+      }
+      if (mk === 'gen:ft:resultou25') {
+        const r = result, over=totalGoals>2.5;
+        const key = r+'_'+(over?'over':'under');
+        return key===pick?'won':'lost';
+      }
+      if (mk === 'gen:ft:resultbtts') {
+        const r=result, yes=h>0&&a>0;
+        const key=r+'_'+(yes?'yes':'no');
+        return key===pick?'won':'lost';
+      }
+      if (mk === 'gen:ft:margin') {
+        const diff=h-a;
+        const actual = diff===1?'home1':diff===2?'home2':diff>=3?'home3+':diff===-1?'away1':diff===-2?'away2':diff<=-3?'away3+':'draw';
+        return actual===pick?'won':'lost';
+      }
+      if (mk === 'gen:bb:winner') return result===pick?'won':'lost';
+      if (mk === 'gen:bb:oddeven') return ((totalGoals%2===1)?'odd':'even')===pick?'won':'lost';
+      if ((m=mk.match(/^gen:bb:total:(\d+(?:\.5)?)$/))) { const line=Number(m[1]); return pick==='over' ? (totalGoals>line?'won':'lost') : (totalGoals<line?'won':'lost'); }
+      if ((m=mk.match(/^gen:bb:spread:(\d+(?:\.5)?)$/))) { const line=Number(m[1]); if(pick==='home') return h-a>line?'won':'lost'; return a-h>-line?'won':'lost'; }
+      if ((m=mk.match(/^gen:bb:teamtotal:(home|away):(\d+(?:\.5)?)$/))) {
+        const val=m[1]==='home'?h:a, line=Number(m[2]);
+        return pick==='over' ? (val>line?'won':'lost') : (val<line?'won':'lost');
+      }
+      if (mk === 'gen:tn:winner') return result===pick?'won':'lost';
+      if (mk === 'gen:tn:setshandicap') { const diff=h-a; return pick==='home' ? (diff>1?'won':'lost') : (diff>-1?'won':'lost'); }
+      if ((m=mk.match(/^gen:tn:sets:(\d+)-(\d+)$/))) return (h===Number(m[1])&&a===Number(m[2]))?'won':'lost';
+      if (mk === 'gen:tn:totalsets') {
+        const actual = h+a;
+        return pick==='over2' ? (actual>2?'won':'lost') : (actual<3?'won':'lost');
+      }
+    }
 
     // ── fallback: treat as 1x2 ──
     default: return result === pick ? 'won' : 'lost';
@@ -154,7 +235,7 @@ async function finalizeBet(bet) {
 // Try to settle a single selection using a known match result
 function applyResult(s, matchResult, homeScore, awayScore) {
   if (s.result !== 'pending') return false;
-  const grade = gradeSelection(s.pick, matchResult, homeScore, awayScore);
+  const grade = gradeSelection(s.pick, matchResult, homeScore, awayScore, s.market);
   if (!grade) return false;
   s.result    = grade;
   s.settledAt = new Date();
