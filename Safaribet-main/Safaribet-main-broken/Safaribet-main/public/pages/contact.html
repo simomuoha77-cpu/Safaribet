@@ -1,0 +1,78 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Contact Us – SafariBet</title>
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--hh:52px;--hdr:rgba(8,12,8,0.98)}
+html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#fff;--s2:#eef3ee;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--hdr:rgba(255,255,255,0.98)}
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx)}
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);background:var(--hdr);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 14px;gap:10px;backdrop-filter:blur(20px)}
+.back{font-size:20px;color:var(--g);text-decoration:none}.logo{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--g)}.logo span{color:var(--yl)}
+.main{margin-top:var(--hh);padding:20px 16px 40px;max-width:600px;margin-left:auto;margin-right:auto}
+.pg-title{font-family:'Rajdhani',sans-serif;font-size:26px;font-weight:700;margin-bottom:6px}
+.pg-sub{font-size:13px;color:var(--mt);margin-bottom:24px}
+.contact-card{background:var(--s2);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin-bottom:16px}
+.cc-row{display:flex;align-items:center;gap:14px;padding:16px;border-bottom:1px solid var(--bd);text-decoration:none;cursor:pointer}
+.cc-row:last-child{border-bottom:none}
+.cc-icon{width:40px;height:40px;border-radius:10px;background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cc-info{}
+.cc-lbl{font-size:11px;color:var(--mt);font-weight:600;margin-bottom:2px}
+.cc-val{font-size:14px;font-weight:700;color:var(--tx)}
+.cc-val a{color:var(--tx);text-decoration:none}
+.social-ttl{font-size:12px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px}
+.social-row{display:flex;gap:12px;flex-wrap:wrap}
+.soc-btn{display:flex;align-items:center;gap:8px;background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;text-decoration:none;color:var(--tx);font-size:13px;font-weight:600;flex:1;min-width:120px}
+</style></head><body>
+<header><a class="back" href="/account">←</a><div class="logo">Safari<span>Bet</span></div></header>
+<main class="main">
+  <div class="pg-title">Contact Us</div>
+  <div class="pg-sub">We're here to help. Reach us through any channel below.</div>
+
+  <div class="contact-card" id="contactCard">
+    <div style="padding:40px;text-align:center;color:var(--mt)">Loading...</div>
+  </div>
+
+  <div class="social-ttl">📲 Follow Us</div>
+  <div id="socialRow" style="display:flex;gap:10px;flex-wrap:wrap;background:var(--s2);border:1px solid var(--bd);border-radius:14px;padding:16px"></div>
+</main>
+<script>
+const SOCIAL_ICONS = {
+  twitter:   { icon:'𝕏', label:'Twitter/X', color:'#1da1f2' },
+  facebook:  { icon:'f', label:'Facebook',  color:'#1877f2', style:'font-size:18px;font-weight:900' },
+  instagram: { icon:'📸', label:'Instagram', color:'#e1306c' },
+  telegram:  { icon:'✈️', label:'Telegram',  color:'#2ca5e0' },
+  whatsapp:  { icon:'📱', label:'WhatsApp',  color:'#25d366' },
+  tiktok:    { icon:'♪', label:'TikTok',    color:'#ff0050' }
+};
+fetch('/api/settings/site').then(r=>r.json()).then(d=>{
+  if(!d.success) return;
+  const s=d.data;
+  document.title=`Contact Us – ${s.site_name}`;
+
+  let rows='';
+  if(s.site_email) rows+=`<a class="cc-row" href="mailto:${s.site_email}">
+    <div class="cc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="2" stroke="#00c853" stroke-width="1.8"/><path d="M2 8l10 7 10-7" stroke="#00c853" stroke-width="1.8"/></svg></div>
+    <div class="cc-info"><div class="cc-lbl">Email</div><div class="cc-val">${s.site_email}</div></div></a>`;
+  if(s.site_phone) rows+=`<a class="cc-row" href="tel:${s.site_phone}">
+    <div class="cc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8A14.9 14.9 0 0013.2 17.4l2.2-2.2a1 1 0 011-.25 11.5 11.5 0 003.6.6 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1 11.5 11.5 0 00.6 3.6 1 1 0 01-.25 1L6.6 10.8z" stroke="#00c853" stroke-width="1.8"/></svg></div>
+    <div class="cc-info"><div class="cc-lbl">Call Us</div><div class="cc-val">${s.site_phone}</div></div></a>`;
+  if(s.site_whatsapp) rows+=`<a class="cc-row" href="https://wa.me/${s.site_whatsapp.replace(/\D/g,'')}">
+    <div class="cc-icon" style="font-size:20px">📱</div>
+    <div class="cc-info"><div class="cc-lbl">WhatsApp</div><div class="cc-val">${s.site_whatsapp}</div></div></a>`;
+  if(!rows) rows=`<div style="padding:20px;text-align:center;color:var(--mt);font-size:13px">Contact details coming soon</div>`;
+  document.getElementById('contactCard').innerHTML=rows;
+
+  const socials=['twitter','facebook','instagram','telegram','whatsapp','tiktok'];
+  const socRow=socials.filter(k=>s[`social_${k}`]).map(k=>{
+    const info=SOCIAL_ICONS[k];
+    return `<a href="${s[`social_${k}`]}" target="_blank"
+      style="display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;min-width:52px">
+      <div style="width:44px;height:44px;border-radius:12px;background:var(--s3);border:1px solid var(--bd);
+        display:flex;align-items:center;justify-content:center;font-size:20px">${info.icon}</div>
+      <span style="font-size:10px;color:var(--mt);font-weight:600">${info.label}</span>
+    </a>`;
+  }).join('');
+  document.getElementById('socialRow').innerHTML=socRow||`<p style="font-size:12px;color:var(--mt)">No social links added yet.</p>`;
+});
+</script></body></html>
