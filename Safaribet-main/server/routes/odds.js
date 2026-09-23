@@ -261,17 +261,22 @@ router.get('/matches/:sport', async (req, res) => {
 // live matches, we return zero — never stale or cached data beyond LIVE_TTL.
 router.get('/live', async (req, res) => {
   try {
-    // Live is its own fast lane. Never wait for the much larger fixtures
-    // feed when the user taps Live. liveWithFallback() is warmed in the
-    // background every few seconds, so this normally returns the current
-    // snapshot immediately and only refreshes SofaBets when its short TTL
-    // expires.
-    let live = await liveWithFallback();
+    // Use the same direct SofaBets fixture path that powers /featured.
+    // /featured is already merging today's dedicated SofaBets live feed, so
+    // the Live tab must not depend on a separate cache that can momentarily
+    // contain an empty snapshot.
+    const all = await fixturesWithFallback();
+    let live = all.filter(m => m.status === 'live');
 
-    // A provider can briefly omit a live game during a transition/halftime.
-    // Keep the per-match last-known-live snapshot without mixing in unrelated
-    // Basketball/Tennis/etc. fixture lists.
-    if (!Array.isArray(live)) live = [];
+    // Keep the dedicated live fetch as a second source only when the merged
+    // fixture response contains no live matches. This avoids showing an empty
+    // Live tab during a short fixture-cache transition.
+    if (!live.length) {
+      try {
+        const directLive = await getLive();
+        if (directLive.length) live = directLive;
+      } catch (_) {}
+    }
 
     live.forEach(m => lastKnownLiveByMatch.set(m.matchId, { data: m, lastSeenLiveAt: Date.now() }));
     res.json({ success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' });

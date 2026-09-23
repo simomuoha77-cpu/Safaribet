@@ -142,7 +142,14 @@ router.get('/sofa-games', async (req, res) => {
       const matchesCategory = category === 'all' || g.slugs.includes(category);
       return matchesSearch && matchesCategory;
     });
-    res.json({ success: true, source: 'sofabets', count: filtered.length, total: games.length, data: filtered });
+    let juanGames = [];
+    try { juanGames = await fetchJuanCasinoGames(); } catch (e) { console.warn('[casino/sofa-games] JuanAI catalog unavailable:', e.message); }
+    const juanByName = new Map(juanGames.map(g => [casinoNameKey(g.name), g]));
+    const mapped = filtered.map(g => {
+      const match = juanByName.get(casinoNameKey(g.name));
+      return { ...g, juanGameId: match?.id || match?.gameId || null };
+    });
+    res.json({ success: true, source: 'sofabets-feed', gameProvider: 'juanai', count: mapped.length, total: games.length, data: mapped });
   } catch (e) {
     console.error('[casino/sofa-games]', e.message);
     res.status(502).json({ success: false, message: 'Casino catalogue unavailable', data: [] });
@@ -151,6 +158,33 @@ router.get('/sofa-games', async (req, res) => {
 
 const JUAN_KEY = () => process.env.JUANAI_API_KEY;
 const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
+
+function casinoNameKey(name) {
+  return String(name || '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/casino|game|live|originals?/g, '');
+}
+
+async function fetchJuanCasinoGames() {
+  if (!JUAN_KEY()) return [];
+  const r = await axios.get(`${JUAN_URL()}/api/casino/games`, {
+    params: { key: JUAN_KEY() }, timeout: 10000
+  });
+  return r.data?.data || r.data?.games || [];
+}
+
+async function resolveSofaGameToJuan(provider, ref) {
+  const sofaGames = await fetchSofaCasinoGames();
+  const sofa = sofaGames.find(g => String(g.provider) === String(provider) && String(g.ref) === String(ref));
+  if (!sofa) return null;
+  const juanGames = await fetchJuanCasinoGames();
+  const sofaKey = casinoNameKey(sofa.name);
+  const exact = juanGames.find(g => casinoNameKey(g.name) === sofaKey);
+  if (exact) return { sofa, juan: exact };
+  const refKey = casinoNameKey(ref);
+  const byRef = juanGames.find(g => casinoNameKey(g.id) === refKey || casinoNameKey(g.gameId) === refKey);
+  return byRef ? { sofa, juan: byRef } : null;
+}
 
 // ── JUAN AI CASINO GAMES LIST ──
 router.get('/juan-games', async (req, res) => {
@@ -367,13 +401,19 @@ router.get('/sofa-play/:provider/:ref', require('../middleware/authFlexible'), a
   if (!provider || !ref || !/^[a-zA-Z0-9_-]+$/.test(provider) || !/^[a-zA-Z0-9._-]+$/.test(ref)) {
     return res.status(400).send('Invalid game');
   }
-  const gameUrl = `https://www.sofabets.com/casino/play/${encodeURIComponent(provider)}/${encodeURIComponent(ref)}`;
-  // SofaBets casino games must be opened as a top-level page. Embedding the
-  // provider game inside an iframe causes its game shell to reject the frame
-  // or navigate back to its home page on mobile browsers.
-  // Keep SafariBet authentication on this launcher, then hand the browser to
-  // the actual SofaBets game URL. The provider/ref are validated above.
-  res.redirect(302, gameUrl);
+  try {
+    const resolved = await resolveSofaGameToJuan(provider, ref);
+    if (!resolved?.juan?.id && !resolved?.juan?.gameId) {
+      return res.status(404).send('This casino game is not currently available.');
+    }
+    const id = resolved.juan.id || resolved.juan.gameId;
+    // SofaBets is catalogue/feed only. The actual playable game session is
+    // created by JuanAI and the wallet remains SafariBet's wallet.
+    return res.redirect(302, `/casino/play/${encodeURIComponent(id)}`);
+  } catch (e) {
+    console.error('[casino/sofa-play]', e.message);
+    return res.status(502).send('Casino game unavailable');
+  }
 });
 
 // ── GAME LAUNCHER PAGE — requires user auth, gets session from Juan AI server-side ──

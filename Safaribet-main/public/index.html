@@ -1521,10 +1521,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // finished). Now a slow/stalled first attempt retries automatically
     // instead of dead-ending on an error.
     const ctrl = new AbortController();
-    // Live is a priority interaction: after the cached snapshot is painted,
-    // give the fresh live endpoint only about one second. Never block the tab
-    // behind a slow upstream request.
-    const timeoutId = setTimeout(() => ctrl.abort(), sport === 'live' ? 1200 : 15000);
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
       r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
@@ -1784,13 +1781,8 @@ function pickCat(el) {
   document.getElementById('mkts').style.display = showFilters ? 'flex' : 'none';
 
   clearSearch();
-  // Each tab owns its own rendered list. Reset the progressive DOM identity
-  // when switching categories so Live can NEVER inherit Basketball/Tennis/etc.
-  // cards from the previous tab. loadCat() immediately paints the selected
-  // tab's cache, so this reset does not introduce a loading screen.
-  lastRenderedMatchIds = null;
-  progressiveMatches = [];
-  stopProgressiveRender();
+  // IMPORTANT: do not clear #matchList here. loadCat() is cache-first and
+  // paints an already-loaded tab synchronously before any network refresh.
   loadCat(currentCat);
 }
 
@@ -1918,13 +1910,13 @@ async function loadCat(cat) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
         if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
-          liveTabCache.data = stored.data;
+          liveTabCache.data = (stored.data || []).filter(m => m && m.status === 'live');
           liveTabCache.ts = stored.ts;
         }
       } catch(e) {}
     }
     if (liveTabCache.data && liveTabCache.data.length) {
-      renderMatches(liveTabCache.data, true);
+      renderMatches((liveTabCache.data || []).filter(m => m && m.status === 'live'), true);
       loadMatches('live', true).catch(() => {});
     } else {
       loadMatches('live', false);
@@ -2200,8 +2192,8 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   if(!silent && retryAttempt===0){
     try{
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 600000) {
-        renderMatches(cached.data, true);
+      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 60000) {
+        renderMatches(sport === 'live' ? cached.data.filter(m => m && m.status === 'live') : cached.data, true);
         usedCache = true;
       }
     }catch(e){ /* corrupt cache — ignore, fall through to normal load */ }
@@ -2225,8 +2217,9 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
+    const rows = sport === 'live' ? (d.data || []).filter(m => m && m.status === 'live') : (d.data || []);
 
-    if(!d.success||!d.data||!d.data.length){
+    if(!d.success||!rows.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
@@ -2242,21 +2235,14 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
-    renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
-    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
-    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    renderMatches(rows, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    if (sport === 'live') { liveTabCache.data = rows.slice(); liveTabCache.ts = Date.now(); }
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: rows, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
     // A failed/timed-out first attempt with nothing on screen yet is very
     // likely just the server waking up from a cold start — retry quietly
     // instead of dead-ending on "Failed to load".
-    if(sport === 'live'){
-      // Live must remain usable even when the fresh poll misses the 1.2s
-      // window. Keep the already-painted snapshot instead of replacing it
-      // with a spinner or retrying into a long wait.
-      setUpdatingIndicator(false);
-      return;
-    }
     const MAX_RETRIES = 5;
     if(!usedCache && retryAttempt < MAX_RETRIES){
       el.innerHTML = '<div class="loading"><div class="spin"></div>'

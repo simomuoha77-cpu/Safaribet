@@ -178,7 +178,7 @@ router.get('/live', async (req, res) => {
   };
 
   try {
-    const cached = C.get(key, 30000);
+    const cached = C.get(key, 5000);
     if (cached?.length) {
       res.json({ success:true, data:cached, count:cached.length, source:'SofaBets', cached:true });
       return;

@@ -285,15 +285,16 @@ async function loadGames() {
       const icon = CAT_ICONS[g.category] || CAT_ICONS.default;
       const bg = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
       const isSofa = g.source === 'sofabets';
-      const isAviator = !isSofa && (g.id === 'aviator' || /aviator/i.test(g.name));
+      const isAviator = /aviator/i.test(g.name);
       const thumb = g.thumbnailFull || g.thumbnail;
       const thumbHtml = thumb
         ? `<img loading="lazy" src="${thumb}" style="width:100%;height:100%;object-fit:cover;opacity:.88" onerror="this.style.display='none'">`
         : '';
       const featured = g.category === 'crash';
-      const click = isSofa
-        ? `openSofaGame('${encodeURIComponent(g.provider)}','${encodeURIComponent(g.ref)}')`
-        : `openGame('${String(g.id).replace(/'/g, "\\'")}','${String(g.name).replace(/'/g, "\\'")}')`;
+      const playableId = isSofa ? g.juanGameId : g.id;
+      const click = playableId
+        ? `openGame('${String(playableId).replace(/'/g, "\\'")}','${String(g.name).replace(/'/g, "\\'")}')`
+        : `showUnavailableGame('${String(g.name).replace(/'/g, "\\'")}')`;
       return `<div class="game-card${featured ? ' featured' : ''}" onclick="${click}">
         <div class="gc-banner" style="background:${bg}">
           ${thumbHtml}
@@ -321,13 +322,12 @@ async function loadGames() {
 }
 
 function openSofaGame(provider, ref) {
-  // Browser GET navigation cannot send the Authorization header, so persist
-  // the existing SafariBet JWT in the same auth cookie used by /casino/play.
-  // This prevents the SofaBets launcher from redirecting back to /login.
-  if (token) {
-    document.cookie = `sb_token=${token}; path=/; max-age=3600; SameSite=Lax`;
-  }
-  location.href = `/casino/sofa-play/${provider}/${ref}`;
+  if (token) document.cookie = `sb_token=${token}; path=/; max-age=3600; SameSite=Lax`;
+  location.href = `/casino/sofa-play/${encodeURIComponent(provider)}/${encodeURIComponent(ref)}`;
+}
+
+function showUnavailableGame(name) {
+  alert(`${name} is listed in the casino feed but its playable game session is temporarily unavailable.`);
 }
 
 function getCatDesc(cat) {
