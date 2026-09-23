@@ -188,35 +188,24 @@ router.get('/live', async (req, res) => {
       timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
     }).format(new Date());
 
-    // Critical path: football only. This returns as soon as the first useful
-    // live feed is ready instead of waiting for basketball/tennis/cricket/etc.
-    // to finish their much larger fixture catalogues.
-    const footballLiveRaw = await sofaBets.getLiveFootballFixtures();
-    const initial = buildLive('football', footballLiveRaw);
+    // Build the Live tab from every supported SofaBets sport, not football only.
+    // Each sport uses SofaBets' live status/fixture feed and is normalized into
+    // the same SafariBet card shape. Run them in parallel so one slow sport does
+    // not block the others.
+    const liveParts = await Promise.all(Object.keys(SPORT_CONFIG).map(async sport => {
+      try {
+        const raw = await sofaBets.getLiveFixturesForSport(sport);
+        return buildLive(sport, raw);
+      } catch (e) {
+        console.warn(`[sports/live/${sport}]`, e.message);
+        return [];
+      }
+    }));
+    const initial = [buildLive('football', await sofaBets.getLiveFootballFixtures()), ...liveParts].flat();
 
-    // Include any non-football live games already warmed in the category cache.
-    for (const sport of Object.keys(SPORT_CONFIG)) {
-      const warmed = sportCategoryCache.get(sport)?.data;
-      if (warmed?.length) initial.push(...buildLive(sport, warmed));
-    }
     const immediate = save(initial);
     res.json({ success:true, data:immediate, count:immediate.length, source:'SofaBets', cached:false });
 
-    // Continue warming every sport AFTER the response has gone to the phone.
-    // When this finishes, the next silent refresh receives the complete list.
-    Promise.all(Object.keys(SPORT_CONFIG).map(async sport => {
-      try {
-        const raw = await sofaBets.getMatchesForDate(today, { sport, fast:true });
-        return buildLive(sport, raw);
-      } catch (e) {
-        console.warn(`[sports/live/${sport}/bg]`, e.message);
-        return [];
-      }
-    })).then(parts => {
-      const merged = [...immediate, ...parts.flat()];
-      save(merged);
-      console.log(`[sports/live] background refresh: ${merged.length} mixed live matches`);
-    }).catch(() => {});
   } catch (e) {
     console.error('[sports/live]', e.message);
     res.status(502).json({ success:false, data:[], message:'SofaBets live feed unavailable' });

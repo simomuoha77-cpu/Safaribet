@@ -965,6 +965,26 @@ async function fetchLiveFootballFixtures() {
   return [];
 }
 
+
+async function getLiveFixturesForSport(sportName) {
+  const name = String(sportName || 'football').toLowerCase();
+  if (name === 'football') return fetchLiveFootballFixtures();
+  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  for (const sportId of candidates) {
+    try {
+      const all = await fetchAllFixturesForSport(sportId, name, { maxPages: MAX_PAGES_PER_FETCH });
+      const live = all.filter(m => {
+        const st = String(m?.status || '').toUpperCase();
+        return st === 'IN_PLAY' || st === 'LIVE' || st === 'PAUSED';
+      });
+      if (live.length) return live;
+    } catch (e) {
+      console.warn(`[sofaBetsProvider] live ${name} sportId ${sportId} failed: ${e.message}`);
+    }
+  }
+  return [];
+}
+
 async function getMatchesForDate(dateStr, options) {
   options = options || {};
   const sportName = String(options.sport || 'football').toLowerCase();
@@ -1007,4 +1027,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures, getLiveFixturesForSport };
