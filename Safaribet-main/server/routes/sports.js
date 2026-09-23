@@ -1,6 +1,7 @@
 const express = require('express');
 const { getFixtures } = require('../engine/apifootball');
 const sofaBets = require('../providers/sofaBetsProvider');
+const { isPickSuspended } = require('../services/marketResolver');
 const router = express.Router();
 
 const cache = {};
@@ -119,6 +120,32 @@ router.get('/live', async (req, res) => {
         },
         providerOdds: o,
         markets: m.markets || [],
+        suspendedPicks: (() => {
+          // Live cards stay bettable by default. Only the specific outcomes
+          // that the live-risk engine has locked are shown with a lock.
+          const riskMarket = sport === 'football' ? 'gen:ft:1x2' :
+            sport === 'basketball' ? 'gen:bb:winner' :
+            sport === 'tennis' ? 'gen:tn:winner' : 'gen:winner';
+          const score = m.score?.fullTime || m.score || {};
+          const riskMatch = {
+            status: 'live',
+            homeTeam: m.homeTeam, awayTeam: m.awayTeam,
+            commenceTime: m.utcDate ? new Date(m.utcDate) : new Date(),
+            updatedAt: new Date(),
+            odds: { home, draw, away, updatedAt: new Date() },
+            score: {
+              home: score.home ?? null, away: score.away ?? null,
+              minute: m.minute ?? m.score?.minute ?? null,
+              period: m.status || null, lastGoalAt: m.score?.lastGoalAt || null
+            }
+          };
+          const out = {};
+          for (const [pick, key] of [['home','home'],['draw','draw'],['away','away']]) {
+            if ((pick === 'draw' && !Number.isFinite(draw)) || !Number.isFinite(pick === 'home' ? home : away)) continue;
+            if (isPickSuspended(riskMatch, riskMarket, pick)) out[`1x2:${pick}`] = true;
+          }
+          return out;
+        })(),
         // The provider normalizes scores as { fullTime: { home, away } }.
         // The SafariBet Live UI expects the flat { home, away, minute, period }
         // shape. Keep this conversion here so Live always receives the REAL
