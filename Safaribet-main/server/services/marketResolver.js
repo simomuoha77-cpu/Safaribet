@@ -92,8 +92,6 @@ function generatedRiskFamily(market, pick) {
   if (market.startsWith('gen:ft:ah:') || market.startsWith('gen:ft:eh:')) return '1x2';
   if (market === 'gen:ft:resultou25' || market === 'gen:ft:resultbtts') return '1x2';
   if (market === 'gen:ft:margin') return '1x2';
-  if (market.startsWith('gen:ft:')) return '1x2';
-  if (market.startsWith('gen:bb:') || market.startsWith('gen:tn:')) return '1x2';
   return null;
 }
 
@@ -141,11 +139,16 @@ function getSuspensionReason(match, market, pick) {
     return (h > 0 && a > 0) ? 'mathematically_certain' : null;
   }
   if (isGen) {
+    // SafariBet owns these generated markets, so each live selection is
+    // re-evaluated from the CURRENT game state. A selection that is already
+    // won or already impossible is locked; unrelated selections stay open.
     if (market === 'gen:ft:btts' && h > 0 && a > 0) return 'mathematically_certain';
 
     const ou = market.match(/^gen:ft:ou:(\d+(?:\.5)?)$/);
     if (ou) {
       const line = Number(ou[1]);
+      // With a half-goal line, once the current total has crossed it the
+      // whole O/U market is decided. Before that, both sides remain live.
       if (total > line) return 'mathematically_certain';
     }
 
@@ -157,7 +160,9 @@ function getSuspensionReason(match, market, pick) {
 
     if (market === 'gen:ft:totalexact') {
       const target = Number(pick);
-      if (Number.isFinite(target) && target <= total) return 'mathematically_certain';
+      // Only totals BELOW the current score are impossible. If the target
+      // equals the current total it is still a valid live outcome.
+      if (Number.isFinite(target) && target < total) return 'mathematically_certain';
     }
 
     if (market === 'gen:ft:correctscore') {
@@ -165,7 +170,19 @@ function getSuspensionReason(match, market, pick) {
       if (m) {
         const targetH = Number(m[1]), targetA = Number(m[2]);
         // A score below the current score on either side is impossible.
+        // The exact CURRENT score remains open until the match ends.
         if (targetH < h || targetA < a) return 'mathematically_certain';
+      }
+    }
+
+
+    const sideMarket = market.match(/^gen:ft:(wintonil|clean):(home|away)$/);
+    if (sideMarket) {
+      const side = sideMarket[2];
+      const sideGoals = side === 'home' ? h : a;
+      const oppGoals = side === 'home' ? a : h;
+      if (oppGoals > 0 || (sideGoals > 0 && oppGoals === 0 && effectiveMinute >= 90)) {
+        return 'game_state_decided';
       }
     }
   }
@@ -175,18 +192,6 @@ function getSuspensionReason(match, market, pick) {
   const affected = cfg.affectedMarkets || LIVE_RISK_DEFAULTS.affectedMarkets;
   const riskMarket = isGen ? generatedRiskFamily(market, pick) : market;
   if (!affected.includes(riskMarket)) return null;
-
-  const sport = String(match.sport || '').toLowerCase();
-  if (sport === 'basketball') {
-    const bm = Number(match.score?.minute);
-    const bd = Math.abs(Number(h) - Number(a));
-    if (Number.isFinite(bm) && bm >= 38 && bd >= 15) return 'lead_rule';
-    if (Number.isFinite(bm) && bm >= 44 && bd >= 10) return 'lead_rule';
-  }
-  if (sport === 'tennis') {
-    const sh = Number(h), sa = Number(a);
-    if (Number.isFinite(sh) && Number.isFinite(sa) && Math.abs(sh-sa) >= 2 && Math.max(sh,sa) >= 2) return 'lead_rule';
-  }
 
   // If the generated market contains a result component, the same leading-side
   // protection applies to that component. Other live markets remain OPEN unless

@@ -1910,13 +1910,13 @@ async function loadCat(cat) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
         if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
-          liveTabCache.data = (stored.data || []).filter(m => m && m.status === 'live');
+          liveTabCache.data = stored.data;
           liveTabCache.ts = stored.ts;
         }
       } catch(e) {}
     }
     if (liveTabCache.data && liveTabCache.data.length) {
-      renderMatches((liveTabCache.data || []).filter(m => m && m.status === 'live'), true);
+      renderMatches(liveTabCache.data, true);
       loadMatches('live', true).catch(() => {});
     } else {
       loadMatches('live', false);
@@ -2192,8 +2192,8 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   if(!silent && retryAttempt===0){
     try{
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 60000) {
-        renderMatches(sport === 'live' ? cached.data.filter(m => m && m.status === 'live') : cached.data, true);
+      if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 600000) {
+        renderMatches(cached.data, true);
         usedCache = true;
       }
     }catch(e){ /* corrupt cache — ignore, fall through to normal load */ }
@@ -2217,9 +2217,8 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
-    const rows = sport === 'live' ? (d.data || []).filter(m => m && m.status === 'live') : (d.data || []);
 
-    if(!d.success||!rows.length){
+    if(!d.success||!d.data||!d.data.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
@@ -2235,9 +2234,9 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
-    renderMatches(rows, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
-    if (sport === 'live') { liveTabCache.data = rows.slice(); liveTabCache.ts = Date.now(); }
-    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: rows, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
     // A failed/timed-out first attempt with nothing on screen yet is very
