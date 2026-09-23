@@ -22,13 +22,6 @@ const auth = require('../middleware/auth');
 const casinoService = require('../services/casinoService');
 const router = express.Router();
 
-// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
-// from firing hundreds of rounds per second, while still allowing normal fast play.
-const playLimiter = rateLimit({
-  windowMs: 1000, max: 5,
-  message: { success: false, message: 'Slow down — max 5 rounds per second' }
-});
-
 
 // ── SOFABETS CASINO CATALOGUE ────────────────────────────────────────────────
 // SofaBets is used as the provider catalogue (provider/ref). The browser never
@@ -145,6 +138,30 @@ function safeHtml(value) {
 }
 
 
+const JUAN_KEY = () => process.env.JUANAI_API_KEY;
+const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
+
+router.get('/juan-games', async (req, res) => {
+  try {
+    if (!JUAN_KEY()) return res.status(503).json({ success:false, message:'Casino API not configured', data:[] });
+    const r = await axios.get(`${JUAN_URL()}/api/casino/games`, {
+      params: { key: JUAN_KEY() }, timeout: 10000
+    });
+    const games = r.data?.data || r.data?.games || [];
+    const resolved = games.map(g => {
+      const { gameUrl, ...safe } = g;
+      return {
+        ...safe,
+        thumbnailFull: g.thumbnail?.startsWith('http') ? g.thumbnail : (g.thumbnail ? `${JUAN_URL()}${g.thumbnail}` : '')
+      };
+    });
+    res.json({ success:true, data:resolved, count:resolved.length });
+  } catch(e) {
+    console.error('[casino/juan-games]', e.message);
+    res.status(502).json({ success:false, message:'Casino service unavailable', data:[] });
+  }
+});
+
 router.get('/sofa-games', async (req,res) => {
   try {
     const games=await fetchSofaCasinoGames();
@@ -172,6 +189,13 @@ router.get('/sofa-games', async (req,res) => {
 });
 
 
+
+// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
+// from firing hundreds of rounds per second, while still allowing normal fast play.
+const playLimiter = rateLimit({
+  windowMs: 1000, max: 5,
+  message: { success: false, message: 'Slow down — max 5 rounds per second' }
+});
 
 router.post('/dice/play', auth, playLimiter, async (req, res) => {
   try {

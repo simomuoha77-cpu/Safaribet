@@ -27,6 +27,7 @@ const casinoWalletRoutes = require('./routes/casinoWallet');
 const scheduler     = require('./engine/scheduler');
 
 const app    = express();
+const authFlexible = require('./middleware/authFlexible');
 const server = http.createServer(app);
 
 // ── WEBSOCKET (Live Notifications) ──
@@ -147,9 +148,6 @@ app.use('/api/referral',     referralRoutes);
 app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
-
-// Auth middleware must be initialized before any route references it.
-const authFlexible = require('./middleware/authFlexible');
 
 app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
   const provider = String(req.params.provider || '').trim();
