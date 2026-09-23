@@ -1287,8 +1287,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   if (!liveTabCache.data) {
     try {
       const cachedLive = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < 600000) {
-        liveTabCache.data = cachedLive.data;
+      const cachedOnlyLive = onlyLiveMatches(cachedLive?.data || []);
+      if (cachedOnlyLive.length && (Date.now() - (cachedLive.ts || 0)) < 600000) {
+        liveTabCache.data = cachedOnlyLive;
         liveTabCache.ts = cachedLive.ts;
       }
     } catch(e) {}
@@ -1770,6 +1771,20 @@ function noMatchesHTML(icon,title,sub){
 // ── SPORT CATEGORY TABS ──
 let currentCat = 'featured';
 let srchTimer = null;
+
+// A LIVE tab may only contain matches that are actually in-play. Never trust
+// a stale/mixed cache or a broad fallback feed to populate Live with upcoming
+// fixtures. This keeps Live instant without showing normal games.
+function isLiveMatch(m) {
+  if (!m) return false;
+  if (m.isLive === true || m.live === true) return true;
+  const s = String(m.status || m.matchStatus || m.state || '').toLowerCase();
+  return s === 'live' || s === 'in_play' || s === 'inplay' || s === 'in-play' || s.includes('in play');
+}
+
+function onlyLiveMatches(list) {
+  return Array.isArray(list) ? list.filter(isLiveMatch) : [];
+}
 // Every main tab keeps its last good list in memory. Switching tabs must render
 // the existing DOM/data first, then refresh silently. This is what makes
 // Highlights -> Basketball -> Football -> Live -> Highlights effectively instant.
@@ -1898,34 +1913,31 @@ async function loadCat(cat) {
   }
 
   if (cat === 'live') {
-    // LIVE must never wait for the live endpoint when Highlights already
-    // loaded the same matches. Derive the live list immediately, paint it,
-    // then refresh the dedicated live endpoint silently in the background.
-    if (!liveTabCache.data?.length && progressiveMatches?.length) {
-      const instantLive = progressiveMatches.filter(m => m && m.status === 'live');
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
+    // LIVE is strict: sanitize every possible cache before painting. A stale
+    // cache can contain upcoming games, so it must never be trusted as-is.
+    let instantLive = onlyLiveMatches(liveTabCache.data);
+
+    if (!instantLive.length && progressiveMatches?.length) {
+      instantLive = onlyLiveMatches(progressiveMatches);
     }
-    if (!liveTabCache.data?.length && allMatches?.length) {
-      const instantLive = allMatches.filter(m => m && m.status === 'live');
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
+    if (!instantLive.length && allMatches?.length) {
+      instantLive = onlyLiveMatches(allMatches);
     }
-    if (!liveTabCache.data?.length) {
+    if (!instantLive.length) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
         if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
-          liveTabCache.data = stored.data;
-          liveTabCache.ts = stored.ts;
+          instantLive = onlyLiveMatches(stored.data);
         }
       } catch(e) {}
     }
-    if (liveTabCache.data && liveTabCache.data.length) {
-      renderMatches(liveTabCache.data, true);
+
+    if (instantLive.length) {
+      liveTabCache.data = instantLive.slice();
+      liveTabCache.ts = Date.now();
+      renderMatches(instantLive, true);
+      // Fresh SofaBets live data updates this list silently; it can never
+      // replace it with upcoming fixtures.
       loadMatches('live', true).catch(() => {});
     } else {
       loadMatches('live', false);
@@ -2226,8 +2238,15 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
+    // The Live endpoint is allowed to return a broad fixture fallback, but the
+    // Live tab is not. Filter it strictly before rendering or caching.
+    const responseData = sport === 'live' ? onlyLiveMatches(d.data) : d.data;
+    const liveFallback = sport === 'live' && !responseData.length && allMatches?.length
+      ? onlyLiveMatches(allMatches)
+      : [];
+    const finalData = responseData.length ? responseData : liveFallback;
 
-    if(!d.success||!d.data||!d.data.length){
+    if(!d.success||!finalData.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
@@ -2243,9 +2262,9 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
-    renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
-    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
-    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
+    renderMatches(finalData, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    if (sport === 'live') { liveTabCache.data = finalData.slice(); liveTabCache.ts = Date.now(); }
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: finalData, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
     // A failed/timed-out first attempt with nothing on screen yet is very
