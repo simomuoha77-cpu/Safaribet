@@ -1558,7 +1558,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       // Count today's matches
       const todayStr=new Date().toDateString();
-      const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
+      const todayCount=allMatches.filter(m=>m.status!=='live'&&m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
       document.getElementById('todayCount').textContent=todayCount;
       applyFilters(silent);
     } else if(!hasExistingData) {
@@ -1643,6 +1643,15 @@ function applyFilters(silent=false){
   let filtered=[...allMatches];
   const now=new Date();
 
+  // LIVE is a dedicated tab. Once a fixture is genuinely live, it must not
+  // leak into Highlights, Today, Favorites, Popular, or any other non-Live
+  // view. The Live tab has its own cache/load path and does not call this
+  // filter, so this single guard keeps the match locked to Live for the rest
+  // of the session.
+  if(currentCat !== 'live') {
+    filtered=filtered.filter(m => m && m.status !== 'live');
+  }
+
   // League filter
   if(currentLeague){
     filtered=filtered.filter(m=>m.sport===currentLeague||m.leagueKey===currentLeague);
@@ -1722,7 +1731,7 @@ function applyFilters(silent=false){
       catch(e) { return ''; }
     };
     const todayStr = nairobiDate(now);
-    filtered=filtered.filter(m=>m.commenceTime&&nairobiDate(m.commenceTime)===todayStr);
+    filtered=filtered.filter(m=>m.status!=='live' && m.commenceTime&&nairobiDate(m.commenceTime)===todayStr);
     filtered.sort((a,b)=>{
       if(a.status==='live'&&b.status!=='live') return -1;
       if(b.status==='live'&&a.status!=='live') return 1;
@@ -2381,8 +2390,7 @@ let progressiveObserver = null;
 let progressiveMatches = [];
 let progressiveRendered = 0;
 const PROGRESSIVE_BATCH = 12;
-const PROGRESSIVE_ROOT_MARGIN = '700px';
-const PROGRESSIVE_MAX_BATCH_PER_TRIGGER = 1;
+const PROGRESSIVE_AUTO_STEP_MS = 70;
 
 function sportBadgeForMatch(m){
   const key = String(m?.sport || '').toLowerCase();
@@ -2432,20 +2440,14 @@ function appendProgressiveBatch(){
     sentinel.style.pointerEvents = 'none';
   }
   if(progressiveRendered < progressiveMatches.length && !progressiveObserver){
-    // Render only what the user is approaching. Do NOT keep appending every
-    // match in the background: that made a tab switch/scroll look like a full
-    // reload and created hundreds of DOM nodes before the user ever reached
-    // them. The feed itself may refresh in the background, but rendering is
-    // demand-driven by this sentinel.
-    const sentinel = document.getElementById('matchLoadMore');
-    if(!sentinel) return;
-    progressiveObserver = new IntersectionObserver((entries) => {
-      if(!entries.some(e => e.isIntersecting)) return;
-      progressiveObserver.disconnect();
+    // Do not make the user scroll to trigger the next batch. Once the first
+    // cards arrive, keep filling the list in tiny background batches. This
+    // makes Live/Football feel like a stream: game 1-12 appear first, then
+    // the next games arrive ~70ms at a time without any loading screen.
+    progressiveObserver = { timer: setTimeout(() => {
       progressiveObserver = null;
       appendProgressiveBatch();
-    }, { root:null, rootMargin: PROGRESSIVE_ROOT_MARGIN, threshold:0 });
-    progressiveObserver.observe(sentinel);
+    }, PROGRESSIVE_AUTO_STEP_MS) };
   }
 }
 
