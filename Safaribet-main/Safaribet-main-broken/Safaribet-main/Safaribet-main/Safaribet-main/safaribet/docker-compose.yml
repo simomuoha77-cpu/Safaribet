@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: safaribet-mongo
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate().ok }"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot job that ensures the replica set is initiated. Runs once and exits.
+  mongo-init:
+    image: mongo:7.0
+    depends_on:
+      - mongodb
+    entrypoint: >
+      bash -c "
+        sleep 5 &&
+        mongosh --host mongodb:27017 --eval '
+          try {
+            rs.status();
+            print(\"Replica set already initiated\");
+          } catch (e) {
+            rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] });
+            print(\"Replica set initiated\");
+          }
+        '
+      "
+    restart: "no"
+
+  backend:
+    build: ./backend
+    container_name: safaribet-backend
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - mongo-init
+    env_file:
+      - ./backend/.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/safaribet?replicaSet=rs0
+      - FRONTEND_ORIGIN=http://localhost:3000
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build: ./frontend
+    container_name: safaribet-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+    ports:
+      - "3000:3000"
+
+volumes:
+  mongo-data:
