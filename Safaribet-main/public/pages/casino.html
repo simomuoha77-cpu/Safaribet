@@ -321,12 +321,6 @@ async function loadGames() {
 }
 
 function openSofaGame(provider, ref) {
-  // Browser GET navigation cannot send the Authorization header, so persist
-  // the existing SafariBet JWT in the same auth cookie used by /casino/play.
-  // This prevents the SofaBets launcher from redirecting back to /login.
-  if (token) {
-    document.cookie = `sb_token=${token}; path=/; max-age=3600; SameSite=Lax`;
-  }
   location.href = `/casino/sofa-play/${provider}/${ref}`;
 }
 

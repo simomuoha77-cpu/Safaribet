@@ -368,12 +368,8 @@ router.get('/sofa-play/:provider/:ref', require('../middleware/authFlexible'), a
     return res.status(400).send('Invalid game');
   }
   const gameUrl = `https://www.sofabets.com/casino/play/${encodeURIComponent(provider)}/${encodeURIComponent(ref)}`;
-  // SofaBets casino games must be opened as a top-level page. Embedding the
-  // provider game inside an iframe causes its game shell to reject the frame
-  // or navigate back to its home page on mobile browsers.
-  // Keep SafariBet authentication on this launcher, then hand the browser to
-  // the actual SofaBets game URL. The provider/ref are validated above.
-  res.redirect(302, gameUrl);
+  const title = `${provider} Casino – SafariBet`;
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>${title}</title><style>*{box-sizing:border-box;margin:0}html,body{height:100%;background:#000}body{font-family:Arial,sans-serif}.bar{height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#071007;color:#fff;border-bottom:1px solid rgba(0,200,83,.2);position:fixed;top:0;left:0;right:0;z-index:5}.back{color:#00c853;text-decoration:none;font-size:20px;font-weight:700}.title{font-size:14px;font-weight:700;flex:1}.provider{font-size:10px;color:#00c853}.frame{position:fixed;top:44px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 44px);border:0}</style></head><body><div class="bar"><a class="back" href="/casino">←</a><div class="title">🎰 SafariBet Casino</div><div class="provider">GAME</div></div><iframe class="frame" src="${gameUrl}" allow="autoplay;fullscreen" allowfullscreen></iframe></body></html>`);
 });
 
 // ── GAME LAUNCHER PAGE — requires user auth, gets session from Juan AI server-side ──
