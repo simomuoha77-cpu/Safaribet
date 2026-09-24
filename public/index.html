@@ -1917,10 +1917,18 @@ async function loadCat(cat) {
     }
     if (liveTabCache.data && liveTabCache.data.length) {
       renderMatches(liveTabCache.data, true);
-      loadMatches('live', true).catch(() => {});
     } else {
-      loadMatches('live', false);
+      // Never block the Live tab on a network request.
+      // Paint the Live view immediately, then refresh silently.
+      const el = document.getElementById('matchList');
+      if (el) {
+        el.innerHTML = '<div class="empty" style="padding:40px 20px"><div style="font-size:36px;margin-bottom:12px">🔴</div><div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">Live</div><div style="font-size:13px;color:var(--mt);line-height:1.6">Updating live matches…</div></div>';
+      }
     }
+
+    // Never await this request. Existing Live content stays visible
+    // while the dedicated live endpoint refreshes in the background.
+    loadMatches('live', true).catch(() => {});
     return;
   }
 

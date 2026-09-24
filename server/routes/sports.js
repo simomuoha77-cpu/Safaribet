@@ -86,115 +86,176 @@ function sportBadge(sport) {
   return SPORT_CONFIG[sport] || { label:String(sport || 'Sport'), icon:'🏆' };
 }
 
-// Live is one mixed feed: football + every SofaBets sport SafariBet supports.
-// Keep it cached briefly so opening Live never waits for a fresh upstream call
-// on every tap/refresh, while the frontend can refresh it silently in the background.
-router.get('/live', async (req, res) => {
-  const key = 'sofa_live_all';
-  const buildLive = (sport, matches) => {
-    const badge = sportBadge(sport);
-    return (matches || []).filter(m => {
-      const st = String(m?.status || '').toUpperCase();
-      return st === 'IN_PLAY' || st === 'LIVE' || st === 'PAUSED';
-    }).map(m => {
-      const o = m.odds || m.providerOdds || {};
-      const home = Number(o.homeWin), away = Number(o.awayWin), draw = Number(o.draw);
-      const hasOdds = Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1;
-      return {
-        matchId: `sofabets_live_${sport}_${m.providerMatchId}`,
-        sport,
-        sportIcon: badge.icon,
-        sportLabel: badge.label,
-        league: m.competition || badge.label,
-        homeTeam: m.homeTeam,
-        awayTeam: m.awayTeam,
-        commenceTime: m.utcDate ? new Date(m.utcDate) : null,
-        status: 'live',
-        hasOdds,
-        odds: {
-          home: hasOdds ? +home.toFixed(2) : null,
-          draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
-          away: hasOdds ? +away.toFixed(2) : null,
-          updatedAt: new Date()
-        },
-        providerOdds: o,
-        markets: m.markets || [],
-        // The provider normalizes scores as { fullTime: { home, away } }.
-        // The SafariBet Live UI expects the flat { home, away, minute, period }
-        // shape. Keep this conversion here so Live always receives the REAL
-        // SofaBets score, including when the browser is using cached matches.
-        score: (() => {
-          const s = m.score?.fullTime || m.score || {};
-          return {
-            home: s.home ?? null,
-            away: s.away ?? null,
-            minute: m.minute ?? m.score?.minute ?? null,
-            minuteIsEstimated: !!m.minuteIsEstimated,
-            period: m.status || null
-          };
-        })(),
-        source: 'sofabets',
-        oddsSource: m.oddsSource || 'SofaBets',
-        realOddsSource: m.realOddsSource || 'SofaBets',
-        isRealMarketOdds: !!m.isRealMarketOdds,
-        fetchedAt: new Date()
-      };
-    });
-  };
+// Live is one mixed feed. The cache is continuously warmed in the background
+// so opening Live never waits for SofaBets.
+const LIVE_CACHE_KEY = 'sofa_live_all';
+let liveRefreshInFlight = false;
 
-  const save = live => {
-    const seen = new Set();
-    const clean = live.filter(m => m.homeTeam && m.awayTeam && !seen.has(m.matchId) && seen.add(m.matchId))
-      .sort((a,b) => new Date(a.commenceTime || 0) - new Date(b.commenceTime || 0));
-    C.set(key, clean);
-    return clean;
-  };
+function buildLiveMatches(sport, matches) {
+  const badge = sportBadge(sport);
+
+  return (matches || []).filter(m => {
+    const st = String(m?.status || '').toUpperCase();
+    return [
+      'IN_PLAY','LIVE','PAUSED',
+      '1H','2H','HT','ET','P','BT',
+      'Q1','Q2','Q3','Q4',
+      'SET1','SET2','SET3','SET4','SET5'
+    ].includes(st);
+  }).map(m => {
+    const o = m.odds || m.providerOdds || {};
+    const home = Number(o.homeWin);
+    const away = Number(o.awayWin);
+    const draw = Number(o.draw);
+    const hasOdds =
+      Number.isFinite(home) && home > 1 &&
+      Number.isFinite(away) && away > 1;
+
+    const s = m.score?.fullTime || m.score || {};
+
+    return {
+      matchId: `sofabets_live_${sport}_${m.providerMatchId}`,
+      sport,
+      sportIcon: badge.icon,
+      sportLabel: badge.label,
+      league: m.competition || badge.label,
+      homeTeam: m.homeTeam,
+      awayTeam: m.awayTeam,
+      commenceTime: m.utcDate ? new Date(m.utcDate) : null,
+      status: 'live',
+      hasOdds,
+      odds: {
+        home: hasOdds ? +home.toFixed(2) : null,
+        draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+        away: hasOdds ? +away.toFixed(2) : null,
+        updatedAt: new Date()
+      },
+      providerOdds: o,
+      markets: m.markets || [],
+      score: {
+        home: s.home ?? null,
+        away: s.away ?? null,
+        minute: m.minute ?? m.score?.minute ?? null,
+        minuteIsEstimated: !!m.minuteIsEstimated,
+        period: m.status || null
+      },
+      source: 'sofabets',
+      oddsSource: m.oddsSource || 'SofaBets',
+      realOddsSource: m.realOddsSource || 'SofaBets',
+      isRealMarketOdds: !!m.isRealMarketOdds,
+      fetchedAt: new Date()
+    };
+  });
+}
+
+function saveLiveCache(matches) {
+  const seen = new Set();
+
+  const clean = (matches || [])
+    .filter(m =>
+      m.homeTeam &&
+      m.awayTeam &&
+      !seen.has(m.matchId) &&
+      seen.add(m.matchId)
+    )
+    .sort((a, b) =>
+      new Date(a.commenceTime || 0) -
+      new Date(b.commenceTime || 0)
+    );
+
+  C.set(LIVE_CACHE_KEY, clean);
+  return clean;
+}
+
+async function refreshLiveCache() {
+  if (liveRefreshInFlight) return;
+
+  liveRefreshInFlight = true;
 
   try {
-    const cached = C.get(key, 30000);
-    if (cached?.length) {
-      res.json({ success:true, data:cached, count:cached.length, source:'SofaBets', cached:true });
+    const sports = [
+      'football',
+      ...Object.keys(SPORT_CONFIG)
+    ].filter((sport, i, arr) => arr.indexOf(sport) === i);
+
+    const parts = await Promise.all(
+      sports.map(async sport => {
+        try {
+          const raw = await sofaBets.getLiveFixtures(sport);
+          return buildLiveMatches(sport, raw);
+        } catch (e) {
+          console.warn(`[sports/live/${sport}]`, e.message);
+          return [];
+        }
+      })
+    );
+
+    const merged = saveLiveCache(parts.flat());
+
+    console.log(
+      `[sports/live] background live refresh: ${merged.length} mixed live matches`
+    );
+  } catch (e) {
+    console.warn('[sports/live] background refresh failed:', e.message);
+  } finally {
+    liveRefreshInFlight = false;
+  }
+}
+
+router.get('/live', async (req, res) => {
+  try {
+    // NEVER wait for SofaBets here.
+    // Return the last known snapshot immediately.
+    const cached = C.get(LIVE_CACHE_KEY, 120000);
+
+    if (Array.isArray(cached)) {
+      res.json({
+        success: true,
+        data: cached,
+        count: cached.length,
+        source: 'SofaBets',
+        cached: true
+      });
+
+      // Refresh silently after responding.
+      refreshLiveCache().catch(() => {});
       return;
     }
 
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
-    }).format(new Date());
+    // Cold-start safety: return immediately, then populate the cache.
+    res.json({
+      success: true,
+      data: [],
+      count: 0,
+      source: 'SofaBets',
+      cached: false,
+      warming: true
+    });
 
-    // Critical path: football only. This returns as soon as the first useful
-    // live feed is ready instead of waiting for basketball/tennis/cricket/etc.
-    // to finish their much larger fixture catalogues.
-    const footballLiveRaw = await sofaBets.getLiveFootballFixtures();
-    const initial = buildLive('football', footballLiveRaw);
-
-    // Include any non-football live games already warmed in the category cache.
-    for (const sport of Object.keys(SPORT_CONFIG)) {
-      const warmed = sportCategoryCache.get(sport)?.data;
-      if (warmed?.length) initial.push(...buildLive(sport, warmed));
-    }
-    const immediate = save(initial);
-    res.json({ success:true, data:immediate, count:immediate.length, source:'SofaBets', cached:false });
-
-    // Continue warming every sport AFTER the response has gone to the phone.
-    // When this finishes, the next silent refresh receives the complete list.
-    Promise.all(Object.keys(SPORT_CONFIG).map(async sport => {
-      try {
-        const raw = await sofaBets.getMatchesForDate(today, { sport, fast:true });
-        return buildLive(sport, raw);
-      } catch (e) {
-        console.warn(`[sports/live/${sport}/bg]`, e.message);
-        return [];
-      }
-    })).then(parts => {
-      const merged = [...immediate, ...parts.flat()];
-      save(merged);
-      console.log(`[sports/live] background refresh: ${merged.length} mixed live matches`);
-    }).catch(() => {});
+    refreshLiveCache().catch(() => {});
   } catch (e) {
     console.error('[sports/live]', e.message);
-    res.status(502).json({ success:false, data:[], message:'SofaBets live feed unavailable' });
+
+    // Even errors must not turn Live into a blocking request.
+    res.json({
+      success: true,
+      data: [],
+      count: 0,
+      source: 'SofaBets',
+      cached: false,
+      warming: true
+    });
+
+    refreshLiveCache().catch(() => {});
   }
 });
+
+// Keep the Live snapshot warm independently of user clicks.
+// This is what makes the next Live tap effectively instant.
+refreshLiveCache().catch(() => {});
+setInterval(() => {
+  refreshLiveCache().catch(() => {});
+}, 10000);
 
 // Category cache is deliberately stale-while-revalidate. A sport tab must
 // never make the user wait for all upcoming dates just because they tapped it.
