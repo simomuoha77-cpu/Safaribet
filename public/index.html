@@ -1915,17 +1915,16 @@ async function loadCat(cat) {
       } catch(e) {}
     }
     if (liveTabCache.data && liveTabCache.data.length) {
+      // Paint only the cached LIVE snapshot immediately.
       renderMatches(liveTabCache.data, true);
     } else {
-      // No cached Live data yet. Do NOT leave Football/Highlights games
-      // visible under the Live tab. Keep the Live tab empty while the
-      // dedicated live endpoint fills it silently.
+      // No LIVE snapshot yet: keep the tab empty while the dedicated
+      // endpoint is fetched silently. Never show Football/Highlights here.
       if (el) el.innerHTML = '';
-      setUpdatingIndicator(true);
     }
 
-    // Never await this request. The backend returns its warm live snapshot
-    // immediately, then refreshes it in the background.
+    // Fetch the warm backend LIVE snapshot silently. It updates the tab
+    // as soon as the response arrives without ever showing a page loader.
     loadMatches('live', true).catch(() => {});
     return;
   }
@@ -2197,7 +2196,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   // localStorage, not sessionStorage — sessionStorage is scoped per browser
   // TAB, so a backgrounded tab that Android discards/reloads under memory
   // pressure can come back with no cache at all even though one was written.
-  if(!silent && retryAttempt===0){
+  if(!silent && sport !== 'live' && retryAttempt===0){
     try{
       const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
       if (cached && cached.data && cached.data.length && (Date.now() - cached.ts) < 600000) {
@@ -2256,7 +2255,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     if(!usedCache && retryAttempt < MAX_RETRIES){
       setUpdatingIndicator(true);
       const delay = Math.min(3000 * (retryAttempt+1), 12000);
-      setTimeout(() => loadMatches(sport, false, retryAttempt+1), delay);
+      setTimeout(() => loadMatches(sport, sport === 'live', retryAttempt+1), delay);
       return;
     }
     if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
