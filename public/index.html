@@ -1556,9 +1556,22 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       }
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
-      // Count today's matches
-      const todayStr=new Date().toDateString();
-      const todayCount=allMatches.filter(m=>m.commenceTime&&new Date(m.commenceTime).toDateString()===todayStr).length;
+      // Count today's matches using the same Nairobi timezone as the Today filter.
+      const nairobiDate = d => {
+        if(!d) return '';
+        try {
+          return new Intl.DateTimeFormat('en-CA',{
+            timeZone:'Africa/Nairobi',
+            year:'numeric',
+            month:'2-digit',
+            day:'2-digit'
+          }).format(new Date(d));
+        } catch(e) {
+          return '';
+        }
+      };
+      const todayStr=nairobiDate(new Date());
+      const todayCount=allMatches.filter(m=>m.commenceTime&&nairobiDate(m.commenceTime)===todayStr).length;
       document.getElementById('todayCount').textContent=todayCount;
       applyFilters(silent);
     } else if(!hasExistingData) {
@@ -1779,10 +1792,23 @@ const footballTabCache = { data:null, ts:0 };
 const liveTabCache = { data:null, ts:0 };
 
 function pickCat(el) {
+  const previousCat = currentCat;
   document.querySelectorAll('.sp-tab').forEach(t => t.classList.remove('on'));
   el.classList.add('on');
   currentCat = el.dataset.cat;
   currentSport = currentCat; // keep legacy var in sync
+
+  // When returning from Live, restore the normal Featured filter state.
+  // Do not otherwise disturb the user's selected filter.
+  if (previousCat === 'live' && (currentCat === 'featured' || currentCat === 'football')) {
+    currentFilter = 'highlights';
+    currentLeague = '';
+    const league = document.getElementById('leagueSelect');
+    if (league) league.value = '';
+    document.querySelectorAll('.ftab').forEach(t => {
+      t.classList.toggle('on', t.dataset.filter === 'highlights');
+    });
+  }
 
   // Show/hide filter bar and market tabs (only for football/featured)
   const showFilters = currentCat === 'featured' || currentCat === 'football';
