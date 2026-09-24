@@ -247,14 +247,18 @@ async function loadGames() {
   document.getElementById('gamesList').style.display = 'none';
 
   try {
-    const r = await fetch('/api/casino/juan-games');
-    const d = await r.json();
-    const games = d?.success ? (d.data || []) : [];
+    // SafariBet casino is powered by JuanAI. SofaBets is NOT used for the
+    // casino lobby or game launch. JuanAI supplies the playable game feed;
+    // SafariBet keeps the authenticated user, wallet and betting session.
+    const r = await fetch('/api/casino/juan-games', { cache: 'no-store' });
+    const d = await r.json().catch(() => ({}));
+    const games = d?.success && Array.isArray(d.data) ? d.data : [];
 
     document.getElementById('gamesLoading').style.display = 'none';
+
     if (!games.length) {
       document.getElementById('gamesError').style.display = 'block';
-      document.getElementById('gamesErrMsg').textContent = 'No games available right now';
+      document.getElementById('gamesErrMsg').textContent = d?.message || 'No JuanAI casino games available right now';
       return;
     }
 
@@ -264,13 +268,13 @@ async function loadGames() {
     grid.innerHTML = games.map(g => {
       const icon = CAT_ICONS[g.category] || CAT_ICONS.default;
       const bg = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
-      const isAviator = g.id === 'aviator' || /aviator/i.test(g.name);
+      const isAviator = g.id === 'aviator' || /aviator/i.test(g.name || '');
       const thumb = g.thumbnailFull || g.thumbnail;
       const thumbHtml = thumb
         ? `<img loading="lazy" src="${thumb}" style="width:100%;height:100%;object-fit:cover;opacity:.88" onerror="this.style.display='none'">`
         : '';
       const featured = g.category === 'crash';
-      const click = `openGame('${String(g.id).replace(/'/g, "\\'")}','${String(g.name).replace(/'/g, "\\'")}')`;
+      const click = `openGame('${String(g.id).replace(/'/g, "\\'")}','${String(g.name || '').replace(/'/g, "\\'")}')`;
       return `<div class="game-card${featured ? ' featured' : ''}" onclick="${click}">
         <div class="gc-banner" style="background:${bg}">
           ${thumbHtml}
@@ -278,10 +282,10 @@ async function loadGames() {
         </div>
         ${g.rtp ? `<div class="gc-rtp">RTP ${g.rtp}%</div>` : ''}
         <div class="gc-body">
-          <div class="gc-name">${g.name}</div>
+          <div class="gc-name">${g.name || g.id}</div>
           <div class="gc-desc">${getCatDesc(g.category)}</div>
           <div class="gc-badges">
-            <span class="badge badge-pf">Verified</span>
+            <span class="badge badge-pf">SafariBet</span>
             ${g.category === 'crash' ? '<span class="badge badge-hot">🔥 HOT</span>' : ''}
             <span class="badge" style="background:rgba(0,200,83,.08);color:var(--g);border:1px solid rgba(0,200,83,.2)">● Live</span>
           </div>
@@ -293,8 +297,16 @@ async function loadGames() {
   } catch(e) {
     document.getElementById('gamesLoading').style.display = 'none';
     document.getElementById('gamesError').style.display = 'block';
-    document.getElementById('gamesErrMsg').textContent = 'Network error — check connection';
+    document.getElementById('gamesErrMsg').textContent = 'JuanAI casino service unavailable — try again';
   }
+}
+
+function openGame(id, name) {
+  if (!token) { location.href='/login'; return; }
+  // The JuanAI launcher creates the authenticated game session server-side
+  // and passes the SafariBet wallet callback into the game. No SofaBets URL.
+  document.cookie = `sb_token=${token}; path=/; max-age=120; SameSite=Lax`;
+  location.href = `/casino/play/${encodeURIComponent(id)}`;
 }
 
 function getCatDesc(cat) {
