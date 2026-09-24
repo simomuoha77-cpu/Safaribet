@@ -25,7 +25,6 @@ const settingsRoutes    = require('./routes/settings');
 const sportsRoutes      = require('./routes/sports');
 const casinoWalletRoutes = require('./routes/casinoWallet');
 const scheduler     = require('./engine/scheduler');
-const authFlexible = require('./middleware/authFlexible');
 
 const app    = express();
 const server = http.createServer(app);
@@ -177,6 +176,7 @@ app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
 });
 
 // ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
+const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
   // Forward to the casino route handler
   req.url = `/play/${req.params.gameId}`;
