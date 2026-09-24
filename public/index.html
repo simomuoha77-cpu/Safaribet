@@ -1953,8 +1953,9 @@ async function loadCat(cat) {
       } catch(e) {}
     }
     if (liveTabCache.data && liveTabCache.data.length) {
-      // Paint only the cached LIVE snapshot immediately.
-      renderMatches(liveTabCache.data, true);
+      // Switching into Live is a new dataset: render it cleanly instead
+      // of merging it with whatever tab was previously on screen.
+      renderMatches(liveTabCache.data, false);
     } else {
       // No LIVE snapshot yet: keep the tab empty while the dedicated
       // endpoint is fetched silently. Never show Football/Highlights here.
@@ -2281,7 +2282,13 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
-    renderMatches(d.data, usedCache || silent); // already-visible content (from cache) means this update should be silent/non-disruptive too
+    if (sport === 'live' && currentCat === 'live') {
+      // Live is the active tab: replace its snapshot cleanly with the
+      // authoritative live response. No Highlights merge is allowed here.
+      renderMatches(d.data, false);
+    } else {
+      renderMatches(d.data, usedCache || silent);
+    }
     if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
     try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
