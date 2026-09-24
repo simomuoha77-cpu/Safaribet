@@ -247,43 +247,46 @@ async function loadGames() {
   document.getElementById('gamesList').style.display = 'none';
 
   try {
-    const r = await fetch('/api/casino/juan-games');
+    // SafariBet casino is powered by JuanAi. JuanAi supplies the game catalogue
+    // and playable game/session URL; SafariBet remains the user/wallet owner.
+    const r = await fetch('/api/casino/juan-games', { cache: 'no-store' });
     const d = await r.json();
+    const games = d?.success && Array.isArray(d.data) ? d.data : [];
 
     document.getElementById('gamesLoading').style.display = 'none';
 
-    if (!d.success || !d.data?.length) {
+    if (!games.length) {
       document.getElementById('gamesError').style.display = 'block';
-      document.getElementById('gamesErrMsg').textContent = d.message || 'No games available right now';
+      document.getElementById('gamesErrMsg').textContent = d?.message || 'No JuanAi casino games available right now';
       return;
     }
 
-    const games = d.data;
-    document.getElementById('gamesCountLbl').textContent = `🎮 ${games.length} Game${games.length>1?'s':''} Available`;
-    
+    document.getElementById('gamesCountLbl').textContent = `🎮 ${games.length} Game${games.length > 1 ? 's' : ''} Available`;
+
     const grid = document.getElementById('gameGrid');
     grid.innerHTML = games.map(g => {
       const icon = CAT_ICONS[g.category] || CAT_ICONS.default;
-      const bg   = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
-      const isAviator = (g.id === 'aviator' || /aviator/i.test(g.name));
-      const thumb = isAviator
-        ? `<img src="/api/content/image/aviator" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">`
-        : (g.thumbnail
-            ? `<img src="${g.thumbnailFull||g.thumbnail}" style="width:100%;height:100%;object-fit:cover;opacity:0.8" onerror="this.style.display='none'">`
-            : '');
-      return `<div class="game-card${g.category==='crash'?' featured':''}" onclick="openGame('${g.id}','${g.name}')">
+      const bg = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
+      const isAviator = g.id === 'aviator' || /aviator/i.test(g.name || '');
+      const thumb = g.thumbnailFull || g.thumbnail;
+      const thumbHtml = thumb
+        ? `<img loading="lazy" src="${thumb}" style="width:100%;height:100%;object-fit:cover;opacity:.88" onerror="this.style.display='none'">`
+        : '';
+      const featured = g.category === 'crash';
+      const click = `openGame('${String(g.id).replace(/'/g, "\\'")}','${String(g.name || g.id).replace(/'/g, "\\'")}')`;
+      return `<div class="game-card${featured ? ' featured' : ''}" onclick="${click}">
         <div class="gc-banner" style="background:${bg}">
-          ${thumb}
-          <div style="position:relative;z-index:1;font-size:${g.category==='crash'?'64':'52'}px">${isAviator ? '' : icon}</div>
+          ${thumbHtml}
+          <div style="position:relative;z-index:1;font-size:${featured ? '64' : '52'}px">${isAviator ? '' : (thumb ? '' : icon)}</div>
         </div>
-        <div class="gc-rtp">RTP ${g.rtp}%</div>
+        ${g.rtp ? `<div class="gc-rtp">RTP ${g.rtp}%</div>` : ''}
         <div class="gc-body">
-          <div class="gc-name">${g.name}</div>
+          <div class="gc-name">${g.name || g.id}</div>
           <div class="gc-desc">${getCatDesc(g.category)}</div>
           <div class="gc-badges">
-            <span class="badge badge-pf">Verified</span>
-            ${g.category==='crash'?'<span class="badge badge-hot">🔥 HOT</span>':''}
-            ${g.status==='active'?'<span class="badge" style="background:rgba(0,200,83,0.08);color:var(--g);border:1px solid rgba(0,200,83,0.2)">● Live</span>':'<span class="badge" style="color:var(--mt)">Maintenance</span>'}
+            <span class="badge badge-pf">SafariBet</span>
+            ${g.category === 'crash' ? '<span class="badge badge-hot">🔥 HOT</span>' : ''}
+            <span class="badge" style="background:rgba(0,200,83,.08);color:var(--g);border:1px solid rgba(0,200,83,.2)">● Live</span>
           </div>
         </div>
       </div>`;
@@ -293,7 +296,7 @@ async function loadGames() {
   } catch(e) {
     document.getElementById('gamesLoading').style.display = 'none';
     document.getElementById('gamesError').style.display = 'block';
-    document.getElementById('gamesErrMsg').textContent = 'Network error — check connection';
+    document.getElementById('gamesErrMsg').textContent = 'JuanAi casino service unavailable — try again';
   }
 }
 

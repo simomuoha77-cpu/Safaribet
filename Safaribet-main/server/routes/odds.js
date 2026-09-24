@@ -21,7 +21,7 @@ const C = {
 };
 const FIXTURES_TTL = 20000; // 20 seconds
 const LIVE_TTL     = 8000;  // 8 seconds
-const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services/marketResolver');
+const { resolveOdds, isPickSuspended, isMarketSuspended, getSuspensionReason } = require('../services/marketResolver');
 
 // Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
 // fallback for when the upstream SofaBets feed has a transient outage. Without
@@ -313,7 +313,7 @@ router.get('/match/:matchId', async (req, res) => {
       const parts = String(req.params.matchId).split('_');
       const isLiveId = parts[1] === 'live';
       const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
-      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
+      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(1).join('_');
       const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
       if (direct && direct.homeTeam && direct.awayTeam) {
         m = {
@@ -335,8 +335,10 @@ router.get('/match/:matchId', async (req, res) => {
             home: direct.score?.fullTime?.home ?? null,
             away: direct.score?.fullTime?.away ?? null,
             minute: direct.minute ?? null,
-            period: direct.status || null
+            period: direct.status || null,
+            lastGoalAt: null
           },
+          updatedAt: new Date(),
           markets: direct.markets || [],
           bookmakers: direct.bookmakers || [],
           providerOdds: direct.odds || null,
@@ -346,73 +348,41 @@ router.get('/match/:matchId', async (req, res) => {
       }
     }
 
+    // Persist direct live SofaBets matches the first time their detail page is
+    // opened. This gives live bets a real Match document for server-side odds
+    // validation/settlement instead of returning "match not found" for the
+    // transient sofabets_live_* ID used by the Live tab.
+    if (m && String(req.params.matchId).startsWith('sofabets_live_')) {
+      try {
+        await Match.findOneAndUpdate(
+          { matchId: m.matchId },
+          { $set: { ...m, source: 'juanai', isStatic: false } },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (persistErr) {
+        console.warn('[odds/match] live SofaBets persist failed:', persistErr.message);
+      }
+    }
+
     if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    // SafariBet builds its own markets from the 1X2 odds already on the match.
-    // No extra SofaBets market request is made, so opening a match is immediate
-    // and the prices always come from data SafariBet already has.
-    const providerMarkets = [];
-
+    // The match page uses SafariBet's own market generator below. No rich
+    // provider-market fetch is performed here.
     const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
 
-    // Provider-native markets are the source of truth for the More markets
-    // page. They are intentionally kept separate from SafariBet's legacy
-    // synthetic market resolver so we never invent bookmaker prices.
-    const richMarkets = providerMarkets.map((mk, index) => {
-      const options = (mk.selections || [])
-        .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
-        .map(o => ({
-          pick: String(o.key),
-          odds: Number(o.odds),
-          pickLabel: String(o.name || o.key),
-          bettable: false,
-          providerMarket: true
-        }));
-      if (!options.length) return null;
-      return {
-        market: 'sb:' + String(mk.key || ('market_' + index)),
-        label: String(mk.name || 'Market'),
-        isSynthetic: false,
-        providerMarket: true,
-        bookmaker: mk.bookmaker || 'SofaBets',
-        hasSuspendedPick: false,
-        wholeMarketSuspended: false,
-        options
-      };
-    }).filter(Boolean);
-
-    const MARKETS = [
-      { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
-      { market: 'dc',       label: 'Double Chance',       picks: ['dc_1x','dc_x2','dc_12'] },
-      { market: 'dnb',      label: 'Draw No Bet',         picks: ['dnb_home','dnb_away'] },
-      { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] },
-      { market: 'ou25',     label: 'Over/Under 2.5',      picks: ['over25','under25'] },
-      { market: 'btts',     label: 'Both Teams to Score', picks: ['btts','btts_no'] }
-    ];
-
-    const legacyMarkets = MARKETS.map(def => {
-      let anySuspended = false;
-      const options = def.picks.map(pick => {
-        const reason = require('../services/marketResolver').getSuspensionReason(m, def.market, pick);
-        if (reason) { anySuspended = true; return { pick, suspended: true, reason }; }
-        const resolved = resolveOdds(m, def.market, pick);
-        if (!resolved) return null;
-        return { pick, odds: resolved.odds, bettable: true };
-      }).filter(Boolean);
-      if (!options.length) return null;
-      return {
-        market: def.market,
-        label: def.label,
-        isSynthetic: !REAL_MARKETS.has(def.market),
-        hasSuspendedPick: anySuspended,
-        wholeMarketSuspended: isMarketSuspended(m, def.market),
-        options
-      };
-    }).filter(Boolean);
-
-    // When SofaBets supplied its real catalogue, show that catalogue only.
-    // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = legacyMarkets;
+    // SafariBet owns the market board. We generate our own markets and prices
+    // from the match's base winner odds/score; SofaBets is never used as the
+    // market catalogue and no provider market IDs/prices are exposed here.
+    const { generateMarkets } = require('../services/safariMarketEngine');
+    let markets = generateMarkets(m).map(mk => ({
+      ...mk,
+      options: (mk.options || []).map(o => ({
+        ...o,
+        odds: Number(o.odds),
+        bettable: true,
+        generatedMarket: true
+      }))
+    }));
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');
@@ -426,6 +396,32 @@ router.get('/match/:matchId', async (req, res) => {
       const opt = mk.options.find(o => o.pick === boost.pick);
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }
     }
+
+    // Live betting is OPEN by default. Only selections that are stale,
+    // immediately after a goal, already decided/impossible, or caught by the
+    // score/minute lead rules are locked. This mirrors sportsbook behaviour: a
+    // live match does not become globally unbettable just because one outcome
+    // has become too risky. Finished/cancelled matches are fully locked.
+    markets = markets.map(mk => {
+      const options = (mk.options || []).map(opt => {
+        const reason = getSuspensionReason(m, mk.market, opt.pick);
+        return {
+          ...opt,
+          suspended: !!reason,
+          bettable: !reason,
+          suspensionReason: reason || null
+        };
+      });
+      const whole = options.length > 0 && options.every(o => o.suspended);
+      const reasons = options.map(o => o.suspensionReason).filter(Boolean);
+      return {
+        ...mk,
+        options,
+        hasSuspendedPick: options.some(o => o.suspended),
+        wholeMarketSuspended: whole,
+        suspensionReason: whole ? (reasons[0] || null) : null
+      };
+    });
 
     res.json({ success: true, data: { ...m, markets } });
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }

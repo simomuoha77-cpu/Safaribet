@@ -23,149 +23,188 @@ const casinoService = require('../services/casinoService');
 const router = express.Router();
 
 
-// ── SOFABETS CASINO CATALOGUE ────────────────────────────────────────────────
-// SofaBets is used as the provider catalogue (provider/ref). The browser never
-// navigates to the SofaBets website. A stable SafariBet gameId is generated
-// from provider/ref and resolved again on the server when the game is launched.
-const SOFA_CASINO_PAGE = () => process.env.SOFABETS_CASINO_PAGE || 'https://www.sofabets.com/casino';
-const SOFA_CASINO_TTL = () => Number(process.env.SOFABETS_CASINO_TTL_MS || 600000);
+// ── SOFABETS CASINO CATALOG ──
+// SofaBets publishes its casino catalogue in the Next.js bundle used by its
+// public casino page. We read that public catalogue and cache it locally so
+// SafariBet automatically picks up newly-added games without hard-coding a
+// fixed list.
+const SOFA_CASINO_PAGE = 'https://www.sofabets.com/casino';
 const sofaCasinoCache = { ts: 0, games: [] };
+const SOFA_CASINO_TTL = 10 * 60 * 1000;
 
 function unescapeJsString(value) {
-  return String(value || '').replace(/\\([\\"'nrt])/g, (_, c) => ({ n:'\n', r:'\r', t:'\t' }[c] || c));
+  return String(value || '').replace(/\\([\\"'nrt])/g, (_, c) => ({ n:'\\n', r:'\\r', t:'\\t' }[c] || c));
 }
 
-function extractBalanced(source, start, open='[', close=']') {
-  let depth=0, quote=null, escaped=false;
-  for (let i=start; i<source.length; i++) {
-    const ch=source[i];
+function extractBalanced(source, start, open = '[', close = ']') {
+  let depth = 0, quote = null, escaped = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
     if (quote) {
-      if (escaped) { escaped=false; continue; }
-      if (ch==='\\') { escaped=true; continue; }
-      if (ch===quote) quote=null;
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = null;
       continue;
     }
-    if (ch==='"' || ch==="'") { quote=ch; continue; }
-    if (ch===open) depth++;
-    else if (ch===close && --depth===0) return source.slice(start,i+1);
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
   }
   return '';
 }
 
 function parseSofaCasinoChunk(source) {
-  const marker='casinoGames",0,[';
-  const pos=source.indexOf(marker);
-  if (pos<0) return [];
-  const arrayStart=source.indexOf('[', pos + marker.length - 1);
-  const arrayText=extractBalanced(source,arrayStart);
+  const marker = 'casinoGames",0,[';
+  const pos = source.indexOf(marker);
+  if (pos < 0) return [];
+  const arrayStart = source.indexOf('[', pos + marker.length - 1);
+  const arrayText = extractBalanced(source, arrayStart);
   if (!arrayText) return [];
 
-  const out=[]; let depth=0, quote=null, escaped=false, objectStart=-1;
-  for (let i=1;i<arrayText.length;i++) {
-    const ch=arrayText[i];
+  const out = [];
+  let depth = 0, quote = null, escaped = false, objectStart = -1;
+  for (let i = 1; i < arrayText.length; i++) {
+    const ch = arrayText[i];
     if (quote) {
-      if (escaped) { escaped=false; continue; }
-      if (ch==='\\') { escaped=true; continue; }
-      if (ch===quote) quote=null;
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = null;
       continue;
     }
-    if (ch==='"' || ch==="'") { quote=ch; continue; }
-    if (ch==='{') { if (depth===0) objectStart=i; depth++; }
-    else if (ch==='}') {
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '{') {
+      if (depth === 0) objectStart = i;
+      depth++;
+    } else if (ch === '}') {
       depth--;
-      if (depth===0 && objectStart>=0) {
-        const obj=arrayText.slice(objectStart,i+1);
-        const provider=obj.match(/\bprovider\s*:\s*"((?:\\.|[^"\\])*)"/);
-        const ref=obj.match(/\bref\s*:\s*"((?:\\.|[^"\\])*)"/);
-        const img=obj.match(/\bimg\s*:\s*"((?:\\.|[^"\\])*)"/);
-        const name=obj.match(/\bname\s*:\s*"((?:\\.|[^"\\])*)"/);
-        const slugs=obj.match(/\bslugs\s*:\s*\[([^\]]*)\]/);
-        if (provider && ref && name) out.push({
-          provider: unescapeJsString(provider[1]),
-          ref: unescapeJsString(ref[1]),
-          img: img ? unescapeJsString(img[1]) : '',
-          name: unescapeJsString(name[1]),
-          slugs: slugs ? Array.from(slugs[1].matchAll(/"((?:\\.|[^"\\])*)"/g)).map(m=>unescapeJsString(m[1])) : []
-        });
-        objectStart=-1;
+      if (depth === 0 && objectStart >= 0) {
+        const obj = arrayText.slice(objectStart, i + 1);
+        const provider = obj.match(/\bprovider\s*:\s*"((?:\\.|[^"\\])*)"/);
+        const ref = obj.match(/\bref\s*:\s*"((?:\\.|[^"\\])*)"/);
+        const img = obj.match(/\bimg\s*:\s*"((?:\\.|[^"\\])*)"/);
+        const name = obj.match(/\bname\s*:\s*"((?:\\.|[^"\\])*)"/);
+        const slugs = obj.match(/\bslugs\s*:\s*\[([^\]]*)\]/);
+        if (provider && ref && name) {
+          out.push({
+            provider: unescapeJsString(provider[1]),
+            ref: unescapeJsString(ref[1]),
+            img: img ? unescapeJsString(img[1]) : '',
+            name: unescapeJsString(name[1]),
+            slugs: slugs ? Array.from(slugs[1].matchAll(/"((?:\\.|[^"\\])*)"/g)).map(m => unescapeJsString(m[1])) : []
+          });
+        }
+        objectStart = -1;
       }
     }
   }
   return out;
 }
 
-function sofaGameId(provider, ref) {
-  return `sofa_${Buffer.from(`${provider}:${ref}`, 'utf8').toString('base64url')}`;
-}
-
-function decodeSofaGameId(id) {
-  const raw=String(id || '');
-  if (!raw.startsWith('sofa_')) return null;
-  try {
-    const decoded=Buffer.from(raw.slice(5), 'base64url').toString('utf8');
-    const idx=decoded.indexOf(':');
-    if (idx<1 || idx===decoded.length-1) return null;
-    return { provider: decoded.slice(0,idx), ref: decoded.slice(idx+1) };
-  } catch (_) { return null; }
-}
-
 async function fetchSofaCasinoGames() {
-  if (sofaCasinoCache.games.length && Date.now()-sofaCasinoCache.ts < SOFA_CASINO_TTL()) return sofaCasinoCache.games;
-  const page=await axios.get(SOFA_CASINO_PAGE(), { timeout:12000, responseType:'text' });
-  const html=String(page.data || '');
-  const scripts=Array.from(html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)).map(m=>m[1]);
-  const urls=Array.from(new Set(scripts.map(src=>src.startsWith('http') ? src : new URL(src, SOFA_CASINO_PAGE()).href)));
-  const games=new Map();
+  if (sofaCasinoCache.games.length && Date.now() - sofaCasinoCache.ts < SOFA_CASINO_TTL) {
+    return sofaCasinoCache.games;
+  }
+  const page = await axios.get(SOFA_CASINO_PAGE, { timeout: 12000, responseType: 'text' });
+  const html = String(page.data || '');
+  const scripts = Array.from(html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)).map(m => m[1]);
+  const urls = Array.from(new Set(scripts.map(src => src.startsWith('http') ? src : new URL(src, SOFA_CASINO_PAGE).href)));
+  const games = new Map();
+
   for (const url of urls) {
     try {
-      const r=await axios.get(url,{timeout:12000,responseType:'text'});
-      for (const game of parseSofaCasinoChunk(String(r.data||''))) {
-        const key=`${game.provider}:${game.ref}`;
-        if (!games.has(key)) games.set(key,game);
+      const r = await axios.get(url, { timeout: 12000, responseType: 'text' });
+      for (const game of parseSofaCasinoChunk(String(r.data || ''))) {
+        const key = `${game.provider}:${game.ref}`;
+        if (!games.has(key)) games.set(key, game);
       }
     } catch (_) {}
   }
-  const result=Array.from(games.values());
+
+  const result = Array.from(games.values());
   if (!result.length) throw new Error('SofaBets casino catalogue unavailable');
-  sofaCasinoCache.ts=Date.now();
-  sofaCasinoCache.games=result;
+  sofaCasinoCache.ts = Date.now();
+  sofaCasinoCache.games = result;
   console.log(`[sofaCasino] synced ${result.length} games`);
   return result;
 }
 
-function safeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-
-router.get('/sofa-games', async (req,res) => {
+router.get('/sofa-games', async (req, res) => {
   try {
-    const games=await fetchSofaCasinoGames();
-    const q=String(req.query.search||'').trim().toLowerCase();
-    const category=String(req.query.category||'all').trim().toLowerCase();
-    const data=games.filter(g=>{
-      const text=`${g.name} ${g.provider}`.toLowerCase();
-      return (!q || text.includes(q)) && (category==='all' || g.slugs.includes(category));
-    }).map(g=>({
-      id: sofaGameId(g.provider,g.ref),
-      name:g.name,
-      provider:g.provider,
-      ref:g.ref,
-      category:g.slugs?.[0] || 'casino',
-      status:'active',
-      rtp:96,
-      thumbnail:g.img?.startsWith('http') ? g.img : (g.img ? `https://www.sofabets.com${g.img}` : ''),
-      source:'sofabets'
-    }));
-    res.json({success:true,source:'sofabets',count:data.length,total:games.length,data});
-  } catch(e) {
+    const games = await fetchSofaCasinoGames();
+    const q = String(req.query.search || '').trim().toLowerCase();
+    const category = String(req.query.category || 'all').trim().toLowerCase();
+    const filtered = games.filter(g => {
+      const text = `${g.name} ${g.provider}`.toLowerCase();
+      const matchesSearch = !q || text.includes(q);
+      const matchesCategory = category === 'all' || g.slugs.includes(category);
+      return matchesSearch && matchesCategory;
+    });
+    res.json({ success: true, source: 'sofabets', count: filtered.length, total: games.length, data: filtered });
+  } catch (e) {
     console.error('[casino/sofa-games]', e.message);
-    res.status(502).json({success:false,message:'Casino catalogue unavailable',data:[]});
+    res.status(502).json({ success: false, message: 'Casino catalogue unavailable', data: [] });
+  }
+});
+
+const JUAN_KEY = () => process.env.JUANAI_API_KEY;
+const JUAN_URL = () => process.env.JUANAI_URL || 'https://your-juanai-domain.com';
+
+// ── JUAN AI CASINO GAMES LIST ──
+router.get('/juan-games', async (req, res) => {
+  try {
+    if (!JUAN_KEY()) return res.status(503).json({ success: false, message: 'Casino API not configured' });
+    const r = await axios.get(`${JUAN_URL()}/api/casino/games`, {
+      params: { key: JUAN_KEY() },
+      timeout: 10000
+    });
+    const games = r.data?.data || r.data?.games || [];
+    // Resolve thumbnails only. Do NOT include the raw API key or a playable game URL here —
+    // this endpoint is public-facing (game list for the lobby). The real, authenticated
+    // game URL is built server-side only, inside GET /casino/play/:gameId, and never
+    // leaves the server as raw text — it's embedded directly into the HTML response
+    // the browser renders as an iframe, which is Juan AI's own session-auth requirement.
+    const resolved = games.map(g => {
+      const { gameUrl, ...safe } = g; // strip the raw relative gameUrl too — not needed by the lobby
+      return {
+        ...safe,
+        thumbnailFull: g.thumbnail?.startsWith('http') ? g.thumbnail : `${JUAN_URL()}${g.thumbnail}`
+      };
+    });
+    res.json({ success: true, data: resolved, count: resolved.length });
+  } catch(e) {
+    console.error('[casino/juan-games]', e.message);
+    res.status(502).json({ success: false, message: 'Casino service unavailable', data: [] });
+  }
+});
+
+// ── JUAN AI CASINO GAME HISTORY ──
+router.get('/juan-history', auth, async (req, res) => {
+  try {
+    if (!JUAN_KEY()) return res.status(503).json({ success: false, message: 'Casino API not configured' });
+    const r = await axios.get(`${JUAN_URL()}/api/casino/history`, {
+      params: { key: JUAN_KEY(), userId: req.user._id.toString() },
+      timeout: 10000
+    });
+    res.json(r.data);
+  } catch(e) {
+    console.error('[casino/juan-history]', e.message);
+    res.status(502).json({ success: false, message: 'History unavailable' });
   }
 });
 
 
 
+// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
+// from firing hundreds of rounds per second, while still allowing normal fast play.
+const playLimiter = rateLimit({
+  windowMs: 1000, max: 5,
+  message: { success: false, message: 'Slow down — max 5 rounds per second' }
+});
+
+// ── DICE: PLAY A ROUND ──
 router.post('/dice/play', auth, playLimiter, async (req, res) => {
   try {
     const { stake, target, direction } = req.body;
@@ -318,227 +357,67 @@ router.get('/history', auth, async (req, res) => {
 
 module.exports = router;
 
-// ── SOFABETS GAME LAUNCHER ────────────────────────────────────────────────────
-
-const SOFABETS_BASE = () =>
-  String(
-    process.env.SOFABETS_BASE ||
-    process.env.SOFABETS_BASE_URL ||
-    'https://backendapi.sofabets.com'
-  ).replace(/\/+$/, '');
-
-const SOFABETS_TOKEN = () =>
-  String(process.env.SOFABETS_TOKEN || '').trim();
-
-const SOFA_LAUNCH_ENDPOINTS = {
-  aviator: '/aviator_launch',
-  spribe: '/Spribe_launch',
-  smartsoft: '/smartsoft_launch',
-  pragmatic: '/Pragmatic_launch',
-  imoon: '/imoon_launch',
-  aviatrix: '/aviatrix_launch',
-  avionix: '/api/hotcrash_launch',
-  turbogames: '/turbogames_launch',
-  tower: '/tower_launch',
-  hotcrash: '/api/hotcrash_launch',
-  imoongames: '/imoon_launch',
-  aviatrixgames: '/aviatrix_launch',
-  smartgames: '/smartsoft_launch',
-  avt: '/Spribe_launch',
-  pascal: '/pascal_launch',
-  pascalgaming: '/pascal_launch',
-  bazooka: '/bazooka_launch',
-  amusnet: '/amusnet_launch',
-  kaga: '/kaga_launch',
-  kiron: '/kiron_launch'
-};
-
-const SOFA_PROVIDER_NAMES = {
-  aviator: 'Aviator',
-  spribe: 'Spribe',
-  smartsoft: 'Smartsoft',
-  pragmatic: 'Pragmatic Play',
-  imoon: 'iMoon',
-  aviatrix: 'Aviatrix',
-  avionix: 'Avionix',
-  turbogames: 'TurboGames',
-  tower: 'Tower Games',
-  hotcrash: 'Hot Crash',
-  imoongames: 'iMoon',
-  aviatrixgames: 'Aviatrix',
-  smartgames: 'Smartsoft',
-  avt: 'Aviator',
-  pascal: 'Pascal Gaming',
-  pascalgaming: 'Pascal Gaming',
-  bazooka: 'Bazooka',
-  amusnet: 'Amusnet',
-  kaga: 'KA Gaming',
-  kiron: 'Kiron'
-};
-
+// ── GAME LAUNCHER PAGE — requires user auth, gets session from Juan AI server-side ──
 router.get('/play/:gameId', require('../middleware/authFlexible'), async (req, res) => {
   const { gameId } = req.params;
+  const user = req.user;
 
   try {
-    const identity = decodeSofaGameId(gameId);
-
-    if (!identity) {
-      return res.status(404).send('Game not found');
-    }
-
-    const sofaGames = await fetchSofaCasinoGames();
-    const norm = v => String(v || '').trim().toLowerCase();
-
-    const sofaGame = sofaGames.find(g =>
-      norm(g.provider) === norm(identity.provider) &&
-      norm(g.ref) === norm(identity.ref)
-    );
-
-    if (!sofaGame) {
-      return res.status(404).send('Game is no longer available');
-    }
-
-    const providerKey = norm(sofaGame.provider);
-    const endpoint = SOFA_LAUNCH_ENDPOINTS[providerKey];
-
-    if (!endpoint) {
-      return res.status(503).send(
-        'This SofaBets game provider is not configured yet. <a href="/casino">← Back to Casino</a>'
-      );
-    }
-
-    const token = SOFABETS_TOKEN();
-
-    if (!token) {
-      console.error('[SOFA_LAUNCH] SOFABETS_TOKEN is not configured');
-
-      return res.status(503).send(
-        'SofaBets authorization is not configured on the server. <a href="/casino">← Back to Casino</a>'
-      );
-    }
-
-    const provider =
-      SOFA_PROVIDER_NAMES[providerKey] || sofaGame.provider;
-
-    const client =
-      /Mobi|Android/i.test(req.headers['user-agent'] || '')
-        ? 'mobile'
-        : 'desktop';
-
-    console.log('[SOFA_LAUNCH] Request', {
-      provider,
-      ref: sofaGame.ref,
-      client
+    // Get game info from Juan AI
+    const gamesRes = await axios.get(`${JUAN_URL()}/api/casino/games`, {
+      params: { key: JUAN_KEY() },
+      timeout: 8000
     });
+    const games = gamesRes.data?.data || [];
+    const game = games.find(g => g.id === gameId);
+    if (!game) return res.status(404).send('Game not found');
 
-    const launchRes = await axios.post(
-      `${SOFABETS_BASE()}${endpoint}`,
-      {
-        ref: String(sofaGame.ref),
-        provider,
-        client
-      },
-      {
-        timeout: Number(process.env.SOFABETS_TIMEOUT_MS || 15000),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    const iframeSrc =
-      launchRes.data?.iframeSrc ||
-      launchRes.data?.iframe_src ||
-      launchRes.data?.launchUrl ||
-      launchRes.data?.launch_url;
-
-    if (!iframeSrc || typeof iframeSrc !== 'string') {
-      console.error('[SOFA_LAUNCH] No iframe URL returned', {
-        provider,
-        ref: sofaGame.ref,
-        status: launchRes.status,
-        responseKeys: Object.keys(launchRes.data || {})
-      });
-
-      return res.status(502).send(
-        'SofaBets returned no game URL. <a href="/casino">← Back to Casino</a>'
-      );
+    // Get real utoken from Juan AI for this user
+    let utoken = '';
+    try {
+      const sessionRes = await axios.post(`${JUAN_URL()}/api/casino/session`, {
+        key:      JUAN_KEY(),
+        userId:   user._id.toString(),
+        username: user.username
+      }, { timeout: 8000 });
+      utoken = sessionRes.data?.utoken || '';
+    } catch(e) {
+      console.error('[casino/play] session failed:', e.message);
     }
 
-    const title = safeHtml(sofaGame.name);
-    const safeLaunchUrl = safeHtml(iframeSrc);
+    const baseUrl = game.gameUrl?.startsWith('http') ? game.gameUrl : `${JUAN_URL()}${game.gameUrl}`;
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const webhookBase = `${process.env.APP_URL || 'https://safaribet.top'}/api/casino/wallet`;
+    const gameUrl = `${baseUrl}${sep}key=${JUAN_KEY()}&utoken=${encodeURIComponent(utoken)}&userId=${encodeURIComponent(user._id.toString())}&username=${encodeURIComponent(user.username)}&currency=KES&walletUrl=${encodeURIComponent(webhookBase)}`;
 
-    res.setHeader('Cache-Control', 'no-store');
-
-    return res.send(`<!doctype html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} – SafariBet</title>
-<style>
-html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
-.top{position:fixed;top:0;left:0;right:0;height:52px;background:#111;color:#fff;
-display:flex;align-items:center;padding:0 14px;z-index:10;font-family:Arial,sans-serif}
-.back{color:#fff;text-decoration:none;margin-right:14px}
-.name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-iframe{position:fixed;top:52px;left:0;right:0;bottom:0;width:100%;
-height:calc(100% - 52px);border:0;background:#000}
-</style>
-</head>
+    res.send(`<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
+<title>${game.name} – SafariBet</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%;background:#000}
+.header{position:fixed;top:0;left:0;right:0;height:44px;background:rgba(0,0,0,0.9);display:flex;align-items:center;padding:0 12px;gap:10px;z-index:999;border-bottom:1px solid rgba(0,200,83,0.2)}
+.back{color:#00c853;font-size:18px;text-decoration:none;font-weight:700}
+.gtitle{color:#fff;font-size:14px;font-weight:700;flex:1}
+.gbal{color:#00c853;font-size:13px;font-weight:800;background:rgba(0,200,83,0.1);padding:4px 10px;border-radius:8px;border:1px solid rgba(0,200,83,0.3)}
+iframe{position:fixed;top:44px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 44px);border:none}
+</style></head>
 <body>
-<div class="top">
-<a class="back" href="/casino">← Casino</a>
-<div class="name">${title}</div>
+<div class="header">
+  <a class="back" href="/casino">←</a>
+  <div class="gtitle">✈️ ${game.name}</div>
+  <div class="gbal" id="hbal">KES ${(user.balance||0).toFixed(2)}</div>
 </div>
-<iframe
-src="${safeLaunchUrl}"
-allow="fullscreen; autoplay; payment"
-allowfullscreen
-referrerpolicy="strict-origin-when-cross-origin"></iframe>
-</body>
-</html>`);
-  } catch (e) {
-    const status = e.response?.status || 502;
-    const data = e.response?.data;
-
-    console.error('[SOFA_LAUNCH_ERROR]', {
-      gameId,
-      status,
-      error: e.message,
-      upstream: typeof data === 'string'
-        ? data.slice(0, 1000)
-        : data
-    });
-
-    return res.status(502).send(`<!doctype html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SofaBets Launch Error</title>
-<style>
-body{font-family:Arial,sans-serif;background:#111;color:#fff;padding:25px}
-.box{max-width:700px;margin:auto;background:#222;padding:20px;border-radius:12px}
-pre{white-space:pre-wrap;word-break:break-word;background:#000;padding:15px;border-radius:8px}
-a{color:#7dd3fc}
-</style>
-</head>
-<body>
-<div class="box">
-<h2>SofaBets Launch Error</h2>
-<p>Upstream status: <b>${status}</b></p>
-<pre>${safeHtml(
-      typeof data === 'string'
-        ? data.slice(0, 1000)
-        : JSON.stringify(data || { error: e.message })
-    )}</pre>
-<p><a href="/casino">← Back to Casino</a></p>
-</div>
-</body>
-</html>`);
+<iframe src="${gameUrl}" allowfullscreen allow="autoplay"></iframe>
+<script>
+const tok = localStorage.getItem('token');
+function refreshBal(){if(tok){fetch('/api/wallet/balance',{headers:{'Authorization':'Bearer '+tok}}).then(r=>r.json()).then(d=>{if(d.success)document.getElementById('hbal').textContent='KES '+(d.spendable??d.balance??0).toFixed(2)}).catch(()=>{})}}
+refreshBal();
+setInterval(refreshBal, 10000);
+</script>
+</body></html>`);
+  } catch(e) {
+    console.error('[casino/play]', e.message);
+    res.status(502).send(`<h2 style="color:#fff;font-family:sans-serif;padding:40px">Game unavailable — please try again</h2><a href="/casino" style="color:#00c853">← Back to Casino</a>`);
   }
 });
-
-module.exports = router;
