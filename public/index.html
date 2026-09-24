@@ -1917,13 +1917,15 @@ async function loadCat(cat) {
     if (liveTabCache.data && liveTabCache.data.length) {
       renderMatches(liveTabCache.data, true);
     } else {
-      // No cached Live data yet. Keep the current screen untouched.
-      // The live endpoint refreshes silently below.
+      // No cached Live data yet. Do NOT leave Football/Highlights games
+      // visible under the Live tab. Keep the Live tab empty while the
+      // dedicated live endpoint fills it silently.
+      if (el) el.innerHTML = '';
       setUpdatingIndicator(true);
     }
 
-    // Never await this request. Existing Live content stays visible
-    // while the dedicated live endpoint refreshes in the background.
+    // Never await this request. The backend returns its warm live snapshot
+    // immediately, then refreshes it in the background.
     loadMatches('live', true).catch(() => {});
     return;
   }
