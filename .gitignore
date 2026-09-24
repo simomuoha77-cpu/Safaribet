@@ -9,3 +9,7 @@ env
 .env
 env.backup
 .env.backup
+
+.env
+.env.*
+*.env
