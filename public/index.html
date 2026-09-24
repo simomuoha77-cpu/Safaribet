@@ -1577,9 +1577,8 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // then the 20s background poll (set up in DOMContentLoaded) keeps trying.
     const MAX_RETRIES = 5;
     if(!hasExistingData && retryAttempt < MAX_RETRIES){
-      el.innerHTML = '<div class="loading"><div class="spin"></div>'
-        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
-        + '</div>';
+      // Keep the existing games visible while the server wakes up/retries.
+      setUpdatingIndicator(true);
       const delay = Math.min(3000 * (retryAttempt+1), 12000); // 3s,6s,9s,12s,12s
       setTimeout(() => loadAllMatches(false, retryAttempt+1), delay);
       return;
@@ -1918,12 +1917,9 @@ async function loadCat(cat) {
     if (liveTabCache.data && liveTabCache.data.length) {
       renderMatches(liveTabCache.data, true);
     } else {
-      // Never block the Live tab on a network request.
-      // Paint the Live view immediately, then refresh silently.
-      const el = document.getElementById('matchList');
-      if (el) {
-        el.innerHTML = '<div class="empty" style="padding:40px 20px"><div style="font-size:36px;margin-bottom:12px">🔴</div><div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">Live</div><div style="font-size:13px;color:var(--mt);line-height:1.6">Updating live matches…</div></div>';
-      }
+      // No cached Live data yet. Keep the current screen untouched.
+      // The live endpoint refreshes silently below.
+      setUpdatingIndicator(true);
     }
 
     // Never await this request. Existing Live content stays visible
@@ -1959,8 +1955,10 @@ async function loadCat(cat) {
       refreshFootballTab(true).catch(() => {});
       return;
     }
-    el.innerHTML = '<div class="loading"><div class="spin"></div>Loading Football...</div>';
-    refreshFootballTab(false).catch(() => {});
+    // No Football cache yet: keep the current content visible.
+    // Refresh silently; never block the tab switch with a loader.
+    setUpdatingIndicator(true);
+    refreshFootballTab(true).catch(() => {});
     return;
   }
 
@@ -2160,7 +2158,7 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refresh
 // covering every league combined, always the freshest data from the server) ──
 async function loadUpcoming(silent=false){
   const el=document.getElementById('matchList');
-  if(!silent) el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+  if(!silent) setUpdatingIndicator(true);
 
   try{
     const r=await fetch('/api/odds/featured');
@@ -2205,7 +2203,9 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
         usedCache = true;
       }
     }catch(e){ /* corrupt cache — ignore, fall through to normal load */ }
-    if (!usedCache) el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+    // Never replace the current screen with a loading spinner.
+    // Live/Football should always show whatever is already available.
+    if (!usedCache) setUpdatingIndicator(true);
   }
 
   try{
@@ -2252,9 +2252,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     // instead of dead-ending on "Failed to load".
     const MAX_RETRIES = 5;
     if(!usedCache && retryAttempt < MAX_RETRIES){
-      el.innerHTML = '<div class="loading"><div class="spin"></div>'
-        + (retryAttempt===0 ? 'Loading matches...' : 'Still connecting — this can take a moment on first load...')
-        + '</div>';
+      setUpdatingIndicator(true);
       const delay = Math.min(3000 * (retryAttempt+1), 12000);
       setTimeout(() => loadMatches(sport, false, retryAttempt+1), delay);
       return;
