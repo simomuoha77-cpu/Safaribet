@@ -1639,6 +1639,16 @@ function isPopularMatch(m){
 }
 
 function applyFilters(silent=false){
+  // Live tab is independent of Highlights filters. Never let a background
+  // Highlights refresh repaint the Live tab with upcoming-only filters.
+  if(currentCat === 'live'){
+    const live = (liveTabCache.data && liveTabCache.data.length)
+      ? liveTabCache.data
+      : (allMatches || []).filter(m => m && m.status === 'live');
+    if(live.length) renderMatches(live, true);
+    return;
+  }
+
   let filtered=[...allMatches];
   const now=new Date();
 
