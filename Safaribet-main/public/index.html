@@ -1639,6 +1639,12 @@ function isPopularMatch(m){
   return isPopularTeam(m.homeTeam, m.awayTeam) || isPopularLeague(m.league);
 }
 
+// A match belongs to exactly one main state: LIVE or non-LIVE.
+// Keep this check centralized so live games never leak into other tabs.
+function isLiveMatch(m){
+  return m && String(m.status || '').toLowerCase() === 'live';
+}
+
 function applyFilters(silent=false){
   let filtered=[...allMatches];
   const now=new Date();
@@ -1680,7 +1686,7 @@ function applyFilters(silent=false){
     // it look like "the API has games but they're not showing" — real,
     // ready-to-display matches were being filtered out by mistake.
     filtered=filtered.filter(m=>{
-      if(m.status==='live') return false;
+      if(isLiveMatch(m)) return false;
       if(m.status!=='upcoming') return false;
       if(!m.commenceTime || new Date(m.commenceTime)<=now) return false;
       const home=m.odds?.home ?? m.aiOdds?.homeWin ?? m.providerOdds?.homeWin;
@@ -1701,6 +1707,7 @@ function applyFilters(silent=false){
     // Popular tab. Same odds-ready and not-yet-kicked-off requirements as
     // Highlights.
     filtered=filtered.filter(m=>{
+      if(isLiveMatch(m)) return false;
       if(m.status!=='upcoming'||new Date(m.commenceTime)<=now) return false;
       if(!isPopularMatch(m)) return false;
       const home=m.odds?.home??m.aiOdds?.homeWin;
@@ -1709,7 +1716,7 @@ function applyFilters(silent=false){
     });
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='upcoming'){
-    filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
+    filtered=filtered.filter(m=>!isLiveMatch(m)&&m.status==='upcoming'&&new Date(m.commenceTime)>now);
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='today'){
     // SofaBets dates are evaluated in Nairobi on the server. Do the same in
@@ -1722,7 +1729,7 @@ function applyFilters(silent=false){
       catch(e) { return ''; }
     };
     const todayStr = nairobiDate(now);
-    filtered=filtered.filter(m=>m.commenceTime&&nairobiDate(m.commenceTime)===todayStr);
+    filtered=filtered.filter(m=>!isLiveMatch(m)&&m.commenceTime&&nairobiDate(m.commenceTime)===todayStr);
     filtered.sort((a,b)=>{
       if(a.status==='live'&&b.status!=='live') return -1;
       if(b.status==='live'&&a.status!=='live') return 1;
@@ -1730,7 +1737,7 @@ function applyFilters(silent=false){
     });
   } else if(currentFilter==='favorites'){
     const favs = window.__favTeams || [];
-    filtered=filtered.filter(m=>favs.includes(m.homeTeam)||favs.includes(m.awayTeam));
+    filtered=filtered.filter(m=>!isLiveMatch(m)&&(favs.includes(m.homeTeam)||favs.includes(m.awayTeam)));
     filtered.sort((a,b)=>{
       if(a.status==='live'&&b.status!=='live') return -1;
       if(b.status==='live'&&a.status!=='live') return 1;
@@ -1889,36 +1896,45 @@ async function loadCat(cat) {
   }
 
   if (cat === 'live') {
-    // LIVE must never wait for the live endpoint when Highlights already
-    // loaded the same matches. Derive the live list immediately, paint it,
-    // then refresh the dedicated live endpoint silently in the background.
-    if (!liveTabCache.data?.length && progressiveMatches?.length) {
-      const instantLive = progressiveMatches.filter(m => m && m.status === 'live');
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
+    // LIVE is a strict tab: only live matches belong here.
+    // First derive from the data already on screen/in memory. This makes
+    // tapping Live immediate and never waits for a network request.
+    let instantLive = [];
+
+    if (allMatches && allMatches.length) {
+      instantLive = allMatches.filter(isLiveMatch);
     }
-    if (!liveTabCache.data?.length && allMatches?.length) {
-      const instantLive = allMatches.filter(m => m && m.status === 'live');
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
+
+    if (!instantLive.length && progressiveMatches?.length) {
+      instantLive = progressiveMatches.filter(isLiveMatch);
     }
-    if (!liveTabCache.data?.length) {
+
+    if (instantLive.length) {
+      liveTabCache.data = instantLive.slice();
+      liveTabCache.ts = Date.now();
       try {
-        const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-        if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
-          liveTabCache.data = stored.data;
-          liveTabCache.ts = stored.ts;
-        }
+        localStorage.setItem(
+          'sb_matches_cache_live',
+          JSON.stringify({data: instantLive, ts: Date.now()})
+        );
       } catch(e) {}
-    }
-    if (liveTabCache.data && liveTabCache.data.length) {
-      renderMatches(liveTabCache.data, true);
+
+      renderMatches(instantLive, true);
+
+      // Refresh Sofabets quietly after the immediate paint.
+      loadMatches('live', true).catch(() => {});
+    } else if (liveTabCache.data?.length) {
+      // Cached Live data is still better than showing a loading screen.
+      const cachedLive = liveTabCache.data.filter(isLiveMatch);
+      if (cachedLive.length) {
+        renderMatches(cachedLive, true);
+      } else {
+        renderMatches([], true);
+      }
       loadMatches('live', true).catch(() => {});
     } else {
+      // No live game is currently known. Fetch in the background; do not
+      // display another tab's matches while waiting.
       loadMatches('live', false);
     }
     return;
