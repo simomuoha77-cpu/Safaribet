@@ -789,11 +789,19 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
   finally { allFixturesInFlight.delete(key); }
 }
 
-async function fetchLiveFootballFixtures() {
+async function fetchLiveFixtures(sportName = 'football') {
   const livePaths = ['/api/live-games'];
   let lastError = null;
 
-  for (const base of BASES) {
+  // SofaBets live-games is served by the feed host.
+  // Keep the normal BASES unchanged for fixtures/details/casino.
+  const liveBases = Array.from(new Set([
+    process.env.SOFABETS_BASE_URL,
+    process.env.SOFABETS_API_URL,
+    'https://feed.sofabets.com'
+  ].filter(Boolean).map(v => String(v).replace(/\/+$/, ''))));
+
+  for (const base of liveBases) {
     for (const path of livePaths) {
       try {
         const all = [];
@@ -802,7 +810,7 @@ async function fetchLiveFootballFixtures() {
             page: String(page),
             limit: '100',
             marketType: 'match result',
-            sport: 'football'
+            sport: String(sportName || 'football')
           });
           const rawItems = extractItems(payload);
           if (!rawItems.length) break;
@@ -825,7 +833,7 @@ async function fetchLiveFootballFixtures() {
           .map(m => Object.assign(m, { status: 'IN_PLAY' }));
 
         if (matches.length) {
-          console.log(`[sofaBetsProvider] live sync: ${matches.length} live fixtures from ${base}${path}`);
+          console.log(`[sofaBetsProvider] live sync: ${matches.length} live ${sportName} fixtures from ${base}${path}`);
           return matches;
         }
       } catch (e) {
@@ -881,4 +889,5 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFixtures: fetchLiveFixtures,
+  getLiveFootballFixtures: () => fetchLiveFixtures('football') };

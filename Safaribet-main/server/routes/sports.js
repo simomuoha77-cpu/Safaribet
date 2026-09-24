@@ -95,7 +95,12 @@ router.get('/live', async (req, res) => {
     const badge = sportBadge(sport);
     return (matches || []).filter(m => {
       const st = String(m?.status || '').toUpperCase();
-      return st === 'IN_PLAY' || st === 'LIVE' || st === 'PAUSED';
+      return [
+        'IN_PLAY','LIVE','PAUSED',
+        '1H','2H','HT','ET','P','BT',
+        'Q1','Q2','Q3','Q4',
+        'SET1','SET2','SET3','SET4','SET5'
+      ].includes(st);
     }).map(m => {
       const o = m.odds || m.providerOdds || {};
       const home = Number(o.homeWin), away = Number(o.awayWin), draw = Number(o.draw);
@@ -161,17 +166,22 @@ router.get('/live', async (req, res) => {
       timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit'
     }).format(new Date());
 
-    // Critical path: football only. This returns as soon as the first useful
-    // live feed is ready instead of waiting for basketball/tennis/cricket/etc.
-    // to finish their much larger fixture catalogues.
-    const footballLiveRaw = await sofaBets.getLiveFootballFixtures();
-    const initial = buildLive('football', footballLiveRaw);
-
-    // Include any non-football live games already warmed in the category cache.
-    for (const sport of Object.keys(SPORT_CONFIG)) {
-      const warmed = sportCategoryCache.get(sport)?.data;
-      if (warmed?.length) initial.push(...buildLive(sport, warmed));
-    }
+    // Fetch the real live feed for every supported sport in parallel.
+    // This makes /api/sports/live return basketball, tennis, etc. immediately
+    // instead of waiting for the larger daily fixture catalogues.
+    const liveParts = await Promise.all(
+      ['football', ...Object.keys(SPORT_CONFIG)].filter((sport, i, arr) => arr.indexOf(sport) === i)
+        .map(async sport => {
+          try {
+            const raw = await sofaBets.getLiveFixtures(sport);
+            return buildLive(sport, raw);
+          } catch (e) {
+            console.warn(`[sports/live/${sport}]`, e.message);
+            return [];
+          }
+        })
+    );
+    const initial = liveParts.flat();
     const immediate = save(initial);
     res.json({ success:true, data:immediate, count:immediate.length, source:'SofaBets', cached:false });
 
