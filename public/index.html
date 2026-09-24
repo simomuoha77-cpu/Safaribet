@@ -1556,22 +1556,20 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       }
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
-      // Count today's matches using the same Nairobi timezone as the Today filter.
-      const nairobiDate = d => {
+      // Count today's matches using the same UTC feed date as the Today filter.
+      const feedDate = d => {
         if(!d) return '';
-        try {
-          return new Intl.DateTimeFormat('en-CA',{
-            timeZone:'Africa/Nairobi',
-            year:'numeric',
-            month:'2-digit',
-            day:'2-digit'
-          }).format(new Date(d));
-        } catch(e) {
-          return '';
-        }
+        const x = new Date(d);
+        if(Number.isNaN(x.getTime())) return '';
+        return x.toISOString().slice(0,10);
       };
-      const todayStr=nairobiDate(new Date());
-      const todayCount=allMatches.filter(m=>m.commenceTime&&nairobiDate(m.commenceTime)===todayStr).length;
+      const todayStr = new Intl.DateTimeFormat('en-CA',{
+        timeZone:'Africa/Nairobi',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit'
+      }).format(new Date());
+      const todayCount=allMatches.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr).length;
       document.getElementById('todayCount').textContent=todayCount;
       applyFilters(silent);
     } else if(!hasExistingData) {
@@ -1734,17 +1732,21 @@ function applyFilters(silent=false){
     filtered=filtered.filter(m=>m.status==='upcoming'&&new Date(m.commenceTime)>now);
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='today'){
-    // SofaBets dates are evaluated in Nairobi on the server. Do the same in
-    // the browser instead of relying on the device timezone/UTC conversion;
-    // otherwise a valid Nairobi fixture can be received by the browser but
-    // fall outside the local `toDateString()` bucket and Today shows 0.
-    const nairobiDate = d => {
+    // Today follows the football feed's UTC calendar date.
+    // Do not convert fixture dates to Nairobi before selecting the day.
+    const feedDate = d => {
       if(!d) return '';
-      try { return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Nairobi',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d)); }
-      catch(e) { return ''; }
+      const x = new Date(d);
+      if(Number.isNaN(x.getTime())) return '';
+      return x.toISOString().slice(0,10);
     };
-    const todayStr = nairobiDate(now);
-    filtered=filtered.filter(m=>m.commenceTime&&nairobiDate(m.commenceTime)===todayStr);
+    const todayStr = new Intl.DateTimeFormat('en-CA',{
+      timeZone:'Africa/Nairobi',
+      year:'numeric',
+      month:'2-digit',
+      day:'2-digit'
+    }).format(now);
+    filtered=filtered.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr);
     filtered.sort((a,b)=>{
       if(a.status==='live'&&b.status!=='live') return -1;
       if(b.status==='live'&&a.status!=='live') return 1;
