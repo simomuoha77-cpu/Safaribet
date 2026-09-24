@@ -2220,7 +2220,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     // LIVE uses the same Sofabets/odds feed already powering Highlights.
     // Never call the nonexistent /api/sports/live endpoint. If matches are
     // already in memory, paint live games immediately; then refresh quietly.
-    const url = sport==='live' ? '/api/odds/featured' : `/api/odds/matches/${sport}`;
+    const url = sport==='live' ? '/api/odds/live' : `/api/odds/matches/${sport}`;
     // Background refresh in progress (either an explicit silent poll, or the
     // network fetch that follows an instant cache-first paint) — show the
     // small pill, never the full-page loader.
