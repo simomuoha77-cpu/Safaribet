@@ -2201,7 +2201,10 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
   }
 
   try{
-    const url = sport==='live' ? '/api/sports/live' : `/api/odds/matches/${sport}`;
+    // LIVE uses the same Sofabets/odds feed already powering Highlights.
+    // Never call the nonexistent /api/sports/live endpoint. If matches are
+    // already in memory, paint live games immediately; then refresh quietly.
+    const url = sport==='live' ? '/api/odds/featured' : `/api/odds/matches/${sport}`;
     // Background refresh in progress (either an explicit silent poll, or the
     // network fetch that follows an instant cache-first paint) — show the
     // small pill, never the full-page loader.
@@ -2217,6 +2220,14 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
+
+    // /api/odds/featured returns the full Sofabets match feed. For Live,
+    // immediately keep only games whose server status says they are live.
+    if (sport === 'live' && d && Array.isArray(d.data)) {
+      d.data = d.data.filter(m =>
+        m && String(m.status || '').toLowerCase() === 'live'
+      );
+    }
 
     if(!d.success||!d.data||!d.data.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
