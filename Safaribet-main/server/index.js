@@ -10,6 +10,7 @@ const compression = require('compression');
 const mongoSanitize = require('express-mongo-sanitize');
 
 const authRoutes    = require('./routes/auth');
+const authFlexible = require('./middleware/authFlexible');
 const oddsRoutes    = require('./routes/odds');
 const casinoRoutes  = require('./routes/casino');
 const mpesaRoutes   = require('./routes/mpesa');
@@ -176,7 +177,6 @@ app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
 });
 
 // ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
-const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
   // Forward to the casino route handler
   req.url = `/play/${req.params.gameId}`;

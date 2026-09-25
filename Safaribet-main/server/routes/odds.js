@@ -351,26 +351,127 @@ router.get('/match/:matchId', async (req, res) => {
     // SafariBet builds its own markets from the 1X2 odds already on the match.
     // No extra SofaBets market request is made, so opening a match is immediate
     // and the prices always come from data SafariBet already has.
-    const providerMarkets = [];
+    const providerMarkets =
+      (Array.isArray(m.markets) && m.markets.length ? m.markets :
+      Array.isArray(m.providerOdds?.markets) && m.providerOdds.markets.length ? m.providerOdds.markets :
+      []);
 
     const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
 
     // Provider-native markets are the source of truth for the More markets
     // page. They are intentionally kept separate from SafariBet's legacy
     // synthetic market resolver so we never invent bookmaker prices.
+    function normalizeProviderMarket(mk) {
+      const text = String((mk && (mk.key || mk.name)) || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const name = String((mk && mk.name) || '').toLowerCase();
+
+      if (
+        text.includes('1x2') ||
+        text.includes('matchwinner') ||
+        text.includes('fulltimewinner') ||
+        name.includes('1x2') ||
+        name.includes('match result') ||
+        name.includes('match winner') ||
+        name.includes('full time result') ||
+        name.includes('full time winner')
+      ) return '1x2';
+
+      if (
+        text.includes('overunder25') ||
+        text.includes('totalgoals25') ||
+        text.includes('ou25') ||
+        (name.includes('over') && name.includes('under') && name.includes('2.5'))
+      ) return 'ou25';
+
+      if (
+        text.includes('btts') ||
+        text.includes('bothteamstoscore') ||
+        name.includes('both teams to score')
+      ) return 'btts';
+
+      if (
+        text.includes('doublechance') ||
+        text === 'dc' ||
+        name.includes('double chance')
+      ) return 'dc';
+
+      return null;
+    }
+
+    function normalizeProviderPick(market, selection, homeTeam, awayTeam) {
+      const key = String((selection && selection.key) || '').toLowerCase();
+      const name = String((selection && selection.name) || '').toLowerCase().trim();
+      const home = String(homeTeam || '').toLowerCase().trim();
+      const away = String(awayTeam || '').toLowerCase().trim();
+
+      if (market === '1x2') {
+        if (key === 'home' || key === '1' || name === home || name.includes(home)) return 'home';
+        if (key === 'draw' || key === 'x' || key === 'tie' || name === 'draw' || name === 'x' || name === 'tie') return 'draw';
+        if (key === 'away' || key === '2' || name === away || name.includes(away)) return 'away';
+      }
+
+      if (market === 'ou25') {
+        if ((key.includes('over') && (key.includes('25') || name.includes('2.5'))) || name.includes('over 2.5')) return 'over25';
+        if ((key.includes('under') && (key.includes('25') || name.includes('2.5'))) || name.includes('under 2.5')) return 'under25';
+      }
+
+      if (market === 'btts') {
+        if (
+          key === 'btts' ||
+          key.includes('yes') ||
+          name === 'yes' ||
+          name.includes('both teams to score')
+        ) return 'btts';
+
+        if (
+          key === 'btts_no' ||
+          key.includes('no') ||
+          name === 'no' ||
+          name.includes('not both')
+        ) return 'btts_no';
+      }
+
+      if (market === 'dc') {
+        const compact = `${key} ${name}`.replace(/\s+/g, '');
+        if (compact.includes('1x') || (compact.includes('home') && compact.includes('draw'))) return 'dc_1x';
+        if (compact.includes('x2') || (compact.includes('draw') && compact.includes('away'))) return 'dc_x2';
+        if (compact.includes('12') || (compact.includes('home') && compact.includes('away'))) return 'dc_12';
+      }
+
+      return null;
+    }
+
     const richMarkets = providerMarkets.map((mk, index) => {
-      const options = (mk.selections || [])
+      if (!mk || !Array.isArray(mk.selections)) return null;
+
+      const canonicalMarket = normalizeProviderMarket(mk);
+
+      const options = mk.selections
         .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
-        .map(o => ({
-          pick: String(o.key),
-          odds: Number(o.odds),
-          pickLabel: String(o.name || o.key),
-          bettable: false,
-          providerMarket: true
-        }));
+        .map(o => {
+          const canonicalPick = canonicalMarket
+            ? normalizeProviderPick(canonicalMarket, o, m.homeTeam, m.awayTeam)
+            : null;
+
+          return {
+            pick: canonicalPick || String(o.key),
+            odds: Number(o.odds),
+            pickLabel: String(o.name || o.key),
+            bettable: !!canonicalPick,
+            providerMarket: true,
+            providerKey: String(o.key || ''),
+            providerMarketKey: String(mk.key || ''),
+            selection_id: o.selection_id != null ? String(o.selection_id) : String(o.key || ''),
+            market_id: mk.market_id != null ? String(mk.market_id) : String(mk.key || ''),
+            market_type: mk.market_type || null,
+            trading_status: mk.trading_status || null
+          };
+        });
+
       if (!options.length) return null;
+
       return {
-        market: 'sb:' + String(mk.key || ('market_' + index)),
+        market: canonicalMarket || ('sb:' + String(mk.key || ('market_' + index))),
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,
@@ -412,7 +513,7 @@ router.get('/match/:matchId', async (req, res) => {
 
     // When SofaBets supplied its real catalogue, show that catalogue only.
     // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = legacyMarkets;
+    const markets = richMarkets.length ? richMarkets : legacyMarkets;
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');

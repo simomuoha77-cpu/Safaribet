@@ -389,16 +389,22 @@ function normalizeMarketList(payload) {
       if (!selection || typeof selection !== 'object') return null;
       const price = pick(selection, ['odds','odd','price','value','decimalOdds','decimalValue','decimal_value','oddsDecimal']);
       const n = Number(price);
+      const selectionId = pick(selection, ['selection_id','selectionId','id','key','choiceId']);
       return {
-        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId']) || ('selection_' + si)),
+        selection_id: selectionId != null ? String(selectionId) : ('selection_' + si),
+        key: selectionId != null ? String(selectionId) : ('selection_' + si),
         name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
       };
     }).filter(Boolean) : [];
+    const marketId = pick(market, ['market_id','marketId','id','key','type']);
     return {
-      key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
+      market_id: marketId != null ? String(marketId) : ('market_' + index),
+      key: marketId != null ? String(marketId) : ('market_' + index),
       name: String(pick(market, ['name','marketType','marketName','market_name','type','title']) || 'Market'),
+      market_type: pick(market, ['market_type','marketType','type']) || null,
+      trading_status: pick(market, ['trading_status','tradingStatus','status']) || null,
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
@@ -424,6 +430,37 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
       best = { markets, bookmakers, base, path };
     }
   };
+  // SofaBets dedicated live-market endpoint: returns the expanded
+  // market catalogue for the exact fixture, including real market_id
+  // and selection_id values.
+  for (const base of BASES) {
+    try {
+      const payload = await sofaFetch(
+        base,
+        `/api/live-games/markets/${encodeURIComponent(id)}`,
+        {}
+      );
+
+      const markets = normalizeMarketList(payload);
+
+      if (markets.length) {
+        const bookmakers = Array.from(new Set(
+          markets.flatMap(m => [
+            m.bookmaker,
+            ...m.selections.map(s => s.bookmaker)
+          ].filter(Boolean))
+        ));
+
+        keepRicher(
+          markets,
+          bookmakers,
+          base,
+          `/api/live-games/markets/${encodeURIComponent(id)}`
+        );
+      }
+    } catch (_) {}
+  }
+
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
@@ -881,4 +918,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

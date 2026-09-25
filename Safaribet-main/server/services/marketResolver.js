@@ -228,12 +228,109 @@ function applyPlatformMargin(rawOdds, isLive) {
   }
 }
 
+function getProviderMarketOdds(match, market, pick) {
+  const providerMarkets = [
+    ...(Array.isArray(match.markets) ? match.markets : []),
+    ...(Array.isArray(match.providerOdds?.markets) ? match.providerOdds.markets : []),
+    ...(Array.isArray(match._sofaProviderOdds?.markets) ? match._sofaProviderOdds.markets : [])
+  ];
+
+  const home = String(match.homeTeam || '').toLowerCase().trim();
+  const away = String(match.awayTeam || '').toLowerCase().trim();
+
+  function marketType(mk) {
+    const key = String((mk && (mk.key || mk.name)) || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const name = String((mk && mk.name) || '').toLowerCase();
+
+    if (
+      key.includes('1x2') ||
+      key.includes('matchwinner') ||
+      key.includes('fulltimewinner') ||
+      name.includes('1x2') ||
+      name.includes('match result') ||
+      name.includes('match winner') ||
+      name.includes('full time result') ||
+      name.includes('full time winner')
+    ) return '1x2';
+
+    if (
+      key.includes('overunder25') ||
+      key.includes('totalgoals25') ||
+      key.includes('ou25') ||
+      (name.includes('over') && name.includes('under') && name.includes('2.5'))
+    ) return 'ou25';
+
+    if (
+      key.includes('btts') ||
+      key.includes('bothteamstoscore') ||
+      name.includes('both teams to score')
+    ) return 'btts';
+
+    if (
+      key.includes('doublechance') ||
+      key === 'dc' ||
+      name.includes('double chance')
+    ) return 'dc';
+
+    return null;
+  }
+
+  function pickType(type, selection) {
+    const key = String((selection && selection.key) || '').toLowerCase();
+    const name = String((selection && selection.name) || '').toLowerCase().trim();
+
+    if (type === '1x2') {
+      if (key === 'home' || key === '1' || name === home || (home && name.includes(home))) return 'home';
+      if (key === 'draw' || key === 'x' || key === 'tie' || name === 'draw' || name === 'x' || name === 'tie') return 'draw';
+      if (key === 'away' || key === '2' || name === away || (away && name.includes(away))) return 'away';
+    }
+
+    if (type === 'ou25') {
+      if ((key.includes('over') && (key.includes('25') || name.includes('2.5'))) || name.includes('over 2.5')) return 'over25';
+      if ((key.includes('under') && (key.includes('25') || name.includes('2.5'))) || name.includes('under 2.5')) return 'under25';
+    }
+
+    if (type === 'btts') {
+      if (key === 'btts' || key.includes('yes') || name === 'yes' || name.includes('both teams to score')) return 'btts';
+      if (key === 'btts_no' || key.includes('no') || name === 'no' || name.includes('not both')) return 'btts_no';
+    }
+
+    if (type === 'dc') {
+      const compact = `${key} ${name}`.replace(/\s+/g, '');
+      if (compact.includes('1x') || (compact.includes('home') && compact.includes('draw'))) return 'dc_1x';
+      if (compact.includes('x2') || (compact.includes('draw') && compact.includes('away'))) return 'dc_x2';
+      if (compact.includes('12') || (compact.includes('home') && compact.includes('away'))) return 'dc_12';
+    }
+
+    return null;
+  }
+
+  for (const mk of providerMarkets) {
+    const type = marketType(mk);
+    if (type !== market) continue;
+
+    for (const selection of (Array.isArray(mk.selections) ? mk.selections : [])) {
+      if (pickType(type, selection) === pick) {
+        const price = Number(selection.odds);
+        if (Number.isFinite(price) && price > 1) return price;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getRealOdds(match, market, pick) {
   const isLive = match.status === 'live';
+
+  // SofaBets provider markets are authoritative. Use their actual selection price first.
+  const providerPrice = getProviderMarketOdds(match, market, pick);
+  if (providerPrice != null) return applyPlatformMargin(providerPrice, isLive);
+
   if (market === '1x2') {
     const src = match.hasOdds ? match.odds : null;
     if (src && src[pick] != null) return applyPlatformMargin(src[pick], isLive);
-    // fall back to aiOdds naming (homeWin/draw/awayWin) if legacy odds object is empty
+
     const ai = match.aiOdds;
     if (!ai) return null;
     if (pick === 'home') return applyPlatformMargin(ai.homeWin ?? null, isLive);
@@ -241,14 +338,33 @@ function getRealOdds(match, market, pick) {
     if (pick === 'away') return applyPlatformMargin(ai.awayWin ?? null, isLive);
     return null;
   }
+
   const ai = match.aiOdds;
   if (!ai) return null;
-  if (market === 'ou25') return applyPlatformMargin(pick === 'over25' ? ai.over25 : pick === 'under25' ? ai.under25 : null, isLive);
-  if (market === 'btts') return applyPlatformMargin(pick === 'btts' ? ai.btts : pick === 'btts_no' ? ai.bttsNo : null, isLive);
+
+  if (market === 'ou25') {
+    return applyPlatformMargin(
+      pick === 'over25' ? ai.over25 : pick === 'under25' ? ai.under25 : null,
+      isLive
+    );
+  }
+
+  if (market === 'btts') {
+    return applyPlatformMargin(
+      pick === 'btts' ? ai.btts : pick === 'btts_no' ? ai.bttsNo : null,
+      isLive
+    );
+  }
+
   if (market === 'dc') {
-    const supplied = pick === 'dc_1x' ? ai.dc_home_draw : pick === 'dc_x2' ? ai.dc_draw_away : pick === 'dc_12' ? ai.dc_home_away : null;
+    const supplied =
+      pick === 'dc_1x' ? ai.dc_home_draw :
+      pick === 'dc_x2' ? ai.dc_draw_away :
+      pick === 'dc_12' ? ai.dc_home_away : null;
+
     return supplied != null ? applyPlatformMargin(supplied, isLive) : null;
   }
+
   return null;
 }
 
