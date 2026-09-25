@@ -22,6 +22,14 @@ const auth = require('../middleware/auth');
 const casinoService = require('../services/casinoService');
 const router = express.Router();
 
+const playLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many game play requests. Please try again shortly.' }
+});
+
 
 // ── SOFABETS CASINO CATALOGUE ────────────────────────────────────────────────
 // SofaBets is used as the provider catalogue (provider/ref). The browser never

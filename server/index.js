@@ -148,6 +148,7 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
 
+const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
   const provider = String(req.params.provider || '').trim();
   const ref = String(req.params.ref || '').trim();
@@ -176,7 +177,6 @@ app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
 });
 
 // ── CLEAN CASINO GAME URL — /casino/play/:gameId instead of /api/casino/play/:gameId ──
-const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/play/:gameId', authFlexible, async (req, res) => {
   // Forward to the casino route handler
   req.url = `/play/${req.params.gameId}`;
