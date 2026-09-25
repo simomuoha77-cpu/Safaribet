@@ -139,11 +139,24 @@ function startCacheWarmer() {
   if (warmerStarted) return;
   warmerStarted = true;
   const warm = async () => {
-    try { await fixturesWithFallback(); } catch (e) { console.warn('  [odds] warmer: fixtures refresh failed:', e.message); }
-    try { await liveWithFallback(); } catch (e) { console.warn('  [odds] warmer: live refresh failed:', e.message); }
+    // Refresh fixtures and LIVE independently. Previously these were awaited
+    // one after another, so a slow 7-day fixture refresh could delay the live
+    // refresh by many seconds. That is especially noticeable when a user taps
+    // Live just as the cache expires. Promise.allSettled keeps one feed from
+    // blocking the other while preserving the last-known-good fallbacks.
+    await Promise.allSettled([
+      fixturesWithFallback().catch(e => {
+        console.warn('  [odds] warmer: fixtures refresh failed:', e.message);
+        throw e;
+      }),
+      liveWithFallback().catch(e => {
+        console.warn('  [odds] warmer: live refresh failed:', e.message);
+        throw e;
+      })
+    ]);
   };
-  warm(); // warm immediately at boot — don't make the first real visitor wait for the first tick
-  setInterval(warm, 7000); // comfortably under both the 20s fixtures TTL and 8s live TTL
+  warm(); // warm immediately at boot
+  setInterval(warm, 4000); // live cache is 8s, so visitors normally hit a warm cache
 }
 startCacheWarmer();
 

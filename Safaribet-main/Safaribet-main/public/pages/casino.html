@@ -247,66 +247,43 @@ async function loadGames() {
   document.getElementById('gamesList').style.display = 'none';
 
   try {
-    const [juanRes, sofaRes] = await Promise.allSettled([
-      fetch('/api/casino/juan-games').then(r => r.json()),
-      fetch('/api/casino/sofa-games').then(r => r.json())
-    ]);
-
-    const juanGames = juanRes.status === 'fulfilled' && juanRes.value?.success
-      ? (juanRes.value.data || []) : [];
-    const sofaGames = sofaRes.status === 'fulfilled' && sofaRes.value?.success
-      ? (sofaRes.value.data || []) : [];
+    const r = await fetch('/api/casino/juan-games');
+    const d = await r.json();
 
     document.getElementById('gamesLoading').style.display = 'none';
 
-    const normalizedSofa = sofaGames.map(g => ({
-      ...g,
-      source: 'sofabets',
-      id: `sofa:${g.provider}:${g.ref}`,
-      category: g.slugs?.includes('crash') ? 'crash' :
-                g.slugs?.includes('slots') ? 'slots' :
-                g.slugs?.includes('casino') ? 'table' : 'instant',
-      status: 'active',
-      rtp: null,
-      thumbnailFull: g.img?.startsWith('http') ? g.img : `https://www.sofabets.com${g.img || ''}`
-    }));
-
-    const games = [...normalizedSofa, ...juanGames];
-    if (!games.length) {
+    if (!d.success || !d.data?.length) {
       document.getElementById('gamesError').style.display = 'block';
-      document.getElementById('gamesErrMsg').textContent = 'No games available right now';
+      document.getElementById('gamesErrMsg').textContent = d.message || 'No games available right now';
       return;
     }
 
-    document.getElementById('gamesCountLbl').textContent = `🎮 ${games.length} Game${games.length > 1 ? 's' : ''} Available`;
-
+    const games = d.data;
+    document.getElementById('gamesCountLbl').textContent = `🎮 ${games.length} Game${games.length>1?'s':''} Available`;
+    
     const grid = document.getElementById('gameGrid');
     grid.innerHTML = games.map(g => {
       const icon = CAT_ICONS[g.category] || CAT_ICONS.default;
-      const bg = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
-      const isSofa = g.source === 'sofabets';
-      const isAviator = !isSofa && (g.id === 'aviator' || /aviator/i.test(g.name));
-      const thumb = g.thumbnailFull || g.thumbnail;
-      const thumbHtml = thumb
-        ? `<img loading="lazy" src="${thumb}" style="width:100%;height:100%;object-fit:cover;opacity:.88" onerror="this.style.display='none'">`
-        : '';
-      const featured = g.category === 'crash';
-      const click = isSofa
-        ? `openSofaGame('${encodeURIComponent(g.provider)}','${encodeURIComponent(g.ref)}')`
-        : `openGame('${String(g.id).replace(/'/g, "\\'")}','${String(g.name).replace(/'/g, "\\'")}')`;
-      return `<div class="game-card${featured ? ' featured' : ''}" onclick="${click}">
+      const bg   = CAT_GRADIENTS[g.category] || CAT_GRADIENTS.default;
+      const isAviator = (g.id === 'aviator' || /aviator/i.test(g.name));
+      const thumb = isAviator
+        ? `<img src="/api/content/image/aviator" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">`
+        : (g.thumbnail
+            ? `<img src="${g.thumbnailFull||g.thumbnail}" style="width:100%;height:100%;object-fit:cover;opacity:0.8" onerror="this.style.display='none'">`
+            : '');
+      return `<div class="game-card${g.category==='crash'?' featured':''}" onclick="openGame('${g.id}','${g.name}')">
         <div class="gc-banner" style="background:${bg}">
-          ${thumbHtml}
-          <div style="position:relative;z-index:1;font-size:${featured ? '64' : '52'}px">${isAviator ? '' : (thumb ? '' : icon)}</div>
+          ${thumb}
+          <div style="position:relative;z-index:1;font-size:${g.category==='crash'?'64':'52'}px">${isAviator ? '' : icon}</div>
         </div>
-        ${g.rtp ? `<div class="gc-rtp">RTP ${g.rtp}%</div>` : ''}
+        <div class="gc-rtp">RTP ${g.rtp}%</div>
         <div class="gc-body">
           <div class="gc-name">${g.name}</div>
           <div class="gc-desc">${getCatDesc(g.category)}</div>
           <div class="gc-badges">
-            <span class="badge badge-pf">${isSofa ? 'SafariBet' : 'Verified'}</span>
-            ${g.category === 'crash' ? '<span class="badge badge-hot">🔥 HOT</span>' : ''}
-            <span class="badge" style="background:rgba(0,200,83,.08);color:var(--g);border:1px solid rgba(0,200,83,.2)">● Live</span>
+            <span class="badge badge-pf">Verified</span>
+            ${g.category==='crash'?'<span class="badge badge-hot">🔥 HOT</span>':''}
+            ${g.status==='active'?'<span class="badge" style="background:rgba(0,200,83,0.08);color:var(--g);border:1px solid rgba(0,200,83,0.2)">● Live</span>':'<span class="badge" style="color:var(--mt)">Maintenance</span>'}
           </div>
         </div>
       </div>`;
@@ -318,16 +295,6 @@ async function loadGames() {
     document.getElementById('gamesError').style.display = 'block';
     document.getElementById('gamesErrMsg').textContent = 'Network error — check connection';
   }
-}
-
-function openSofaGame(provider, ref) {
-  // Browser GET navigation cannot send the Authorization header, so persist
-  // the existing SafariBet JWT in the same auth cookie used by /casino/play.
-  // This prevents the SofaBets launcher from redirecting back to /login.
-  if (token) {
-    document.cookie = `sb_token=${token}; path=/; max-age=3600; SameSite=Lax`;
-  }
-  location.href = `/casino/sofa-play/${provider}/${ref}`;
 }
 
 function getCatDesc(cat) {

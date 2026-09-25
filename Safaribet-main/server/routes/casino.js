@@ -166,13 +166,6 @@ router.get('/sofa-games', async (req,res) => {
 
 
 
-// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
-// from firing hundreds of rounds per second, while still allowing normal fast play.
-const playLimiter = rateLimit({
-  windowMs: 1000, max: 5,
-  message: { success: false, message: 'Slow down — max 5 rounds per second' }
-});
-
 router.post('/dice/play', auth, playLimiter, async (req, res) => {
   try {
     const { stake, target, direction } = req.body;
