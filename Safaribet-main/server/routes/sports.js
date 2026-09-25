@@ -10,6 +10,7 @@ const C = {
 };
 
 const SPORT_CONFIG = {
+  football:   { label:'Football',   icon:'⚽' },
   basketball: { label:'Basketball', icon:'🏀' },
   tennis:     { label:'Tennis',     icon:'🎾' },
   cricket:    { label:'Cricket',    icon:'🏏' },
