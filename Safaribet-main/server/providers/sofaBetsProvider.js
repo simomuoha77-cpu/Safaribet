@@ -198,35 +198,28 @@ async function fetchPages(base, path, sportId, sportName, maxPagesOverride) {
     // Match the public SofaBets frontend contract exactly. The frontend uses
     // sportId + page + limit (+ marketType), and some backend deployments
     // return an empty/sport-null response when extra sport parameters are sent.
+    // Use the plain fixture catalogue for All Games discovery.
+    // SofaBets can return HTTP 200 with an empty response when
+    // marketType=match result is supplied, so marketType must not be
+    // required to discover fixtures.
     const query = {
       sportId: String(sportId),
       page: String(page),
-      limit: '100',
-      marketType: 'match result'
+      limit: '100'
     };
 
     let payload;
     try {
       payload = await sofaFetch(base, path, query);
     } catch (e) {
-      // Some installations expose fixtures without the marketType filter.
-      const fallbackQuery = {
-        sportId: String(sportId),
+      // A few SofaBets deployments accept the sport slug instead of
+      // the numeric id. Try that before declaring the sport unavailable.
+      const slugQuery = {
+        sport: String(sportName || ''),
         page: String(page),
         limit: '100'
       };
-      try {
-        payload = await sofaFetch(base, path, fallbackQuery);
-      } catch (_) {
-        // A few SofaBets deployments accept the sport slug instead of the
-        // numeric id. Try that before declaring the sport unavailable.
-        const slugQuery = {
-          sport: String(sportName || ''),
-          page: String(page),
-          limit: '100'
-        };
-        payload = await sofaFetch(base, path, slugQuery);
-      }
+      payload = await sofaFetch(base, path, slugQuery);
     }
     const items = extractItems(payload);
     if (!items.length) break;
@@ -719,7 +712,13 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
         for (const path of FIXTURE_PATHS) {
           try {
             const rawItems = await fetchPages(base, path, candidateId, name, options.maxPages);
-            const matches = rawItems.map(safeNormalizeMatch).filter(Boolean);
+            const matches = rawItems
+                  .map(safeNormalizeMatch)
+                  .filter(Boolean)
+                  .map(m => ({
+                    ...m,
+                    matchId: `sofabets_${name || String(candidateId)}_${String(m.providerMatchId)}`
+                  }));
             if (!matches.length && rawItems.length) {
               throw new Error('SofaBets returned ' + rawItems.length + ' records but none could be normalized');
             }
