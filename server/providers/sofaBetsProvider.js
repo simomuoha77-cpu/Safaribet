@@ -449,32 +449,94 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
   const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
   if (!id) return null;
-  const details = rich ? await getMatchMarkets(id, sportName) : { markets: [], bookmakers: [] };
-  // Re-use the normal fixture catalogue as a safe fallback for the match
-  // metadata; the detail call above supplies the richer market list.
-  const candidates = Array.from(new Set([...(SPORT_ID_CANDIDATES[String(sportName).toLowerCase()] || []), SPORT_IDS[String(sportName).toLowerCase()]].filter(Number.isFinite)));
+
+  const sport = String(sportName || 'football').toLowerCase();
+  const candidates = Array.from(new Set([
+    ...(SPORT_ID_CANDIDATES[sport] || []),
+    SPORT_IDS[sport]
+  ].filter(Number.isFinite)));
+
+  // First get rich markets, but never trust their fixture metadata.
+  let details = { markets: [], bookmakers: [] };
+  if (rich) {
+    try {
+      details = await getMatchMarkets(id, sport);
+    } catch (_) {}
+  }
+
+  // Find the exact fixture through the normal SofaBets catalogue.
+  // IMPORTANT: never use items[0] because SofaBets may ignore fixtureId.
   for (const sportId of candidates) {
     for (const base of BASES) {
       try {
-        const payload = await sofaFetch(base, '/api/fixtures-by-sport', { sportId: String(sportId), fixtureId: id, page: '1', limit: '1' });
-        const items = extractItems(payload);
-        const item = items.find(x => String(pick(x, ['id','fixtureId','fixture_id','eventId','event_id','matchId','match_id'])) === id) || items[0];
-        if (item) {
-          const normalized = safeNormalizeMatch(item);
-          if (normalized) {
-            if (details.markets.length) {
-              normalized.markets = details.markets;
-              normalized.bookmakers = details.bookmakers;
-              normalized.odds = normalized.odds || { markets: details.markets, bookmakers: details.bookmakers };
-              if (normalized.odds && !normalized.odds.markets) normalized.odds.markets = details.markets;
+        for (let page = 1; page <= 20; page++) {
+          const payload = await sofaFetch(
+            base,
+            '/api/fixtures-by-sport',
+            {
+              sportId: String(sportId),
+              page: String(page),
+              limit: '100'
             }
-            return normalized;
+          );
+
+          const items = extractItems(payload);
+          if (!items.length) break;
+
+          const item = items.find(x =>
+            String(pick(x, [
+              'id',
+              'fixtureId',
+              'fixture_id',
+              'eventId',
+              'event_id',
+              'matchId',
+              'match_id'
+            ])).trim() === id
+          );
+
+          if (item) {
+            const normalized = safeNormalizeMatch(item);
+
+            if (normalized) {
+              if (details.markets && details.markets.length) {
+                normalized.markets = details.markets;
+                normalized.bookmakers = details.bookmakers || [];
+                normalized.odds = normalized.odds || {};
+                normalized.odds.markets = details.markets;
+                normalized.odds.bookmakers = details.bookmakers || [];
+              }
+
+              normalized.providerMatchId = id;
+              return normalized;
+            }
           }
+
+          const more =
+            payload &&
+            (
+              payload.hasMore ??
+              payload.has_more ??
+              payload.pagination?.hasMore ??
+              payload.pagination?.has_more
+            );
+
+          if (more === false) break;
+          if (items.length < 100) break;
         }
       } catch (_) {}
     }
   }
-  return details.markets.length ? { providerMatchId: id, markets: details.markets, bookmakers: details.bookmakers } : null;
+
+  // Only return markets without metadata if the markets themselves exist.
+  // Never invent or attach unrelated fixture metadata.
+  return details.markets && details.markets.length
+    ? {
+        providerMatchId: id,
+        markets: details.markets,
+        bookmakers: details.bookmakers || []
+      }
+    : null;
 }
 
 function normalizeMatch(raw) {
@@ -719,7 +781,27 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
         for (const path of FIXTURE_PATHS) {
           try {
             const rawItems = await fetchPages(base, path, candidateId, name, options.maxPages);
-            const matches = rawItems.map(safeNormalizeMatch).filter(Boolean);
+            const matches = rawItems
+              .map(safeNormalizeMatch)
+              .filter(Boolean)
+              .map(m => {
+                const normalizedStatus = String(m.status || '').toUpperCase();
+
+                return {
+                  ...m,
+                  status:
+                    normalizedStatus === 'IN_PLAY' ||
+                    normalizedStatus === 'LIVE'
+                      ? 'live'
+                      : normalizedStatus === 'FINISHED' ||
+                        normalizedStatus === 'ENDED' ||
+                        normalizedStatus === 'FT'
+                      ? 'finished'
+                      : 'upcoming',
+                  matchId: `sofabets_${name || String(candidateId)}_${String(m.providerMatchId)}`,
+                  commenceTime: m.commenceTime || m.utcDate || null
+                };
+              });
             if (!matches.length && rawItems.length) {
               throw new Error('SofaBets returned ' + rawItems.length + ' records but none could be normalized');
             }
