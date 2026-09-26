@@ -131,6 +131,13 @@ async function loadMatch(){
       return;
     }
     matchData = d.data;
+    console.log('[MATCH DEBUG]', {
+      matchId,
+      homeTeam: matchData.homeTeam,
+      awayTeam: matchData.awayTeam,
+      marketCount: (matchData.markets || []).length,
+      marketNames: (matchData.markets || []).slice(0,20).map(m => m.label)
+    });
     renderHeader();
     renderMarkets();
     updateSlipBar();
