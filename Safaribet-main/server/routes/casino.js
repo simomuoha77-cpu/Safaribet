@@ -17,6 +17,10 @@ function safeGameMessage(e) {
   return 'Failed to play';
 }
 const rateLimit = require('express-rate-limit');
+const axios = require('axios');
+const auth = require('../middleware/auth');
+const casinoService = require('../services/casinoService');
+const router = express.Router();
 
 const playLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -25,10 +29,6 @@ const playLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many game play requests. Please try again shortly.' }
 });
-const axios = require('axios');
-const auth = require('../middleware/auth');
-const casinoService = require('../services/casinoService');
-const router = express.Router();
 
 
 // ── SOFABETS CASINO CATALOGUE ────────────────────────────────────────────────

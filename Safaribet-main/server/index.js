@@ -10,7 +10,6 @@ const compression = require('compression');
 const mongoSanitize = require('express-mongo-sanitize');
 
 const authRoutes    = require('./routes/auth');
-const authFlexible = require('./middleware/authFlexible');
 const oddsRoutes    = require('./routes/odds');
 const casinoRoutes  = require('./routes/casino');
 const mpesaRoutes   = require('./routes/mpesa');
@@ -149,6 +148,7 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
 
+const authFlexible = require('./middleware/authFlexible');
 app.get('/casino/sofa-play/:provider/:ref', authFlexible, async (req, res) => {
   const provider = String(req.params.provider || '').trim();
   const ref = String(req.params.ref || '').trim();

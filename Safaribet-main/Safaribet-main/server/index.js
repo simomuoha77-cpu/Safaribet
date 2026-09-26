@@ -10,6 +10,7 @@ const compression = require('compression');
 const mongoSanitize = require('express-mongo-sanitize');
 
 const authRoutes    = require('./routes/auth');
+const authFlexible = require('./middleware/authFlexible');
 const oddsRoutes    = require('./routes/odds');
 const casinoRoutes  = require('./routes/casino');
 const mpesaRoutes   = require('./routes/mpesa');
@@ -25,7 +26,6 @@ const settingsRoutes    = require('./routes/settings');
 const sportsRoutes      = require('./routes/sports');
 const casinoWalletRoutes = require('./routes/casinoWallet');
 const scheduler     = require('./engine/scheduler');
-const authFlexible = require('./middleware/authFlexible');
 
 const app    = express();
 const server = http.createServer(app);

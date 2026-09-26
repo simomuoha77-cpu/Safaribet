@@ -389,16 +389,22 @@ function normalizeMarketList(payload) {
       if (!selection || typeof selection !== 'object') return null;
       const price = pick(selection, ['odds','odd','price','value','decimalOdds','decimalValue','decimal_value','oddsDecimal']);
       const n = Number(price);
+      const selectionId = pick(selection, ['selection_id','selectionId','id','key','choiceId']);
       return {
-        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId']) || ('selection_' + si)),
+        selection_id: selectionId != null ? String(selectionId) : ('selection_' + si),
+        key: selectionId != null ? String(selectionId) : ('selection_' + si),
         name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
       };
     }).filter(Boolean) : [];
+    const marketId = pick(market, ['market_id','marketId','id','key','type']);
     return {
-      key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
+      market_id: marketId != null ? String(marketId) : ('market_' + index),
+      key: marketId != null ? String(marketId) : ('market_' + index),
       name: String(pick(market, ['name','marketType','marketName','market_name','type','title']) || 'Market'),
+      market_type: pick(market, ['market_type','marketType','type']) || null,
+      trading_status: pick(market, ['trading_status','tradingStatus','status']) || null,
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
@@ -424,6 +430,37 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
       best = { markets, bookmakers, base, path };
     }
   };
+  // SofaBets dedicated live-market endpoint: returns the expanded
+  // market catalogue for the exact fixture, including real market_id
+  // and selection_id values.
+  for (const base of BASES) {
+    try {
+      const payload = await sofaFetch(
+        base,
+        `/api/live-games/markets/${encodeURIComponent(id)}`,
+        {}
+      );
+
+      const markets = normalizeMarketList(payload);
+
+      if (markets.length) {
+        const bookmakers = Array.from(new Set(
+          markets.flatMap(m => [
+            m.bookmaker,
+            ...m.selections.map(s => s.bookmaker)
+          ].filter(Boolean))
+        ));
+
+        keepRicher(
+          markets,
+          bookmakers,
+          base,
+          `/api/live-games/markets/${encodeURIComponent(id)}`
+        );
+      }
+    } catch (_) {}
+  }
+
   const detailPaths = [
     `/api/fixture/${encodeURIComponent(id)}`,
     `/api/fixtures/${encodeURIComponent(id)}`,
@@ -789,19 +826,11 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
   finally { allFixturesInFlight.delete(key); }
 }
 
-async function fetchLiveFixtures(sportName = 'football') {
+async function fetchLiveFootballFixtures(sportName = 'football') {
   const livePaths = ['/api/live-games'];
   let lastError = null;
 
-  // SofaBets live-games is served by the feed host.
-  // Keep the normal BASES unchanged for fixtures/details/casino.
-  const liveBases = Array.from(new Set([
-    process.env.SOFABETS_BASE_URL,
-    process.env.SOFABETS_API_URL,
-    'https://feed.sofabets.com'
-  ].filter(Boolean).map(v => String(v).replace(/\/+$/, ''))));
-
-  for (const base of liveBases) {
+  for (const base of BASES) {
     for (const path of livePaths) {
       try {
         const all = [];
@@ -833,7 +862,7 @@ async function fetchLiveFixtures(sportName = 'football') {
           .map(m => Object.assign(m, { status: 'IN_PLAY' }));
 
         if (matches.length) {
-          console.log(`[sofaBetsProvider] live sync: ${matches.length} live ${sportName} fixtures from ${base}${path}`);
+          console.log(`[sofaBetsProvider] live sync (${sportName}): ${matches.length} live fixtures from ${base}${path}`);
           return matches;
         }
       } catch (e) {
@@ -889,5 +918,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFixtures: fetchLiveFixtures,
-  getLiveFootballFixtures: () => fetchLiveFixtures('football') };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

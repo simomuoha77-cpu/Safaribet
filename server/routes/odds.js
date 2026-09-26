@@ -246,13 +246,46 @@ router.get('/featured', async (req, res) => {
 
 // ── BY SPORT/LEAGUE ──
 router.get('/matches/:sport', async (req, res) => {
-  const sport = req.params.sport;
+  const sport = String(req.params.sport || 'football').toLowerCase();
+
   try {
-    const matches = await fixturesWithFallback();
-    const filtered = smartSort(matches.filter(m => m.sport === sport)).map(applyOddsPipeline);
-    res.json({ success: true, data: filtered, count: filtered.length });
+    const sportId = sofaBets.SPORT_IDS[sport];
+
+    if (!Number.isFinite(Number(sportId))) {
+      return res.json({ success: true, data: [], count: 0 });
+    }
+
+    const date = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Nairobi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+
+    const matches = await sofaBets.getMatchesForDate(date, {
+      sport,
+      sportId: Number(sportId)
+    });
+
+    const filtered = smartSort(
+      (matches || []).map(m => ({
+        ...m,
+        sport: sport
+      }))
+    ).map(applyOddsPipeline);
+
+    res.json({
+      success: true,
+      data: filtered,
+      count: filtered.length
+    });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
+    console.warn('[odds/matches/' + sport + '] SofaBets failed:', e.message);
+    res.status(502).json({
+      success: false,
+      data: [],
+      message: 'SofaBets unavailable: ' + e.message
+    });
   }
 });
 
@@ -346,12 +379,36 @@ router.get('/match/:matchId', async (req, res) => {
       }
     }
 
+    // When More Markets requests rich=1, refresh the persisted SofaBets
+    // match from the provider so MongoDB's primary-market snapshot cannot
+    // hide SofaBets' full native market catalogue.
+    if (m && req.query.rich === '1' && String(req.params.matchId).startsWith('sofabets_')) {
+      const parts = String(req.params.matchId).split('_');
+      const isLiveId = parts[1] === 'live';
+      const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
+      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
+      try {
+        const direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
+        if (direct && Array.isArray(direct.markets) && direct.markets.length) {
+          m.markets = direct.markets;
+          m.bookmakers = direct.bookmakers || [];
+          m.providerOdds = direct.odds || m.providerOdds || null;
+          console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
+        }
+      } catch (err) {
+        console.warn('[odds/match] rich SofaBets refresh failed:', err.message);
+      }
+    }
+
     if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
     // SafariBet builds its own markets from the 1X2 odds already on the match.
     // No extra SofaBets market request is made, so opening a match is immediate
     // and the prices always come from data SafariBet already has.
-    const providerMarkets = [];
+    const providerMarkets =
+      Array.isArray(m.markets) && m.markets.length
+        ? m.markets
+        : (Array.isArray(m.providerOdds?.markets) ? m.providerOdds.markets : []);
 
     const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
 
@@ -412,7 +469,7 @@ router.get('/match/:matchId', async (req, res) => {
 
     // When SofaBets supplied its real catalogue, show that catalogue only.
     // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = legacyMarkets;
+    const markets = richMarkets.length ? richMarkets : legacyMarkets;
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');

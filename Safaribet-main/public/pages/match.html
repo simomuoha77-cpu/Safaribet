@@ -124,7 +124,7 @@ async function loadMatch(){
     // Fast path: render the match and whatever markets are already cached
     // immediately. The rich SofaBets catalogue is refreshed in the background
     // so this page never sits on a blocking "Loading match…" screen.
-    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}`);
+    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`);
     const d = await r.json();
     if (!d.success) {
       document.getElementById('matchHeader').innerHTML = `<div class="loading">${d.message || 'Match not found'}</div>`;

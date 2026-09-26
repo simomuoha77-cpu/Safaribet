@@ -17,6 +17,14 @@ function safeGameMessage(e) {
   return 'Failed to play';
 }
 const rateLimit = require('express-rate-limit');
+
+const playLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many game play requests. Please try again shortly.' }
+});
 const axios = require('axios');
 const auth = require('../middleware/auth');
 const casinoService = require('../services/casinoService');
@@ -165,13 +173,6 @@ router.get('/sofa-games', async (req,res) => {
 });
 
 
-
-// Casino games are fast, repeatable actions — rate limit to prevent abuse/bugs
-// from firing hundreds of rounds per second, while still allowing normal fast play.
-const playLimiter = rateLimit({
-  windowMs: 1000, max: 5,
-  message: { success: false, message: 'Slow down — max 5 rounds per second' }
-});
 
 router.post('/dice/play', auth, playLimiter, async (req, res) => {
   try {

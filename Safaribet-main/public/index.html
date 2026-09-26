@@ -1415,12 +1415,6 @@ function pickFilter(el){
   currentFilter=el.dataset.filter;
   currentLeague='';
   document.getElementById('leagueSelect').value='';
-
-  if(currentFilter==='today'){
-    loadTodayMatches();
-    return;
-  }
-
   // Defer the actual filter/sort/render to the next animation frame instead
   // of running it synchronously in this same click handler. With hundreds of
   // matches loaded (a week of fixtures across every league), building and
@@ -1569,17 +1563,12 @@ async function loadAllMatches(silent=false, retryAttempt=0){
         if(Number.isNaN(x.getTime())) return '';
         return x.toISOString().slice(0,10);
       };
-      const todayParts = new Intl.DateTimeFormat('en-US',{
+      const todayStr = new Intl.DateTimeFormat('en-CA',{
         timeZone:'Africa/Nairobi',
         year:'numeric',
         month:'2-digit',
         day:'2-digit'
-      }).formatToParts(new Date());
-
-      const todayStr =
-        todayParts.find(p=>p.type==='year').value + '-' +
-        todayParts.find(p=>p.type==='month').value + '-' +
-        todayParts.find(p=>p.type==='day').value;
+      }).format(new Date());
       const todayCount=allMatches.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr).length;
       document.getElementById('todayCount').textContent=todayCount;
       applyFilters(silent);
@@ -1658,49 +1647,6 @@ function isPopularTeam(homeTeam, awayTeam){
 }
 function isPopularMatch(m){
   return isPopularTeam(m.homeTeam, m.awayTeam) || isPopularLeague(m.league);
-}
-
-async function loadTodayMatches(){
-  const todayStr = new Intl.DateTimeFormat('en-CA',{
-    timeZone:'Africa/Nairobi',
-    year:'numeric',
-    month:'2-digit',
-    day:'2-digit'
-  }).format(new Date());
-
-  console.log('[today] requesting SofaBets date:', todayStr);
-
-  try{
-    const r=await fetch(
-      `/api/sports/category/football?date=${encodeURIComponent(todayStr)}&todayOnly=1`,
-      {cache:'no-store'}
-    );
-
-    const d=await r.json();
-
-    if(!d.success || !Array.isArray(d.data)){
-      throw new Error(d.message || 'Today feed unavailable');
-    }
-
-    todayTabCache.data=d.data;
-    todayTabCache.ts=Date.now();
-
-    document.getElementById('todayCount').textContent=d.data.length;
-
-    if(currentFilter==='today' && currentCat!=='live'){
-      renderMatches(d.data,false);
-    }
-
-    console.log(
-      '[today] SofaBets:',
-      todayStr,
-      'matches:',
-      d.data.length
-    );
-
-  }catch(e){
-    console.warn('[today] SofaBets request failed:',e.message);
-  }
 }
 
 function applyFilters(silent=false){
@@ -1794,17 +1740,12 @@ function applyFilters(silent=false){
       if(Number.isNaN(x.getTime())) return '';
       return x.toISOString().slice(0,10);
     };
-    const todayParts = new Intl.DateTimeFormat('en-US',{
+    const todayStr = new Intl.DateTimeFormat('en-CA',{
       timeZone:'Africa/Nairobi',
       year:'numeric',
       month:'2-digit',
       day:'2-digit'
-    }).formatToParts(now);
-
-    const todayStr =
-      todayParts.find(p=>p.type==='year').value + '-' +
-      todayParts.find(p=>p.type==='month').value + '-' +
-      todayParts.find(p=>p.type==='day').value;
+    }).format(now);
     filtered=filtered.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr);
     filtered.sort((a,b)=>{
       if(a.status==='live'&&b.status!=='live') return -1;
@@ -1851,7 +1792,6 @@ const sportTabCache = new Map();
 const sportTabRequests = new Map();
 const footballTabCache = { data:null, ts:0 };
 const liveTabCache = { data:null, ts:0 };
-const todayTabCache = { data:null, ts:0 };
 
 function pickCat(el) {
   const previousCat = currentCat;
