@@ -190,10 +190,21 @@ async function refreshLiveCache() {
       })
     );
 
-    const merged = saveLiveCache(parts.flat());
+    // Some SofaBets deployments ignore the requested sport parameter and return
+    // the same fixture list for every sport. Never publish one provider fixture
+    // once per sport, which creates fake cross-sport copies of the same match.
+    const seenProviderIds = new Set();
+    const unique = parts.flat().filter(m => {
+      const id = String(m?.providerMatchId || '').trim();
+      if (!id || seenProviderIds.has(id)) return false;
+      seenProviderIds.add(id);
+      return true;
+    });
+
+    const merged = saveLiveCache(unique);
 
     console.log(
-      `[sports/live] background live refresh: ${merged.length} mixed live matches`
+      `[sports/live] background live refresh: ${merged.length} unique live matches`
     );
   } catch (e) {
     console.warn('[sports/live] background refresh failed:', e.message);
