@@ -452,8 +452,13 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
   // the detail page can never resolve an ID to a different fixture.
   if (preferLive) {
     try {
-      const live = await fetchLiveFixtures(sport);
-      exact = live.find(m => String(m.providerMatchId) === id) || null;
+      // First search the mixed live feed. This avoids provider-side sport
+      // filters dropping valid live IDs (especially cricket/tennis/etc.).
+      const live = await fetchLiveFixtures('');
+      exact = live.find(m =>
+        String(m.providerMatchId) === id &&
+        (!sport || String(m.sport || '').toLowerCase() === sport)
+      ) || live.find(m => String(m.providerMatchId) === id) || null;
     } catch (_) {}
   }
 
@@ -795,11 +800,15 @@ async function fetchLiveFixtures(sportName = 'football') {
     try {
       const all = [];
       for (let page = 1; page <= MAX_PAGES_PER_FETCH; page += 1) {
-        const payload = await sofaFetch(base, '/api/live-games', {
+        const liveQuery = {
           page: String(page),
-          limit: '100',
-          sport: name
-        });
+          limit: '100'
+        };
+        // The live endpoint is a mixed-sport feed on some SofaBets deployments.
+        // Only send sport when the provider explicitly supports it; otherwise
+        // filtering happens locally from sport_id/sport_name.
+        if (name) liveQuery.sport = name;
+        const payload = await sofaFetch(base, '/api/live-games', liveQuery);
         const rawItems = extractItems(payload);
         if (!rawItems.length) break;
 
