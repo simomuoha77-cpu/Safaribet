@@ -107,16 +107,15 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 // Prefer sessionStorage (keeps the URL clean, no vendor-identifying matchId
 // visible in the address bar) — fall back to the old ?id= query string only
 // for backward compatibility with any links already shared before this change.
-// The URL is authoritative. Session storage is only a fallback for older
-// navigation paths. This prevents one match's cached session ID from opening
-// when the user clicked a different live match.
-const matchId = new URLSearchParams(location.search).get('id') || sessionStorage.getItem('currentMatchId');
+const matchId = sessionStorage.getItem('currentMatchId') || new URLSearchParams(location.search).get('id');
 let matchData = null;
 let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
 
 if (!matchId) {
   document.getElementById('matchHeader').innerHTML = '<div class="loading">No match specified. <a href="/" style="color:var(--g)">Go back home</a></div>';
 } else {
+  // Clean up the URL if we got here via the old query-string method
+  if (location.search.includes('id=')) history.replaceState(null, '', '/match');
   loadMatch();
 }
 

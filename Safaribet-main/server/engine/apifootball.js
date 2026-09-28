@@ -145,7 +145,7 @@ function normalize(m) {
       dc_draw_away: m.aiOdds.dc_draw_away ?? null
     } : null,
     isStatic: false,
-    source: 'sofabets',
+    source: 'juanai',
     fetchedAt: new Date()
   };
 }
@@ -194,12 +194,11 @@ function directStatusToInternal(status) {
   return 'upcoming';
 }
 
-function normalizeDirectSofaMatch(m, sportName = 'football') {
+function normalizeDirectSofaMatch(m) {
   if (!m || !m.providerMatchId || !m.homeTeam || !m.awayTeam) return null;
   const home = String(m.homeTeam);
   const away = String(m.awayTeam);
-  const sport = String(sportName || 'football').toLowerCase();
-  const matchId = `sofabets_${sport}_${m.providerMatchId}`;
+  const matchId = `sofabets_${m.providerMatchId}`;
   const status = directStatusToInternal(m.status);
   const rawOdds = m.odds || m.providerOdds || m._sofaProviderOdds || null;
   const homeWin = Number(rawOdds?.homeWin);
@@ -220,7 +219,7 @@ function normalizeDirectSofaMatch(m, sportName = 'football') {
   const score = m.score?.fullTime || {};
   return {
     matchId,
-    sport,
+    sport: competitionKey(m.competition),
     league: m.competition || 'Football',
     homeTeam: home,
     awayTeam: away,
@@ -249,7 +248,7 @@ function normalizeDirectSofaMatch(m, sportName = 'football') {
       ? ((score.home != null && score.away != null) ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null)
       : null,
     isStatic: false,
-    source: 'sofabets',
+    source: 'juanai',
     providerSource: 'sofabets',
     oddsSource: has1x2 ? 'SofaBets' : null,
     realOddsSource: has1x2 ? 'SofaBets' : null,
@@ -288,7 +287,7 @@ async function getFixtures(daysAhead = 7) {
       const matches = result.value;
       console.log(`  [sofabets] ${dateStr}: ${matches.length} matches`);
       for (const m of matches) {
-        const normalized = normalizeDirectSofaMatch(m, 'football');
+        const normalized = normalizeDirectSofaMatch(m);
         if (!normalized || seen.has(normalized.matchId)) continue;
         seen.add(normalized.matchId);
         all.push(normalized);
@@ -304,27 +303,15 @@ async function getFixtures(daysAhead = 7) {
 }
 
 async function getLive() {
-  const sports = [
-    'football','basketball','tennis','cricket','rugby','hockey','volleyball','handball'
-  ];
-  const parts = await Promise.allSettled(
-    sports.map(async sport => {
-      const matches = await sofaBets.getLiveFixtures(sport);
-      return matches.map(m => normalizeDirectSofaMatch(m, sport)).filter(Boolean);
-    })
-  );
-  const all = [];
-  const seen = new Set();
-  for (const part of parts) {
-    if (part.status !== 'fulfilled') continue;
-    for (const m of part.value) {
-      if (!seen.has(m.matchId)) {
-        seen.add(m.matchId);
-        all.push(m);
-      }
-    }
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+  try {
+    const matches = await sofaBets.getMatchesForDate(today, { sport: 'football' });
+    return matches.map(normalizeDirectSofaMatch).filter(Boolean).filter(m => m.status === 'live');
+  } catch (e) {
+    throw new Error('SofaBets direct live feed unavailable: ' + e.message);
   }
-  return all;
 }
 
 // ── DB sync ──
@@ -446,9 +433,9 @@ async function updateLive() {
 }
 
 async function cleanFakeMatches() {
-  // SofaBets fixtures are authoritative provider matches, not fake data.
-  // Never delete them from the betting database during scheduler cleanup.
-  return 0;
+  const del = await Match.deleteMany({ source: { $ne: 'juanai' } });
+  if (del.deletedCount) console.log(`🗑️ Cleaned ${del.deletedCount} non-Juan matches`);
+  return del.deletedCount;
 }
 
 module.exports = { syncFixtures, updateLive, cleanFakeMatches, getFixtures, getLive, competitionKey };

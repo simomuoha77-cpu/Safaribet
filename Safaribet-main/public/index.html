@@ -2808,12 +2808,8 @@ function esc(s){return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 // between different matches visited this way (sessionStorage always holds the
 // most recent one) — a deliberate tradeoff for keeping the URL clean.
 function openMatchDetail(matchId){
-  const id = String(matchId || '').trim();
-  if (!id) return;
-  sessionStorage.setItem('currentMatchId', id);
-  // Keep the exact match ID in the URL so every click is deterministic, even
-  // if the browser/session has stale storage from a previous match.
-  location.href = '/match?id=' + encodeURIComponent(id);
+  sessionStorage.setItem('currentMatchId', matchId);
+  location.href = '/match';
 }
 
 // ── TOGGLE ODD ──

@@ -331,72 +331,9 @@ router.get('/history/:matchId', async (req, res) => {
 });
 
 // ── MATCH DETAIL WITH ALL MARKETS ──
-// Real markets (1x2, ou25, btts, dc) come from Juan AI's aiOdds directly.
-// Everything else (handicap) is mathematically derived from those real odds,
-// NOT sent by Juan AI, and is explicitly flagged isSynthetic:true so the
-// frontend can show a clear "estimated, not live bookmaker odds" indicator.
 router.get('/match/:matchId', async (req, res) => {
   try {
-    let m = null;
-    const requestedId = String(req.params.matchId || '');
-
-    // SofaBets is the source of truth for SofaBets IDs. Resolve the exact
-    // provider fixture FIRST, even when an older/stale Mongo snapshot exists.
-    // This keeps the More Markets page, live state, and server-side betting
-    // verification on the same fixture.
-    if (requestedId.startsWith('sofabets_')) {
-      const parts = requestedId.split('_');
-      const isLiveId = parts[1] === 'live';
-      const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
-      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
-      try {
-        const direct = await sofaBets.getMatchById(providerId, sport, { rich: true, live: isLiveId });
-        if (direct && direct.homeTeam && direct.awayTeam) {
-          m = {
-            matchId: requestedId,
-            providerMatchId: direct.providerMatchId || providerId,
-            sport,
-            league: direct.competition || sport,
-            homeTeam: direct.homeTeam,
-            awayTeam: direct.awayTeam,
-            commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-            status: (() => {
-              const st = String(direct.status || '').toUpperCase();
-              if (['IN_PLAY','LIVE','PAUSED','1H','2H','HT','ET','P','BT','Q1','Q2','Q3','Q4','SET1','SET2','SET3','SET4','SET5'].includes(st)) return 'live';
-              if (['FINISHED','FT','COMPLETED','ENDED','AET','PEN'].includes(st)) return 'finished';
-              if (['CANCELLED','POSTPONED','PST','CANC','ABD'].includes(st)) return 'cancelled';
-              return 'upcoming';
-            })(),
-            odds: {
-              home: Number(direct.odds?.homeWin) || null,
-              draw: Number(direct.odds?.draw) || null,
-              away: Number(direct.odds?.awayWin) || null,
-              updatedAt: new Date()
-            },
-            hasOdds: Number.isFinite(Number(direct.odds?.homeWin)) && Number(direct.odds?.homeWin) > 1 && Number.isFinite(Number(direct.odds?.awayWin)) && Number(direct.odds?.awayWin) > 1,
-            score: {
-              home: direct.score?.fullTime?.home ?? null,
-              away: direct.score?.fullTime?.away ?? null,
-              minute: direct.minute ?? null,
-              period: direct.status || null
-            },
-            markets: Array.isArray(direct.markets) ? direct.markets : [],
-            bookmakers: Array.isArray(direct.bookmakers) ? direct.bookmakers : [],
-            providerOdds: direct.odds || null,
-            providerSource: 'sofabets',
-            realOddsSource: 'SofaBets',
-            source: 'sofabets',
-            updatedAt: new Date()
-          };
-        }
-      } catch (err) {
-        console.warn('[odds/match] provider-first SofaBets lookup failed:', err.message);
-      }
-    }
-
-    // Fall back to the stored record only if the live provider lookup could
-    // not resolve the exact SofaBets fixture (or for legacy non-SofaBets IDs).
-    if (!m) m = await Match.findOne({ matchId: requestedId }).lean();
+    let m = await Match.findOne({ matchId: req.params.matchId }).lean();
 
     // Non-football SofaBets tabs are served directly and are not persisted in
     // the football Match collection. Allow the same More markets page to work
@@ -406,23 +343,16 @@ router.get('/match/:matchId', async (req, res) => {
       const isLiveId = parts[1] === 'live';
       const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
       const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
-      const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1', live: isLiveId });
+      const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
       if (direct && direct.homeTeam && direct.awayTeam) {
         m = {
           matchId: req.params.matchId,
-          providerMatchId: direct.providerMatchId || providerId,
           sport,
           league: direct.competition || sport,
           homeTeam: direct.homeTeam,
           awayTeam: direct.awayTeam,
           commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-          status: (() => {
-            const st = String(direct.status || '').toUpperCase();
-            if (['IN_PLAY','LIVE','PAUSED','1H','2H','HT','ET','P','BT','Q1','Q2','Q3','Q4','SET1','SET2','SET3','SET4','SET5'].includes(st)) return 'live';
-            if (['FINISHED','FT','COMPLETED','ENDED','AET','PEN'].includes(st)) return 'finished';
-            if (['CANCELLED','POSTPONED','PST','CANC','ABD'].includes(st)) return 'cancelled';
-            return 'upcoming';
-          })(),
+          status: String(direct.status || '').toUpperCase() === 'IN_PLAY' ? 'live' : 'upcoming',
           odds: {
             home: Number(direct.odds?.homeWin) || null,
             draw: Number(direct.odds?.draw) || null,
@@ -481,68 +411,8 @@ router.get('/match/:matchId', async (req, res) => {
     // Provider-native markets are the source of truth for the More markets
     // page. They are intentionally kept separate from SafariBet's legacy
     // synthetic market resolver so we never invent bookmaker prices.
-    const normalizeText = value => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ' ').trim();
-    const homeNorm = normalizeText(m.homeTeam);
-    const awayNorm = normalizeText(m.awayTeam);
-
-    // Map only markets that SafariBet's server can already verify/settle safely.
-    // All other SofaBets markets remain visible, but are not made clickable by
-    // the UI until their exact settlement contract is implemented.
-    const mapProviderMarket = (mk) => {
-      const marketName = normalizeText(mk.name || mk.key);
-      const selections = Array.isArray(mk.selections) ? mk.selections : [];
-      if (!selections.length) return null;
-
-      const isWinner =
-        /(^| )1 ?x ?2($| )/.test(marketName) ||
-        marketName.includes('match result') ||
-        marketName.includes('match winner') ||
-        marketName.includes('moneyline') ||
-        marketName === 'winner' ||
-        marketName.endsWith(' winner');
-
-      if (isWinner) {
-        const mapped = [];
-        for (let i = 0; i < selections.length; i += 1) {
-          const o = selections[i];
-          const label = String(o.name || o.key || '');
-          const norm = normalizeText(label);
-          let pick = null;
-          if (norm === 'draw' || norm === 'x' || norm === 'tie') pick = 'draw';
-          else if (homeNorm && (norm === homeNorm || norm.includes(homeNorm) || homeNorm.includes(norm))) pick = 'home';
-          else if (awayNorm && (norm === awayNorm || norm.includes(awayNorm) || awayNorm.includes(norm))) pick = 'away';
-          else if (i === 0) pick = 'home';
-          else if (i === 1 && selections.length === 2) pick = 'away';
-          else if (i === 2 && selections.length === 3) pick = 'away';
-          if (!pick || !Number.isFinite(Number(o.odds)) || Number(o.odds) <= 1) continue;
-          mapped.push({
-            pick,
-            odds: Number(o.odds),
-            pickLabel: label || pick,
-            bettable: true,
-            providerMarket: true
-          });
-        }
-        // A valid 2-way winner market is [home, away]; a 3-way winner market
-        // is [home, draw, away]. Do not enable malformed winner markets.
-        const picks = new Set(mapped.map(x => x.pick));
-        const valid = (selections.length === 2 && picks.has('home') && picks.has('away')) ||
-                      (selections.length >= 3 && picks.has('home') && picks.has('draw') && picks.has('away'));
-        if (valid) {
-          return {
-            market: '1x2',
-            label: String(mk.name || 'Match Winner'),
-            isSynthetic: false,
-            providerMarket: true,
-            bookmaker: mk.bookmaker || 'SofaBets',
-            hasSuspendedPick: false,
-            wholeMarketSuspended: false,
-            options: mapped.filter((x, i, a) => a.findIndex(y => y.pick === x.pick) === i)
-          };
-        }
-      }
-
-      const options = selections
+    const richMarkets = providerMarkets.map((mk, index) => {
+      const options = (mk.selections || [])
         .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
         .map(o => ({
           pick: String(o.key),
@@ -553,7 +423,7 @@ router.get('/match/:matchId', async (req, res) => {
         }));
       if (!options.length) return null;
       return {
-        market: 'sb:' + String(mk.key || ('market_' + providerMarkets.indexOf(mk))),
+        market: 'sb:' + String(mk.key || ('market_' + index)),
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,
@@ -562,16 +432,7 @@ router.get('/match/:matchId', async (req, res) => {
         wholeMarketSuspended: false,
         options
       };
-    };
-
-    const providerMarketRows = providerMarkets.map(mapProviderMarket).filter(Boolean);
-    const seenCanonical = new Set();
-    const richMarkets = providerMarketRows.filter(row => {
-      if (row.market !== '1x2') return true;
-      if (seenCanonical.has('1x2')) return false;
-      seenCanonical.add('1x2');
-      return true;
-    });
+    }).filter(Boolean);
 
     const MARKETS = [
       { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
@@ -602,28 +463,9 @@ router.get('/match/:matchId', async (req, res) => {
       };
     }).filter(Boolean);
 
-    // SofaBets is the source of truth for provider matches. Never replace a
-    // failed SofaBets market fetch with Juan/synthetic prices. Keep only the
-    // real 1X2 data already attached to the SofaBets match as a temporary
-    // fallback; non-provider matches retain their existing legacy behaviour.
-    const isSofaMatch = String(req.params.matchId).startsWith('sofabets_');
-    const sofaOneXTwo = (() => {
-      const src = m.odds || {};
-      const options = [];
-      if (Number.isFinite(Number(src.home)) && Number(src.home) > 1) {
-        options.push({ pick:'home', odds:Number(src.home), pickLabel:String(m.homeTeam), bettable:true, providerMarket:true });
-      }
-      if (Number.isFinite(Number(src.draw)) && Number(src.draw) > 1) {
-        options.push({ pick:'draw', odds:Number(src.draw), pickLabel:'Draw', bettable:true, providerMarket:true });
-      }
-      if (Number.isFinite(Number(src.away)) && Number(src.away) > 1) {
-        options.push({ pick:'away', odds:Number(src.away), pickLabel:String(m.awayTeam), bettable:true, providerMarket:true });
-      }
-      return options.length >= 2 ? [{ market:'1x2', label:'Match Result', isSynthetic:false, providerMarket:true, bookmaker:'SofaBets', hasSuspendedPick:false, wholeMarketSuspended:false, options }] : [];
-    })();
-    const markets = isSofaMatch
-      ? (richMarkets.length ? richMarkets : sofaOneXTwo)
-      : (richMarkets.length ? richMarkets : legacyMarkets);
+    // When SofaBets supplied its real catalogue, show that catalogue only.
+    // Otherwise retain the existing SafariBet markets as a safe fallback.
+    const markets = richMarkets.length ? richMarkets : legacyMarkets;
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');

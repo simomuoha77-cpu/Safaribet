@@ -8,7 +8,6 @@ const Match   = require('../models/Match');
 const User    = require('../models/User');
 const Transaction = require('../models/Transaction');
 const walletService = require('../services/walletService');
-const sofaBets = require('../providers/sofaBetsProvider');
 const router  = express.Router();
 
 // Odds older than this are considered stale and rejected at bet-placement time,
@@ -34,90 +33,6 @@ function pickLabelFor(market, pick, match) {
     'handicap': { handicap_home: `${h} (Handicap)`, handicap_away: `${a} (Handicap)` }
   };
   return LABELS[market]?.[pick] || pick;
-}
-
-async function resolveBetMatch(matchId) {
-  const rawId = String(matchId || '');
-
-  // SofaBets is authoritative for SofaBets IDs. Always refresh the exact
-  // provider fixture before consulting Mongo so a stale scheduler snapshot
-  // cannot suspend a live outcome or reject a valid live bet.
-  if (rawId.startsWith('sofabets_')) {
-    const parts = rawId.split('_');
-    const isLive = parts[1] === 'live';
-    const sport = isLive ? (parts[2] || 'football') : (parts[1] || 'football');
-    const providerId = isLive ? parts.slice(3).join('_') : parts.slice(2).join('_');
-    if (!providerId) return null;
-
-    let direct = null;
-    if (isLive) {
-      try {
-        const live = await sofaBets.getLiveFixtures(sport);
-        direct = live.find(m => String(m.providerMatchId) === providerId) || null;
-      } catch (_) {}
-    }
-    if (!direct) {
-      direct = await sofaBets.getMatchById(providerId, sport, { rich: true, live: isLive });
-    }
-    if (!direct || !direct.homeTeam || !direct.awayTeam) return null;
-
-    const rawOdds = direct.odds || direct.providerOdds || {};
-    const home = Number(rawOdds.homeWin);
-    const draw = Number(rawOdds.draw);
-    const away = Number(rawOdds.awayWin);
-    const hasOdds = Number.isFinite(home) && home > 1 && Number.isFinite(away) && away > 1;
-
-    const statusValue = String(direct.status || '').toUpperCase();
-    const status = ['IN_PLAY','LIVE','PAUSED','1H','2H','HT','ET','P','BT','Q1','Q2','Q3','Q4','SET1','SET2','SET3','SET4','SET5'].includes(statusValue)
-      ? 'live'
-      : ['FINISHED','FT','COMPLETED','ENDED','AET','PEN'].includes(statusValue)
-        ? 'finished'
-        : ['CANCELLED','POSTPONED','PST','CANC','ABD'].includes(statusValue)
-          ? 'cancelled'
-          : 'upcoming';
-
-    const score = direct.score?.fullTime || direct.score || {};
-    const payload = {
-      matchId: rawId,
-      providerMatchId: providerId,
-      sport,
-      league: direct.competition || sport,
-      homeTeam: direct.homeTeam,
-      awayTeam: direct.awayTeam,
-      commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-      status,
-      hasOdds,
-      odds: {
-        home: hasOdds ? home : null,
-        draw: Number.isFinite(draw) && draw > 1 ? draw : null,
-        away: hasOdds ? away : null,
-        updatedAt: new Date()
-      },
-      score: {
-        home: score.home ?? null,
-        away: score.away ?? null,
-        minute: direct.minute ?? null,
-        period: direct.status || null
-      },
-      markets: Array.isArray(direct.markets) ? direct.markets : [],
-      bookmakers: Array.isArray(direct.bookmakers) ? direct.bookmakers : [],
-      providerOdds: direct.odds || null,
-      source: 'sofabets',
-      settled: false
-    };
-
-    // Persist the fresh provider snapshot so the existing settlement/verification
-    // pipeline has a canonical record, but never use the stale record ahead of it.
-    return Match.findOneAndUpdate(
-      { matchId: rawId },
-      { $set: payload },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-  }
-
-  const match = await Match.findOne({ matchId });
-  if (match) return match;
-  return null;
 }
 
 function getFreshServerOdds(match, market, pick) {
@@ -209,10 +124,10 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
     // Verify matches exist and are still bettable + verify server-side odds
     const matchIds = selections.map(s => s.matchId);
-    const matches  = await Promise.all(matchIds.map(id => resolveBetMatch(id)));
+    const matches  = await Match.find({ matchId: { $in: matchIds } });
 
     const matchMap = {};
-    matches.filter(Boolean).forEach(m => { matchMap[m.matchId] = m; });
+    matches.forEach(m => { matchMap[m.matchId] = m; });
 
     const verifiedSelections = [];
     let totalOdds = 1;
@@ -446,7 +361,7 @@ router.post('/place-builder', auth, betLimiter, async (req, res) => {
     const err = bettingService.validateBetBuilderLegs(legs);
     if (err) return res.status(400).json({ success: false, message: err });
 
-    const match = await resolveBetMatch(legs[0].matchId);
+    const match = await Match.findOne({ matchId: legs[0].matchId }).lean();
     if (!match) return res.status(400).json({ success: false, message: 'Match not found' });
 
     const adminRoutes = require('./admin');
@@ -543,9 +458,9 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
 
     // Verify all matches + odds server-side (same as regular bet)
     const matchIds = selections.map(s => s.matchId);
-    const matches = await Promise.all(matchIds.map(id => resolveBetMatch(id)));
+    const matches = await Match.find({ matchId: { $in: matchIds } });
     const matchMap = {};
-    matches.filter(Boolean).forEach(m => { matchMap[m.matchId] = m; });
+    matches.forEach(m => { matchMap[m.matchId] = m; });
 
     const verifiedSelections = [];
     for (const s of selections) {
@@ -796,7 +711,7 @@ router.post('/admin/add-selection/:betId', requireAdmin, async (req, res) => {
       return res.status(400).json({ success:false, message:'This bet already has a selection on that match — only one selection per match is allowed per slip.' });
     }
 
-    const match = await resolveBetMatch(matchId);
+    const match = await Match.findOne({ matchId });
     if (!match) return res.status(400).json({ success:false, message:`Match not found: ${matchId}` });
     if (match.status === 'finished') return res.status(400).json({ success:false, message:`Match already finished: ${match.homeTeam} vs ${match.awayTeam}` });
     if (match.status === 'cancelled') return res.status(400).json({ success:false, message:`Match cancelled: ${match.homeTeam} vs ${match.awayTeam}` });

@@ -57,7 +57,7 @@ const matchSchema = new mongoose.Schema({
   settled:    { type: Boolean, default: false },
   settledAt:  { type: Date },
   isStatic:   { type: Boolean, default: false },
-  source:     { type: String, enum: ['juanai','sofabets'], default: 'juanai' }
+  source:     { type: String, enum: ['juanai'], default: 'juanai' }
 }, { timestamps: true });
 
 matchSchema.index({ status: 1, commenceTime: 1 });
