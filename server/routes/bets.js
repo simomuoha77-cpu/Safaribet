@@ -87,9 +87,9 @@ function validateSelections(selections, maxSelections) {
       const validPicks = VALID_PICKS_BY_MARKET[market] || [];
       if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
     } else {
-      if (s.provider && s.provider !== 'sofabets') return 'Unknown provider';
-      if (!s.providerSelectionId && !s.providerSelectionKey) return 'Missing SofaBets selection identifier';
-      if (!s.providerMarketId && !s.providerMarketKey) return 'Missing SofaBets market identifier';
+      if (s.provider && s.provider !== 'sofabets') return 'Invalid market selection';
+      if (!s.providerSelectionId && !s.providerSelectionKey) return 'Invalid market selection';
+      if (!s.providerMarketId && !s.providerMarketKey) return 'Invalid market selection';
     }
     if (s.odds < 1.01 || s.odds > 500) return 'Invalid odds';
     // Only ONE selection per MATCH is allowed in a regular multi-bet, regardless
@@ -166,22 +166,24 @@ router.post('/place', auth, betLimiter, async (req, res) => {
           ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts[1] : 'football')
           : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts[0] : 'football');
 
-        if (!providerId) return res.status(400).json({ success: false, message: 'Invalid SofaBets fixture ID' });
+        if (!providerId) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
         let direct = null;
         if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
           direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
         }
-        if (!direct) {
+        if (!direct && !isLiveId) {
           direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
-          if (isLiveId && direct &&
-              !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
-            direct = null;
-          }
+        }
+        if (direct && String(direct.providerMatchId) !== String(providerId)) direct = null;
+        if (isLiveId && direct &&
+            !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
+          direct = null;
         }
 
         if (!direct || String(direct.providerMatchId) !== providerId) {
-          return res.status(400).json({ success: false, message: `SofaBets fixture not found: ${s.matchId}` });
+          console.warn('[bets/place] exact provider fixture not found:', s.matchId);
+          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
         }
 
         const requestedMarketId = s.providerMarketId ? String(s.providerMarketId) : null;
@@ -194,7 +196,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
           (m.key != null && String(m.key) === requestedMarketKey)
         );
         if (!providerMarket) {
-          return res.status(400).json({ success: false, message: 'SofaBets market is no longer available for this fixture' });
+          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
         }
 
         providerOutcome = (providerMarket.selections || []).find(o =>
@@ -202,7 +204,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
           (o.key != null && String(o.key) === requestedSelectionKey)
         );
         if (!providerOutcome || !Number.isFinite(Number(providerOutcome.odds)) || Number(providerOutcome.odds) < 1.01) {
-          return res.status(400).json({ success: false, message: 'SofaBets selection is no longer available' });
+          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
         }
 
         serverOdds = Number(providerOutcome.odds);

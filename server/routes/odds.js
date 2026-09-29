@@ -327,7 +327,7 @@ router.get('/matches/:sport', async (req, res) => {
     res.status(502).json({
       success: false,
       data: [],
-      message: 'SofaBets unavailable: ' + e.message
+      message: 'Sports data is temporarily unavailable. Please try again.'
     });
   }
 });
@@ -454,7 +454,7 @@ router.get('/match/:matchId', async (req, res) => {
           if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
             direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
           }
-          if (!direct) {
+          if (!direct && !isLiveId) {
             direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
           }
 
@@ -486,7 +486,7 @@ router.get('/match/:matchId', async (req, res) => {
       }
     }
 
-    if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
+    if (!m) return res.status(404).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
     // SafariBet builds its own markets from the 1X2 odds already on the match.
     // No extra SofaBets market request is made, so opening a match is immediate

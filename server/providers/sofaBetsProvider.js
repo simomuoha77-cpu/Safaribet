@@ -401,7 +401,7 @@ function normalizeMarketList(payload) {
     }).filter(Boolean) : [];
     return {
       key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
-      name: String(pick(market, ['name','marketType','marketName','market_name','type','title']) || 'Market'),
+      name: String(pick(market, ['label','name','marketType','marketName','market_name','type','title']) || 'Market'),
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
@@ -412,15 +412,19 @@ function normalizeMarketList(payload) {
 // object, WITHOUT assuming any particular shape. Returns null if no id-like
 // field can be found (not the same as "matches" — callers must not treat
 // "no id found" as a pass).
-function findIdInPayload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+function findIdInPayload(payload, depth = 0, seen = new Set()) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || depth > 4 || seen.has(payload)) return null;
+  seen.add(payload);
   const direct = pick(payload, ['id', 'fixtureId', 'fixture_id', 'eventId', 'event_id', 'matchId', 'match_id']);
   if (direct != null) return String(direct).trim();
-  for (const key of ['fixture', 'data', 'event', 'match']) {
+  // Provider responses commonly wrap the fixture in data/fixture/event/match,
+  // sometimes with one additional envelope. Walk only those known wrappers so
+  // an unrelated nested object's id can never become the fixture identity.
+  for (const key of ['fixture', 'data', 'event', 'match', 'result']) {
     const nested = payload[key];
     if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      const nid = pick(nested, ['id', 'fixtureId', 'fixture_id', 'eventId', 'event_id', 'matchId', 'match_id']);
-      if (nid != null) return String(nid).trim();
+      const nid = findIdInPayload(nested, depth + 1, seen);
+      if (nid != null) return nid;
     }
   }
   return null;
@@ -650,13 +654,51 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
     SPORT_IDS[sport]
   ].filter(Number.isFinite)));
 
-  // STEP 1 — resolve the EXACT fixture: every candidate item
-  // is checked against the requested id before being accepted. SofaBets can
-  // expose the same fixture through more than one host with different market
-  // depth, so every host is checked and the richest VALIDATED copy is kept.
+  // STEP 1 — resolve the EXACT fixture. Prefer provider endpoints that are
+  // explicitly keyed by the requested fixture id, then use the paginated
+  // catalogue as a strict exact-id fallback. Never accept a payload merely
+  // because it came from an endpoint containing the requested id in the URL.
+  // The returned object's own id must match the requested provider id.
   let best = null;
   let bestMarketCount = -1;
 
+  const acceptExact = (item, source) => {
+    if (!item || typeof item !== 'object') return;
+    const itemId = findIdInPayload(item);
+    if (itemId !== id) return;
+    const normalized = safeNormalizeMatch(item);
+    if (!normalized || String(normalized.providerMatchId).trim() !== id) return;
+    const marketCount = Array.isArray(normalized.markets) ? normalized.markets.length : 0;
+    if (!best || marketCount > bestMarketCount) {
+      best = normalized;
+      bestMarketCount = marketCount;
+      console.log(`[sofaBetsProvider] exact fixture ${id} via ${source}`);
+    }
+  };
+
+  // These endpoints are the most reliable way to resolve a known provider
+  // fixture. Some installations expose one or more of them; unsuccessful or
+  // shape-mismatched responses are simply ignored.
+  const directPaths = [
+    `/api/fixtures/${encodeURIComponent(id)}`,
+    `/api/matches/${encodeURIComponent(id)}`,
+    `/api/events/${encodeURIComponent(id)}`
+  ];
+  for (const base of BASES) {
+    for (const path of directPaths) {
+      try {
+        const payload = await sofaFetch(base, path, {});
+        const items = extractItems(payload);
+        if (items.length > 1) continue;
+        if (items.length === 1) acceptExact(items[0], `${base}${path}`);
+        else if (payload && typeof payload === 'object' && !Array.isArray(payload)) acceptExact(payload.fixture || payload.event || payload.match || payload, `${base}${path}`);
+      } catch (_) {}
+    }
+  }
+
+  // Catalogue fallback: still exact-id only, and every candidate sport is
+  // checked so a generic/mistaken sport parameter can never substitute a
+  // different fixture.
   for (const sportId of candidates) {
     for (const base of BASES) {
       try {
@@ -686,19 +728,7 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
             ])).trim() === id
           );
 
-          if (item) {
-            const normalized = safeNormalizeMatch(item);
-
-            // Re-confirm identity after normalization too — normalizeMatch
-            // must report the same providerMatchId we asked for.
-            if (normalized && String(normalized.providerMatchId).trim() === id) {
-              const marketCount = Array.isArray(normalized.markets) ? normalized.markets.length : 0;
-              if (!best || marketCount > bestMarketCount) {
-                best = normalized;
-                bestMarketCount = marketCount;
-              }
-            }
-          }
+          if (item) acceptExact(item, `${base}/api/fixtures-by-sport:${sportId}:page${page}`);
 
           // Exact fixture handled for this host. Continue with other hosts
           // in case one of them carries a richer, still-validated, copy.
@@ -901,7 +931,7 @@ function normalizeMatch(raw) {
     return {
       id: marketId != null ? String(marketId) : null,
       key: String(marketKey != null ? marketKey : (marketId != null ? marketId : ('market_' + index))),
-      name: String(pick(market, ['name', 'marketType', 'marketName', 'market_name', 'type']) || 'Market'),
+      name: String(pick(market, ['label', 'name', 'marketType', 'marketName', 'market_name', 'type']) || 'Market'),
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
     };

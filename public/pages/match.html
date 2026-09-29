@@ -128,7 +128,7 @@ async function loadMatch(){
     const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' });
     const d = await r.json();
     if (!d.success) {
-      document.getElementById('matchHeader').innerHTML = `<div class="loading">${d.message || 'Match not found'}</div>`;
+      document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
       return;
     }
     matchData = d.data;
@@ -139,7 +139,7 @@ async function loadMatch(){
     // SafariBet builds its own markets from the odds already loaded above.
     // No background provider-market request is needed.
   } catch(e) {
-    document.getElementById('matchHeader').innerHTML = '<div class="loading">Failed to load match — check connection.</div>';
+    document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
   }
 }
 

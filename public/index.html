@@ -2033,7 +2033,7 @@ async function loadCat(cat) {
       try { r = await fetch(`/api/sports/category/${cat}`, { signal: ctrl.signal }); }
       finally { clearTimeout(timer); }
       const d = await r.json();
-      if (!d.success) throw new Error(d.message || 'SofaBets sport feed failed');
+      if (!d.success) throw new Error(d.message || 'Sports data is temporarily unavailable. Please try again.');
       if (Array.isArray(d.data) && d.data.length) {
         const old = sportTabCache.get(cat) || cachedSport || [];
         const byId = new Map(old.map(m => [String(m.matchId), m]));
