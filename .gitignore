@@ -16,3 +16,4 @@ env.backup
 
 *.env.backup
 Safaribet-main.env.backup
+*.zip
