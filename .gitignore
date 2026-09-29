@@ -31,3 +31,8 @@ README_APPLY_CHANGE*
 *.backup
 safaribet/
 *.juan-backup
+
+# Local extracted project - NEVER PUSH
+Safaribet-main/
+*.zip
+*.env.backup
