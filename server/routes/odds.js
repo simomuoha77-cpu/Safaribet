@@ -378,43 +378,67 @@ router.get('/match/:matchId', async (req, res) => {
   try {
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
 
-    // Non-football SofaBets tabs are served directly and are not persisted in
-    // the football Match collection. Allow the same More markets page to work
-    // for tennis, basketball, cricket, rugby, hockey, volleyball and handball.
+    // SofaBets live IDs are authoritative provider identities. Resolve the
+    // exact live fixture from the live feed first; never substitute a DB
+    // fixture or a first/nearest/team-name match.
     if (!m && String(req.params.matchId).startsWith('sofabets_')) {
       const parsed = parseSofaMatchId(req.params.matchId);
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
-        const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
-      if (direct && direct.homeTeam && direct.awayTeam) {
-        m = {
-          matchId: req.params.matchId,
-          sport,
-          league: direct.competition || sport,
-          homeTeam: direct.homeTeam,
-          awayTeam: direct.awayTeam,
-          commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-          status: String(direct.status || '').toUpperCase() === 'IN_PLAY' ? 'live' : 'upcoming',
-          odds: {
-            home: Number(direct.odds?.homeWin) || null,
-            draw: Number(direct.odds?.draw) || null,
-            away: Number(direct.odds?.awayWin) || null,
-            updatedAt: new Date()
-          },
-          hasOdds: !!direct.odds,
-          score: {
-            home: direct.score?.fullTime?.home ?? null,
-            away: direct.score?.fullTime?.away ?? null,
-            minute: direct.minute ?? null,
-            period: direct.status || null
-          },
-          markets: direct.markets || [],
-          bookmakers: direct.bookmakers || [],
-          providerOdds: direct.odds || null,
-          providerSource: 'sofabets',
-          realOddsSource: 'SofaBets'
-        };
-      }
+        let direct = null;
+
+        if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
+          direct = await sofaBets.getLiveMatchById(providerId, sport, {
+            rich: req.query.rich === '1'
+          });
+        }
+
+        // Non-live IDs use the existing exact provider resolver. For a live
+        // ID, this is only an exact-ID fallback and may never downgrade a live
+        // request to a different fixture.
+        if (!direct) {
+          direct = await sofaBets.getMatchById(providerId, sport, {
+            rich: req.query.rich === '1'
+          });
+          if (isLiveId && direct &&
+              (String(direct.providerMatchId) !== String(providerId) ||
+               !['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase()))) {
+            direct = null;
+          }
+        }
+
+        if (direct && String(direct.providerMatchId) === String(providerId) &&
+            direct.homeTeam && direct.awayTeam) {
+          m = {
+            matchId: req.params.matchId,
+            sport,
+            league: direct.competition || sport,
+            homeTeam: direct.homeTeam,
+            awayTeam: direct.awayTeam,
+            commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
+            status: ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase())
+              ? 'live' : 'upcoming',
+            odds: {
+              home: Number(direct.odds?.homeWin) || null,
+              draw: Number(direct.odds?.draw) || null,
+              away: Number(direct.odds?.awayWin) || null,
+              updatedAt: new Date()
+            },
+            hasOdds: !!direct.odds,
+            score: {
+              home: direct.score?.fullTime?.home ?? null,
+              away: direct.score?.fullTime?.away ?? null,
+              minute: direct.minute ?? null,
+              period: direct.status || null
+            },
+            markets: direct.markets || [],
+            bookmakers: direct.bookmakers || [],
+            providerOdds: direct.odds || null,
+            providerSource: 'sofabets',
+            realOddsSource: 'SofaBets',
+            providerMatchId: String(direct.providerMatchId)
+          };
+        }
       }
     }
 
@@ -424,13 +448,36 @@ router.get('/match/:matchId', async (req, res) => {
     if (m && req.query.rich === '1' && String(req.params.matchId).startsWith('sofabets_')) {
       const parsed = parseSofaMatchId(req.params.matchId);
       if (parsed && parsed.providerId) {
-        const { sport, providerId } = parsed;
+        const { isLive: isLiveId, sport, providerId } = parsed;
         try {
-          const direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
-          if (direct && Array.isArray(direct.markets) && direct.markets.length) {
+          let direct = null;
+          if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
+            direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
+          }
+          if (!direct) {
+            direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
+          }
+
+          // Never attach a richer response unless its provider identity is
+          // exactly the requested fixture. Live IDs must also remain live.
+          const directIsExact = direct &&
+            String(direct.providerMatchId) === String(providerId) &&
+            (!isLiveId || ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase()));
+
+          if (directIsExact && Array.isArray(direct.markets) && direct.markets.length) {
             m.markets = direct.markets;
             m.bookmakers = direct.bookmakers || [];
             m.providerOdds = direct.odds || m.providerOdds || null;
+            m.providerMatchId = String(direct.providerMatchId);
+            if (isLiveId) {
+              m.status = 'live';
+              m.score = {
+                home: direct.score?.fullTime?.home ?? m.score?.home ?? null,
+                away: direct.score?.fullTime?.away ?? m.score?.away ?? null,
+                minute: direct.minute ?? m.score?.minute ?? null,
+                period: direct.status || m.score?.period || null
+              };
+            }
             console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
           }
         } catch (err) {
@@ -461,12 +508,16 @@ router.get('/match/:matchId', async (req, res) => {
           pick: String(o.key),
           odds: Number(o.odds),
           pickLabel: String(o.name || o.key),
-          bettable: false,
+          providerSelectionId: o.id != null ? String(o.id) : null,
+          providerSelectionKey: o.key != null ? String(o.key) : null,
+          bettable: true,
           providerMarket: true
         }));
       if (!options.length) return null;
       return {
         market: 'sb:' + String(mk.key || ('market_' + index)),
+        providerMarketId: mk.id != null ? String(mk.id) : null,
+        providerMarketKey: mk.key != null ? String(mk.key) : null,
         label: String(mk.name || 'Market'),
         isSynthetic: false,
         providerMarket: true,

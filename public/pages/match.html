@@ -197,7 +197,7 @@ function renderMarkets(){
         </div>
         <div class="market-body">
           ${mk.options.map(opt => `
-            <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${Number(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}')\"` : ''}>
+            <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `id=\"mkt_${escapeAttr(mk.market)}_${escapeAttr(opt.pick)}\" onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${Number(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}','${escapeAttr(mk.providerMarketId || '')}','${escapeAttr(mk.providerMarketKey || '')}','${escapeAttr(opt.providerSelectionId || '')}','${escapeAttr(opt.providerSelectionKey || opt.pick || '')}')\"` : ''}>
               <div class="odd-lbl">${escapeHtml(opt.pickLabel || opt.pick)}</div>
               <div class="odd-val">${Number(opt.boostedOdds || opt.odds).toFixed(2)}</div>
             </div>`).join('')}
@@ -296,7 +296,7 @@ function setMode(m){
   updateBuilderBar();
 }
 
-function toggleMarketPick(market, pick, odds, pickLabelText){
+function toggleMarketPick(market, pick, odds, pickLabelText, providerMarketId, providerMarketKey, providerSelectionId, providerSelectionKey){
   if (mode === 'builder') { toggleBuilderLeg(market, pick, odds, pickLabelText); return; }
 
   // Quick Pick allows only ONE selection per MATCH (any market), not one per
@@ -326,7 +326,14 @@ function toggleMarketPick(market, pick, odds, pickLabelText){
       homeTeam: matchData.homeTeam, awayTeam: matchData.awayTeam,
       league: matchData.league, sport: matchData.sport,
       pickLabel: pickLabelText, odds: parseFloat(odds),
-      commenceTime: matchData.commenceTime
+      commenceTime: matchData.commenceTime,
+      ...(String(market).startsWith('sb:') ? {
+        provider: 'sofabets',
+        providerMarketId: providerMarketId || null,
+        providerMarketKey: providerMarketKey || String(market).slice(3),
+        providerSelectionId: providerSelectionId || null,
+        providerSelectionKey: providerSelectionKey || pick
+      } : {})
     });
     document.getElementById(`mkt_${market}_${pick}`)?.classList.add('sel');
   }

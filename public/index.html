@@ -2861,7 +2861,7 @@ function renderSlipItems(){
       <div class="si-match">${s.homeTeam} vs ${s.awayTeam}</div>
       <div class="si-bottom">
         <div>
-          <span class="si-pick">${s.pick==='home'?'1 — Home Win':s.pick==='draw'?'X — Draw':'2 — Away Win'} — <strong>${s.pickLabel}</strong></span>
+          <span class="si-pick">${s.market && String(s.market).startsWith('sb:') ? (s.pickLabel || s.pick) : (s.pick==='home'?'1 — Home Win':s.pick==='draw'?'X — Draw':s.pick==='away'?'2 — Away Win':s.pick)} — <strong>${s.pickLabel || ''}</strong></span>
         </div>
         <span class="si-odd">${s.odds.toFixed(2)}</span>
       </div>
@@ -2986,6 +2986,9 @@ async function submitLoadCode(){
       slip.push({
         matchId:s.matchId, homeTeam:s.homeTeam, awayTeam:s.awayTeam,
         league:s.league, sport:s.sport, pick:s.pick, pickLabel:s.pickLabel,
+        market:s.market, provider:s.provider,
+        providerMarketId:s.providerMarketId, providerMarketKey:s.providerMarketKey,
+        providerSelectionId:s.providerSelectionId, providerSelectionKey:s.providerSelectionKey,
         odds:s.currentOdds, // always use the CURRENT odds, never the odds from when it was shared
         commenceTime:s.commenceTime
       });

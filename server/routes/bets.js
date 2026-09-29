@@ -5,6 +5,7 @@ const auth    = require('../middleware/auth');
 const { requireAdmin } = require('../utils/adminAuth');
 const Bet     = require('../models/Bet');
 const Match   = require('../models/Match');
+const sofaBets = require('../providers/sofaBetsProvider');
 const User    = require('../models/User');
 const Transaction = require('../models/Transaction');
 const walletService = require('../services/walletService');
@@ -67,6 +68,12 @@ const VALID_PICKS_BY_MARKET = {
   'handicap':['handicap_home','handicap_away']
 };
 
+function isSofaProviderSelection(s) {
+  return String(s?.market || '').startsWith('sb:') &&
+    !!s?.providerMarketKey &&
+    !!s?.providerSelectionKey;
+}
+
 function validateSelections(selections, maxSelections) {
   if (!Array.isArray(selections) || !selections.length) return 'No selections provided';
   if (selections.length > maxSelections) return `Maximum ${maxSelections} selections per bet`;
@@ -74,9 +81,16 @@ function validateSelections(selections, maxSelections) {
   for (const s of selections) {
     if (!s.matchId || !s.pick || !s.odds) return 'Invalid selection data';
     const market = s.market || '1x2'; // default to 1x2 for older frontend calls that don't send market
-    if (!ALL_KNOWN_MARKETS.has(market)) return `Unknown market: ${market}`;
-    const validPicks = VALID_PICKS_BY_MARKET[market] || [];
-    if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
+    const providerSelection = isSofaProviderSelection(s);
+    if (!providerSelection && !ALL_KNOWN_MARKETS.has(market)) return `Unknown market: ${market}`;
+    if (!providerSelection) {
+      const validPicks = VALID_PICKS_BY_MARKET[market] || [];
+      if (!validPicks.includes(s.pick)) return `Invalid pick "${s.pick}" for market ${market}`;
+    } else {
+      if (s.provider && s.provider !== 'sofabets') return 'Unknown provider';
+      if (!s.providerSelectionId && !s.providerSelectionKey) return 'Missing SofaBets selection identifier';
+      if (!s.providerMarketId && !s.providerMarketKey) return 'Missing SofaBets market identifier';
+    }
     if (s.odds < 1.01 || s.odds > 500) return 'Invalid odds';
     // Only ONE selection per MATCH is allowed in a regular multi-bet, regardless
     // of market. Multiple markets on the same match are correlated (e.g. a
@@ -133,31 +147,112 @@ router.post('/place', auth, betLimiter, async (req, res) => {
     let totalOdds = 1;
 
     for (const s of selections) {
-      const match = matchMap[s.matchId];
-      if (!match) return res.status(400).json({ success: false, message: `Match not found: ${s.matchId}` });
-      if (match.status === 'finished') return res.status(400).json({ success: false, message: `Match already finished: ${match.homeTeam} vs ${match.awayTeam}` });
-      if (match.status === 'cancelled') return res.status(400).json({ success: false, message: `Match cancelled: ${match.homeTeam} vs ${match.awayTeam}` });
+      const providerSelection = isSofaProviderSelection(s);
+      let match = matchMap[s.matchId];
+      let serverOdds = null;
+      let providerMarket = null;
+      let providerOutcome = null;
 
-      // Use SERVER odds, not client odds (anti-cheat) — and reject if stale
-      const market = s.market || '1x2';
-      let serverOdds = getFreshServerOdds(match, market, s.pick);
-      if (!serverOdds) {
-        const suspended = isPickSuspended(match, market, s.pick);
-        return res.status(400).json({ success: false, message: suspended
-          ? `Betting suspended for ${match.homeTeam} vs ${match.awayTeam} — this outcome is already effectively decided`
-          : `Odds unavailable for ${s.pick} (${market}) in ${match.homeTeam} vs ${match.awayTeam}` });
+      if (providerSelection) {
+        // SofaBets-native selections must be verified against the exact provider
+        // fixture and the exact market/selection keys. Never resolve by teams.
+        const rawId = String(s.matchId || '');
+        const parts = rawId.startsWith('sofabets_') ? rawId.slice('sofabets_'.length).split('_') : [];
+        const isLiveId = parts[0] === 'live';
+        const providerId = isLiveId
+          ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts.slice(2).join('_') : parts.slice(1).join('_'))
+          : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts.slice(1).join('_') : parts.join('_'));
+        const sport = isLiveId
+          ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts[1] : 'football')
+          : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts[0] : 'football');
+
+        if (!providerId) return res.status(400).json({ success: false, message: 'Invalid SofaBets fixture ID' });
+
+        let direct = null;
+        if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
+          direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
+        }
+        if (!direct) {
+          direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
+          if (isLiveId && direct &&
+              !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
+            direct = null;
+          }
+        }
+
+        if (!direct || String(direct.providerMatchId) !== providerId) {
+          return res.status(400).json({ success: false, message: `SofaBets fixture not found: ${s.matchId}` });
+        }
+
+        const requestedMarketId = s.providerMarketId ? String(s.providerMarketId) : null;
+        const requestedMarketKey = String(s.providerMarketKey);
+        const requestedSelectionId = s.providerSelectionId ? String(s.providerSelectionId) : null;
+        const requestedSelectionKey = String(s.providerSelectionKey);
+
+        providerMarket = (direct.markets || []).find(m =>
+          (requestedMarketId && m.id != null && String(m.id) === requestedMarketId) ||
+          (m.key != null && String(m.key) === requestedMarketKey)
+        );
+        if (!providerMarket) {
+          return res.status(400).json({ success: false, message: 'SofaBets market is no longer available for this fixture' });
+        }
+
+        providerOutcome = (providerMarket.selections || []).find(o =>
+          (requestedSelectionId && o.id != null && String(o.id) === requestedSelectionId) ||
+          (o.key != null && String(o.key) === requestedSelectionKey)
+        );
+        if (!providerOutcome || !Number.isFinite(Number(providerOutcome.odds)) || Number(providerOutcome.odds) < 1.01) {
+          return res.status(400).json({ success: false, message: 'SofaBets selection is no longer available' });
+        }
+
+        serverOdds = Number(providerOutcome.odds);
+        if (isLiveId && !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
+          return res.status(400).json({ success: false, message: 'Live betting is no longer available for this fixture' });
+        }
+
+        // Construct the same canonical match shape used by settlement and the
+        // existing bet record, while retaining the exact provider identity.
+        match = {
+          matchId: s.matchId,
+          providerMatchId: providerId,
+          homeTeam: direct.homeTeam,
+          awayTeam: direct.awayTeam,
+          league: direct.competition || sport,
+          sport,
+          commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
+          status: isLiveId ? 'live' : 'upcoming',
+          score: {
+            home: direct.score?.fullTime?.home ?? null,
+            away: direct.score?.fullTime?.away ?? null,
+            minute: direct.minute ?? null,
+            period: direct.status || null
+          }
+        };
+      } else {
+        if (!match) return res.status(400).json({ success: false, message: `Match not found: ${s.matchId}` });
+        if (match.status === 'finished') return res.status(400).json({ success: false, message: `Match already finished: ${match.homeTeam} vs ${match.awayTeam}` });
+        if (match.status === 'cancelled') return res.status(400).json({ success: false, message: `Match cancelled: ${match.homeTeam} vs ${match.awayTeam}` });
+
+        // Use SERVER odds, not client odds (anti-cheat) — and reject if stale.
+        const market = s.market || '1x2';
+        serverOdds = getFreshServerOdds(match, market, s.pick);
+        if (!serverOdds) {
+          const suspended = isPickSuspended(match, market, s.pick);
+          return res.status(400).json({ success: false, message: suspended
+            ? `Betting suspended for ${match.homeTeam} vs ${match.awayTeam} — this outcome is already effectively decided`
+            : `Odds unavailable for ${s.pick} (${market}) in ${match.homeTeam} vs ${match.awayTeam}` });
+        }
       }
 
-      // Odds boost — only applied to single-selection bets, where the full stake
-      // directly maps to this one selection's exposure. Applying boosts inside a
-      // multi-bet is ambiguous (what "stake" does the cap apply to?) and easier
-      // to game, so it's deliberately out of scope there.
-      if (selections.length === 1) {
+      // Odds boost — legacy SafariBet markets only. Provider-native prices are
+      // authoritative SofaBets prices and must not be rewritten client-side.
+      if (!providerSelection && selections.length === 1) {
         const { getBoostedOdds } = require('../services/marketResolver');
-        const boost = await getBoostedOdds(s.matchId, market, s.pick, stakeAmt);
+        const boost = await getBoostedOdds(s.matchId, s.market || '1x2', s.pick, stakeAmt);
         if (boost) serverOdds = boost.odds;
       }
 
+      const market = s.market || '1x2';
       verifiedSelections.push({
         matchId:       s.matchId,
         homeTeam:      match.homeTeam,
@@ -167,9 +262,16 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         commenceTime:  match.commenceTime,
         market,
         pick:          s.pick,
-        pickLabel: pickLabelFor(market, s.pick, match),
-        odds:      serverOdds,
-        result:    'pending'
+        providerMarketId: providerSelection ? String(providerMarket.id ?? s.providerMarketId ?? '') : undefined,
+        providerMarketKey: providerSelection ? String(providerMarket.key ?? s.providerMarketKey) : undefined,
+        providerSelectionId: providerSelection ? String(providerOutcome.id ?? s.providerSelectionId ?? '') : undefined,
+        providerSelectionKey: providerSelection ? String(providerOutcome.key ?? s.providerSelectionKey) : undefined,
+        provider: providerSelection ? 'sofabets' : undefined,
+        pickLabel: providerSelection
+          ? String(providerOutcome.name || s.pickLabel || providerOutcome.key)
+          : pickLabelFor(market, s.pick, match),
+        odds: serverOdds,
+        result: 'pending'
       });
       totalOdds *= serverOdds;
     }
@@ -621,7 +723,13 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
       createdBy: req.user._id,
       selections: selections.map(s => ({
         matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam,
-        league: s.league||'', sport: s.sport||'', pick: s.pick, pickLabel: s.pickLabel||'',
+        league: s.league||'', sport: s.sport||'', pick: s.pick,
+        provider: s.provider||'', market: s.market||'',
+        providerMarketId: s.providerMarketId||'',
+        providerMarketKey: s.providerMarketKey||'',
+        providerSelectionId: s.providerSelectionId||'',
+        providerSelectionKey: s.providerSelectionKey||'',
+        pickLabel: s.pickLabel||'',
         odds: parseFloat(s.odds), commenceTime: new Date(s.commenceTime)
       })),
       expiresAt: new Date(Date.now() + 7*24*60*60*1000)
@@ -673,6 +781,9 @@ router.get('/slip/load/:code', auth, async (req, res) => {
       return {
         matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam,
         league: s.league, sport: s.sport, pick: s.pick, pickLabel: s.pickLabel,
+        market: s.market, provider: s.provider,
+        providerMarketId: s.providerMarketId, providerMarketKey: s.providerMarketKey,
+        providerSelectionId: s.providerSelectionId, providerSelectionKey: s.providerSelectionKey,
         sharedOdds: s.odds,                       // what it was when shared
         currentOdds: currentOdds || null,         // what it is right now (null if unavailable)
         oddsChanged: !!currentOdds && Math.abs(currentOdds - s.odds) > 0.001,

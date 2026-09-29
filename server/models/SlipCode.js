@@ -13,7 +13,13 @@ const slipSelectionSchema = new mongoose.Schema({
   awayTeam:     { type: String, required: true },
   league:       { type: String, default: '' },
   sport:        { type: String, default: '' },
-  pick:         { type: String, required: true }, // 'home' | 'draw' | 'away'
+  pick:         { type: String, required: true },
+  provider:     { type: String, default: '' },
+  providerMarketId: { type: String, default: '' },
+  providerMarketKey: { type: String, default: '' },
+  providerSelectionId: { type: String, default: '' },
+  providerSelectionKey: { type: String, default: '' },
+  market:       { type: String, default: '' },
   pickLabel:    { type: String, default: '' },
   odds:         { type: Number, required: true },
   commenceTime: { type: Date, required: true }

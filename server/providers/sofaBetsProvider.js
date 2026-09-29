@@ -389,8 +389,11 @@ function normalizeMarketList(payload) {
       if (!selection || typeof selection !== 'object') return null;
       const price = pick(selection, ['odds','odd','price','value','decimalOdds','decimalValue','decimal_value','oddsDecimal']);
       const n = Number(price);
+      const selectionId = pick(selection, ['id','selectionId','selection_id','outcomeId','outcome_id','choiceId']);
+      const selectionKey = pick(selection, ['key','selectionKey','selection_key','outcomeKey','outcome_key','name','label']);
       return {
-        key: String(pick(selection, ['id','key','selectionId','selection_id','name','label','choiceId']) || ('selection_' + si)),
+        id: selectionId != null ? String(selectionId) : null,
+        key: String(selectionKey != null ? selectionKey : (selectionId != null ? selectionId : ('selection_' + si))),
         name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
@@ -547,7 +550,7 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
           continue;
         }
 
-        const candidate = items[0] || payload;
+        const candidate = items.find(item => findIdInPayload(item) === id) || payload;
         const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
 
         // If the payload identifies itself with a DIFFERENT fixture id than
@@ -577,9 +580,9 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
 
     const items = extractItems(payload);
     if (items.length <= 1) {
-      const candidate = items[0] || payload;
+      const candidate = items.find(item => findIdInPayload(item) === id) || payload;
       const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
-      if (foundId == null || foundId === id) {
+      if (foundId === id) {
         saveIfRicher(
           candidate,
           `${base}/api/live-games/markets/${id}`
@@ -599,6 +602,43 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
 
   return result;
 }
+async function getLiveMatchById(providerMatchId, sportName = 'football', options = {}) {
+  const id = String(providerMatchId || '').trim();
+  if (!id) return null;
+
+  // Live IDs are resolved from the live feed by exact provider identity.
+  // Never substitute a first, nearest, or team-name-matched fixture.
+  try {
+    const liveMatches = await fetchLiveFootballFixtures(sportName);
+    const exact = liveMatches.find(m => String(m?.providerMatchId || '').trim() === id);
+    if (!exact) return null;
+
+    if (options && options.rich === true &&
+        (!Array.isArray(exact.markets) || exact.markets.length <= 1)) {
+      try {
+        const details = await getMatchMarkets(id, sportName);
+        if (details && Array.isArray(details.markets) && details.markets.length > (exact.markets || []).length) {
+          const merged = new Map();
+          for (const m of (exact.markets || [])) merged.set(String(m.key) + ':' + String(m.name), m);
+          for (const m of details.markets) {
+            const k = String(m.key) + ':' + String(m.name);
+            if (!merged.has(k)) merged.set(k, m);
+          }
+          exact.markets = Array.from(merged.values());
+          exact.bookmakers = Array.from(new Set([...(exact.bookmakers || []), ...(details.bookmakers || [])]));
+          exact.odds = exact.odds || {};
+          exact.odds.markets = exact.markets;
+          exact.odds.bookmakers = exact.bookmakers;
+        }
+      } catch (_) {}
+    }
+
+    return String(exact.providerMatchId) === id ? exact : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function getMatchById(providerMatchId, sportName = 'football', options = {}) {
   const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
@@ -610,7 +650,7 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
     SPORT_IDS[sport]
   ].filter(Number.isFinite)));
 
-  // STEP 1 — resolve the EXACT fixture. Never items[0]: every candidate item
+  // STEP 1 — resolve the EXACT fixture: every candidate item
   // is checked against the requested id before being accepted. SofaBets can
   // expose the same fixture through more than one host with different market
   // depth, so every host is checked and the richest VALIDATED copy is kept.
@@ -846,15 +886,21 @@ function normalizeMatch(raw) {
     const normalizedSelections = Array.isArray(selections) ? selections.map((selection, si) => {
       if (!selection || typeof selection !== 'object') return null;
       const price = pick(selection, ['odds', 'odd', 'price', 'value', 'decimalOdds', 'decimalValue', 'decimal_value', 'oddsDecimal']);
+      const selectionId = pick(selection, ['id', 'selectionId', 'selection_id', 'outcomeId', 'outcome_id', 'choiceId']);
+      const selectionKey = pick(selection, ['key', 'selectionKey', 'selection_key', 'outcomeKey', 'outcome_key', 'name', 'label']);
       return {
-        key: String(pick(selection, ['id', 'key', 'selectionId', 'selection_id', 'name', 'label']) || ('selection_' + si)),
+        id: selectionId != null ? String(selectionId) : null,
+        key: String(selectionKey != null ? selectionKey : (selectionId != null ? selectionId : ('selection_' + si))),
         name: String(pick(selection, ['name', 'label', 'selectionName', 'selection_name', 'outcomeName']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(Number(price)) ? Number(price) : null,
         bookmaker: pick(selection, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
       };
     }).filter(Boolean) : [];
+    const marketId = pick(market, ['id', 'marketId', 'market_id']);
+    const marketKey = pick(market, ['key', 'type', 'marketType', 'market_type']);
     return {
-      key: String(pick(market, ['id', 'key', 'marketId', 'market_id', 'type']) || ('market_' + index)),
+      id: marketId != null ? String(marketId) : null,
+      key: String(marketKey != null ? marketKey : (marketId != null ? marketId : ('market_' + index))),
       name: String(pick(market, ['name', 'marketType', 'marketName', 'market_name', 'type']) || 'Market'),
       selections: normalizedSelections,
       bookmaker: pick(market, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
@@ -1010,7 +1056,7 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
   finally { allFixturesInFlight.delete(key); }
 }
 
-async function fetchLiveFootballFixtures() {
+async function fetchLiveFootballFixtures(sportName = 'football') {
   const livePaths = ['/api/live-games'];
   let lastError = null;
 
@@ -1023,7 +1069,7 @@ async function fetchLiveFootballFixtures() {
             page: String(page),
             limit: '100',
             marketType: 'match result',
-            sport: 'football'
+            sport: String(sportName || 'football').toLowerCase()
           });
           const rawItems = extractItems(payload);
           if (!rawItems.length) break;
@@ -1102,4 +1148,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

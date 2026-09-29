@@ -154,6 +154,33 @@ async function finalizeBet(bet) {
 // Try to settle a single selection using a known match result
 function applyResult(s, matchResult, homeScore, awayScore) {
   if (s.result !== 'pending') return false;
+
+  // Provider-native markets are not interchangeable with SafariBet's legacy
+  // picks. Only grade them from score when the provider market/selection can
+  // be identified safely; never interpret an arbitrary provider key as 1X2.
+  if (s.provider === 'sofabets') {
+    const marketText = String(s.providerMarketKey || s.market || '').toLowerCase();
+    const pickText = String(s.pickLabel || s.providerSelectionKey || s.pick || '').toLowerCase();
+    let providerPick = null;
+
+    if (/(over.?under|total.?goals|goals)/.test(marketText + ' ' + (s.pickLabel || '')) && /over/.test(pickText)) providerPick = 'over25';
+    else if (/(over.?under|total.?goals|goals)/.test(marketText + ' ' + (s.pickLabel || '')) && /under/.test(pickText)) providerPick = 'under25';
+    else if (/both.?teams.?to.?score|btts/.test(marketText + ' ' + (s.pickLabel || ''))) providerPick = /(^|\b)(no|not)\b/.test(pickText) ? 'btts_no' : 'btts';
+    else if (/(match.?result|1x2|winner|win)/.test(marketText + ' ' + (s.pickLabel || ''))) {
+      if (pickText === String(s.homeTeam || '').toLowerCase() || /home/.test(pickText)) providerPick = 'home';
+      else if (pickText === String(s.awayTeam || '').toLowerCase() || /away/.test(pickText)) providerPick = 'away';
+      else if (/draw|tie/.test(pickText)) providerPick = 'draw';
+    }
+
+    if (!providerPick) return false;
+    const grade = gradeSelection(providerPick, matchResult, homeScore, awayScore);
+    if (!grade) return false;
+    s.result = grade;
+    s.settledAt = new Date();
+    if (homeScore !== null && homeScore !== undefined) s.score = { home: homeScore, away: awayScore };
+    return true;
+  }
+
   const grade = gradeSelection(s.pick, matchResult, homeScore, awayScore);
   if (!grade) return false;
   s.result    = grade;
@@ -295,7 +322,7 @@ async function _runSettlementInner(includeApiFetch) {
           const applied = applyResult(s, entry.result, entry.homeScore, entry.awayScore);
           if (applied) {
             changed = true;
-            console.log(`  ✅ Graded: ${s.homeTeam} vs ${s.awayTeam} | pick:${s.pick} → ${s.result} (match result: ${entry.result} ${entry.homeScore}-${entry.awayScore})`);
+            console.log(`  ✅ Graded: ${s.homeTeam} vs ${s.awayTeam} | market:${s.providerMarketKey || s.market} selection:${s.providerSelectionKey || s.pick} → ${s.result} (match result: ${entry.result} ${entry.homeScore}-${entry.awayScore})`);
             // Update the Match record's result in DB for future runs
             await Match.findOneAndUpdate(
               { matchId: s.matchId },
