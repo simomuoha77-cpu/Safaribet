@@ -11,6 +11,49 @@ const { getFixtures, getLive, competitionKey } = require('../engine/apifootball'
 const sofaBets = require('../providers/sofaBetsProvider');
 const router  = express.Router();
 
+// SafariBet's codebase has, at different times, generated THREE different
+// sofabets_ matchId shapes:
+//   1. sofabets_<id>                — server/engine/apifootball.js: the
+//                                      MAIN football/featured feed. No sport
+//                                      segment at all — this is the format
+//                                      most matches on the site actually use.
+//   2. sofabets_<sport>_<id>        — server/routes/sports.js: non-football
+//                                      sport tabs (basketball, tennis, etc).
+//   3. sofabets_live_<sport>_<id>   — server/routes/sports.js: the live tab
+//                                      for those same non-football sports.
+// This route previously only understood shapes 2/3, which silently broke
+// every shape-1 match (i.e. most football matches): sport ended up being
+// the numeric id itself and providerId ended up empty, so the provider
+// lookup always returned null and any rich-market refresh was a silent
+// no-op. Provider ids observed so far are always purely numeric, so that's
+// used to tell shape 1 apart from shape 2 (whose first segment is a sport
+// name, never a number).
+function parseSofaMatchId(rawId) {
+  const str = String(rawId || '');
+  if (!str.startsWith('sofabets_')) return null;
+  const parts = str.slice('sofabets_'.length).split('_').filter(Boolean);
+  if (!parts.length) return null;
+
+  if (parts[0] === 'live') {
+    const rest = parts.slice(1);
+    if (rest.length >= 2 && Number.isNaN(Number(rest[0]))) {
+      // sofabets_live_<sport>_<id>
+      return { isLive: true, sport: rest[0], providerId: rest.slice(1).join('_') };
+    }
+    // sofabets_live_<id> — no sport segment, default to football.
+    return { isLive: true, sport: 'football', providerId: rest.join('_') };
+  }
+
+  if (parts.length >= 2 && Number.isNaN(Number(parts[0]))) {
+    // sofabets_<sport>_<id>
+    return { isLive: false, sport: parts[0], providerId: parts.slice(1).join('_') };
+  }
+
+  // sofabets_<id> — the main football feed's own format.
+  return { isLive: false, sport: 'football', providerId: parts.join('_') };
+}
+
+
 // Short request-coalescing cache to avoid duplicate upstream calls within the
 // same few seconds. NOT a data store — expires fast enough that stale data
 // can never linger between poll cycles.
@@ -331,10 +374,6 @@ router.get('/history/:matchId', async (req, res) => {
 });
 
 // ── MATCH DETAIL WITH ALL MARKETS ──
-// Real markets (1x2, ou25, btts, dc) come from Juan AI's aiOdds directly.
-// Everything else (handicap) is mathematically derived from those real odds,
-// NOT sent by Juan AI, and is explicitly flagged isSynthetic:true so the
-// frontend can show a clear "estimated, not live bookmaker odds" indicator.
 router.get('/match/:matchId', async (req, res) => {
   try {
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
@@ -343,11 +382,10 @@ router.get('/match/:matchId', async (req, res) => {
     // the football Match collection. Allow the same More markets page to work
     // for tennis, basketball, cricket, rugby, hockey, volleyball and handball.
     if (!m && String(req.params.matchId).startsWith('sofabets_')) {
-      const parts = String(req.params.matchId).split('_');
-      const isLiveId = parts[1] === 'live';
-      const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
-      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
-      const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
+      const parsed = parseSofaMatchId(req.params.matchId);
+      if (parsed && parsed.providerId) {
+        const { isLive: isLiveId, sport, providerId } = parsed;
+        const direct = await sofaBets.getMatchById(providerId, sport, { rich: req.query.rich === '1' });
       if (direct && direct.homeTeam && direct.awayTeam) {
         m = {
           matchId: req.params.matchId,
@@ -377,26 +415,27 @@ router.get('/match/:matchId', async (req, res) => {
           realOddsSource: 'SofaBets'
         };
       }
+      }
     }
 
     // When More Markets requests rich=1, refresh the persisted SofaBets
     // match from the provider so MongoDB's primary-market snapshot cannot
     // hide SofaBets' full native market catalogue.
     if (m && req.query.rich === '1' && String(req.params.matchId).startsWith('sofabets_')) {
-      const parts = String(req.params.matchId).split('_');
-      const isLiveId = parts[1] === 'live';
-      const sport = isLiveId ? (parts[2] || 'football') : (parts[1] || 'football');
-      const providerId = isLiveId ? parts.slice(3).join('_') : parts.slice(2).join('_');
-      try {
-        const direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
-        if (direct && Array.isArray(direct.markets) && direct.markets.length) {
-          m.markets = direct.markets;
-          m.bookmakers = direct.bookmakers || [];
-          m.providerOdds = direct.odds || m.providerOdds || null;
-          console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
+      const parsed = parseSofaMatchId(req.params.matchId);
+      if (parsed && parsed.providerId) {
+        const { sport, providerId } = parsed;
+        try {
+          const direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
+          if (direct && Array.isArray(direct.markets) && direct.markets.length) {
+            m.markets = direct.markets;
+            m.bookmakers = direct.bookmakers || [];
+            m.providerOdds = direct.odds || m.providerOdds || null;
+            console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
+          }
+        } catch (err) {
+          console.warn('[odds/match] rich SofaBets refresh failed:', err.message);
         }
-      } catch (err) {
-        console.warn('[odds/match] rich SofaBets refresh failed:', err.message);
       }
     }
 

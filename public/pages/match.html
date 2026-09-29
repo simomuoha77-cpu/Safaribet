@@ -107,7 +107,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 // Prefer sessionStorage (keeps the URL clean, no vendor-identifying matchId
 // visible in the address bar) — fall back to the old ?id= query string only
 // for backward compatibility with any links already shared before this change.
-const matchId = sessionStorage.getItem('currentMatchId') || new URLSearchParams(location.search).get('id');
+const urlMatchId = new URLSearchParams(location.search).get('id');
+const matchId = urlMatchId || sessionStorage.getItem('currentMatchId');
 let matchData = null;
 let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
 
@@ -124,7 +125,7 @@ async function loadMatch(){
     // Fast path: render the match and whatever markets are already cached
     // immediately. The rich SofaBets catalogue is refreshed in the background
     // so this page never sits on a blocking "Loading match…" screen.
-    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`);
+    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' });
     const d = await r.json();
     if (!d.success) {
       document.getElementById('matchHeader').innerHTML = `<div class="loading">${d.message || 'Match not found'}</div>`;

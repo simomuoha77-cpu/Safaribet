@@ -405,46 +405,200 @@ function normalizeMarketList(payload) {
   }).filter(m => m.selections.some(s => Number.isFinite(s.odds)));
 }
 
+// Find an id-like field on a payload or its most likely nested fixture
+// object, WITHOUT assuming any particular shape. Returns null if no id-like
+// field can be found (not the same as "matches" — callers must not treat
+// "no id found" as a pass).
+function findIdInPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const direct = pick(payload, ['id', 'fixtureId', 'fixture_id', 'eventId', 'event_id', 'matchId', 'match_id']);
+  if (direct != null) return String(direct).trim();
+  for (const key of ['fixture', 'data', 'event', 'match']) {
+    const nested = payload[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const nid = pick(nested, ['id', 'fixtureId', 'fixture_id', 'eventId', 'event_id', 'matchId', 'match_id']);
+      if (nid != null) return String(nid).trim();
+    }
+  }
+  return null;
+}
+
 const matchMarketsCache = new Map();
 
 async function getMatchMarkets(providerMatchId, sportName = 'football') {
-  const cacheKey = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '');
+  const cacheKey =
+    String(sportName || 'football').toLowerCase() + ':' +
+    String(providerMatchId || '');
+
   const cached = matchMarketsCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 60000) return cached.data;
+  if (cached && Date.now() - cached.ts < 60000) {
+    return cached.data;
+  }
 
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
 
   const name = String(sportName || 'football').toLowerCase();
-  if (name !== 'football') return { markets: [], bookmakers: [] };
 
+  const sportIds = Array.from(new Set([
+    ...(SPORT_ID_CANDIDATES[name] || []),
+    SPORT_IDS[name]
+  ].filter(Number.isFinite)));
+
+  const result = {
+    markets: [],
+    bookmakers: []
+  };
+
+  const saveIfRicher = (payload, source) => {
+    try {
+      const markets = normalizeMarketList(
+        payload?.fixture || payload
+      );
+
+      if (!Array.isArray(markets)) return;
+      if (markets.length <= result.markets.length) return;
+
+      const bookmakers = Array.from(new Set(
+        markets.flatMap(m => [
+          m.bookmaker,
+          ...((m.selections || []).map(s => s.bookmaker))
+        ].filter(Boolean))
+      ));
+
+      result.markets = markets;
+      result.bookmakers = bookmakers;
+
+      console.log(
+        `[sofaBetsProvider] rich markets ${id}: ${markets.length} via ${source}`
+      );
+    } catch (err) {
+      console.warn(
+        `[sofaBetsProvider] market normalize failed ${id} via ${source}: ${err.message}`
+      );
+    }
+  };
+
+  // Normal/upcoming fixtures: request the exact fixture from SofaBets.
+  // IMPORTANT: SofaBets has been observed to IGNORE the fixtureId filter and
+  // return an unrelated page of fixtures instead (this is the exact cause of
+  // a past bug where "Suriname vs Martinique" was requested but markets from
+  // an unrelated "Czechia vs England" fixture were attached). Never extract
+  // markets from the raw payload as a whole — only from an item whose id
+  // field has been checked and matches the requested id.
+  for (const sportId of sportIds) {
+    for (const base of BASES) {
+      try {
+        const payload = await sofaFetch(
+          base,
+          '/api/fixtures-by-sport',
+          {
+            sportId: String(sportId),
+            fixtureId: id,
+            page: '1',
+            limit: '1'
+          }
+        );
+
+        for (const item of extractItems(payload)) {
+          const itemId = String(pick(item, [
+            'id',
+            'fixtureId',
+            'fixture_id',
+            'eventId',
+            'event_id',
+            'matchId',
+            'match_id'
+          ])).trim();
+
+          if (itemId === id) {
+            saveIfRicher(
+              item,
+              `${base}/api/fixtures-by-sport:item`
+            );
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // Direct SofaBets fixture/event market endpoints.
+  const directPaths = [
+    `/api/fixtures/${encodeURIComponent(id)}/markets`,
+    `/api/events/${encodeURIComponent(id)}/markets`,
+    `/api/fixtures/${encodeURIComponent(id)}`,
+    `/api/matches/${encodeURIComponent(id)}`,
+    `/api/events/${encodeURIComponent(id)}`
+  ];
+
+  for (const base of BASES) {
+    for (const path of directPaths) {
+      try {
+        const payload = await sofaFetch(base, path, {});
+        const items = extractItems(payload);
+
+        // A genuinely single-fixture endpoint should return zero, one, or a
+        // wrapped single object — never a multi-fixture list. If it returns
+        // several fixture-like items, the guessed path almost certainly
+        // isn't a real per-fixture endpoint and is instead echoing back a
+        // generic list; accepting it risks attaching another fixture's
+        // markets, so skip it entirely.
+        if (items.length > 1) {
+          continue;
+        }
+
+        const candidate = items[0] || payload;
+        const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
+
+        // If the payload identifies itself with a DIFFERENT fixture id than
+        // requested, it belongs to another fixture — never accept it. If no
+        // id field is present at all we cannot rule this out either, so we
+        // only proceed when the endpoint explicitly confirms the same id.
+        if (foundId == null || foundId !== id) {
+          continue;
+        }
+
+        saveIfRicher(candidate, `${base}${path}`);
+      } catch (_) {}
+    }
+  }
+
+  // Live fixtures have a dedicated market endpoint. The fixture id is already
+  // in the URL path, but SofaBets responses have been unreliable elsewhere,
+  // so still confirm the id before trusting the markets.
   try {
     const base = 'https://feed.sofabets.com';
+
     const payload = await sofaFetch(
       base,
       `/api/live-games/markets/${encodeURIComponent(id)}`,
       {}
     );
 
-    const markets = normalizeMarketList(payload?.fixture || payload);
-    const bookmakers = Array.from(new Set(
-      markets.flatMap(m => [
-        m.bookmaker,
-        ...m.selections.map(s => s.bookmaker)
-      ].filter(Boolean))
-    ));
+    const items = extractItems(payload);
+    if (items.length <= 1) {
+      const candidate = items[0] || payload;
+      const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
+      if (foundId == null || foundId === id) {
+        saveIfRicher(
+          candidate,
+          `${base}/api/live-games/markets/${id}`
+        );
+      }
+    }
+  } catch (_) {}
 
-    const result = { markets, bookmakers };
-    matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });
+  matchMarketsCache.set(cacheKey, {
+    ts: Date.now(),
+    data: result
+  });
 
-    console.log(`[sofaBetsProvider] rich markets ${id}: ${markets.length}`);
-    return result;
-  } catch (err) {
-    console.warn(`[sofaBetsProvider] rich markets ${id} failed: ${err.message}`);
-    return { markets: [], bookmakers: [] };
-  }
+  console.log(
+    `[sofaBetsProvider] final rich markets ${id}: ${result.markets.length}`
+  );
+
+  return result;
 }
-
 async function getMatchById(providerMatchId, sportName = 'football', options = {}) {
   const rich = options && options.rich === true;
   const id = String(providerMatchId || '').trim();
@@ -456,20 +610,17 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
     SPORT_IDS[sport]
   ].filter(Number.isFinite)));
 
-  // First get rich markets, but never trust their fixture metadata.
-  let details = { markets: [], bookmakers: [] };
-  if (rich) {
-    try {
-      details = await getMatchMarkets(id, sport);
-    } catch (_) {}
-  }
+  // STEP 1 — resolve the EXACT fixture. Never items[0]: every candidate item
+  // is checked against the requested id before being accepted. SofaBets can
+  // expose the same fixture through more than one host with different market
+  // depth, so every host is checked and the richest VALIDATED copy is kept.
+  let best = null;
+  let bestMarketCount = -1;
 
-  // Find the exact fixture through the normal SofaBets catalogue.
-  // IMPORTANT: never use items[0] because SofaBets may ignore fixtureId.
   for (const sportId of candidates) {
     for (const base of BASES) {
       try {
-        for (let page = 1; page <= 20; page++) {
+        for (let page = 1; page <= 100; page++) {
           const payload = await sofaFetch(
             base,
             '/api/fixtures-by-sport',
@@ -498,19 +649,20 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
           if (item) {
             const normalized = safeNormalizeMatch(item);
 
-            if (normalized) {
-              if (details.markets && details.markets.length) {
-                normalized.markets = details.markets;
-                normalized.bookmakers = details.bookmakers || [];
-                normalized.odds = normalized.odds || {};
-                normalized.odds.markets = details.markets;
-                normalized.odds.bookmakers = details.bookmakers || [];
+            // Re-confirm identity after normalization too — normalizeMatch
+            // must report the same providerMatchId we asked for.
+            if (normalized && String(normalized.providerMatchId).trim() === id) {
+              const marketCount = Array.isArray(normalized.markets) ? normalized.markets.length : 0;
+              if (!best || marketCount > bestMarketCount) {
+                best = normalized;
+                bestMarketCount = marketCount;
               }
-
-              normalized.providerMatchId = id;
-              return normalized;
             }
           }
+
+          // Exact fixture handled for this host. Continue with other hosts
+          // in case one of them carries a richer, still-validated, copy.
+          if (item) break;
 
           const more =
             payload &&
@@ -528,15 +680,42 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
     }
   }
 
-  // Only return markets without metadata if the markets themselves exist.
-  // Never invent or attach unrelated fixture metadata.
-  return details.markets && details.markets.length
-    ? {
-        providerMatchId: id,
-        markets: details.markets,
-        bookmakers: details.bookmakers || []
+  // The exact fixture could not be confirmed anywhere. Per policy, never
+  // fabricate a match record or hand back markets with no verified owner.
+  if (!best) return null;
+
+  // STEP 2 — only reach for the supplementary lookup when this fixture's own
+  // embedded data didn't already carry more than the basic Match Result
+  // market. This keeps the common case fast (no extra requests needed) and,
+  // more importantly, means the riskier lookup is never given the chance to
+  // clobber markets we've already confirmed belong to this exact fixture.
+  if (rich && bestMarketCount <= 1) {
+    try {
+      const details = await getMatchMarkets(id, sport);
+      if (details && Array.isArray(details.markets) && details.markets.length > bestMarketCount) {
+        // Merge, never replace: keep every market already confirmed for this
+        // fixture and only add markets that aren't already present.
+        const merged = new Map();
+        for (const m of (best.markets || [])) merged.set(m.key + ':' + m.name, m);
+        for (const m of details.markets) {
+          const k = m.key + ':' + m.name;
+          if (!merged.has(k)) merged.set(k, m);
+        }
+        const mergedMarkets = Array.from(merged.values());
+        const mergedBookmakers = Array.from(new Set([...(best.bookmakers || []), ...(details.bookmakers || [])]));
+
+        best.markets = mergedMarkets;
+        best.bookmakers = mergedBookmakers;
+        best.odds = best.odds || {};
+        best.odds.markets = mergedMarkets;
+        best.odds.bookmakers = mergedBookmakers;
+
+        console.log(`[sofaBetsProvider] getMatchById enriched ${id}: ${bestMarketCount} -> ${mergedMarkets.length} markets`);
       }
-    : null;
+    } catch (_) {}
+  }
+
+  return best;
 }
 
 function normalizeMatch(raw) {
