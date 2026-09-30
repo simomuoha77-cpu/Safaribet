@@ -120,26 +120,75 @@ if (!matchId) {
   loadMatch();
 }
 
+// Turn whatever we already knew about this match on the previous page (team
+// names, league, current 1X2 odds, status/score) into the same shape the
+// markets renderer expects, so there's something real to paint before the
+// network has answered at all.
+function summaryToMatchData(s){
+  const hasOdds = s.odds && (s.odds.home != null || s.odds.draw != null || s.odds.away != null);
+  const legacyMarket = hasOdds ? [{
+    market: '1x2',
+    label: 'Match Result',
+    providerMarket: false,
+    isSynthetic: false,
+    options: [
+      { pick: 'home', pickLabel: s.homeTeam, odds: Number(s.odds.home) },
+      ...(s.odds.draw != null ? [{ pick: 'draw', pickLabel: 'Draw', odds: Number(s.odds.draw) }] : []),
+      { pick: 'away', pickLabel: s.awayTeam, odds: Number(s.odds.away) }
+    ].filter(o => Number.isFinite(o.odds))
+  }] : [];
+  return {
+    matchId: s.matchId,
+    homeTeam: s.homeTeam,
+    awayTeam: s.awayTeam,
+    league: s.league,
+    commenceTime: s.commenceTime,
+    status: s.status,
+    score: s.score || {},
+    markets: (Array.isArray(s.markets) && s.markets.length) ? s.markets : legacyMarket
+  };
+}
+
 async function loadMatch(){
+  // Instant paint: if we already know roughly what this match looks like
+  // from the page the user just came from, render it immediately — no
+  // network wait, no loading screen. The full SofaBets market catalogue is
+  // then fetched below and merged in silently the moment it arrives.
+  let paintedFromCache = false;
   try {
-    // Fast path: render the match and whatever markets are already cached
-    // immediately. The rich SofaBets catalogue is refreshed in the background
-    // so this page never sits on a blocking "Loading match…" screen.
+    const cachedRaw = sessionStorage.getItem('currentMatchSummary');
+    if (cachedRaw) {
+      const cached = JSON.parse(cachedRaw);
+      if (cached && String(cached.matchId) === String(matchId)) {
+        matchData = summaryToMatchData(cached);
+        renderHeader();
+        renderMarkets();
+        updateSlipBar();
+        paintedFromCache = true;
+      }
+    }
+  } catch (e) { /* corrupt cache — fall through to the normal network load */ }
+
+  try {
     const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' });
     const d = await r.json();
     if (!d.success) {
-      document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
+      // Only show the error state if we had nothing to show at all —
+      // never blow away an already-painted cached view over a background
+      // refresh hiccup.
+      if (!paintedFromCache) {
+        document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
+      }
       return;
     }
     matchData = d.data;
     renderHeader();
     renderMarkets();
     updateSlipBar();
-
-    // SafariBet builds its own markets from the odds already loaded above.
-    // No background provider-market request is needed.
   } catch(e) {
-    document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
+    if (!paintedFromCache) {
+      document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
+    }
   }
 }
 

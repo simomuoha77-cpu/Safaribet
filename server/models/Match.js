@@ -41,6 +41,13 @@ const matchSchema = new mongoose.Schema({
   // sport to SafariBet's small legacy 1X2 set.
   markets:   { type: mongoose.Schema.Types.Mixed, default: [] },
   bookmakers:{ type: mongoose.Schema.Types.Mixed, default: [] },
+  // When `markets` was last populated with the FULL SofaBets catalogue (as
+  // opposed to just the default single Match Result market from the routine
+  // sync). Lets callers skip repeating the slow external SofaBets search —
+  // which can loop through many pages across several hosts — when a recent
+  // enough copy is already sitting in MongoDB. Separate from the document's
+  // own `updatedAt`, which also changes on unrelated routine odds updates.
+  marketsRefreshedAt: { type: Date, default: null },
   providerOdds: { type: mongoose.Schema.Types.Mixed, default: null },
   aiOdds: {
     homeWin:      { type: Number, default: null },

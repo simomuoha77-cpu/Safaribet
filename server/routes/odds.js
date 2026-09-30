@@ -425,8 +425,18 @@ router.get('/match/:matchId', async (req, res) => {
             providerOdds: direct.odds || null,
             providerSource: 'sofabets',
             realOddsSource: 'SofaBets',
-            providerMatchId: String(direct.providerMatchId)
+            providerMatchId: String(direct.providerMatchId),
+            marketsRefreshedAt: (Array.isArray(direct.markets) && direct.markets.length > 1) ? new Date() : null
           };
+          // Persist so this fixture can be found instantly next time (by this
+          // route, by bet placement, or by any other viewer) instead of
+          // re-running the full external SofaBets search from scratch on
+          // every single request for it.
+          Match.findOneAndUpdate(
+            { matchId: req.params.matchId },
+            { $set: m },
+            { upsert: true }
+          ).catch(err => console.warn('[odds/match] failed to persist resolved match:', err.message));
         }
       }
     }
@@ -434,7 +444,19 @@ router.get('/match/:matchId', async (req, res) => {
     // When More Markets requests rich=1, refresh the persisted SofaBets
     // match from the provider so MongoDB's primary-market snapshot cannot
     // hide SofaBets' full native market catalogue.
-    if (m && req.query.rich === '1' && String(req.params.matchId).startsWith('sofabets_')) {
+    //
+    // MARKETS_FRESH_MS: if this exact fixture's rich catalogue was already
+    // fetched within this window, skip the external SofaBets search
+    // entirely and serve straight from MongoDB. That search can loop through
+    // many pages across several hosts, so repeating it on every click/bet is
+    // what made this feel slow — most of the time the data hasn't changed
+    // since the last click seconds ago anyway.
+    const MARKETS_FRESH_MS = 20000;
+    const marketsAlreadyFresh = m && m.marketsRefreshedAt &&
+      (Date.now() - new Date(m.marketsRefreshedAt).getTime()) < MARKETS_FRESH_MS &&
+      Array.isArray(m.markets) && m.markets.length > 1;
+
+    if (m && req.query.rich === '1' && !marketsAlreadyFresh && String(req.params.matchId).startsWith('sofabets_')) {
       const parsed = parseSofaMatchId(req.params.matchId);
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
@@ -451,6 +473,7 @@ router.get('/match/:matchId', async (req, res) => {
             m.bookmakers = direct.bookmakers || [];
             m.providerOdds = direct.odds || m.providerOdds || null;
             m.providerMatchId = String(direct.providerMatchId);
+            m.marketsRefreshedAt = new Date();
             if (directIsLive) {
               m.status = 'live';
               m.score = {
@@ -461,6 +484,23 @@ router.get('/match/:matchId', async (req, res) => {
               };
             }
             console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
+
+            // Persist immediately (don't block the response on this write) so
+            // the next request for this exact fixture — whether it's this
+            // same route, or a bet-placement check — can be served straight
+            // from MongoDB instead of repeating this same external search.
+            Match.findOneAndUpdate(
+              { matchId: req.params.matchId },
+              {
+                $set: {
+                  markets: direct.markets,
+                  bookmakers: direct.bookmakers || [],
+                  providerOdds: direct.odds || undefined,
+                  providerMatchId: String(direct.providerMatchId),
+                  marketsRefreshedAt: m.marketsRefreshedAt
+                }
+              }
+            ).catch(err => console.warn('[odds/match] failed to persist rich markets:', err.message));
           }
         } catch (err) {
           console.warn('[odds/match] rich SofaBets refresh failed:', err.message);

@@ -2810,8 +2810,30 @@ function esc(s){return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 // /match. Note: this means the browser back/forward buttons won't distinguish
 // between different matches visited this way (sessionStorage always holds the
 // most recent one) — a deliberate tradeoff for keeping the URL clean.
+//
+// Also caches whatever we already know about this match (team names, league,
+// current 1X2 odds, status/score) so the match page can paint instantly
+// instead of showing a loading screen while it waits on the network — the
+// full provider market catalogue is then fetched in the background on that
+// page and merged in once it arrives.
+function findKnownMatch(matchId){
+  const pools = [allMatches, progressiveMatches, ...Array.from(sportTabCache.values())];
+  for (const pool of pools){
+    if (!Array.isArray(pool)) continue;
+    const found = pool.find(m => m && String(m.matchId) === String(matchId));
+    if (found) return found;
+  }
+  return null;
+}
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
+  const known = findKnownMatch(matchId);
+  if (known){
+    try { sessionStorage.setItem('currentMatchSummary', JSON.stringify(known)); }
+    catch(e) { sessionStorage.removeItem('currentMatchSummary'); }
+  } else {
+    sessionStorage.removeItem('currentMatchSummary');
+  }
   location.href = '/match';
 }
 

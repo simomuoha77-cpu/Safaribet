@@ -168,13 +168,43 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
         if (!providerId) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
+        // Fast path: if this exact fixture's rich market catalogue was
+        // already fetched and persisted recently (almost always true —  the
+        // user just came from viewing this match's markets seconds ago),
+        // serve straight from MongoDB instead of repeating the full external
+        // SofaBets search, which can loop through many pages across several
+        // hosts and is what made placing a bet feel slow. Falls straight
+        // through to the full resolver below if the cached copy is missing,
+        // stale, or doesn't contain the exact selection being bet on.
+        const existingMatch = matchMap[s.matchId];
+        const MARKETS_FRESH_MS = 20000;
+        const cachedFresh = existingMatch && existingMatch.marketsRefreshedAt &&
+          (Date.now() - new Date(existingMatch.marketsRefreshedAt).getTime()) < MARKETS_FRESH_MS &&
+          Array.isArray(existingMatch.markets) && existingMatch.markets.length > 1;
+
+        let direct = null;
+        if (cachedFresh) {
+          direct = {
+            providerMatchId: providerId,
+            homeTeam: existingMatch.homeTeam,
+            awayTeam: existingMatch.awayTeam,
+            competition: existingMatch.league,
+            utcDate: existingMatch.commenceTime,
+            status: existingMatch.status === 'live' ? 'IN_PLAY' : existingMatch.status,
+            markets: existingMatch.markets,
+            score: { fullTime: existingMatch.score || {} }
+          };
+        }
+
         // Never decide "is this fixture live?" from the id string alone — the
         // main football pipeline's ids never carry a live/upcoming marker, so
         // a fixture that kicked off after the page loaded must still be
         // checked against the live feed. resolveExactFixture tries both, in
         // the right order, and only trusts a result that independently
         // confirms this exact provider id.
-        let direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
+        if (!direct) {
+          direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
+        }
         if (direct && String(direct.providerMatchId) !== String(providerId)) direct = null;
         const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
         if (isLiveId && direct && !directIsLive) {
@@ -191,18 +221,38 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         const requestedSelectionId = s.providerSelectionId ? String(s.providerSelectionId) : null;
         const requestedSelectionKey = String(s.providerSelectionKey);
 
-        providerMarket = (direct.markets || []).find(m =>
-          (requestedMarketId && m.id != null && String(m.id) === requestedMarketId) ||
-          (m.key != null && String(m.key) === requestedMarketKey)
-        );
-        if (!providerMarket) {
-          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
+        const findMarketAndOutcome = (source) => {
+          const mk = (source.markets || []).find(m =>
+            (requestedMarketId && m.id != null && String(m.id) === requestedMarketId) ||
+            (m.key != null && String(m.key) === requestedMarketKey)
+          );
+          if (!mk) return null;
+          const out = (mk.selections || []).find(o =>
+            (requestedSelectionId && o.id != null && String(o.id) === requestedSelectionId) ||
+            (o.key != null && String(o.key) === requestedSelectionKey)
+          );
+          return out ? { mk, out } : null;
+        };
+
+        let found = findMarketAndOutcome(direct);
+
+        // The cached copy didn't have this specific market/selection — rare
+        // (e.g. a market that appeared after the last refresh), but rather
+        // than reject a bet the user can clearly see on screen, fall back to
+        // a live check before giving up.
+        if (!found && cachedFresh) {
+          const fresh = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
+          if (fresh && String(fresh.providerMatchId) === String(providerId)) {
+            direct = fresh;
+            found = findMarketAndOutcome(direct);
+          }
         }
 
-        providerOutcome = (providerMarket.selections || []).find(o =>
-          (requestedSelectionId && o.id != null && String(o.id) === requestedSelectionId) ||
-          (o.key != null && String(o.key) === requestedSelectionKey)
-        );
+        if (!found) {
+          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
+        }
+        providerMarket = found.mk;
+        providerOutcome = found.out;
         if (!providerOutcome || !Number.isFinite(Number(providerOutcome.odds)) || Number(providerOutcome.odds) < 1.01) {
           return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
         }
