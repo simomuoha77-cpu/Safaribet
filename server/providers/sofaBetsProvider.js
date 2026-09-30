@@ -606,6 +606,39 @@ async function getMatchMarkets(providerMatchId, sportName = 'football') {
 
   return result;
 }
+// Single source of truth for resolving a SofaBets fixture by its exact
+// provider id, used by every route instead of each one deciding for itself
+// whether to check the live feed or the prematch catalogue. This matters
+// because SafariBet's main football pipeline uses the exact same bare
+// `sofabets_<id>` id whether a fixture is upcoming or has already kicked
+// off — there is no "live_" marker to go by — so a naive "only check the
+// live feed when the id says live" check silently breaks the moment a
+// fixture the user is looking at goes live. Both getMatchById and
+// getLiveMatchById already enforce exact-id identity on their own, so
+// whichever one confirms the fixture is trusted as-is; this function only
+// decides which order to try them in.
+async function resolveExactFixture(providerId, sportName, options = {}) {
+  const rich = !!(options && options.rich);
+  const preferLive = !!(options && options.preferLive);
+
+  const tryLive = () => getLiveMatchById(providerId, sportName, { rich }).catch(() => null);
+  const tryPrematch = () => getMatchById(providerId, sportName, { rich }).catch(() => null);
+
+  if (preferLive) {
+    // The caller's id explicitly signalled "live" (SofaBets' non-football
+    // sport tabs use a sofabets_live_<sport>_<id> scheme) — check there first,
+    // but still fall back to the prematch catalogue in case the fixture was
+    // just re-classified.
+    return (await tryLive()) || (await tryPrematch());
+  }
+
+  // Common case: try the prematch catalogue first (cheaper — a single-pass
+  // cached lookup for most callers). If it can't confirm the fixture, it may
+  // simply have kicked off and dropped out of that listing, so check the
+  // live feed before giving up entirely.
+  return (await tryPrematch()) || (await tryLive());
+}
+
 async function getLiveMatchById(providerMatchId, sportName = 'football', options = {}) {
   const id = String(providerMatchId || '').trim();
   if (!id) return null;
@@ -1178,4 +1211,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

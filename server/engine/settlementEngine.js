@@ -29,6 +29,106 @@ function scoreToResult(h, a) {
   return h > a ? 'home' : a > h ? 'away' : 'draw';
 }
 
+// Grade a SofaBets-native (provider) selection directly from its own stored
+// market name + pick label + final score — no translation through the
+// legacy pick-code table, which only knows SafariBet's own six markets.
+// Returns 'won' | 'lost' | 'void' | null (null = leave pending; the existing
+// stale-pending safety net in runSettlement below still applies, so an
+// unrecognized market never gets silently mis-graded — it just waits for
+// manual review instead).
+function gradeProviderSelection(s, homeScore, awayScore) {
+  const h = Number(homeScore), a = Number(awayScore);
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+  const total = h + a;
+
+  const homeTeam = clean(s.homeTeam || '');
+  const awayTeam = clean(s.awayTeam || '');
+  // Prefer the market's actual stored name (added going forward — see
+  // Bet.js marketLabel). Older bets placed before that field existed fall
+  // back to the previous heuristic of combining whatever text is available.
+  const marketText = clean(s.marketLabel || s.providerMarketKey || s.market || '');
+  const pickLabelRaw = String(s.pickLabel || s.providerSelectionKey || s.pick || '');
+  const pickText = clean(pickLabelRaw);
+
+  const mentionsHome = pickText && homeTeam && (pickText === homeTeam || pickText.includes(homeTeam) || homeTeam.includes(pickText));
+  const mentionsAway = pickText && awayTeam && (pickText === awayTeam || pickText.includes(awayTeam) || awayTeam.includes(pickText));
+  // .includes(), not exact equality — Double Chance labels are compound
+  // phrases like "Draw or Namibia", not the bare word "draw".
+  const mentionsDraw = pickText.includes('draw') || pickText === 'x' || pickText.includes('tie');
+
+  // ── Match Result / 1X2 / Winner ──
+  if (/matchresult|1x2|winner|fulltimeresult|fulltime$/.test(marketText)) {
+    if (mentionsDraw) return h === a ? 'won' : 'lost';
+    if (mentionsHome) return h > a ? 'won' : 'lost';
+    if (mentionsAway) return a > h ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Draw No Bet ──
+  if (/drawnobet|dnb/.test(marketText)) {
+    if (h === a) return 'void'; // stake refunded — standard DNB rule
+    if (mentionsHome) return h > a ? 'won' : 'lost';
+    if (mentionsAway) return a > h ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Double Chance ── (pick combines two of the three 1X2 outcomes, e.g.
+  // "Home or Draw", "Draw or Away", "Home or Away")
+  if (/doublechance/.test(marketText)) {
+    if (!(mentionsHome || mentionsAway || mentionsDraw)) return null;
+    const won = (mentionsHome && h > a) || (mentionsAway && a > h) || (mentionsDraw && h === a);
+    return won ? 'won' : 'lost';
+  }
+
+  // ── Both Teams To Score ──
+  if (/bothteamstoscore|btts/.test(marketText)) {
+    if (/^(yes|gg)$/.test(pickText)) return (h > 0 && a > 0) ? 'won' : 'lost';
+    if (/^(no|ng)$/.test(pickText)) return (h === 0 || a === 0) ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Odd/Even (total goals) ──
+  if (/oddeven/.test(marketText)) {
+    const isOdd = total % 2 === 1;
+    if (pickText === 'odd') return isOdd ? 'won' : 'lost';
+    if (pickText === 'even') return !isOdd ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Correct Score / Exact Score — pick label like "2-1" or "2:1" ──
+  const csMatch = pickLabelRaw.match(/^(\d+)\s*[-:]\s*(\d+)$/);
+  if (csMatch && /correctscore|exactscore/.test(marketText)) {
+    return (Number(csMatch[1]) === h && Number(csMatch[2]) === a) ? 'won' : 'lost';
+  }
+
+  // ── Exact/Total Goals — pick label like "3" or "3 goals" meaning the
+  // exact total number of goals in the match ──
+  if (/exactgoals|totalgoals/.test(marketText)) {
+    const numMatch = pickLabelRaw.match(/(\d+)/);
+    if (numMatch) return Number(numMatch[1]) === total ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Over/Under — ANY line, not just 2.5. Covers both a match-wide total
+  // ("Over/Under", pick "Over 2.5") and a single team's own total ("Comoros
+  // total", pick "Over 0.5") — the market name is checked for which team it
+  // names, defaulting to the match-wide total if neither/both are named. ──
+  const ouMatch = pickLabelRaw.match(/^(over|under)\s*([\d.]+)$/i);
+  if (ouMatch) {
+    const isOver = ouMatch[1].toLowerCase() === 'over';
+    const line = Number(ouMatch[2]);
+    if (!Number.isFinite(line)) return null;
+    let relevant = total;
+    const marketMentionsHome = marketText.includes(homeTeam) && homeTeam.length > 0;
+    const marketMentionsAway = marketText.includes(awayTeam) && awayTeam.length > 0;
+    if (marketMentionsHome && !marketMentionsAway) relevant = h;
+    else if (marketMentionsAway && !marketMentionsHome) relevant = a;
+    return isOver ? (relevant > line ? 'won' : 'lost') : (relevant < line ? 'won' : 'lost');
+  }
+
+  return null; // unrecognized market/pick combination — leave pending for manual review
+}
+
 // Grade a selection pick against the match result
 // Handles 1x2 picks (home/draw/away) AND extended markets (dc_1x, dc_12, dc_x2, btts, bttsNo, over25, under25)
 function gradeSelection(pick, result, homeScore, awayScore) {
@@ -156,24 +256,11 @@ function applyResult(s, matchResult, homeScore, awayScore) {
   if (s.result !== 'pending') return false;
 
   // Provider-native markets are not interchangeable with SafariBet's legacy
-  // picks. Only grade them from score when the provider market/selection can
-  // be identified safely; never interpret an arbitrary provider key as 1X2.
+  // picks. Grade them directly from their own stored market name + pick
+  // label — never interpret an arbitrary provider key as if it were one of
+  // SafariBet's six legacy picks.
   if (s.provider === 'sofabets') {
-    const marketText = String(s.providerMarketKey || s.market || '').toLowerCase();
-    const pickText = String(s.pickLabel || s.providerSelectionKey || s.pick || '').toLowerCase();
-    let providerPick = null;
-
-    if (/(over.?under|total.?goals|goals)/.test(marketText + ' ' + (s.pickLabel || '')) && /over/.test(pickText)) providerPick = 'over25';
-    else if (/(over.?under|total.?goals|goals)/.test(marketText + ' ' + (s.pickLabel || '')) && /under/.test(pickText)) providerPick = 'under25';
-    else if (/both.?teams.?to.?score|btts/.test(marketText + ' ' + (s.pickLabel || ''))) providerPick = /(^|\b)(no|not)\b/.test(pickText) ? 'btts_no' : 'btts';
-    else if (/(match.?result|1x2|winner|win)/.test(marketText + ' ' + (s.pickLabel || ''))) {
-      if (pickText === String(s.homeTeam || '').toLowerCase() || /home/.test(pickText)) providerPick = 'home';
-      else if (pickText === String(s.awayTeam || '').toLowerCase() || /away/.test(pickText)) providerPick = 'away';
-      else if (/draw|tie/.test(pickText)) providerPick = 'draw';
-    }
-
-    if (!providerPick) return false;
-    const grade = gradeSelection(providerPick, matchResult, homeScore, awayScore);
+    const grade = gradeProviderSelection(s, homeScore, awayScore);
     if (!grade) return false;
     s.result = grade;
     s.settledAt = new Date();

@@ -168,16 +168,16 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
         if (!providerId) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
-        let direct = null;
-        if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
-          direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
-        }
-        if (!direct && !isLiveId) {
-          direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
-        }
+        // Never decide "is this fixture live?" from the id string alone — the
+        // main football pipeline's ids never carry a live/upcoming marker, so
+        // a fixture that kicked off after the page loaded must still be
+        // checked against the live feed. resolveExactFixture tries both, in
+        // the right order, and only trusts a result that independently
+        // confirms this exact provider id.
+        let direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
         if (direct && String(direct.providerMatchId) !== String(providerId)) direct = null;
-        if (isLiveId && direct &&
-            !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
+        const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
+        if (isLiveId && direct && !directIsLive) {
           direct = null;
         }
 
@@ -208,12 +208,21 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         }
 
         serverOdds = Number(providerOutcome.odds);
-        if (isLiveId && !['IN_PLAY','LIVE','PAUSED'].includes(String(direct.status || '').toUpperCase())) {
+        const directStatusUpper = String(direct.status || '').toUpperCase();
+        if (['FINISHED', 'CANCELLED', 'POSTPONED', 'ABANDONED'].includes(directStatusUpper)) {
+          return res.status(400).json({ success: false, message: 'Betting has closed for this fixture' });
+        }
+        if (isLiveId && !directIsLive) {
           return res.status(400).json({ success: false, message: 'Live betting is no longer available for this fixture' });
         }
 
         // Construct the same canonical match shape used by settlement and the
         // existing bet record, while retaining the exact provider identity.
+        // Status is derived from what the provider actually reported, not
+        // from whether the id string happened to contain "live_" — the main
+        // football pipeline's bare ids never encode that, so trusting the id
+        // here would mislabel an in-play fixture resolved via the live-feed
+        // fallback as merely "upcoming".
         match = {
           matchId: s.matchId,
           providerMatchId: providerId,
@@ -222,7 +231,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
           league: direct.competition || sport,
           sport,
           commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-          status: isLiveId ? 'live' : 'upcoming',
+          status: directIsLive ? 'live' : 'upcoming',
           score: {
             home: direct.score?.fullTime?.home ?? null,
             away: direct.score?.fullTime?.away ?? null,
@@ -266,6 +275,7 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         pick:          s.pick,
         providerMarketId: providerSelection ? String(providerMarket.id ?? s.providerMarketId ?? '') : undefined,
         providerMarketKey: providerSelection ? String(providerMarket.key ?? s.providerMarketKey) : undefined,
+        marketLabel: providerSelection ? String(providerMarket.name || providerMarket.label || '') : undefined,
         providerSelectionId: providerSelection ? String(providerOutcome.id ?? s.providerSelectionId ?? '') : undefined,
         providerSelectionKey: providerSelection ? String(providerOutcome.key ?? s.providerSelectionKey) : undefined,
         provider: providerSelection ? 'sofabets' : undefined,

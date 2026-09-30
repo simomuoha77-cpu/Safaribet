@@ -24,6 +24,13 @@ const selectionSchema = new mongoose.Schema({
   pick:         { type: String, required: true },
   providerMarketId:    { type: String },
   providerMarketKey:   { type: String },
+  // The market's actual display name (e.g. "Double Chance", "Comoros total") —
+  // as opposed to providerMarketKey, which is an opaque numeric id and useless
+  // for settlement to pattern-match against. Captured once at placement time
+  // so settlement never needs to re-fetch the provider (whose market catalogue
+  // may have rotated/expired by settlement time) just to know what kind of
+  // market this selection belongs to.
+  marketLabel:          { type: String },
   providerSelectionId: { type: String },
   providerSelectionKey:{ type: String },
   provider:             { type: String },

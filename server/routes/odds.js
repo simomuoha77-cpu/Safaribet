@@ -379,33 +379,23 @@ router.get('/match/:matchId', async (req, res) => {
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
 
     // SofaBets live IDs are authoritative provider identities. Resolve the
-    // exact live fixture from the live feed first; never substitute a DB
-    // fixture or a first/nearest/team-name match.
+    // exact fixture via the shared resolver, which checks both the live feed
+    // and the prematch catalogue (in the right order) rather than assuming
+    // liveness from the id string — the main football pipeline's ids never
+    // carry a live/upcoming marker, so a fixture that kicked off after the
+    // page loaded must still be checked against the live feed before this
+    // gives up. Never substitute a DB fixture or a first/nearest/team-name
+    // match.
     if (!m && String(req.params.matchId).startsWith('sofabets_')) {
       const parsed = parseSofaMatchId(req.params.matchId);
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
-        let direct = null;
+        const direct = await sofaBets.resolveExactFixture(providerId, sport, {
+          rich: req.query.rich === '1',
+          preferLive: isLiveId
+        });
 
-        if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
-          direct = await sofaBets.getLiveMatchById(providerId, sport, {
-            rich: req.query.rich === '1'
-          });
-        }
-
-        // Non-live IDs use the existing exact provider resolver. For a live
-        // ID, this is only an exact-ID fallback and may never downgrade a live
-        // request to a different fixture.
-        if (!direct) {
-          direct = await sofaBets.getMatchById(providerId, sport, {
-            rich: req.query.rich === '1'
-          });
-          if (isLiveId && direct &&
-              (String(direct.providerMatchId) !== String(providerId) ||
-               !['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase()))) {
-            direct = null;
-          }
-        }
+        const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
 
         if (direct && String(direct.providerMatchId) === String(providerId) &&
             direct.homeTeam && direct.awayTeam) {
@@ -416,8 +406,7 @@ router.get('/match/:matchId', async (req, res) => {
             homeTeam: direct.homeTeam,
             awayTeam: direct.awayTeam,
             commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-            status: ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase())
-              ? 'live' : 'upcoming',
+            status: directIsLive ? 'live' : 'upcoming',
             odds: {
               home: Number(direct.odds?.homeWin) || null,
               draw: Number(direct.odds?.draw) || null,
@@ -450,26 +439,19 @@ router.get('/match/:matchId', async (req, res) => {
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
         try {
-          let direct = null;
-          if (isLiveId && typeof sofaBets.getLiveMatchById === 'function') {
-            direct = await sofaBets.getLiveMatchById(providerId, sport, { rich: true });
-          }
-          if (!direct && !isLiveId) {
-            direct = await sofaBets.getMatchById(providerId, sport, { rich: true });
-          }
+          const direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
+          const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
 
           // Never attach a richer response unless its provider identity is
-          // exactly the requested fixture. Live IDs must also remain live.
-          const directIsExact = direct &&
-            String(direct.providerMatchId) === String(providerId) &&
-            (!isLiveId || ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase()));
+          // exactly the requested fixture.
+          const directIsExact = direct && String(direct.providerMatchId) === String(providerId);
 
           if (directIsExact && Array.isArray(direct.markets) && direct.markets.length) {
             m.markets = direct.markets;
             m.bookmakers = direct.bookmakers || [];
             m.providerOdds = direct.odds || m.providerOdds || null;
             m.providerMatchId = String(direct.providerMatchId);
-            if (isLiveId) {
+            if (directIsLive) {
               m.status = 'live';
               m.score = {
                 home: direct.score?.fullTime?.home ?? m.score?.home ?? null,

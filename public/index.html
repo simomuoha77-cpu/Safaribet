@@ -2102,6 +2102,9 @@ function renderNonFootball(matches) {
           : '<div style="padding:12px 8px;font-size:11px;color:var(--mt)">Odds unavailable</div>'
         }
       </div>
+      <div style="text-align:right;padding:4px 10px 8px" onclick="event.stopPropagation();openMatchDetail('${esc(m.matchId)}')">
+        <span style="font-size:11px;color:var(--g);font-weight:700;cursor:pointer">More markets →</span>
+      </div>
     </div>`;
   }).join('');
 }
