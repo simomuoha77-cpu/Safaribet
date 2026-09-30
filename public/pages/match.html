@@ -225,15 +225,50 @@ function renderMarkets(){
   }
   document.getElementById('modeToggle').style.display = markets.length >= 2 ? 'flex' : 'none';
 
-  const REASON_LABELS = {
-    stale_data: 'Live data updating',
-    goal_event: 'Odds recalculating after goal',
-    mathematically_certain: 'Outcome decided',
-    lead_rule: 'Selection suspended',
-    draw_late: 'Selection suspended'
-  };
-
+  // Render each market independently and never let one bad/unexpected market
+  // shape take down the whole page — previously a single throw inside this
+  // map (e.g. a non-numeric odds value, or a market missing `.options`) left
+  // marketsContainer completely blank with no error shown at all, even
+  // though the header above had already rendered fine from a separate call.
   container.innerHTML = markets.map(mk => {
+    try {
+      return renderOneMarket(mk);
+    } catch (e) {
+      console.warn('[match] failed to render a market — skipping it, not the whole page:', mk, e);
+      return '';
+    }
+  }).join('');
+
+  // Restore selection highlighting if this match/market/pick is already in the slip
+  slip.forEach(s => {
+    if (s.matchId === matchId) {
+      const el = document.getElementById(`mkt_${s.market}_${s.pick}`);
+      if (el) el.classList.add('sel');
+    }
+  });
+}
+
+const REASON_LABELS = {
+  stale_data: 'Live data updating',
+  goal_event: 'Odds recalculating after goal',
+  mathematically_certain: 'Outcome decided',
+  lead_rule: 'Selection suspended',
+  draw_late: 'Selection suspended'
+};
+
+// num(): every place an odds value gets displayed or put in a click handler
+// goes through this instead of calling .toFixed() directly on the raw value.
+// Odds can arrive as a string, null, or otherwise-shaped value depending on
+// which part of the pipeline produced this particular market, and a bare
+// `.toFixed()` call throws immediately on anything that isn't already a
+// number — which is exactly what was blanking the whole markets list.
+function num(v, fallback){
+  const n = Number(v);
+  return Number.isFinite(n) ? n : (fallback ?? 0);
+}
+
+function renderOneMarket(mk){
+    const options = Array.isArray(mk.options) ? mk.options : [];
     // SofaBets-native markets are real provider prices. They are displayed
     // exactly as supplied by SofaBets; unsupported provider markets remain
     // view-only so SafariBet never accepts a bet it cannot settle safely.
@@ -245,10 +280,10 @@ function renderMarkets(){
           <span style="font-size:9px;color:var(--g);font-weight:700">SAFARIBET</span>
         </div>
         <div class="market-body">
-          ${mk.options.map(opt => `
-            <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `id=\"mkt_${escapeAttr(mk.market)}_${escapeAttr(opt.pick)}\" onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${Number(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}','${escapeAttr(mk.providerMarketId || '')}','${escapeAttr(mk.providerMarketKey || '')}','${escapeAttr(opt.providerSelectionId || '')}','${escapeAttr(opt.providerSelectionKey || opt.pick || '')}')\"` : ''}>
+          ${options.map(opt => `
+            <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `id=\"mkt_${escapeAttr(mk.market)}_${escapeAttr(opt.pick)}\" onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${num(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}','${escapeAttr(mk.providerMarketId || '')}','${escapeAttr(mk.providerMarketKey || '')}','${escapeAttr(opt.providerSelectionId || '')}','${escapeAttr(opt.providerSelectionKey || opt.pick || '')}')\"` : ''}>
               <div class="odd-lbl">${escapeHtml(opt.pickLabel || opt.pick)}</div>
-              <div class="odd-val">${Number(opt.boostedOdds || opt.odds).toFixed(2)}</div>
+              <div class="odd-val">${num(opt.boostedOdds || opt.odds).toFixed(2)}</div>
             </div>`).join('')}
         </div>
       </div>`;
@@ -260,7 +295,7 @@ function renderMarkets(){
     // reason, otherwise the market is suspended because the risk rules judge
     // it effectively decided.
     if (mk.wholeMarketSuspended) {
-      const anyReason = (mk.options.find(o => o.reason) || {}).reason;
+      const anyReason = (options.find(o => o.reason) || {}).reason;
       const isTemporary = anyReason === 'stale_data' || anyReason === 'goal_event';
       return `
       <div class="market-card">
@@ -281,33 +316,25 @@ function renderMarkets(){
         <span style="font-size:9px;color:var(--g);font-weight:700">${mk.isSynthetic ? 'CALCULATED' : 'SAFARIBET'}</span>
       </div>
       <div class="market-body">
-        ${mk.options.map(opt => opt.suspended ? `
+        ${options.map(opt => opt.suspended ? `
           <div class="odd-btn" style="opacity:.5;cursor:default" onclick="event.stopPropagation()" title="${REASON_LABELS[opt.reason] || 'Selection suspended'}">
             <div class="odd-lbl">${escapeHtml(opt.pickLabel || pickLabel(mk.market, opt.pick))}</div>
             <div class="odd-val">🔒</div>
           </div>
         ` : `
-          <div class="odd-btn ${opt.boostedOdds?'boosted':''}" id="mkt_${mk.market}_${opt.pick}" onclick="toggleMarketPick('${mk.market}','${opt.pick}',${opt.boostedOdds||opt.odds},'${escapeAttr(pickLabel(mk.market,opt.pick))}')">
+          <div class="odd-btn ${opt.boostedOdds?'boosted':''}" id="mkt_${mk.market}_${opt.pick}" onclick="toggleMarketPick('${mk.market}','${opt.pick}',${num(opt.boostedOdds||opt.odds)},'${escapeAttr(pickLabel(mk.market,opt.pick))}')">
             ${opt.boostedOdds ? '<div class="boost-flag">⚡ BOOST</div>' : ''}
             <div class="odd-lbl">${escapeHtml(opt.pickLabel || pickLabel(mk.market, opt.pick))}</div>
             ${opt.boostedOdds
-              ? `<div class="odd-val-old">${opt.odds.toFixed(2)}</div><div class="odd-val boosted-val">${opt.boostedOdds.toFixed(2)}</div>`
-              : `<div class="odd-val">${opt.odds.toFixed(2)}</div>`}
+              ? `<div class="odd-val-old">${num(opt.odds).toFixed(2)}</div><div class="odd-val boosted-val">${num(opt.boostedOdds).toFixed(2)}</div>`
+              : `<div class="odd-val">${num(opt.odds).toFixed(2)}</div>`}
           </div>
         `).join('')}
       </div>
       ${mk.hasSuspendedPick ? `<div class="suspended-note">🔒 A selection on this market is suspended — that outcome is already effectively decided, or odds are being recalculated.</div>` : ''}
-      ${mk.options.some(o=>o.boostedOdds) ? `<div class="boost-note">⚡ Boosted odds apply to stakes up to KES ${mk.options.find(o=>o.boostedOdds).maxQualifyingStake.toLocaleString()} on that selection — normal odds apply beyond that.</div>` : ''}
+      ${options.some(o=>o.boostedOdds) ? `<div class="boost-note">⚡ Boosted odds apply to stakes up to KES ${num(options.find(o=>o.boostedOdds).maxQualifyingStake).toLocaleString()} on that selection — normal odds apply beyond that.</div>` : ''}
     </div>
-  `;}).join('');
-
-  // Restore selection highlighting if this match/market/pick is already in the slip
-  slip.forEach(s => {
-    if (s.matchId === matchId) {
-      const el = document.getElementById(`mkt_${s.market}_${s.pick}`);
-      if (el) el.classList.add('sel');
-    }
-  });
+  `;
 }
 
 function pickLabel(market, pick){

@@ -153,19 +153,23 @@ router.post('/place', auth, betLimiter, async (req, res) => {
       let providerMarket = null;
       let providerOutcome = null;
 
+      // Parsed unconditionally — needed for provider-market selections below,
+      // but also for the plain Home/Draw/Away path when the match hasn't
+      // been persisted to MongoDB (e.g. a live match sourced from the
+      // non-football live-tab pipeline, which never writes to Mongo at all).
+      const rawId = String(s.matchId || '');
+      const parts = rawId.startsWith('sofabets_') ? rawId.slice('sofabets_'.length).split('_') : [];
+      const isLiveId = parts[0] === 'live';
+      const providerId = isLiveId
+        ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts.slice(2).join('_') : parts.slice(1).join('_'))
+        : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts.slice(1).join('_') : parts.join('_'));
+      const sport = isLiveId
+        ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts[1] : 'football')
+        : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts[0] : 'football');
+
       if (providerSelection) {
         // SofaBets-native selections must be verified against the exact provider
         // fixture and the exact market/selection keys. Never resolve by teams.
-        const rawId = String(s.matchId || '');
-        const parts = rawId.startsWith('sofabets_') ? rawId.slice('sofabets_'.length).split('_') : [];
-        const isLiveId = parts[0] === 'live';
-        const providerId = isLiveId
-          ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts.slice(2).join('_') : parts.slice(1).join('_'))
-          : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts.slice(1).join('_') : parts.join('_'));
-        const sport = isLiveId
-          ? (parts.length >= 3 && Number.isNaN(Number(parts[1])) ? parts[1] : 'football')
-          : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts[0] : 'football');
-
         if (!providerId) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
         // Fast path: if this exact fixture's rich market catalogue was
@@ -290,7 +294,53 @@ router.post('/place', auth, betLimiter, async (req, res) => {
           }
         };
       } else {
-        if (!match) return res.status(400).json({ success: false, message: `Match not found: ${s.matchId}` });
+        // Plain Home/Draw/Away (or other legacy market) pick. If this exact
+        // fixture isn't in MongoDB yet — most commonly a live match whose
+        // source pipeline never persists it — resolve it directly from the
+        // provider instead of failing outright, the same way provider-market
+        // selections already do. This is what was breaking live betting: the
+        // match was real and visibly on screen, just never written to Mongo,
+        // so the lookup below always came back empty.
+        if (!match && rawId.startsWith('sofabets_') && providerId) {
+          const direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: false, preferLive: isLiveId });
+          if (direct && String(direct.providerMatchId) === String(providerId) && direct.homeTeam && direct.awayTeam) {
+            const directIsLive = ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
+            const builtMatch = {
+              matchId: s.matchId,
+              providerMatchId: providerId,
+              homeTeam: direct.homeTeam,
+              awayTeam: direct.awayTeam,
+              league: direct.competition || sport,
+              sport,
+              commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
+              status: directIsLive ? 'live' : 'upcoming',
+              hasOdds: !!direct.odds,
+              odds: {
+                home: Number(direct.odds?.homeWin) || null,
+                draw: Number(direct.odds?.draw) || null,
+                away: Number(direct.odds?.awayWin) || null,
+                updatedAt: new Date()
+              },
+              markets: direct.markets || [],
+              score: {
+                home: direct.score?.fullTime?.home ?? null,
+                away: direct.score?.fullTime?.away ?? null,
+                minute: direct.minute ?? null,
+                period: direct.status || null
+              }
+            };
+            match = builtMatch;
+            // Persist so the next request for this fixture — another
+            // selection, a page view, settlement — finds it immediately.
+            Match.findOneAndUpdate(
+              { matchId: s.matchId },
+              { $set: builtMatch },
+              { upsert: true }
+            ).catch(err => console.warn('[bets/place] failed to persist resolved match:', err.message));
+          }
+        }
+
+        if (!match) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
         if (match.status === 'finished') return res.status(400).json({ success: false, message: `Match already finished: ${match.homeTeam} vs ${match.awayTeam}` });
         if (match.status === 'cancelled') return res.status(400).json({ success: false, message: `Match cancelled: ${match.homeTeam} vs ${match.awayTeam}` });
 
@@ -629,7 +679,7 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
     const verifiedSelections = [];
     for (const s of selections) {
       const match = matchMap[s.matchId];
-      if (!match) return res.status(400).json({ success: false, message: `Match not found: ${s.matchId}` });
+      if (!match) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
       if (match.status === 'finished' || match.status === 'cancelled') {
         return res.status(400).json({ success: false, message: `Match unavailable: ${match.homeTeam} vs ${match.awayTeam}` });
       }

@@ -2817,7 +2817,7 @@ function esc(s){return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 // full provider market catalogue is then fetched in the background on that
 // page and merged in once it arrives.
 function findKnownMatch(matchId){
-  const pools = [allMatches, progressiveMatches, ...Array.from(sportTabCache.values())];
+  const pools = [allMatches, progressiveMatches, liveTabCache.data, ...Array.from(sportTabCache.values())];
   for (const pool of pools){
     if (!Array.isArray(pool)) continue;
     const found = pool.find(m => m && String(m.matchId) === String(matchId));
