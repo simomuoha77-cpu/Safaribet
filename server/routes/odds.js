@@ -513,10 +513,24 @@ router.get('/match/:matchId', async (req, res) => {
     // SafariBet builds its own markets from the 1X2 odds already on the match.
     // No extra SofaBets market request is made, so opening a match is immediate
     // and the prices always come from data SafariBet already has.
-    const providerMarkets =
+    //
+    // Deduped by display name as a final safety net: MongoDB may still hold a
+    // duplicate pair of same-named markets (e.g. two "Match Result" entries
+    // under different provider keys) persisted before this dedup existed
+    // upstream — this ensures the customer never sees that regardless of how
+    // old the stored record is.
+    const rawProviderMarkets =
       Array.isArray(m.markets) && m.markets.length
         ? m.markets
         : (Array.isArray(m.providerOdds?.markets) ? m.providerOdds.markets : []);
+    const seenMarketNames = new Set();
+    const providerMarkets = rawProviderMarkets.filter(mk => {
+      const nameKey = String(mk?.name || '').trim().toLowerCase();
+      if (!nameKey) return true; // keep unnamed entries rather than silently dropping them
+      if (seenMarketNames.has(nameKey)) return false;
+      seenMarketNames.add(nameKey);
+      return true;
+    });
 
     const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
 

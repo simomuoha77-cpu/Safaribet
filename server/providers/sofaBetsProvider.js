@@ -408,6 +408,25 @@ function normalizeMarketList(payload) {
   }).filter(m => m.selections.some(s => Number.isFinite(s.odds)));
 }
 
+// Two markets with the exact same display name on the same fixture should
+// never both be shown — but the per-source dedup elsewhere keys on key+name,
+// which doesn't catch SofaBets occasionally surfacing the same conceptual
+// market (e.g. "Match Result") under two different internal numeric keys
+// when the fixture is looked up through more than one endpoint/host. Dedupe
+// by name alone as a final pass, keeping whichever copy has more selections.
+function dedupeMarketsByName(markets) {
+  const byName = new Map();
+  for (const m of (markets || [])) {
+    const nameKey = String(m?.name || '').trim().toLowerCase();
+    if (!nameKey) continue;
+    const existing = byName.get(nameKey);
+    if (!existing || (m.selections || []).length > (existing.selections || []).length) {
+      byName.set(nameKey, m);
+    }
+  }
+  return Array.from(byName.values());
+}
+
 // Find an id-like field on a payload or its most likely nested fixture
 // object, WITHOUT assuming any particular shape. Returns null if no id-like
 // field can be found (not the same as "matches" — callers must not treat
@@ -661,7 +680,7 @@ async function getLiveMatchById(providerMatchId, sportName = 'football', options
             const k = String(m.key) + ':' + String(m.name);
             if (!merged.has(k)) merged.set(k, m);
           }
-          exact.markets = Array.from(merged.values());
+          exact.markets = dedupeMarketsByName(Array.from(merged.values()));
           exact.bookmakers = Array.from(new Set([...(exact.bookmakers || []), ...(details.bookmakers || [])]));
           exact.odds = exact.odds || {};
           exact.odds.markets = exact.markets;
@@ -804,7 +823,7 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
           const k = m.key + ':' + m.name;
           if (!merged.has(k)) merged.set(k, m);
         }
-        const mergedMarkets = Array.from(merged.values());
+        const mergedMarkets = dedupeMarketsByName(Array.from(merged.values()));
         const mergedBookmakers = Array.from(new Set([...(best.bookmakers || []), ...(details.bookmakers || [])]));
 
         best.markets = mergedMarkets;

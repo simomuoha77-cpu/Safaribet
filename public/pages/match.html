@@ -126,16 +126,21 @@ if (!matchId) {
 // network has answered at all.
 function summaryToMatchData(s){
   const hasOdds = s.odds && (s.odds.home != null || s.odds.draw != null || s.odds.away != null);
-  const legacyMarket = hasOdds ? [{
+  const options = hasOdds ? [
+    { pick: 'home', pickLabel: s.homeTeam, odds: Number(s.odds.home) },
+    ...(s.odds.draw != null ? [{ pick: 'draw', pickLabel: 'Draw', odds: Number(s.odds.draw) }] : []),
+    { pick: 'away', pickLabel: s.awayTeam, odds: Number(s.odds.away) }
+  ].filter(o => Number.isFinite(o.odds)) : [];
+  // Only worth showing as its own market card if there are at least 2 real
+  // priced outcomes — a single stray option looked exactly like a broken,
+  // half-rendered card, which is worse than just showing the loading state
+  // below until the real data (with all outcomes) arrives moments later.
+  const legacyMarket = options.length >= 2 ? [{
     market: '1x2',
     label: 'Match Result',
     providerMarket: false,
     isSynthetic: false,
-    options: [
-      { pick: 'home', pickLabel: s.homeTeam, odds: Number(s.odds.home) },
-      ...(s.odds.draw != null ? [{ pick: 'draw', pickLabel: 'Draw', odds: Number(s.odds.draw) }] : []),
-      { pick: 'away', pickLabel: s.awayTeam, odds: Number(s.odds.away) }
-    ].filter(o => Number.isFinite(o.odds))
+    options
   }] : [];
   return {
     matchId: s.matchId,
@@ -162,7 +167,7 @@ async function loadMatch(){
       if (cached && String(cached.matchId) === String(matchId)) {
         matchData = summaryToMatchData(cached);
         renderHeader();
-        renderMarkets();
+        renderMarkets(true); // true = this is the preliminary/instant paint, not the final answer yet
         updateSlipBar();
         paintedFromCache = true;
       }
@@ -183,7 +188,7 @@ async function loadMatch(){
     }
     matchData = d.data;
     renderHeader();
-    renderMarkets();
+    renderMarkets(false);
     updateSlipBar();
   } catch(e) {
     if (!paintedFromCache) {
@@ -215,11 +220,22 @@ function renderHeader(){
   `;
 }
 
-function renderMarkets(){
-  const markets = matchData.markets || [];
+function renderMarkets(isPreliminary){
+  // Never render a market card with zero options — that's exactly what
+  // produced an empty-looking, broken card. A market only earns a spot on
+  // screen once it actually has something to show.
+  const markets = (matchData.markets || []).filter(mk => Array.isArray(mk.options) && mk.options.length > 0);
   const container = document.getElementById('marketsContainer');
+
   if (!markets.length) {
-    container.innerHTML = '<div class="loading">No odds available for this match right now.</div>';
+    container.innerHTML = isPreliminary
+      // We know more markets are coming (the real fetch is still in flight)
+      // — say so plainly rather than a generic/empty state that reads like
+      // this match simply has no odds at all.
+      ? `<div class="market-card" style="text-align:center;padding:28px 16px">
+           <div class="loading" style="margin:0">Loading markets…</div>
+         </div>`
+      : '<div class="loading">No odds available for this match right now.</div>';
     document.getElementById('modeToggle').style.display = 'none';
     return;
   }
