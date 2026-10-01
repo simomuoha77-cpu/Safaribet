@@ -444,24 +444,47 @@ async function _runSettlementInner(includeApiFetch) {
           }).lean();
         } catch(e) {}
 
-        if (dbMatch?.result) {
+        // CRITICAL: a score or a `result` field on the Match document is NOT
+        // by itself proof the game has ended — both can be present on a match
+        // that is still live (a live score is written continuously while the
+        // game is in progress). The ONLY thing that may ever be treated as a
+        // final result is a match whose own status field says 'finished'.
+        // This is what previously let an in-progress match's current score
+        // get settled as if it were the final score once enough real time had
+        // passed since kickoff (e.g. a long-running live match, or a feed
+        // that hadn't yet flipped status) — exactly the bug being fixed here.
+        const dbMatchIsFinished = dbMatch && dbMatch.status === 'finished';
+
+        if (dbMatchIsFinished && dbMatch.result) {
           const applied = applyResult(s, dbMatch.result, dbMatch.score?.home, dbMatch.score?.away);
           if (applied) { changed = true;
             console.log(`  ✅ Settled from DB (late): ${s.homeTeam} vs ${s.awayTeam} → ${dbMatch.result}`); }
-        } else if (dbMatch?.score?.home !== null && dbMatch?.score?.home !== undefined
-                && dbMatch?.score?.away !== null && dbMatch?.score?.away !== undefined
-                && hoursAgo > 5) {
-          // Has a score but no result yet — compute it
+        } else if (dbMatchIsFinished
+                && dbMatch?.score?.home !== null && dbMatch?.score?.home !== undefined
+                && dbMatch?.score?.away !== null && dbMatch?.score?.away !== undefined) {
+          // Confirmed finished, but no precomputed result field yet — derive
+          // it from the FINAL score (safe now, because status === 'finished'
+          // has already been verified above).
           const r = scoreToResult(dbMatch.score.home, dbMatch.score.away);
           if (r) {
             await Match.findOneAndUpdate({ _id: dbMatch._id },
-              { $set: { result: r, status: 'finished', 'score.period': 'FT' } }).catch(()=>{});
+              { $set: { result: r, 'score.period': 'FT' } }).catch(()=>{});
             const applied = applyResult(s, r, dbMatch.score.home, dbMatch.score.away);
             if (applied) { changed = true;
-              console.log(`  ✅ Computed from score: ${s.homeTeam} ${dbMatch.score.home}-${dbMatch.score.away} ${s.awayTeam} → ${r}`); }
+              console.log(`  ✅ Computed from final score: ${s.homeTeam} ${dbMatch.score.home}-${dbMatch.score.away} ${s.awayTeam} → ${r}`); }
           }
+        } else if (dbMatch && dbMatch.status === 'live') {
+          // Affirmatively still in progress, however many hours have passed
+          // (some fixtures genuinely run long, or a feed delay can leave a
+          // match looking "overdue" while still live) — stay pending. Never
+          // void a bet out from under a game we can see is still being
+          // played; only the void-after-10h path below (which only fires
+          // when a match can't be found or confirmed at all) applies here.
+          continue;
         } else if (hoursAgo > 10) {
-          // 10+ hours, nothing found anywhere — void this selection
+          // 10+ hours, and nothing finished was ever found for this fixture
+          // (not merely "still shows live" — handled above) — void this
+          // selection rather than leave it stuck pending forever.
           console.log(`  ⚠️ VOID (${hoursAgo.toFixed(1)}h, no data): ${s.homeTeam} vs ${s.awayTeam}`);
           s.result    = 'void';
           s.settledAt = new Date();
