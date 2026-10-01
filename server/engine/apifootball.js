@@ -247,6 +247,8 @@ function normalizeDirectSofaMatch(m) {
     result: status === 'finished'
       ? ((score.home != null && score.away != null) ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null)
       : null,
+    // Only a provider-confirmed FINISHED fixture with a final score is verified.
+    finalVerified: status === 'finished' && score.home != null && score.away != null,
     isStatic: false,
     source: 'juanai',
     providerSource: 'sofabets',
@@ -375,51 +377,52 @@ async function updateLive() {
       ).catch(() => {});
     }
 
-    // Any match previously marked 'live' in DB that is no longer in the live
-    // response must have ended — mark it finished so it stops showing as live.
-    const wasLive = await Match.find({ status: 'live' }, { matchId: 1 }).lean();
-    const droppedIds = wasLive.filter(m => !liveIds.has(m.matchId)).map(m => m.matchId);
-    if (droppedIds.length) {
-      // For each match that just dropped off the live feed, use the last
-      // known score from DB to compute the result and mark finished.
-      // This is the ONLY moment we can capture the final score — once it
-      // disappears from the API there is no /results endpoint to call.
-      for (const matchId of droppedIds) {
-        const dbMatch = await Match.findOne({ matchId }).lean();
+    // A match that is no longer in the live response is NOT necessarily over:
+    // it can be halftime, a feed gap/outage, a different sport's feed (this
+    // poll only sees football), or a different id shape. A live score is never
+    // a final result, so we never infer "finished" from disappearance.
+    // Instead each dropped match is checked against the provider by its EXACT
+    // id and is only marked finished when the provider itself says FINISHED.
+    const { verifyFinalResult } = require('../services/finalResultService');
+    const wasLive = await Match.find({ status: 'live' }, { matchId: 1, lastFinalCheckAt: 1 }).lean();
+    const CHECK_GAP_MS = 2 * 60 * 1000;
+    const MAX_CHECKS_PER_POLL = 8;
+    const dropped = wasLive
+      .filter(m => !liveIds.has(m.matchId))
+      .filter(m => !m.lastFinalCheckAt || Date.now() - new Date(m.lastFinalCheckAt).getTime() > CHECK_GAP_MS)
+      .slice(0, MAX_CHECKS_PER_POLL);
+    let endedCount = 0;
+    for (const d of dropped) {
+      try {
+        const dbMatch = await Match.findOne({ matchId: d.matchId }).lean();
         if (!dbMatch) continue;
-
-        const h = dbMatch.score?.home;
-        const a = dbMatch.score?.away;
-        let result = null;
-
-        if (h !== null && h !== undefined && a !== null && a !== undefined) {
-          result = h > a ? 'home' : a > h ? 'away' : 'draw';
+        const fin = await verifyFinalResult(d.matchId);
+        if (!fin) {
+          // Not confirmed final — leave it exactly as it is (still live/unknown).
+          await Match.updateOne({ matchId: d.matchId }, { $set: { lastFinalCheckAt: new Date() } });
+          continue;
         }
-
-        await Match.findOneAndUpdate(
-          { matchId },
-          { $set: {
-              status: 'finished',
-              result,
-              settled: false,
-              'score.period': 'FT',
-              fetchedAt: new Date()
-            }
-          }
-        );
-
-        if (result) {
-          console.log(`  ✅ Match ended: ${dbMatch.homeTeam} ${h}-${a} ${dbMatch.awayTeam} → ${result}`);
-          // Immediately trigger settlement for this match
-          try {
-            const { runSettlement } = require('./settlementEngine');
-            runSettlement().catch(() => {});
-          } catch(e) {}
-        } else {
-          console.log(`  ⚠️ Match dropped with no score: ${dbMatch.homeTeam} vs ${dbMatch.awayTeam} — will void on next settlement`);
-        }
-      }
+        await Match.updateOne({ matchId: d.matchId }, { $set: {
+          status: 'finished',
+          result: fin.result,
+          'score.home': fin.homeScore,
+          'score.away': fin.awayScore,
+          'score.period': 'FT',
+          finalVerified: true,
+          finalVerifiedAt: new Date(),
+          lastFinalCheckAt: new Date(),
+          settled: false,
+          fetchedAt: new Date()
+        } });
+        endedCount++;
+        console.log(`  ✅ Match confirmed FINAL by provider: ${dbMatch.homeTeam} ${fin.homeScore}-${fin.awayScore} ${dbMatch.awayTeam} → ${fin.result}`);
+        try {
+          const { runSettlement } = require('./settlementEngine');
+          runSettlement().catch(() => {});
+        } catch (e) {}
+      } catch (e) { /* non-fatal — retried after CHECK_GAP_MS */ }
     }
+    const droppedIds = new Array(endedCount);
 
     console.log(`⚡ [sofabets] ${live.length} live matches, ${droppedIds.length} just ended`);
     if (live.length) {

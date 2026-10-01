@@ -242,6 +242,7 @@ function renderBets(bets){
         <span class="pill ${pClass}">${bet.status.charAt(0).toUpperCase()+bet.status.slice(1)}</span>
       </div>
       <div class="sels">${sels}</div>
+      ${bet.status==='pending' && bet.selections.some(s=>(s.result||'pending')==='pending') ? `<div style="font-size:11px;color:var(--yl);padding:6px 12px;background:rgba(255,214,0,0.06);border-top:1px solid var(--bd)">⏳ Pending — awaiting final result. Bets are settled only after the game has officially finished.</div>` : ''}
       ${bet.selections.some(s=>s.result==='void') ? `<div style="font-size:11px;color:#999;padding:6px 12px;background:rgba(150,150,150,0.06);border-top:1px solid var(--bd)">↩ One or more games were voided (result unavailable) — those legs do not count against your bet</div>` : ''}
       <div class="bcard-foot">
         <div class="bf"><div class="bf-lbl">Picks</div><div class="bf-val">${bet.selections.length}</div></div>

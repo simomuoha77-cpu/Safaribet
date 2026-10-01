@@ -342,7 +342,11 @@ function parseStatus(raw, utcDate) {
   const value = String(pick(raw, ['status', 'matchStatus', 'match_status', 'gameStatus', 'eventStatus', 'state']) || '').toLowerCase();
   if (value.includes('live') || value.includes('inplay') || value.includes('in_play') || value.includes('in-play')) return 'IN_PLAY';
   if (value.includes('half') || value.includes('pause')) return 'PAUSED';
-  if (value.includes('finish') || value.includes('ended') || value.includes('settled') || value === 'ft' || value.includes('complete')) return 'FINISHED';
+  // Period markers used by non-football sports (quarters, sets, overtime, ...)
+  // mean the game is still being played — never SCHEDULED, never FINISHED.
+  if (/^(q[1-4]|ot|set\s*\d|[1-5](st|nd|rd|th)\s*(quarter|set|period|half|inning)|period\s*\d|inning\s*\d|break|extra\s*time)/.test(value)) return 'IN_PLAY';
+  if (value.includes('finish') || value.includes('ended') || value.includes('settled') || value === 'ft' || value.includes('complete') ||
+      value === 'final' || value === 'full time' || value === 'fulltime' || value === 'closed' || value === 'aet' || value === 'after extra time' || value === 'after penalties') return 'FINISHED';
   return 'SCHEDULED';
 }
 

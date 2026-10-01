@@ -11,6 +11,7 @@ const User        = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { getFixtures } = require('./apifootball');
 const walletService = require('../services/walletService');
+const finalResults = require('../services/finalResultService');
 
 // ── helpers ──
 function clean(s) { return (s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
@@ -279,6 +280,8 @@ function applyResult(s, matchResult, homeScore, awayScore) {
   return true;
 }
 
+const lastVerifyAttempt = new Map(); // fixtureKey -> last provider verification attempt (ms)
+const VERIFY_COOLDOWN_MS = 90 * 1000;
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
 
 async function runSettlement(includeApiFetch = true) {
@@ -342,8 +345,11 @@ async function _runSettlementInner(includeApiFetch) {
   // settlement without needing the heavy API call on every pass.
   let dbMatches = [];
   try {
+    // LIVE SCORE ≠ FINAL RESULT: only matches the provider explicitly
+    // confirmed as FINISHED (finalVerified) may ever be used to grade a bet.
     dbMatches = await Match.find({
       status: 'finished',
+      finalVerified: true,
       result: { $nin: [null, undefined] }
     }).lean();
     console.log(`[Settlement] DB finished matches: ${dbMatches.length}`);
@@ -355,20 +361,23 @@ async function _runSettlementInner(includeApiFetch) {
   // Build lookup maps for fast matching
   const resultMap = new Map(); // matchId → {result, homeScore, awayScore}
 
+  // Keyed by EXACT fixture identity only (the matchId, plus a canonical
+  // provider-fixture key so live/non-live id shapes of the same fixture
+  // match). Never by team names — that can attach another fixture's result.
   const addToMap = (matchId, homeTeam, awayTeam, result, homeScore, awayScore) => {
     if (!result) return;
     const entry = { result, homeScore, awayScore, homeTeam, awayTeam };
     resultMap.set(matchId, entry);
-    resultMap.set(`${clean(homeTeam)}|${clean(awayTeam)}`, entry);
+    resultMap.set(finalResults.fixtureKey(matchId), entry);
   };
 
-  // DB matches first (most reliable — saved by our own updateLive)
+  // DB matches first — only provider-verified finals reach this map.
   for (const m of dbMatches) {
     addToMap(m.matchId, m.homeTeam, m.awayTeam, m.result, m.score?.home, m.score?.away);
   }
-  // API matches (may override DB if API has fresher result)
+  // API snapshot — only fixtures whose provider status is FINISHED.
   for (const m of apiMatches) {
-    if (m.result) addToMap(m.matchId, m.homeTeam, m.awayTeam, m.result, m.score?.home, m.score?.away);
+    if (m.result && m.status === 'finished' && m.finalVerified === true) addToMap(m.matchId, m.homeTeam, m.awayTeam, m.result, m.score?.home, m.score?.away);
   }
 
   console.log(`[Settlement] Result map: ${resultMap.size} entries`);
@@ -384,6 +393,8 @@ async function _runSettlementInner(includeApiFetch) {
 
   let totalSettled = 0, totalPaid = 0;
   const now = Date.now();
+  const verifiedThisRun = new Map(); // fixtureKey -> verified final | null
+
 
   for (const bet of bets) {
     try {
@@ -392,16 +403,34 @@ async function _runSettlementInner(includeApiFetch) {
       for (const s of bet.selections) {
         if (s.result !== 'pending') continue;
 
-        // Look up result by matchId first, then by team names
-        let entry = resultMap.get(s.matchId)
-          || resultMap.get(`${clean(s.homeTeam)}|${clean(s.awayTeam)}`);
+        // Look up the VERIFIED-FINAL result by exact fixture identity only.
+        let entry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
 
-        // Also try partial team name match across all DB entries
-        if (!entry) {
-          for (const [, v] of resultMap) {
-            if (teamsMatch(s.homeTeam, v.homeTeam) && teamsMatch(s.awayTeam, v.awayTeam)) {
-              entry = v; break;
+        // No verified final on file yet. Ask the provider about this EXACT
+        // fixture (cooled down, once per fixture per run). Anything other than
+        // an explicit FINISHED + final score leaves the selection PENDING.
+        if (!entry && String(s.matchId).startsWith('sofabets_')) {
+          const key = finalResults.fixtureKey(s.matchId);
+          let fin = verifiedThisRun.get(key);
+          if (fin === undefined) {
+            const last = lastVerifyAttempt.get(key) || 0;
+            if (now - last < VERIFY_COOLDOWN_MS) { fin = null; }
+            else {
+              lastVerifyAttempt.set(key, now);
+              fin = await finalResults.verifyFinalResult(s.matchId).catch(() => null);
             }
+            verifiedThisRun.set(key, fin);
+            if (fin) {
+              await Match.findOneAndUpdate({ matchId: s.matchId }, { $set: {
+                status: 'finished', result: fin.result, 'score.home': fin.homeScore, 'score.away': fin.awayScore,
+                'score.period': 'FT', finalVerified: true, finalVerifiedAt: new Date()
+              } }).catch(() => {});
+            }
+          }
+          if (fin) {
+            entry = { result: fin.result, homeScore: fin.homeScore, awayScore: fin.awayScore, homeTeam: fin.homeTeam, awayTeam: fin.awayTeam };
+            resultMap.set(s.matchId, entry);
+            resultMap.set(key, entry);
           }
         }
 
@@ -409,87 +438,33 @@ async function _runSettlementInner(includeApiFetch) {
           const applied = applyResult(s, entry.result, entry.homeScore, entry.awayScore);
           if (applied) {
             changed = true;
-            console.log(`  ✅ Graded: ${s.homeTeam} vs ${s.awayTeam} | market:${s.providerMarketKey || s.market} selection:${s.providerSelectionKey || s.pick} → ${s.result} (match result: ${entry.result} ${entry.homeScore}-${entry.awayScore})`);
-            // Update the Match record's result in DB for future runs
-            await Match.findOneAndUpdate(
-              { matchId: s.matchId },
-              { $set: { result: entry.result, status: 'finished',
-                        'score.home': entry.homeScore, 'score.away': entry.awayScore,
-                        'score.period': 'FT', settled: true } }
-            ).catch(()=>{});
+            console.log(`  ✅ Graded (final verified): ${s.homeTeam} vs ${s.awayTeam} | market:${s.providerMarketKey || s.market} selection:${s.providerSelectionKey || s.pick} → ${s.result} (final: ${entry.homeScore}-${entry.awayScore})`);
           }
           continue;
         }
 
-        // ── No result found — handle overdue selections ──
-        // commenceTime may not be on the selection itself; check bet.createdAt as fallback
+        // ── No verified final result — the selection STAYS PENDING ──
+        // A live/in-progress score, a score on a Match row, `status:'finished'`
+        // without verification, or a match missing from the live list are all
+        // NOT final. The only thing that may resolve a selection without a
+        // verified final is the existing void rule for fixtures that have been
+        // unresolvable for 10+ hours AND are not currently being updated live.
         const kickoffTime = s.commenceTime
           ? new Date(s.commenceTime).getTime()
           : new Date(bet.createdAt).getTime();
         const hoursAgo = (now - kickoffTime) / 3600000;
+        if (hoursAgo <= 10) continue;
 
-        if (hoursAgo < 3) continue; // Too early — game might still be playing
-
-        // Try DB one more time with loose team name search
         let dbMatch = null;
-        try {
-          dbMatch = await Match.findOne({
-            $or: [
-              { matchId: s.matchId },
-              {
-                homeTeam: { $regex: s.homeTeam.slice(0,5), $options: 'i' },
-                awayTeam: { $regex: s.awayTeam.slice(0,5), $options: 'i' }
-              }
-            ]
-          }).lean();
-        } catch(e) {}
+        try { dbMatch = await Match.findOne({ matchId: s.matchId }).lean(); } catch(e) {}
+        const lastTouched = dbMatch?.updatedAt ? new Date(dbMatch.updatedAt).getTime() : 0;
+        const activelyLive = dbMatch && dbMatch.status === 'live' && (now - lastTouched) < 30 * 60 * 1000;
+        if (activelyLive) continue; // genuinely still being played/updated — never void
 
-        // CRITICAL: a score or a `result` field on the Match document is NOT
-        // by itself proof the game has ended — both can be present on a match
-        // that is still live (a live score is written continuously while the
-        // game is in progress). The ONLY thing that may ever be treated as a
-        // final result is a match whose own status field says 'finished'.
-        // This is what previously let an in-progress match's current score
-        // get settled as if it were the final score once enough real time had
-        // passed since kickoff (e.g. a long-running live match, or a feed
-        // that hadn't yet flipped status) — exactly the bug being fixed here.
-        const dbMatchIsFinished = dbMatch && dbMatch.status === 'finished';
-
-        if (dbMatchIsFinished && dbMatch.result) {
-          const applied = applyResult(s, dbMatch.result, dbMatch.score?.home, dbMatch.score?.away);
-          if (applied) { changed = true;
-            console.log(`  ✅ Settled from DB (late): ${s.homeTeam} vs ${s.awayTeam} → ${dbMatch.result}`); }
-        } else if (dbMatchIsFinished
-                && dbMatch?.score?.home !== null && dbMatch?.score?.home !== undefined
-                && dbMatch?.score?.away !== null && dbMatch?.score?.away !== undefined) {
-          // Confirmed finished, but no precomputed result field yet — derive
-          // it from the FINAL score (safe now, because status === 'finished'
-          // has already been verified above).
-          const r = scoreToResult(dbMatch.score.home, dbMatch.score.away);
-          if (r) {
-            await Match.findOneAndUpdate({ _id: dbMatch._id },
-              { $set: { result: r, 'score.period': 'FT' } }).catch(()=>{});
-            const applied = applyResult(s, r, dbMatch.score.home, dbMatch.score.away);
-            if (applied) { changed = true;
-              console.log(`  ✅ Computed from final score: ${s.homeTeam} ${dbMatch.score.home}-${dbMatch.score.away} ${s.awayTeam} → ${r}`); }
-          }
-        } else if (dbMatch && dbMatch.status === 'live') {
-          // Affirmatively still in progress, however many hours have passed
-          // (some fixtures genuinely run long, or a feed delay can leave a
-          // match looking "overdue" while still live) — stay pending. Never
-          // void a bet out from under a game we can see is still being
-          // played; only the void-after-10h path below (which only fires
-          // when a match can't be found or confirmed at all) applies here.
-          continue;
-        } else if (hoursAgo > 10) {
-          // 10+ hours, and nothing finished was ever found for this fixture
-          // (not merely "still shows live" — handled above) — void this
-          // selection rather than leave it stuck pending forever.
-          console.log(`  ⚠️ VOID (${hoursAgo.toFixed(1)}h, no data): ${s.homeTeam} vs ${s.awayTeam}`);
-          s.result    = 'void';
-          s.settledAt = new Date();
-          changed     = true;
-        }
+        console.log(`  ⚠️ VOID (${hoursAgo.toFixed(1)}h, no verified final result): ${s.homeTeam} vs ${s.awayTeam}`);
+        s.result    = 'void';
+        s.settledAt = new Date();
+        changed     = true;
       }
 
       if (!changed) continue;

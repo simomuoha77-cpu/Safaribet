@@ -63,6 +63,12 @@ const matchSchema = new mongoose.Schema({
   },
   settled:    { type: Boolean, default: false },
   settledAt:  { type: Date },
+  // True ONLY when the provider has explicitly confirmed this fixture as
+  // FINISHED with a final score. `status: 'finished'` + a score is NOT enough
+  // for settlement — a live score must never be treated as a final result.
+  finalVerified:   { type: Boolean, default: false, index: true },
+  finalVerifiedAt: { type: Date, default: null },
+  lastFinalCheckAt:{ type: Date, default: null },
   isStatic:   { type: Boolean, default: false },
   source:     { type: String, enum: ['juanai'], default: 'juanai' }
 }, { timestamps: true });
