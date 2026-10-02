@@ -44,6 +44,8 @@
 // nothing about the existing navigation is removed, only improved when it
 // can be.
 window.goHome = function(){
+  // Client-side router (router.js) owns navigation once it has loaded.
+  if (window.SB && typeof SB.goHome === 'function') { SB.goHome(); return; }
   try {
     if (document.referrer) {
       var ref = new URL(document.referrer);

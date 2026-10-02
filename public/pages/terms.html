@@ -2,6 +2,7 @@
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Terms & Conditions – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 :root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--hh:52px;--bn:0px;--hdr:rgba(8,12,8,0.98)}
@@ -22,7 +23,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
   <div class="pg-date" id="pgDate">Loading...</div>
   <div class="content" id="content">Loading...</div>
 </main>
-<script>
+<script type="text/sb-page">
 fetch('/api/settings/site').then(r=>r.json()).then(d=>{
   if(!d.success) return;
   const s=d.data;
@@ -31,4 +32,5 @@ fetch('/api/settings/site').then(r=>r.json()).then(d=>{
   document.getElementById('pgDate').textContent=`Effective as of January 2025 · ${s.site_name}`;
   document.getElementById('content').innerHTML=s.terms_content;
 });
-</script></body></html>
+</script>
+<script>SB.run()</script></body></html>

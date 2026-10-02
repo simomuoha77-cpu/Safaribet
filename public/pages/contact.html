@@ -2,6 +2,7 @@
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Contact Us – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 :root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--hh:52px;--hdr:rgba(8,12,8,0.98)}
@@ -36,7 +37,7 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
   <div class="social-ttl">📲 Follow Us</div>
   <div id="socialRow" style="display:flex;gap:10px;flex-wrap:wrap;background:var(--s2);border:1px solid var(--bd);border-radius:14px;padding:16px"></div>
 </main>
-<script>
+<script type="text/sb-page">
 const SOCIAL_ICONS = {
   twitter:   { icon:'𝕏', label:'Twitter/X', color:'#1da1f2' },
   facebook:  { icon:'f', label:'Facebook',  color:'#1877f2', style:'font-size:18px;font-weight:900' },
@@ -75,4 +76,5 @@ fetch('/api/settings/site').then(r=>r.json()).then(d=>{
   }).join('');
   document.getElementById('socialRow').innerHTML=socRow||`<p style="font-size:12px;color:var(--mt)">No social links added yet.</p>`;
 });
-</script></body></html>
+</script>
+<script>SB.run()</script></body></html>

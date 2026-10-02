@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Refer & Earn – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 :root{--g:#00c853;--gg:rgba(0,200,83,0.12);--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b;--hh:52px;--bn:56px;--hdr:rgba(8,12,8,0.98)}
@@ -137,22 +138,22 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
   <div class="bni" onclick="goHome()">
     <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
   </div>
-  <div class="bni" onclick="location.href='/my-bets'">
+  <div class="bni" onclick="SB.go('/my-bets')">
     <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg>My Bets
   </div>
-  <div class="bni on" onclick="location.href='/referral'">
+  <div class="bni on" onclick="SB.go('/referral')">
     <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>Refer
   </div>
-  <div class="bni" onclick="location.href='/account'">
+  <div class="bni" onclick="SB.go('/account')">
     <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Account
   </div>
 </nav>
 
 <div class="toast" id="toast"></div>
 
-<script>
+<script type="text/sb-page">
 const token = localStorage.getItem('token');
-if (!token) { location.href = '/login'; }
+if (!token) { SB.go('/login'); }
 
 let refLink = '';
 
@@ -243,5 +244,6 @@ function showT(msg, type='') {
 
 loadStats();
 </script>
+<script>SB.run()</script>
 </body>
 </html>

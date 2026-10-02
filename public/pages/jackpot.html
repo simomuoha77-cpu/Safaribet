@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Jackpot – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
 :root{--g:#00c853;--bg:#080c08;--s1:#0d120d;--s2:#131a13;--s3:#192019;--bd:rgba(0,200,83,0.08);--tx:#e0f0e0;--mt:#4a6a4a;--yl:#ffd600;--rd:#ff3b3b}
@@ -75,7 +76,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <div class="empty">Loading jackpot…</div>
 </div>
 
-<script>
+<script type="text/sb-page">
 let round = null;
 let myEntry = null;
 let picks = {}; // matchId -> pick
@@ -259,7 +260,7 @@ function selectPick(matchId, pick){
 
 async function enterJackpot(){
   const token = localStorage.getItem('token');
-  if (!token) { location.href = '/login'; return; }
+  if (!token) { SB.go('/login'); return; }
   const el = document.getElementById('enterRes');
   el.className = 'res'; el.textContent = 'Entering...';
   try {
@@ -283,5 +284,6 @@ async function enterJackpot(){
 
 init();
 </script>
+<script>SB.run()</script>
 </body>
 </html>

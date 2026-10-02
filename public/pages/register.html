@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Register – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <style>
 :root{--g:#00c853;--bg:#0d1f0f;--s1:#111111;--s2:#1a1a1a;--s3:#2a2a2a;--bd:#1e3a1e;--tx:#ffffff;--mt:#888888;--mt2:#555555;--mt3:#444444;--yl:#f5c518;--rd:#ff6b6b}
 html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:#c8dccb;--tx:#14231a;--mt:#5c7a63;--mt2:#8aa38f;--mt3:#9ab09e;--yl:#b8860b;--rd:#d32f2f}
@@ -99,7 +100,7 @@ h2{font-size:22px;font-weight:800;color:var(--tx);margin-bottom:4px}
   </div>
 </div>
 
-<script>
+<script type="text/sb-page">
 // Show referral badge if ?ref= in URL
 window.addEventListener('DOMContentLoaded', () => {
   const ref = new URLSearchParams(location.search).get('ref');
@@ -171,7 +172,7 @@ async function doVerifyOtp(){
       localStorage.setItem('user', JSON.stringify(data.user));
       okEl.textContent = '✅ Account created! Redirecting...';
       okEl.style.display = 'block';
-      setTimeout(() => location.href = '/', 1200);
+      setTimeout(() => SB.go('/'), 1200);
     } else {
       showErr(data.message || 'Invalid code');
       btn.disabled = false;
@@ -290,5 +291,6 @@ document.addEventListener('keydown', e => {
   if(e.key === 'Enter') doRegister();
 });
 </script>
+<script>SB.run()</script>
 </body>
 </html>

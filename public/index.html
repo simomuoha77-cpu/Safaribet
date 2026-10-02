@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SafariBet – Bet Smart, Win Big</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 :root{
@@ -464,7 +465,7 @@ header{
     <button onclick="dismissAppBanner()" style="background:transparent;color:#8a9a8a;border:none;font-size:18px;padding:0 4px;line-height:1">✕</button>
   </div>
 </div>
-<script>
+<script type="text/sb-page">
   (function(){
     var isAndroid = /Android/i.test(navigator.userAgent);
     var alreadyDismissed = sessionStorage.getItem('sb_app_banner_dismissed') === '1';
@@ -492,6 +493,7 @@ header{
     location.href = intentUrl;
   }
 </script>
+<script>SB.run()</script>
 
 <header>
   <div class="logo">Safari<span>Bet</span></div>
@@ -500,16 +502,16 @@ header{
       <span style="font-size:20px">🔔</span>
       <span id="notifBadge" style="display:none;position:absolute;top:0;right:0;background:#ff1744;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px">0</span>
     </div>
-    <div class="balpill" id="balpill" onclick="location.href='/deposit'">
+    <div class="balpill" id="balpill" onclick="SB.go('/deposit')">
       KES <span id="balv">0.00</span> <span class="dep">+Deposit</span>
     </div>
-    <button class="hbtn o" id="loginBtn" onclick="location.href='/login'">Login</button>
-    <button class="hbtn g" id="joinBtn"  onclick="location.href='/register'">Join</button>
+    <button class="hbtn o" id="loginBtn" onclick="SB.go('/login')">Login</button>
+    <button class="hbtn g" id="joinBtn"  onclick="SB.go('/register')">Join</button>
     <button class="hbtn o" id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
   </div>
 </header>
 
-<script>
+<script type="text/sb-page">
 // ── APPLY AUTH HEADER STATE IMMEDIATELY ──
 // This runs the instant the parser reaches this point — right after the
 // header exists in the DOM — instead of waiting for DOMContentLoaded, which
@@ -538,6 +540,7 @@ header{
   document.getElementById('balv').textContent = parseFloat(window.USER.balance || 0).toFixed(2);
 })();
 </script>
+<script>SB.run()</script>
 
 <!-- NOTIFICATION DROPDOWN PANEL -->
 <div id="notifPanel" style="display:none;position:fixed;top:52px;right:8px;left:8px;max-width:360px;margin-left:auto;background:var(--s1);border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:999;max-height:70vh;overflow-y:auto">
@@ -635,7 +638,7 @@ header{
 
   <!-- COMPACT PROMO STRIP -->
   <div style="display:flex;gap:8px;padding:8px 10px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--bd)">
-    <div onclick="location.href='/register'" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(0,200,83,0.12),rgba(0,200,83,0.05));border:1px solid rgba(0,200,83,0.25);border-radius:10px;padding:8px 12px;min-width:200px;cursor:pointer">
+    <div onclick="SB.go('/register')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(0,200,83,0.12),rgba(0,200,83,0.05));border:1px solid rgba(0,200,83,0.25);border-radius:10px;padding:8px 12px;min-width:200px;cursor:pointer">
       <span style="font-size:22px">🎁</span>
       <div>
         <div style="font-size:11px;font-weight:800;color:var(--g)">Welcome Bonus</div>
@@ -647,15 +650,15 @@ header{
       <span style="font-size:18px">🔴</span>
       <div style="font-size:11px;font-weight:700;color:#fff">Live Now</div>
     </div>
-    <div onclick="location.href='/casino'" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(0,200,83,0.06);border:1px solid rgba(0,200,83,0.15);border-radius:10px;padding:8px 12px;cursor:pointer">
+    <div onclick="SB.go('/casino')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(0,200,83,0.06);border:1px solid rgba(0,200,83,0.15);border-radius:10px;padding:8px 12px;cursor:pointer">
       <span style="font-size:18px">🎰</span>
       <div style="font-size:11px;font-weight:700;color:#fff">Casino</div>
     </div>
-    <div onclick="location.href='/jackpot'" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(255,214,0,0.08);border:1px solid rgba(255,214,0,0.25);border-radius:10px;padding:8px 12px;cursor:pointer">
+    <div onclick="SB.go('/jackpot')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(255,214,0,0.08);border:1px solid rgba(255,214,0,0.25);border-radius:10px;padding:8px 12px;cursor:pointer">
       <span style="font-size:18px">🏆</span>
       <div style="font-size:11px;font-weight:700;color:var(--yl)">Jackpot</div>
     </div>
-    <div onclick="location.href='/referral'" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(255,214,0,0.06);border:1px solid rgba(255,214,0,0.2);border-radius:10px;padding:8px 12px;cursor:pointer">
+    <div onclick="SB.go('/referral')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(255,214,0,0.06);border:1px solid rgba(255,214,0,0.2);border-radius:10px;padding:8px 12px;cursor:pointer">
       <span style="font-size:18px">🤝</span>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--yl)">Refer & Earn</div>
@@ -687,7 +690,7 @@ header{
     <div class="loading"><div class="spin"></div>Loading matches...</div>
   </div>
 
-  <script>
+  <script type="text/sb-page">
   // ── EARLY MATCH-LIST PAINT ──
   // Same idea as the header's early-paint script: this runs the instant the
   // parser reaches this point, right after #matchList exists — not once
@@ -706,6 +709,7 @@ header{
     } catch(e) {}
   })();
   </script>
+<script>SB.run()</script>
 
   <!-- SITE FOOTER -->
   <footer id="siteFooter" style="margin-top:24px;border-top:1px solid var(--bd);padding:0 0 8px">
@@ -763,7 +767,7 @@ header{
   </footer>
 </main>
 
-<script>
+<script type="text/sb-page">
 // Load footer content from settings API
 (async function loadFooter(){
   try{
@@ -842,6 +846,7 @@ function toggleFaq(i){
   ico.style.transform=open?'rotate(0)':'rotate(45deg)';
 }
 </script>
+<script>SB.run()</script>
 
 <!-- FAB -->
 <!-- OVERLAY -->
@@ -888,7 +893,7 @@ function toggleFaq(i){
       </div>
     </div>
     <div id="slipAction">
-      <button class="login-prompt" onclick="location.href='/login'">Login to Place Bet</button>
+      <button class="login-prompt" onclick="SB.go('/login')">Login to Place Bet</button>
     </div>
   </div>
 </div>
@@ -932,12 +937,12 @@ function toggleFaq(i){
     <div class="modal-row"><span class="mr-l">Net Payout</span><span class="mr-r" style="color:var(--yl)" id="mPayout">—</span></div>
     <div class="modal-row"><span class="mr-l">New Balance</span><span class="mr-r" style="color:var(--g)" id="mBal">—</span></div>
     <button class="mbtn g" onclick="closeSuccess()">Continue Betting</button>
-    <button class="mbtn o" onclick="location.href='/my-bets'">View My Bets</button>
+    <button class="mbtn o" onclick="SB.go('/my-bets')">View My Bets</button>
   </div>
 </div>
 
 <nav class="bnav">
-  <div class="bni on" id="bni-home" onclick="location.href='/'">
+  <div class="bni on" id="bni-home" onclick="SB.go('/')">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
     Home
   </div>
@@ -948,15 +953,15 @@ function toggleFaq(i){
     </div>
     Bet Slip
   </div>
-  <div class="bni" id="bni-casino" onclick="location.href='/casino'">
+  <div class="bni" id="bni-casino" onclick="SB.go('/casino')">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm4 4v2h2V8H8zm6 0v2h2V8h-2zm-6 6v2h2v-2H8zm6 0v2h2v-2h-2zm-3-3v2h2v-2h-2z"/></svg></div>
     Casino
   </div>
-  <div class="bni" id="bni-bets" onclick="location.href='/my-bets'">
+  <div class="bni" id="bni-bets" onclick="SB.go('/my-bets')">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>
     My Bets
   </div>
-  <div class="bni" id="bni-account" onclick="location.href='/account'">
+  <div class="bni" id="bni-account" onclick="SB.go('/account')">
     <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
     Account
   </div>
@@ -964,7 +969,7 @@ function toggleFaq(i){
 
 <div class="toast" id="toast"></div>
 
-<script>
+<script type="text/sb-page">
 // ── STATE ──
 // USER may already have been set by the early auth-header script right after
 // <header> (window.USER) — pick that up instead of resetting to null, or the
@@ -1095,7 +1100,7 @@ async function loadFavorites(){
   }catch(e){ /* non-critical */ }
 }
 async function toggleFavorite(team, sport){
-  if (!localStorage.getItem('token')) { location.href = '/login'; return; }
+  if (!localStorage.getItem('token')) { SB.go('/login'); return; }
   try{
     const r = await fetch('/api/favorites/toggle', {
       method:'POST', headers: {...apiHeaders(),'Content-Type':'application/json'},
@@ -1237,7 +1242,7 @@ async function loadAdminBanner(){
       const pimg = document.getElementById('popupAdImg');
       pimg.src = d.popupImage;
       pimg.onerror = () => { overlay.style.display = 'none'; };
-      pimg.onclick = () => { if (d.popupLink) location.href = d.popupLink; };
+      pimg.onclick = () => { if (d.popupLink) SB.go(d.popupLink); };
       overlay.style.display = 'flex';
       sessionStorage.setItem('popupAdSeen', '1');
     }
@@ -2175,7 +2180,7 @@ function pickMatchFromSearch(matchId, sport) {
 }
 
 function logout(){
-  localStorage.removeItem('token'); localStorage.removeItem('user'); location.reload();
+  localStorage.removeItem('token'); localStorage.removeItem('user'); SB.reload();
 }
 
 // Fetch the real, current wallet balance from the server — the same endpoint
@@ -2834,7 +2839,7 @@ function openMatchDetail(matchId){
   } else {
     sessionStorage.removeItem('currentMatchSummary');
   }
-  location.href = '/match';
+  SB.go('/match');
 }
 
 // ── TOGGLE ODD ──
@@ -3032,7 +3037,7 @@ async function submitLoadCode(){
 
 // ── PLACE BET ──
 async function placeBet(){
-  if(!USER){ location.href='/login'; return; }
+  if(!USER){ SB.go('/login'); return; }
   if(!slip.length) return showT('Add selections first','err');
 
   const stake=parseFloat(document.getElementById('stakeInp').value);
@@ -3086,5 +3091,6 @@ function showT(msg,type=''){
   clearTimeout(tTmr); tTmr=setTimeout(()=>el.classList.remove('on'),3500);
 }
 </script>
+<script>SB.run()</script>
 </body>
 </html>

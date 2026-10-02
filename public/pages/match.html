@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Match – SafariBet</title>
 <script src="/js/theme.js"></script>
+<script src="/js/router.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
 :root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
@@ -85,7 +86,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 
 <div class="main" id="marketsContainer"></div>
 
-<div class="slip-bar" id="slipBar" onclick="location.href='/?openSlip=1'">
+<div class="slip-bar" id="slipBar" onclick="SB.go('/?openSlip=1')">
   <span id="slipCount">0 selections</span>
   <span id="slipOdds">View Slip on Home →</span>
 </div>
@@ -103,7 +104,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <div class="res" id="builderRes"></div>
 </div>
 
-<script>
+<script type="text/sb-page">
 // Prefer sessionStorage (keeps the URL clean, no vendor-identifying matchId
 // visible in the address bar) — fall back to the old ?id= query string only
 // for backward compatibility with any links already shared before this change.
@@ -475,7 +476,7 @@ async function placeBetBuilder(){
   if (!stake || stake < 10) { el.className='res er'; el.textContent='Enter a stake (min KES 10)'; return; }
 
   const token = localStorage.getItem('token');
-  if (!token) { location.href = '/login'; return; }
+  if (!token) { SB.go('/login'); return; }
 
   el.className='res'; el.textContent='Placing bet...';
   try{
@@ -491,7 +492,7 @@ async function placeBetBuilder(){
       document.getElementById('builderStake').value = '';
       document.querySelectorAll('.odd-btn.sel').forEach(b=>b.classList.remove('sel'));
       updateBuilderBar();
-      setTimeout(() => location.href = '/my-bets', 1200);
+      setTimeout(() => SB.go('/my-bets'), 1200);
     } else {
       el.className='res er'; el.textContent = '❌ ' + (d.message || 'Failed to place bet');
     }
@@ -512,5 +513,6 @@ function updateSlipBar(){
 // Refresh live score/minute periodically without losing selections
 setInterval(() => { if (matchData?.status === 'live') loadMatch(); }, 20000);
 </script>
+<script>SB.run()</script>
 </body>
 </html>
