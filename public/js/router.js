@@ -492,6 +492,53 @@
     });
   }
 
+
+  // ── More Markets prefetch / cache ──
+  // Starts loading a match's full market list as soon as the user shows intent
+  // (touch/hover on "More markets"), so by the time /match is open the answer
+  // is usually already there. Uses the un-wrapped fetch so it still completes
+  // after the page that started it has been navigated away from.
+  var mmInflight = {};
+  function mmKey(id) { return 'sb_mm_' + id; }
+  SB.prefetchMatch = function (id) {
+    if (!id || !_fetch) return Promise.resolve(null);
+    var e = mmInflight[id];
+    if (e && Date.now() - e.ts < 20000) return e.p;
+    var p = _fetch('/api/odds/match/' + encodeURIComponent(id) + '?rich=1', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.success && d.data) {
+          try {
+            sessionStorage.setItem(mmKey(id), JSON.stringify({ ts: Date.now(), data: d.data }));
+            var idx = JSON.parse(sessionStorage.getItem('sb_mm_index') || '[]').filter(function (x) { return x !== id; });
+            idx.push(id);
+            while (idx.length > 6) { try { sessionStorage.removeItem(mmKey(idx.shift())); } catch (e2) {} }
+            sessionStorage.setItem('sb_mm_index', JSON.stringify(idx));
+          } catch (e3) {}
+        }
+        return d;
+      });
+    mmInflight[id] = { ts: Date.now(), p: p };
+    p.catch(function () { delete mmInflight[id]; });
+    return p;
+  };
+  SB.cachedMatch = function (id) {
+    try {
+      var r = JSON.parse(sessionStorage.getItem(mmKey(id)) || 'null');
+      if (r && r.data && Date.now() - r.ts < 10 * 60000) return r.data;
+    } catch (e) {}
+    return null;
+  };
+  function mmIntent(ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[onclick*="openMatchDetail("]') : null;
+    if (!el) return;
+    var m = /openMatchDetail\(\s*['"]([^'"]+)['"]/.exec(el.getAttribute('onclick') || '');
+    if (m) SB.prefetchMatch(m[1]);
+  }
+  _docAdd.call(document, 'touchstart', mmIntent, { passive: true });
+  _docAdd.call(document, 'mousedown', mmIntent, true);
+  _docAdd.call(document, 'mouseover', mmIntent, { passive: true });
+
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}

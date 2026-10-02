@@ -461,45 +461,43 @@ router.get('/match/:matchId', async (req, res) => {
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
         try {
-          const direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
-          const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
+          // FAST PATH: the fixture is already known (it is in MongoDB), so there
+          // is no need to re-resolve it by crawling the provider's catalogue.
+          // Ask for just this exact fixture's markets (every candidate payload
+          // is checked against the exact provider id inside getMatchMarkets)
+          // and, in parallel, whether it is live right now (cached live feed).
+          const [details, liveNow] = await Promise.all([
+            sofaBets.getMatchMarkets(providerId, sport).catch(() => null),
+            sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null)
+          ]);
+          const liveIsExact = liveNow && String(liveNow.providerMatchId) === String(providerId);
+          const haveRich = details && Array.isArray(details.markets) && details.markets.length > 0;
 
-          // Never attach a richer response unless its provider identity is
-          // exactly the requested fixture.
-          const directIsExact = direct && String(direct.providerMatchId) === String(providerId);
-
-          if (directIsExact && Array.isArray(direct.markets) && direct.markets.length) {
-            m.markets = direct.markets;
-            m.bookmakers = direct.bookmakers || [];
-            m.providerOdds = direct.odds || m.providerOdds || null;
-            m.providerMatchId = String(direct.providerMatchId);
-            m.marketsRefreshedAt = new Date();
-            if (directIsLive) {
-              m.status = 'live';
-              m.score = {
-                home: direct.score?.fullTime?.home ?? m.score?.home ?? null,
-                away: direct.score?.fullTime?.away ?? m.score?.away ?? null,
-                minute: direct.minute ?? m.score?.minute ?? null,
-                period: direct.status || m.score?.period || null
-              };
+          if (haveRich) {
+            const known = Array.isArray(m.markets) ? m.markets.length : 0;
+            if (details.markets.length >= known) {
+              m.markets = details.markets;
+              m.bookmakers = details.bookmakers || m.bookmakers || [];
             }
-            console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${direct.markets.length} markets`);
-
-            // Persist immediately (don't block the response on this write) so
-            // the next request for this exact fixture — whether it's this
-            // same route, or a bet-placement check — can be served straight
-            // from MongoDB instead of repeating this same external search.
+            m.providerMatchId = String(providerId);
+            m.marketsRefreshedAt = new Date();
+          }
+          if (liveIsExact) {
+            m.status = 'live';
+            m.score = {
+              home: liveNow.score?.fullTime?.home ?? m.score?.home ?? null,
+              away: liveNow.score?.fullTime?.away ?? m.score?.away ?? null,
+              minute: liveNow.minute ?? m.score?.minute ?? null,
+              period: liveNow.status || m.score?.period || null
+            };
+            if (liveNow.odds) m.providerOdds = liveNow.odds;
+          }
+          if (haveRich) {
+            console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${m.markets.length} markets`);
+            // Persist without blocking the response.
             Match.findOneAndUpdate(
-              { matchId: req.params.matchId },
-              {
-                $set: {
-                  markets: direct.markets,
-                  bookmakers: direct.bookmakers || [],
-                  providerOdds: direct.odds || undefined,
-                  providerMatchId: String(direct.providerMatchId),
-                  marketsRefreshedAt: m.marketsRefreshedAt
-                }
-              }
+              { matchId: req.params.matchId, finalVerified: { $ne: true } },
+              { $set: { markets: m.markets, bookmakers: m.bookmakers || [], providerMatchId: String(providerId), marketsRefreshedAt: m.marketsRefreshedAt } }
             ).catch(err => console.warn('[odds/match] failed to persist rich markets:', err.message));
           }
         } catch (err) {

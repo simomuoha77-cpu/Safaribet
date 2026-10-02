@@ -95,11 +95,11 @@ function recordFailure(err) {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-async function sofaFetch(base, path, query, attempt = 1) {
+async function sofaFetch(base, path, query, attempt = 1, timeoutMs = REQUEST_TIMEOUT_MS) {
   const qs = new URLSearchParams(query || {});
   const url = base + path + (qs.toString() ? '?' + qs.toString() : '');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const resp = await fetch(url, {
       headers: {
@@ -113,7 +113,7 @@ async function sofaFetch(base, path, query, attempt = 1) {
     if (resp.status === 429 && attempt < 3) {
       clearTimeout(timer);
       await sleep(1200 * attempt);
-      return sofaFetch(base, path, query, attempt + 1);
+      return sofaFetch(base, path, query, attempt + 1, timeoutMs);
     }
     if (!resp.ok) throw new Error('SofaBets HTTP ' + resp.status + ' for ' + url);
     const text = await resp.text();
@@ -122,7 +122,7 @@ async function sofaFetch(base, path, query, attempt = 1) {
   } catch (e) {
     if (attempt < 2 && e.name !== 'AbortError') {
       await sleep(700);
-      return sofaFetch(base, path, query, attempt + 1);
+      return sofaFetch(base, path, query, attempt + 1, timeoutMs);
     }
     throw e;
   } finally {
@@ -455,180 +455,113 @@ function findIdInPayload(payload, depth = 0, seen = new Set()) {
 
 const matchMarketsCache = new Map();
 
+const matchMarketsInflight = new Map();
+const MARKETS_TTL_MS = 30000;          // served instantly while younger than this
+const MARKETS_STALE_MS = 10 * 60000;   // served instantly (and refreshed in the background) up to this age
+const MARKETS_FAST_TIMEOUT_MS = 6000;  // per-request cap for these per-fixture lookups
+
 async function getMatchMarkets(providerMatchId, sportName = 'football') {
-  const cacheKey =
-    String(sportName || 'football').toLowerCase() + ':' +
-    String(providerMatchId || '');
-
-  const cached = matchMarketsCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 60000) {
-    return cached.data;
-  }
-
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
-
   const name = String(sportName || 'football').toLowerCase();
+  const cacheKey = name + ':' + id;
 
-  const sportIds = Array.from(new Set([
-    ...(SPORT_ID_CANDIDATES[name] || []),
-    SPORT_IDS[name]
-  ].filter(Number.isFinite)));
+  const cached = matchMarketsCache.get(cacheKey);
+  const age = cached ? Date.now() - cached.ts : Infinity;
+  if (cached && cached.data && cached.data.markets.length > 1) {
+    if (age < MARKETS_TTL_MS) return cached.data;
+    if (age < MARKETS_STALE_MS) {           // stale-while-revalidate: answer now, refresh behind the scenes
+      refreshMatchMarkets(id, name, cacheKey).catch(() => {});
+      return cached.data;
+    }
+  }
+  return refreshMatchMarkets(id, name, cacheKey);
+}
 
-  const result = {
-    markets: [],
-    bookmakers: []
-  };
+function refreshMatchMarkets(id, name, cacheKey) {
+  if (matchMarketsInflight.has(cacheKey)) return matchMarketsInflight.get(cacheKey);
+  const p = fetchMatchMarketsParallel(id, name, cacheKey).finally(() => matchMarketsInflight.delete(cacheKey));
+  matchMarketsInflight.set(cacheKey, p);
+  return p;
+}
+
+// Every exact-fixture endpoint is asked AT THE SAME TIME (previously one after
+// another, each with its own retry/timeout), and the answer is returned as soon
+// as one of them yields a real market list. Identity rules are unchanged: a
+// payload is only used when the item's own id equals the requested id.
+function fetchMatchMarketsParallel(id, name, cacheKey) {
+  const sportIds = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
+  const result = { markets: [], bookmakers: [] };
+  const hosts = Array.from(new Set([...BASES, 'https://feed.sofabets.com']));
+  const get = (base, path, query) => sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
 
   const saveIfRicher = (payload, source) => {
     try {
-      const markets = normalizeMarketList(
-        payload?.fixture || payload
-      );
-
-      if (!Array.isArray(markets)) return;
-      if (markets.length <= result.markets.length) return;
-
-      const bookmakers = Array.from(new Set(
-        markets.flatMap(m => [
-          m.bookmaker,
-          ...((m.selections || []).map(s => s.bookmaker))
-        ].filter(Boolean))
-      ));
-
+      const markets = normalizeMarketList(payload && payload.fixture || payload);
+      if (!Array.isArray(markets) || markets.length <= result.markets.length) return;
       result.markets = markets;
-      result.bookmakers = bookmakers;
-
-      console.log(
-        `[sofaBetsProvider] rich markets ${id}: ${markets.length} via ${source}`
-      );
+      result.bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...((m.selections || []).map(x => x.bookmaker))].filter(Boolean))));
+      matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });   // visible to other requests immediately
+      console.log(`[sofaBetsProvider] rich markets ${id}: ${markets.length} via ${source}`);
     } catch (err) {
-      console.warn(
-        `[sofaBetsProvider] market normalize failed ${id} via ${source}: ${err.message}`
-      );
+      console.warn(`[sofaBetsProvider] market normalize failed ${id} via ${source}: ${err.message}`);
     }
   };
 
-  // Normal/upcoming fixtures: request the exact fixture from SofaBets.
-  // IMPORTANT: SofaBets has been observed to IGNORE the fixtureId filter and
-  // return an unrelated page of fixtures instead (this is the exact cause of
-  // a past bug where "Suriname vs Martinique" was requested but markets from
-  // an unrelated "Czechia vs England" fixture were attached). Never extract
-  // markets from the raw payload as a whole — only from an item whose id
-  // field has been checked and matches the requested id.
-  for (const sportId of sportIds) {
-    for (const base of BASES) {
-      try {
-        const payload = await sofaFetch(
-          base,
-          '/api/fixtures-by-sport',
-          {
-            sportId: String(sportId),
-            fixtureId: id,
-            page: '1',
-            limit: '1'
-          }
-        );
-
-        for (const item of extractItems(payload)) {
-          const itemId = String(pick(item, [
-            'id',
-            'fixtureId',
-            'fixture_id',
-            'eventId',
-            'event_id',
-            'matchId',
-            'match_id'
-          ])).trim();
-
-          if (itemId === id) {
-            saveIfRicher(
-              item,
-              `${base}/api/fixtures-by-sport:item`
-            );
-          }
-        }
-      } catch (_) {}
-    }
-  }
-
-  // Direct SofaBets fixture/event market endpoints.
-  const directPaths = [
-    `/api/fixtures/${encodeURIComponent(id)}/markets`,
-    `/api/events/${encodeURIComponent(id)}/markets`,
-    `/api/fixtures/${encodeURIComponent(id)}`,
-    `/api/matches/${encodeURIComponent(id)}`,
-    `/api/events/${encodeURIComponent(id)}`
-  ];
-
-  for (const base of BASES) {
-    for (const path of directPaths) {
-      try {
-        const payload = await sofaFetch(base, path, {});
-        const items = extractItems(payload);
-
-        // A genuinely single-fixture endpoint should return zero, one, or a
-        // wrapped single object — never a multi-fixture list. If it returns
-        // several fixture-like items, the guessed path almost certainly
-        // isn't a real per-fixture endpoint and is instead echoing back a
-        // generic list; accepting it risks attaching another fixture's
-        // markets, so skip it entirely.
-        if (items.length > 1) {
-          continue;
-        }
-
-        const candidate = items.find(item => findIdInPayload(item) === id) || payload;
-        const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
-
-        // If the payload identifies itself with a DIFFERENT fixture id than
-        // requested, it belongs to another fixture — never accept it. If no
-        // id field is present at all we cannot rule this out either, so we
-        // only proceed when the endpoint explicitly confirms the same id.
-        if (foundId == null || foundId !== id) {
-          continue;
-        }
-
-        saveIfRicher(candidate, `${base}${path}`);
-      } catch (_) {}
-    }
-  }
-
-  // Live fixtures have a dedicated market endpoint. The fixture id is already
-  // in the URL path, but SofaBets responses have been unreliable elsewhere,
-  // so still confirm the id before trusting the markets.
-  try {
-    const base = 'https://feed.sofabets.com';
-
-    const payload = await sofaFetch(
-      base,
-      `/api/live-games/markets/${encodeURIComponent(id)}`,
-      {}
-    );
-
-    const items = extractItems(payload);
-    if (items.length <= 1) {
-      const candidate = items.find(item => findIdInPayload(item) === id) || payload;
+  const tasks = [];
+  // Dedicated live endpoint first in the list (path carries the exact fixture id)
+  for (const base of hosts) {
+    tasks.push((async () => {
+      const payload = await get(base, `/api/live-games/markets/${encodeURIComponent(id)}`);
+      const items = extractItems(payload);
+      if (items.length > 1) return;
+      const candidate = items.find(it => findIdInPayload(it) === id) || payload;
       const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
-      if (foundId === id) {
-        saveIfRicher(
-          candidate,
-          `${base}/api/live-games/markets/${id}`
-        );
+      if (foundId === id) saveIfRicher(candidate, `${base}/api/live-games/markets/${id}`);
+    })());
+  }
+  // Exact fixture on the catalogue endpoint
+  for (const sportId of sportIds) for (const base of BASES) {
+    tasks.push((async () => {
+      const payload = await get(base, '/api/fixtures-by-sport', { sportId: String(sportId), fixtureId: id, page: '1', limit: '1' });
+      for (const item of extractItems(payload)) {
+        const itemId = String(pick(item, ['id', 'fixtureId', 'fixture_id', 'eventId', 'event_id', 'matchId', 'match_id'])).trim();
+        if (itemId === id) saveIfRicher(item, `${base}/api/fixtures-by-sport:item`);
       }
-    }
-  } catch (_) {}
+    })());
+  }
+  // Direct per-fixture endpoints
+  const directPaths = [`/api/fixtures/${encodeURIComponent(id)}/markets`, `/api/events/${encodeURIComponent(id)}/markets`,
+    `/api/fixtures/${encodeURIComponent(id)}`, `/api/matches/${encodeURIComponent(id)}`, `/api/events/${encodeURIComponent(id)}`];
+  for (const base of BASES) for (const path of directPaths) {
+    tasks.push((async () => {
+      const payload = await get(base, path);
+      const items = extractItems(payload);
+      if (items.length > 1) return;   // a list echo, not a per-fixture endpoint
+      const candidate = items.find(it => findIdInPayload(it) === id) || payload;
+      const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
+      if (foundId == null || foundId !== id) return;
+      saveIfRicher(candidate, `${base}${path}`);
+    })());
+  }
 
-  matchMarketsCache.set(cacheKey, {
-    ts: Date.now(),
-    data: result
+  return new Promise(resolve => {
+    let pending = tasks.length, done = false, graceTimer = null;
+    const finish = () => {
+      if (done) return; done = true; if (graceTimer) clearTimeout(graceTimer);
+      matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });
+      console.log(`[sofaBetsProvider] final rich markets ${id}: ${result.markets.length}`);
+      resolve(result);
+    };
+    const check = () => {
+      if (result.markets.length > 1 && !graceTimer && !done) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
+      if (pending === 0) finish();
+    };
+    tasks.forEach(t => t.then(() => {}, () => {}).then(() => { pending--; check(); }));
+    if (!tasks.length) finish();
   });
-
-  console.log(
-    `[sofaBetsProvider] final rich markets ${id}: ${result.markets.length}`
-  );
-
-  return result;
 }
+
 // Single source of truth for resolving a SofaBets fixture by its exact
 // provider id, used by every route instead of each one deciding for itself
 // whether to check the live feed or the prematch catalogue. This matters
@@ -647,19 +580,17 @@ async function resolveExactFixture(providerId, sportName, options = {}) {
   const tryLive = () => getLiveMatchById(providerId, sportName, { rich }).catch(() => null);
   const tryPrematch = () => getMatchById(providerId, sportName, { rich }).catch(() => null);
 
-  if (preferLive) {
-    // The caller's id explicitly signalled "live" (SofaBets' non-football
-    // sport tabs use a sofabets_live_<sport>_<id> scheme) — check there first,
-    // but still fall back to the prematch catalogue in case the fixture was
-    // just re-classified.
-    return (await tryLive()) || (await tryPrematch());
-  }
-
-  // Common case: try the prematch catalogue first (cheaper — a single-pass
-  // cached lookup for most callers). If it can't confirm the fixture, it may
-  // simply have kicked off and dropped out of that listing, so check the
-  // live feed before giving up entirely.
-  return (await tryPrematch()) || (await tryLive());
+  // Both lookups enforce exact provider-id identity on their own. They are
+  // started together (the prematch catalogue crawl can be slow, and waiting for
+  // it before even asking the live feed was a big part of the delay). The live
+  // feed answer wins when it confirms the fixture; otherwise the prematch
+  // answer is used. preferLive only affects which is awaited first.
+  const livePromise = tryLive();
+  const prePromise = tryPrematch();
+  prePromise.catch(() => {}); livePromise.catch(() => {});
+  const live = await livePromise;
+  if (live) return live;
+  return await prePromise;
 }
 
 async function getLiveMatchById(providerMatchId, sportName = 'football', options = {}) {
@@ -1142,7 +1073,24 @@ async function fetchAllFixturesForSport(sportId, sportName, options) {
   finally { allFixturesInFlight.delete(key); }
 }
 
+const liveFeedCache = new Map();     // sport -> { ts, data }
+const liveFeedInflight = new Map();  // sport -> Promise
+const LIVE_FEED_TTL_MS = 6000;
+
 async function fetchLiveFootballFixtures(sportName = 'football') {
+  const key = String(sportName || 'football').toLowerCase();
+  const hit = liveFeedCache.get(key);
+  if (hit && Date.now() - hit.ts < LIVE_FEED_TTL_MS) return hit.data;
+  if (liveFeedInflight.has(key)) return liveFeedInflight.get(key);
+  const p = fetchLiveFootballFixturesUncached(sportName).then(data => {
+    if (Array.isArray(data) && data.length) liveFeedCache.set(key, { ts: Date.now(), data });
+    return data;
+  }).finally(() => liveFeedInflight.delete(key));
+  liveFeedInflight.set(key, p);
+  return p;
+}
+
+async function fetchLiveFootballFixturesUncached(sportName = 'football') {
   const livePaths = ['/api/live-games'];
   let lastError = null;
 

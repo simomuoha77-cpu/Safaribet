@@ -163,7 +163,7 @@ async function loadMatch(){
   let paintedFromCache = false;
   try {
     const cachedRaw = sessionStorage.getItem('currentMatchSummary');
-    if (cachedRaw) {
+    if (cachedRaw && !matchData) {
       const cached = JSON.parse(cachedRaw);
       if (cached && String(cached.matchId) === String(matchId)) {
         matchData = summaryToMatchData(cached);
@@ -175,9 +175,21 @@ async function loadMatch(){
     }
   } catch (e) { /* corrupt cache — fall through to the normal network load */ }
 
+  // Full market list seen recently (prefetched on touch, or from a previous
+  // visit): paint it right away instead of waiting for the network at all.
+  if (!matchData || !matchData.__full) {
+    const full = (window.SB && SB.cachedMatch) ? SB.cachedMatch(matchId) : null;
+    if (full && Array.isArray(full.markets) && full.markets.length) {
+      matchData = full; matchData.__full = true;
+      renderHeader(); renderMarkets(false); updateSlipBar();
+      paintedFromCache = true;
+    }
+  }
+
   try {
-    const r = await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' });
-    const d = await r.json();
+    // Re-uses a request already started by the touch/hover prefetch if there is one
+    const d = (window.SB && SB.prefetchMatch) ? await SB.prefetchMatch(matchId)
+      : await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
     if (!d.success) {
       // Only show the error state if we had nothing to show at all —
       // never blow away an already-painted cached view over a background
@@ -187,7 +199,7 @@ async function loadMatch(){
       }
       return;
     }
-    matchData = d.data;
+    matchData = d.data; matchData.__full = true;
     renderHeader();
     renderMarkets(false);
     updateSlipBar();
