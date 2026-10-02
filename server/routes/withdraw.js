@@ -1,5 +1,6 @@
 const express     = require('express');
 const axios       = require('axios');
+const mpesaClient = require('../services/mpesaClient');
 const crypto      = require('crypto');
 const auth        = require('../middleware/auth');
 const User        = require('../models/User');
@@ -39,13 +40,9 @@ const TIMEOUT_URL = process.env.MPESA_QUEUE_TIMEOUT_URL || `${process.env.APP_UR
 const B2C_CONSUMER_KEY    = process.env.MPESA_B2C_CONSUMER_KEY    || process.env.MPESA_CONSUMER_KEY;
 const B2C_CONSUMER_SECRET = process.env.MPESA_B2C_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
 
-async function getB2CToken() {
-  const creds = Buffer.from(`${B2C_CONSUMER_KEY}:${B2C_CONSUMER_SECRET}`).toString('base64');
-  const r = await axios.get(`${BASE}/oauth/v1/generate?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${creds}` }, timeout: 8000
-  });
-  return r.data.access_token;
-}
+// Cached token (services/mpesaClient.js): no extra Safaricom round trip per withdrawal.
+function getB2CToken() { return mpesaClient.getToken(B2C_CONSUMER_KEY, B2C_CONSUMER_SECRET); }
+if (B2C_CONSUMER_KEY && B2C_CONSUMER_SECRET) mpesaClient.warm(B2C_CONSUMER_KEY, B2C_CONSUMER_SECRET);
 
 async function sendB2C(phone, amount, ref) {
   if (!B2C_CONSUMER_KEY || !B2C_CONSUMER_SECRET) {
@@ -56,8 +53,7 @@ async function sendB2C(phone, amount, ref) {
   }
   console.log('[B2C] Sending payout — ResultURL:', RESULT_URL, '| TimeoutURL:', TIMEOUT_URL);
   console.log(`[B2C] InitiatorName: "${INITIATOR}" (${INITIATOR.length} chars) | SecurityCredential: ${SECURITY_CREDENTIAL.length} chars, starts "${SECURITY_CREDENTIAL.slice(0,6)}...", ends "...${SECURITY_CREDENTIAL.slice(-6)}"`);
-  const token = await getB2CToken();
-  const r = await axios.post(`${BASE}/mpesa/b2c/v1/paymentrequest`, {
+  const rData = await mpesaClient.authedPost(B2C_CONSUMER_KEY, B2C_CONSUMER_SECRET, '/mpesa/b2c/v1/paymentrequest', {
     InitiatorName:          INITIATOR,
     SecurityCredential:     SECURITY_CREDENTIAL,
     CommandID:              'BusinessPayment',
@@ -68,37 +64,29 @@ async function sendB2C(phone, amount, ref) {
     QueueTimeOutURL:        TIMEOUT_URL,
     ResultURL:              RESULT_URL,
     Occasion:               ref
-  }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
-  return r.data;
+  }, 15000);
+  return rData;
 }
 
 // ── SECURITY: verify user ownership + minimum bet requirement ──
 async function securityChecks(userId, amount, phone) {
-  // 1. User must have placed at least 1 real bet (anti-money-laundering)
-  const betCount = await Bet.countDocuments({ userId, status: { $in: ['won','lost','pending'] } });
-  if (betCount === 0) {
-    return 'You must place at least 1 bet before withdrawing';
-  }
-
-  // 2. Total deposited must be >= withdrawal amount
-  const depAgg = await Transaction.aggregate([
-    { $match: { userId, type: 'deposit', status: 'completed' } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
+  // The three lookups are independent, so they run together instead of one
+  // after another. The messages keep the same precedence as before.
+  const [betCount, depAgg, existingPending] = await Promise.all([
+    // 1. User must have placed at least 1 real bet (anti-money-laundering)
+    Bet.countDocuments({ userId, status: { $in: ['won','lost','pending'] } }),
+    // 2. Total deposited must be >= withdrawal amount
+    Transaction.aggregate([
+      { $match: { userId, type: 'deposit', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]),
+    // 3. Check no pending withdrawal already exists
+    Transaction.findOne({ userId, type: 'withdrawal', status: 'pending' })
   ]);
+  if (betCount === 0) return 'You must place at least 1 bet before withdrawing';
   const totalDeposited = depAgg[0]?.total || 0;
-  if (totalDeposited === 0) {
-    return 'No completed deposits found. Deposit first.';
-  }
-
-  // 3. Check no pending withdrawal already exists
-  const existingPending = await Transaction.findOne({ userId, type: 'withdrawal', status: 'pending' });
-  if (existingPending) {
-    return 'You already have a pending withdrawal. Wait for it to complete.';
-  }
-
-  // 4. Phone must match registered phone or be verified
-  // (allow any valid Kenyan number for now)
-  
+  if (totalDeposited === 0) return 'No completed deposits found. Deposit first.';
+  if (existingPending) return 'You already have a pending withdrawal. Wait for it to complete.';
   return null; // all clear
 }
 
@@ -131,9 +119,16 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
 
-    // Security checks
+    // Warm the B2C token while the database checks run (instant when cached).
+    if (process.env.MPESA_CONSUMER_KEY && process.env.MPESA_CONSUMER_SECRET) getB2CToken().catch(() => {});
+
+    // Security checks - the independent lookups run together.
+    const [userDoc, secError, uFull] = await Promise.all([
+      require('../models/User').findById(req.user._id).select('phone').lean(),
+      securityChecks(req.user._id, amount, phone),
+      User.findById(req.user._id)
+    ]);
     // Lock to registered phone number only
-    const userDoc = await require('../models/User').findById(req.user._id).select('phone').lean();
     const regPhone = String(userDoc?.phone || '').replace(/\D/g, '');
     const regNorm = regPhone.startsWith('0') ? '254' + regPhone.slice(1) : regPhone;
     const inpNorm = phone.startsWith('0') ? '254' + phone.slice(1) : phone;
@@ -141,7 +136,6 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: `Withdrawals only allowed to your registered number (${regPhone.slice(0,6)}XXXXXX). Contact support to change your number.` });
     }
 
-    const secError = await securityChecks(req.user._id, amount, phone);
     if (secError) {
       return res.status(403).json({ success: false, message: secError });
     }
@@ -151,7 +145,7 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
     // the user account is suspended or insufficient funds.
     const walletService = require('../services/walletService');
 
-    const u = await User.findById(req.user._id);
+    const u = uFull;
     if (!u) return res.status(404).json({ success: false, message: 'Account not found' });
     if (!u.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
 
@@ -211,12 +205,14 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       try {
         b2cResult = await sendB2C(phone, amount, ref);
         if (b2cResult?.ResponseCode === '0') {
-          await Transaction.findByIdAndUpdate(tx._id, {
+          // Not awaited: the result callback also finds the transaction by its reference
+          // (Occasion), so the response does not wait for this bookkeeping write.
+          Transaction.findByIdAndUpdate(tx._id, {
             $set: {
               description: `${tx.description} — B2C sent: ${b2cResult.ConversationID}`,
               conversationId: b2cResult.ConversationID
             }
-          });
+          }).catch(e => console.error('[B2C] could not store ConversationID:', e.message));
           console.log(`✅ B2C sent: ${b2cResult.ConversationID}`);
         }
       } catch(e) {

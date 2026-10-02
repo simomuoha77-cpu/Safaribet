@@ -327,6 +327,9 @@ async function deposit() {
 
   btn.disabled = true;
   btn.textContent = 'Sending request...';
+  // Instant feedback: show the "sending" popup the moment the button is pressed
+  // instead of making the user wait for the server before anything happens.
+  showSendingModal(phone);
 
   try {
     const res = await fetch('/api/mpesa/stk', {
@@ -347,15 +350,30 @@ async function deposit() {
       showModal('waitModal');
       startPolling(amount);
     } else {
+      closeModal('waitModal');
       showToast(data.message || 'Failed to send STK push', 'err');
       btn.disabled = false;
       btn.textContent = '💚 Deposit via M-Pesa';
     }
   } catch (err) {
+    closeModal('waitModal');
     showToast('Connection error. Try again.', 'err');
     btn.disabled = false;
     btn.textContent = '💚 Deposit via M-Pesa';
   }
+}
+
+// Shown immediately on tap, before the server has answered. It is replaced by
+// the normal "Check Your Phone" popup (resetWaitModalCopy) as soon as the STK
+// push is confirmed sent, or closed if the request fails.
+function showSendingModal(phone) {
+  inSlowPhase = false;
+  document.getElementById('waitTitle').textContent = 'Sending M-Pesa Request';
+  document.getElementById('waitMsg').innerHTML = 'Sending a payment prompt to <strong id="sentTo">' + String(phone || '').replace(/[<>&"']/g, '') + '</strong>...';
+  document.getElementById('waitSub').textContent = 'This only takes a moment';
+  const cb = document.getElementById('waitCancelBtn');
+  cb.textContent = 'Cancel'; cb.disabled = true; cb.style.opacity = '0.5';
+  showModal('waitModal');
 }
 
 function resetWaitModalCopy() {
@@ -363,7 +381,8 @@ function resetWaitModalCopy() {
   document.getElementById('waitTitle').textContent = 'Check Your Phone';
   document.getElementById('waitMsg').innerHTML = 'An M-Pesa prompt has been sent to <strong id="sentTo">' + (document.getElementById('sentTo')?.textContent || '') + '</strong>.<br/>Enter your PIN to complete.';
   document.getElementById('waitSub').textContent = 'Waiting for confirmation...';
-  document.getElementById('waitCancelBtn').textContent = 'Cancel';
+  const cb = document.getElementById('waitCancelBtn');
+  cb.textContent = 'Cancel'; cb.disabled = false; cb.style.opacity = '';
 }
 
 function switchToSlowPhaseCopy() {

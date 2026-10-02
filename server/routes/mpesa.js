@@ -1,5 +1,6 @@
 const express = require('express');
 const axios   = require('axios');
+const mpesaClient = require('../services/mpesaClient');
 const auth    = require('../middleware/auth');
 const User    = require('../models/User');
 const Transaction = require('../models/Transaction');
@@ -12,20 +13,16 @@ const mpesaLimiter = rateLimit({ windowMs: 60000, max: 3, message: { success: fa
 const queryThrottle = new Map();
 
 const MPESA_ENV    = process.env.MPESA_ENV || 'sandbox';
-const BASE_URL     = (MPESA_ENV === 'production' || MPESA_ENV === 'live') ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+const BASE_URL     = mpesaClient.BASE_URL;
 const SHORTCODE    = process.env.MPESA_SHORTCODE;
 const PASSKEY      = process.env.MPESA_PASSKEY;
 const CONSUMER_KEY = process.env.MPESA_CONSUMER_KEY;
 const CONSUMER_SEC = process.env.MPESA_CONSUMER_SECRET;
 const CALLBACK_URL = process.env.MPESA_CALLBACK_URL;
 
-async function getToken() {
-  const creds = Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SEC}`).toString('base64');
-  const r = await axios.get(`${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${creds}` }, timeout: 8000
-  });
-  return r.data.access_token;
-}
+// Cached token (see services/mpesaClient.js) - no extra Safaricom round trip per request.
+function getToken() { return mpesaClient.getToken(CONSUMER_KEY, CONSUMER_SEC); }
+mpesaClient.warm(CONSUMER_KEY, CONSUMER_SEC);
 
 function getTimestamp() {
   return new Date().toISOString().replace(/[-T:Z.]/g, '').slice(0, 14);
@@ -44,6 +41,10 @@ router.post('/stk', auth, mpesaLimiter, async (req, res) => {
         message: 'M-Pesa not configured. Add MPESA keys in Render environment variables.'
       });
     }
+
+    // Start getting the token right away (instant when cached); it runs while
+    // the database checks below are in progress.
+    const tokenP = getToken(); tokenP.catch(() => {});
 
     let { amount, phone } = req.body;
     // Lock to registered phone number only
@@ -81,10 +82,10 @@ router.post('/stk', auth, mpesaLimiter, async (req, res) => {
       return res.status(403).json({ success: false, message: rgErr.message });
     }
 
-    const token = await getToken();
+    await tokenP;
     const ts    = getTimestamp();
 
-    const r = await axios.post(`${BASE_URL}/mpesa/stkpush/v1/processrequest`, {
+    const rData = await mpesaClient.authedPost(CONSUMER_KEY, CONSUMER_SEC, '/mpesa/stkpush/v1/processrequest', {
       BusinessShortCode: SHORTCODE,
       Password:          getPassword(ts),
       Timestamp:         ts,
@@ -96,7 +97,8 @@ router.post('/stk', auth, mpesaLimiter, async (req, res) => {
       CallBackURL:       CALLBACK_URL,
       AccountReference:  'SafariBet',
       TransactionDesc:   'Deposit'
-    }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+    }, 15000);
+    const r = { data: rData };
 
     await Transaction.create({
       userId:      req.user._id,
