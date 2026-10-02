@@ -318,6 +318,8 @@ async function getLive() {
 
 // ── DB sync ──
 
+const BetModel = require('../models/Bet');
+
 async function syncFixtures() {
   console.log('\n📡 [SofaBets Direct] Syncing fixtures...');
   try {
@@ -327,16 +329,34 @@ async function syncFixtures() {
       return { synced: 0 };
     }
     const seen = new Set();
+    // Never overwrite a fixture that already has a verified final result.
+    const verified = new Set((await Match.find({ finalVerified: true }, { matchId: 1 }).lean()).map(x => x.matchId));
     for (const m of matches) {
       seen.add(m.matchId);
+      if (verified.has(m.matchId)) continue;
       await Match.findOneAndUpdate(
         { matchId: m.matchId },
         { $set: m },
         { upsert: true }
       ).catch(e => console.error(`  [sofabets] save failed for ${m.matchId}:`, e.message));
     }
-    // Remove stale records from previous syncs that no longer appear in the API
-    const del = await Match.deleteMany({ source: 'juanai', matchId: { $nin: Array.from(seen) } });
+    // Remove stale records that no longer appear in the API, BUT never a fixture
+    // a pending bet still depends on, and keep recent live/finished rows for
+    // 3 days so results survive until every bet on them has been graded.
+    const protectedIds = new Set();
+    try {
+      const open = await BetModel.find({ 'selections.result': 'pending' }, { 'selections.matchId': 1, 'selections.result': 1 }).lean();
+      for (const b of open) for (const sel of (b.selections || [])) if (sel.result === 'pending') protectedIds.add(sel.matchId);
+    } catch (e) {
+      console.error('  [sofabets] could not load pending-bet fixtures; skipping stale cleanup:', e.message);
+      return { synced: matches.length };
+    }
+    const keepRecent = new Date(Date.now() - 3 * 86400000);
+    const del = await Match.deleteMany({
+      source: 'juanai',
+      matchId: { $nin: [...seen, ...protectedIds] },
+      $nor: [{ status: { $in: ['live', 'finished'] }, commenceTime: { $gt: keepRecent } }]
+    });
     console.log(`✅ [sofabets] Synced ${matches.length} fixtures (removed ${del.deletedCount} stale)`);
     return { synced: matches.length };
   } catch (e) {
@@ -370,6 +390,10 @@ async function updateLive() {
         }
       } catch (e) { /* non-fatal — worst case lastGoalAt just doesn't carry forward this poll */ }
 
+      m.lastLiveSeenAt = new Date();
+      m.liveAbsentSince = null;
+      if (m.score && m.score.minute != null) m.lastLiveMinute = m.score.minute;
+      try { const ex = await Match.findOne({ matchId: m.matchId, finalVerified: true }, { _id: 1 }).lean(); if (ex) continue; } catch (e) {}
       await Match.findOneAndUpdate(
         { matchId: m.matchId },
         { $set: m },
@@ -384,7 +408,7 @@ async function updateLive() {
     // Instead each dropped match is checked against the provider by its EXACT
     // id and is only marked finished when the provider itself says FINISHED.
     const { verifyFinalResult } = require('../services/finalResultService');
-    const wasLive = await Match.find({ status: 'live' }, { matchId: 1, lastFinalCheckAt: 1 }).lean();
+    const wasLive = await Match.find({ status: 'live', source: 'juanai', matchId: { $not: /^sofabets_live_/ } }, { matchId: 1, lastFinalCheckAt: 1 }).lean();
     const CHECK_GAP_MS = 2 * 60 * 1000;
     const MAX_CHECKS_PER_POLL = 8;
     const dropped = wasLive
@@ -400,6 +424,7 @@ async function updateLive() {
         if (!fin) {
           // Not confirmed final — leave it exactly as it is (still live/unknown).
           await Match.updateOne({ matchId: d.matchId }, { $set: { lastFinalCheckAt: new Date() } });
+          await Match.updateOne({ matchId: d.matchId, liveAbsentSince: null }, { $set: { liveAbsentSince: new Date() } });
           continue;
         }
         await Match.updateOne({ matchId: d.matchId }, { $set: {

@@ -64,4 +64,117 @@ async function verifyFinalResult(matchId) {
   return { homeScore: Number(h), awayScore: Number(a), result: resultFromScore(h, a), homeTeam: fx.homeTeam, awayTeam: fx.awayTeam };
 }
 
-module.exports = { isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult };
+// ══════════════════════════════════════════════════════════════════════════════
+// FIXTURE TRACKER
+//
+// SofaBets has no "results" endpoint: once a match ends it simply leaves the
+// live feed. So a game is confirmed as ENDED by ONE of:
+//   1. PROVIDER:  the provider reports an explicit FINISHED status + final score
+//      (live feed, today's/that day's catalogue, or exact-id lookup), or
+//   2. FEED-ENDED: it was tracked live (score recorded), has been absent from
+//      the live feed for >= ABSENT_MS, the sport's minimum game length has
+//      passed since kickoff, and (football) the last seen minute was in the
+//      closing stage. A mid-game score alone, a half-time gap, or a feed
+//      hiccup can never satisfy this.
+// ══════════════════════════════════════════════════════════════════════════════
+const MIN_DURATION_MIN = { football: 110, basketball: 125, tennis: 90, hockey: 150, cricket: 480, volleyball: 90, rugby: 110, handball: 100 };
+const ABSENT_MS = 15 * 60 * 1000;
+const FOOTBALL_LAST_MIN = 80;
+const memo = new Map(); // key -> { ts, data }
+async function memoized(key, ttlMs, fn) {
+  const hit = memo.get(key);
+  if (hit && Date.now() - hit.ts < ttlMs) return hit.data;
+  let data = null;
+  try { data = await fn(); } catch (_) { data = hit ? hit.data : null; }
+  memo.set(key, { ts: Date.now(), data });
+  return data;
+}
+const nairobiDate = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+const toMap = list => { const m = new Map(); (list || []).forEach(x => { const k = String(x && x.providerMatchId || '').trim(); if (k) m.set(k, x); }); return m; };
+const liveFeed = sport => memoized('live:' + sport, 40 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
+const catalogue = (sport, date) => memoized('cat:' + sport + ':' + date, 3 * 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));
+
+function finalScoreOf(fx) {
+  const ft = fx && fx.score && fx.score.fullTime;
+  if (!ft || ft.home == null || ft.away == null || !Number.isFinite(Number(ft.home)) || !Number.isFinite(Number(ft.away))) return null;
+  return { home: Number(ft.home), away: Number(ft.away) };
+}
+
+function inferEnded(row, sport, now) {
+  const kickoff = row.commenceTime ? new Date(row.commenceTime).getTime() : 0;
+  if (!kickoff) return { ok: false, why: 'no kickoff time' };
+  const minDur = (MIN_DURATION_MIN[sport] || 180) * 60000;
+  if (now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
+  const h = row.score && row.score.home, a = row.score && row.score.away;
+  if (h == null || a == null) return { ok: false, why: 'no score was ever recorded from the live feed' };
+  const lastSeen = row.lastLiveSeenAt || (row.status === 'finished' || row.status === 'live' ? row.fetchedAt : null);
+  if (!lastSeen) return { ok: false, why: 'match was never seen live' };
+  const absent = row.liveAbsentSince || (row.status === 'finished' ? row.fetchedAt : null);
+  if (!absent || now - new Date(absent).getTime() < ABSENT_MS) return { ok: false, why: 'not absent from live feed long enough' };
+  const minute = row.lastLiveMinute != null ? row.lastLiveMinute : (row.score && row.score.minute);
+  if (sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
+  if (sport === 'football' && minute == null && now - kickoff < 150 * 60000) return { ok: false, why: 'last minute unknown' };
+  return { ok: true, home: Number(h), away: Number(a) };
+}
+
+// fixtures: [{ matchId, homeTeam, awayTeam, league, commenceTime }]
+async function trackFixtures(fixtures, Match) {
+  const now = Date.now();
+  const out = { finalized: 0, waiting: [] };
+  for (const fx of fixtures) {
+    try {
+      const p = parseSofaMatchId(fx.matchId);
+      if (!p || !p.providerId) continue;
+      const id = String(p.providerId).trim();
+      let row = await Match.findOne({ matchId: fx.matchId }).lean();
+      if (row && row.finalVerified === true && row.status === 'finished') continue;
+      if (!row) {
+        await Match.updateOne({ matchId: fx.matchId }, { $setOnInsert: { matchId: fx.matchId, homeTeam: fx.homeTeam, awayTeam: fx.awayTeam, league: fx.league || p.sport, sport: p.sport, commenceTime: fx.commenceTime ? new Date(fx.commenceTime) : new Date(), status: 'upcoming', source: 'tracker' } }, { upsert: true });
+        row = await Match.findOne({ matchId: fx.matchId }).lean();
+      }
+      const kickoff = row.commenceTime ? new Date(row.commenceTime) : new Date(fx.commenceTime || now);
+      if (kickoff.getTime() > now) continue; // not started
+
+      // exact-id sources only
+      let item = (await liveFeed(p.sport) || new Map()).get(id) || null;
+      if (!item) item = ((await catalogue(p.sport, nairobiDate(kickoff))) || new Map()).get(id) || null;
+
+      const finish = async (sc, source) => {
+        await Match.updateOne({ matchId: fx.matchId }, { $set: {
+          status: 'finished', result: resultFromScore(sc.home, sc.away), 'score.home': sc.home, 'score.away': sc.away, 'score.period': 'FT',
+          finalVerified: true, finalVerifiedAt: new Date(), finalSource: source, lastFinalCheckAt: new Date(), liveAbsentSince: row.liveAbsentSince || new Date()
+        } });
+        out.finalized++;
+        console.log(`  [Tracker] FINAL (${source}): ${row.homeTeam} ${sc.home}-${sc.away} ${row.awayTeam} [${fx.matchId}]`);
+      };
+
+      if (item) {
+        const sc = finalScoreOf(item);
+        if (isFinalStatus(item.status)) {
+          if (sc) { await finish(sc, 'provider'); continue; }
+          out.waiting.push({ matchId: fx.matchId, why: 'provider says finished but gave no score' }); continue;
+        }
+        if (isInProgressStatus(item.status) || String(item.status).toUpperCase() === 'IN_PLAY') {
+          const set = { status: 'live', lastLiveSeenAt: new Date(), liveAbsentSince: null, lastFinalCheckAt: new Date() };
+          if (sc) { set['score.home'] = sc.home; set['score.away'] = sc.away; }
+          if (item.minute != null && Number.isFinite(Number(item.minute))) { set.lastLiveMinute = Number(item.minute); set['score.minute'] = Number(item.minute); }
+          await Match.updateOne({ matchId: fx.matchId }, { $set: set });
+          out.waiting.push({ matchId: fx.matchId, why: 'still in play' }); continue;
+        }
+      }
+      // not live right now (absent, or listed as scheduled long after kickoff)
+      if (!row.liveAbsentSince && row.status !== 'finished') {
+        await Match.updateOne({ matchId: fx.matchId }, { $set: { liveAbsentSince: new Date(), lastFinalCheckAt: new Date() } });
+        row.liveAbsentSince = new Date();
+      }
+      const inf = inferEnded(row, p.sport, now);
+      if (inf.ok) { await finish({ home: inf.home, away: inf.away }, 'feed-ended'); continue; }
+      out.waiting.push({ matchId: fx.matchId, why: inf.why });
+    } catch (e) { out.waiting.push({ matchId: fx.matchId, why: 'tracker error: ' + e.message }); }
+  }
+  return out;
+}
+
+function _resetCache() { memo.clear(); }
+
+module.exports = { _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };

@@ -280,8 +280,6 @@ function applyResult(s, matchResult, homeScore, awayScore) {
   return true;
 }
 
-const lastVerifyAttempt = new Map(); // fixtureKey -> last provider verification attempt (ms)
-const VERIFY_COOLDOWN_MS = 90 * 1000;
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
 
 async function runSettlement(includeApiFetch = true) {
@@ -339,6 +337,24 @@ async function _runSettlementInner(includeApiFetch) {
     }
   }
 
+  // Source A2: confirm which started fixtures have really ended. This records
+  // live observations and, only on an explicit provider FINISHED (or a verified
+  // feed-ended game, see finalResultService), marks the fixture final.
+  try {
+    const openBets0 = await Bet.find(openQuery).lean();
+    const fx = new Map();
+    for (const b of openBets0) for (const sel of (b.selections || [])) {
+      if (sel.result === 'pending' && String(sel.matchId).startsWith('sofabets_') && !fx.has(sel.matchId))
+        fx.set(sel.matchId, { matchId: sel.matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, league: sel.league, commenceTime: sel.commenceTime });
+    }
+    if (fx.size) {
+      const t = await finalResults.trackFixtures(Array.from(fx.values()), Match);
+      const old = t.waiting.filter(w => w.why !== 'still in play');
+      console.log(`[Settlement] Tracker: ${fx.size} fixtures, ${t.finalized} confirmed final, ${t.waiting.length} waiting`);
+      old.slice(0, 15).forEach(w => console.log(`  [Tracker] waiting ${w.matchId}: ${w.why}`));
+    }
+  } catch (e) { console.error('[Settlement] Tracker failed (continuing):', e.message); }
+
   // Source B: DB matches marked finished with a result — this is the primary,
   // fast source. updateLive() writes results here every ~10s as matches end,
   // so checking this alone every minute is what actually delivers "real time"
@@ -393,7 +409,6 @@ async function _runSettlementInner(includeApiFetch) {
 
   let totalSettled = 0, totalPaid = 0;
   const now = Date.now();
-  const verifiedThisRun = new Map(); // fixtureKey -> verified final | null
 
 
   for (const bet of bets) {
@@ -405,34 +420,6 @@ async function _runSettlementInner(includeApiFetch) {
 
         // Look up the VERIFIED-FINAL result by exact fixture identity only.
         let entry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
-
-        // No verified final on file yet. Ask the provider about this EXACT
-        // fixture (cooled down, once per fixture per run). Anything other than
-        // an explicit FINISHED + final score leaves the selection PENDING.
-        if (!entry && String(s.matchId).startsWith('sofabets_')) {
-          const key = finalResults.fixtureKey(s.matchId);
-          let fin = verifiedThisRun.get(key);
-          if (fin === undefined) {
-            const last = lastVerifyAttempt.get(key) || 0;
-            if (now - last < VERIFY_COOLDOWN_MS) { fin = null; }
-            else {
-              lastVerifyAttempt.set(key, now);
-              fin = await finalResults.verifyFinalResult(s.matchId).catch(() => null);
-            }
-            verifiedThisRun.set(key, fin);
-            if (fin) {
-              await Match.findOneAndUpdate({ matchId: s.matchId }, { $set: {
-                status: 'finished', result: fin.result, 'score.home': fin.homeScore, 'score.away': fin.awayScore,
-                'score.period': 'FT', finalVerified: true, finalVerifiedAt: new Date()
-              } }).catch(() => {});
-            }
-          }
-          if (fin) {
-            entry = { result: fin.result, homeScore: fin.homeScore, awayScore: fin.awayScore, homeTeam: fin.homeTeam, awayTeam: fin.awayTeam };
-            resultMap.set(s.matchId, entry);
-            resultMap.set(key, entry);
-          }
-        }
 
         if (entry) {
           const applied = applyResult(s, entry.result, entry.homeScore, entry.awayScore);
@@ -453,7 +440,7 @@ async function _runSettlementInner(includeApiFetch) {
           ? new Date(s.commenceTime).getTime()
           : new Date(bet.createdAt).getTime();
         const hoursAgo = (now - kickoffTime) / 3600000;
-        if (hoursAgo <= 10) continue;
+        if (hoursAgo <= 24) continue; // allow the tracker a full day to confirm the result before any void
 
         let dbMatch = null;
         try { dbMatch = await Match.findOne({ matchId: s.matchId }).lean(); } catch(e) {}

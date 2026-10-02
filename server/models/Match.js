@@ -68,6 +68,11 @@ const matchSchema = new mongoose.Schema({
   // for settlement — a live score must never be treated as a final result.
   finalVerified:   { type: Boolean, default: false, index: true },
   finalVerifiedAt: { type: Date, default: null },
+  finalSource:     { type: String, default: null },   // 'provider' | 'feed-ended' (see finalResultService)
+  // Live-feed observations used to confirm that a game really ended
+  lastLiveSeenAt:  { type: Date, default: null },
+  liveAbsentSince: { type: Date, default: null },
+  lastLiveMinute:  { type: Number, default: null },
   lastFinalCheckAt:{ type: Date, default: null },
   isStatic:   { type: Boolean, default: false },
   source:     { type: String, enum: ['juanai'], default: 'juanai' }
