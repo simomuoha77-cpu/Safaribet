@@ -247,6 +247,9 @@ function normalizeDirectSofaMatch(m) {
     result: status === 'finished'
       ? ((score.home != null && score.away != null) ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null)
       : null,
+    // In-memory only (not in the Match schema): used to record half-time scores.
+    _statusRaw: m.statusRaw || '',
+    _halfTime: m.score?.halfTime || null,
     // Only a provider-confirmed FINISHED fixture with a final score is verified.
     finalVerified: status === 'finished' && score.home != null && score.away != null,
     isStatic: false,
@@ -393,7 +396,14 @@ async function updateLive() {
       m.lastLiveSeenAt = new Date();
       m.liveAbsentSince = null;
       if (m.score && m.score.minute != null) m.lastLiveMinute = m.score.minute;
-      try { const ex = await Match.findOne({ matchId: m.matchId, finalVerified: true }, { _id: 1 }).lean(); if (ex) continue; } catch (e) {}
+      let prevRow = null;
+      try { prevRow = await Match.findOne({ matchId: m.matchId }, { finalVerified: 1, periodScores: 1 }).lean(); } catch (e) {}
+      if (prevRow && prevRow.finalVerified) continue;
+      try {
+        const newPs = require('../services/finalResultService').observePeriods(prevRow && prevRow.periodScores, { score: { fullTime: { home: m.score && m.score.home, away: m.score && m.score.away }, minute: m.score && m.score.minute, halfTime: m._halfTime }, _statusRaw: m._statusRaw, _halfTime: m._halfTime, status: m.score && m.score.period, minute: m.score && m.score.minute }, 'football');
+        if (newPs) m.periodScores = newPs;
+      } catch (e) { /* never block the live poll */ }
+      delete m._statusRaw; delete m._halfTime;
       await Match.findOneAndUpdate(
         { matchId: m.matchId },
         { $set: m },

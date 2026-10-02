@@ -12,8 +12,13 @@ const Transaction = require('../models/Transaction');
 const { getFixtures } = require('./apifootball');
 const walletService = require('../services/walletService');
 const finalResults = require('../services/finalResultService');
+const marketRules  = require('../services/marketRules');
+const sofaBetsProvider = require('../providers/sofaBetsProvider');
 
 // ── helpers ──
+// A SofaBets-native (More Markets) selection: graded by market-aware rules.
+const isProviderSel = s => !!s && (s.provider === 'sofabets' || String(s.market || '').startsWith('sb:'));
+
 function clean(s) { return (s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 
 function teamsMatch(a, b) {
@@ -260,14 +265,11 @@ function applyResult(s, matchResult, homeScore, awayScore) {
   // picks. Grade them directly from their own stored market name + pick
   // label — never interpret an arbitrary provider key as if it were one of
   // SafariBet's six legacy picks.
-  if (s.provider === 'sofabets') {
-    const grade = gradeProviderSelection(s, homeScore, awayScore);
-    if (!grade) return false;
-    s.result = grade;
-    s.settledAt = new Date();
-    if (homeScore !== null && homeScore !== undefined) s.score = { home: homeScore, away: awayScore };
-    return true;
-  }
+  // SofaBets-native selections are graded ONLY by the market-aware path in
+  // runSettlement (gradeProviderSel): it knows the market's period (1st half,
+  // 2nd half, full match), so it must never fall through to the full-time-only
+  // legacy grader below.
+  if (s.provider === 'sofabets') return false;
 
   const grade = gradeSelection(s.pick, matchResult, homeScore, awayScore);
   if (!grade) return false;
@@ -278,6 +280,60 @@ function applyResult(s, matchResult, homeScore, awayScore) {
     s.score = { home: homeScore, away: awayScore };
   }
   return true;
+}
+
+
+// ── Market-aware grading of a SofaBets-native selection ──
+// Fixture state + market period + market type + pick decide WHEN and HOW a
+// selection settles. Returns { status, score, periodLabel, source } or
+// { status: null, reason } (stay pending).
+const officialMemo = new Map();   // per-run: one provider lookup per fixture
+async function gradeProviderSel(s, matchRows) {
+  const key = s.matchId;
+  if (!matchRows.has(key)) {
+    let row = null;
+    try { row = await Match.findOne({ matchId: key }).lean(); } catch (e) {}
+    if (!row) { // live ids and bare ids can describe the same provider fixture
+      const p = finalResults.parseSofaMatchId(key);
+      if (p) { try { row = await Match.findOne({ matchId: { $in: [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`] } }).lean(); } catch (e) {} }
+    }
+    matchRows.set(key, row);
+  }
+  const row = matchRows.get(key);
+
+  // 1. Official provider result for THIS exact market + selection, when the
+  //    provider exposes it (exact fixture id, exact market id, exact selection id).
+  try {
+    const p = finalResults.parseSofaMatchId(s.matchId);
+    const started = s.commenceTime ? new Date(s.commenceTime).getTime() <= Date.now() : true;
+    if (p && p.providerId && started && (s.providerMarketId || s.providerMarketKey)) {
+      const mk0 = `${p.sport}:${p.providerId}`;
+      if (!officialMemo.has(mk0)) officialMemo.set(mk0, sofaBetsProvider.getMatchMarkets(p.providerId, p.sport).catch(() => null));
+      const det = await officialMemo.get(mk0);
+      const mk = (det && det.markets || []).find(m => (s.providerMarketId && String(m.id) === String(s.providerMarketId)) || String(m.key) === String(s.providerMarketKey) && String(m.name || '') === String(s.marketLabel || m.name || ''));
+      const sel = mk && (mk.selections || []).find(x => (s.providerSelectionId && String(x.id) === String(s.providerSelectionId)) || String(x.key) === String(s.providerSelectionKey));
+      if (sel && sel.providerResult && (mk.providerSettled || sel.providerResult)) {
+        return { status: sel.providerResult, score: null, periodLabel: null, source: 'provider' };
+      }
+    }
+  } catch (e) { /* provider unavailable -> fall back to our own period scores */ }
+
+  // 2. Market rules on the recorded period scores
+  if (!row) return { status: null, reason: 'fixture not tracked yet' };
+  const ft = row.finalVerified === true && row.score && row.score.home != null && row.score.away != null
+    ? { home: Number(row.score.home), away: Number(row.score.away) } : null;
+  const htRaw = row.periodScores && row.periodScores.ht;
+  const ht = htRaw && htRaw.home != null && htRaw.away != null ? { home: Number(htRaw.home), away: Number(htRaw.away) } : null;
+  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht };
+
+  const r = marketRules.evaluate({
+    marketLabel: s.marketLabel || s.providerMarketKey || s.market,
+    pickLabel: s.pickLabel || s.providerSelectionKey || s.pick,
+    homeTeam: s.homeTeam, awayTeam: s.awayTeam, sport: s.sport
+  }, ps);
+  if (!r.status) return { status: null, reason: r.reason, need: r.need };
+  const period = r.market && r.market.period;
+  return { status: r.status, score: r.score || null, periodLabel: period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT', source: 'market-rules' };
 }
 
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
@@ -409,6 +465,8 @@ async function _runSettlementInner(includeApiFetch) {
 
   let totalSettled = 0, totalPaid = 0;
   const now = Date.now();
+  const matchRows = new Map(); // matchId -> Match row, loaded once per run
+  officialMemo.clear();
 
 
   for (const bet of bets) {
@@ -418,8 +476,31 @@ async function _runSettlementInner(includeApiFetch) {
       for (const s of bet.selections) {
         if (s.result !== 'pending') continue;
 
+        // SofaBets-native (More Markets) selection: market-aware settlement.
+        // A 1st-half market settles once the first half is officially over, a
+        // 2nd-half market from (full time - half time), a full-match market
+        // only after the verified final. Nothing settles from a live score.
+        if (isProviderSel(s)) {
+          const g = await gradeProviderSel(s, matchRows);
+          if (g && g.status) {
+            s.result = g.status;
+            s.settledAt = new Date();
+            s.periodLabel = g.periodLabel || undefined;
+            s.settledSource = g.source;
+            if (g.score) s.score = { home: g.score.home, away: g.score.away };
+            changed = true;
+            console.log(`   Graded (${g.source}): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel} = ${g.status}${g.score ? ` (${g.periodLabel} ${g.score.home}-${g.score.away})` : ''}`);
+            continue;
+          }
+          // Not settleable yet (period not finished / data missing): stays pending.
+          // If the fixture IS final but the market cannot be read, keep it for
+          // manual review (never auto-void, never guess).
+          const finalEntry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
+          if (finalEntry) { console.log(`   Pending (needs review): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`); continue; }
+        }
+
         // Look up the VERIFIED-FINAL result by exact fixture identity only.
-        let entry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
+        let entry = (!isProviderSel(s)) ? (resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId))) : null;
 
         if (entry) {
           const applied = applyResult(s, entry.result, entry.homeScore, entry.awayScore);

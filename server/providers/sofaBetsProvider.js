@@ -341,6 +341,7 @@ function parseStatus(raw, utcDate) {
   if (liveFlag === true || String(liveFlag).toLowerCase() === 'true' || Number(liveFlag) === 1) return 'IN_PLAY';
   const value = String(pick(raw, ['status', 'matchStatus', 'match_status', 'gameStatus', 'eventStatus', 'state']) || '').toLowerCase();
   if (value.includes('live') || value.includes('inplay') || value.includes('in_play') || value.includes('in-play')) return 'IN_PLAY';
+  if (/^(1st|2nd|first|second)\s*half$|^[12]h$/.test(value)) return 'IN_PLAY';
   if (value.includes('half') || value.includes('pause')) return 'PAUSED';
   // Period markers used by non-football sports (quarters, sets, overtime, ...)
   // mean the game is still being played — never SCHEDULED, never FINISHED.
@@ -385,6 +386,31 @@ function extractMarketArrays(root) {
   return Array.from(dedupe.values());
 }
 
+
+// ── Official settlement info, when the provider supplies it ──
+// Only explicit won/lost/void words (or winner flags) count. Anything else
+// (e.g. "active", "suspended", a score string) is ignored.
+function officialResultOf(obj, marketSettled) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const k of ['result', 'outcomeResult', 'settlement', 'settlementResult', 'settlement_result', 'resultStatus', 'result_status', 'settlementStatus', 'settlement_status', 'outcome', 'status']) {
+    const v = obj[k];
+    if (v == null || typeof v === 'object') continue;
+    const t = String(v).trim().toLowerCase();
+    if (/^(won|win|winner|winning|success)$/.test(t)) return 'won';
+    if (/^(lost|lose|loser|losing|loss)$/.test(t)) return 'lost';
+    if (/^(void|voided|cancelled|canceled|refund|refunded|push|returned)$/.test(t)) return 'void';
+  }
+  for (const k of ['isWinner', 'is_winner', 'winner', 'won']) if (obj[k] === true) return 'won';
+  if (marketSettled) for (const k of ['isWinner', 'is_winner', 'winner', 'won']) if (obj[k] === false) return 'lost';
+  return null;
+}
+function marketSettledFlag(m) {
+  if (!m || typeof m !== 'object') return false;
+  for (const k of ['settled', 'isSettled', 'is_settled', 'resulted', 'isResulted']) if (m[k] === true) return true;
+  const st = String(pick(m, ['status', 'state', 'marketStatus', 'market_status']) || '').toLowerCase();
+  return /^(settled|resulted|closed|finished|completed)$/.test(st);
+}
+
 function normalizeMarketList(payload) {
   const raw = extractMarketArrays(payload);
   return raw.map((market, index) => {
@@ -400,6 +426,7 @@ function normalizeMarketList(payload) {
         key: String(selectionKey != null ? selectionKey : (selectionId != null ? selectionId : ('selection_' + si))),
         name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
+        providerResult: officialResultOf(selection, marketSettledFlag(market)),
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
       };
     }).filter(Boolean) : [];
@@ -407,6 +434,7 @@ function normalizeMarketList(payload) {
       key: String(pick(market, ['id','key','marketId','market_id','type']) || ('market_' + index)),
       name: String(pick(market, ['label','name','marketType','marketName','market_name','type','title']) || 'Market'),
       selections: normalizedSelections,
+      providerSettled: marketSettledFlag(market),
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
   }).filter(m => m.selections.some(s => Number.isFinite(s.odds)));
@@ -895,6 +923,34 @@ function normalizeMatch(raw) {
   const awayScore = parsedScore ? parsedScore.away : null;
   const hasScore = !!parsedScore;
 
+  // Explicit first-half score, only from clearly named fields (never guessed).
+  function findHalfTime(node) {
+    if (!node || typeof node !== 'object') return null;
+    const keys = ['halfTimeScore', 'half_time_score', 'halftimeScore', 'htScore', 'ht_score', 'halfTime', 'half_time', 'halftime', 'ht', 'firstHalfScore', 'first_half_score'];
+    for (const holder of [node, node.score, node.scores, node.result]) {
+      if (!holder || typeof holder !== 'object') continue;
+      for (const k of keys) {
+        const v = holder[k];
+        if (v == null) continue;
+        if (typeof v === 'string') { const m = v.match(/(\d+)\s*[-:]\s*(\d+)/); if (m) return { home: Number(m[1]), away: Number(m[2]) }; continue; }
+        const pair = scorePair(v);
+        if (pair) return pair;
+      }
+    }
+    for (const holder of [node, node.score, node.scores]) {
+      if (!holder || typeof holder !== 'object') continue;
+      const arr = holder.periods || holder.periodScores || holder.period_scores || holder.byPeriod;
+      if (Array.isArray(arr)) {
+        const first = arr.find(x => x && /^(1h|1|first|1st|ht|first[\s_-]?half|1st[\s_-]?half|half[\s_-]?time)$/i.test(String(pick(x, ['period', 'name', 'label', 'type', 'key', 'number']) ?? '')));
+        const pair = first && scorePair(first);
+        if (pair) return pair;
+      }
+    }
+    return null;
+  }
+  const halfTimeScore = findHalfTime(source);
+  const statusRaw = String(pick(source, ['status', 'matchStatus', 'match_status', 'gameStatus', 'eventStatus', 'state', 'period', 'phase']) || '');
+
   const odds = parseOdds(source, home, away);
   const rawMarkets = extractMarketArrays(source);
   const markets = rawMarkets.map((market, index) => {
@@ -910,6 +966,7 @@ function normalizeMatch(raw) {
         key: String(selectionKey != null ? selectionKey : (selectionId != null ? selectionId : ('selection_' + si))),
         name: String(pick(selection, ['name', 'label', 'selectionName', 'selection_name', 'outcomeName']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(Number(price)) ? Number(price) : null,
+        providerResult: officialResultOf(selection, marketSettledFlag(market)),
         bookmaker: pick(selection, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
       };
     }).filter(Boolean) : [];
@@ -920,6 +977,7 @@ function normalizeMatch(raw) {
       key: String(marketKey != null ? marketKey : (marketId != null ? marketId : ('market_' + index))),
       name: String(pick(market, ['label', 'name', 'marketType', 'marketName', 'market_name', 'type']) || 'Market'),
       selections: normalizedSelections,
+      providerSettled: marketSettledFlag(market),
       bookmaker: pick(market, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
     };
   }).filter(Boolean);
@@ -940,7 +998,8 @@ function normalizeMatch(raw) {
     awayTeam: away,
     utcDate,
     status,
-    score: { fullTime: hasScore ? { home: Number(homeScore), away: Number(awayScore) } : null, halfTime: null },
+    score: { fullTime: hasScore ? { home: Number(homeScore), away: Number(awayScore) } : null, halfTime: halfTimeScore },
+    statusRaw,
     venue: teamName(pick(source, ['venue', 'stadium'])),
     minute: minute != null && Number.isFinite(Number(minute)) ? Number(minute) : null,
     minuteIsEstimated: minute == null,

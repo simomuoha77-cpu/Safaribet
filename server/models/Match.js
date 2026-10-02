@@ -68,6 +68,15 @@ const matchSchema = new mongoose.Schema({
   // for settlement — a live score must never be treated as a final result.
   finalVerified:   { type: Boolean, default: false, index: true },
   finalVerifiedAt: { type: Date, default: null },
+  // Period results, recorded while the game is tracked live. Needed to settle
+  // half-specific markets (1st half / 2nd half) from the right score.
+  periodScores: {
+    ht:       { home: { type: Number }, away: { type: Number } },   // score at the end of the 1st half
+    htSource: { type: String },                                      // 'provider' | 'observed' | 'inferred'
+    htAt:     { type: Date },
+    last1h:   { home: { type: Number }, away: { type: Number }, at: { type: Date } },
+    seen2h:   { type: Boolean }
+  },
   finalSource:     { type: String, default: null },   // 'provider' | 'feed-ended' (see finalResultService)
   // Live-feed observations used to confirm that a game really ended
   lastLiveSeenAt:  { type: Date, default: null },

@@ -379,6 +379,10 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         providerSelectionId: providerSelection ? String(providerOutcome.id ?? s.providerSelectionId ?? '') : undefined,
         providerSelectionKey: providerSelection ? String(providerOutcome.key ?? s.providerSelectionKey) : undefined,
         provider: providerSelection ? 'sofabets' : undefined,
+        ...(providerSelection ? (() => {
+          const pm = require('../services/marketRules').parseMarket(String(providerMarket.name || providerMarket.label || ''));
+          return { marketType: pm.type || undefined, period: pm.period, line: Number.isFinite(pm.line) ? pm.line : undefined, placedAt: new Date(), isLive: match.status === 'live' };
+        })() : {}),
         pickLabel: providerSelection
           ? String(providerOutcome.name || s.pickLabel || providerOutcome.key)
           : pickLabelFor(market, s.pick, match),

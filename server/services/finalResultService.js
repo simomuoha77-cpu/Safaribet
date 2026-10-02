@@ -117,6 +117,64 @@ function inferEnded(row, sport, now) {
   return { ok: true, home: Number(h), away: Number(a) };
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PERIOD SCORES (half-time capture)
+// Half-specific markets need the score at the END of the first half. It is
+// recorded from the live feed, strongest evidence first:
+//   'provider'  the provider sent an explicit half-time score
+//   'observed'  the feed said half-time/break and we read the (frozen) score
+//   'inferred'  the feed skipped the break but we saw the 1st half and then the
+//               2nd half within INFER_GAP_MS, so no goal can have been missed
+// Anything weaker is NOT recorded, so a half market whose HT score is unknown
+// stays pending instead of being graded from a guess.
+// ══════════════════════════════════════════════════════════════════════════════
+const INFER_GAP_MS = 90 * 1000;
+const HT_RE = /(^|[^a-z])(ht|half[\s_-]*time|halftime)($|[^a-z])/;
+function classifyPeriod(item, sport) {
+  const raw = String(item.statusRaw || item._statusRaw || '').toLowerCase().trim();
+  const minute = item.minute != null ? Number(item.minute) : (item.score && item.score.minute != null ? Number(item.score.minute) : null);
+  if (raw && HT_RE.test(raw) && !/full/.test(raw)) return 'break';
+  if (/(^|[^a-z0-9])(1st|first)[\s_-]*half|^1h$/.test(raw)) return 'first';
+  if (/(^|[^a-z0-9])(2nd|second)[\s_-]*half|^2h$/.test(raw)) return 'second';
+  if (sport === 'football' || !sport) {
+    if (String(item.status || '').toUpperCase() === 'PAUSED' && minute != null && minute >= 44 && minute <= 46) return 'break';
+    if (minute != null && Number.isFinite(minute)) return minute <= 45 ? 'first' : 'second';
+  }
+  return null;
+}
+// prev: Match.periodScores (or undefined). Returns the new periodScores, or null when unchanged.
+function observePeriods(prev, item, sport, now = new Date()) {
+  const ps = JSON.parse(JSON.stringify(prev || {}));
+  const ft = item && item.score && item.score.fullTime;
+  const cur = ft && ft.home != null && ft.away != null && Number.isFinite(Number(ft.home)) && Number.isFinite(Number(ft.away))
+    ? { home: Number(ft.home), away: Number(ft.away) } : null;
+  let changed = false;
+  const set = (k, v) => { ps[k] = v; changed = true; };
+
+  const prov = item && (item._halfTime || (item.score && item.score.halfTime));
+  if (prov && prov.home != null && prov.away != null && Number.isFinite(Number(prov.home)) && Number.isFinite(Number(prov.away))) {
+    const h = { home: Number(prov.home), away: Number(prov.away) };
+    if (!ps.ht || ps.htSource !== 'provider' || ps.ht.home !== h.home || ps.ht.away !== h.away) { set('ht', h); set('htSource', 'provider'); set('htAt', now); }
+    return changed ? ps : null;
+  }
+  if (!cur) return null;
+  const phase = classifyPeriod(item, sport);
+  const hasHt = ps.ht && ps.ht.home != null && ps.ht.away != null;
+
+  if (phase === 'break') {
+    if (!hasHt || ps.htSource === 'inferred') { set('ht', cur); set('htSource', 'observed'); set('htAt', now); }
+  } else if (phase === 'first') {
+    set('last1h', { home: cur.home, away: cur.away, at: now });
+  } else if (phase === 'second') {
+    if (!ps.seen2h) set('seen2h', true);
+    if (!hasHt && ps.last1h && ps.last1h.at && now.getTime() - new Date(ps.last1h.at).getTime() <= INFER_GAP_MS) {
+      set('ht', { home: ps.last1h.home, away: ps.last1h.away }); set('htSource', 'inferred'); set('htAt', now);
+    }
+  }
+  return changed ? ps : null;
+}
+
 // fixtures: [{ matchId, homeTeam, awayTeam, league, commenceTime }]
 async function trackFixtures(fixtures, Match) {
   const now = Date.now();
@@ -158,6 +216,8 @@ async function trackFixtures(fixtures, Match) {
           const set = { status: 'live', lastLiveSeenAt: new Date(), liveAbsentSince: null, lastFinalCheckAt: new Date() };
           if (sc) { set['score.home'] = sc.home; set['score.away'] = sc.away; }
           if (item.minute != null && Number.isFinite(Number(item.minute))) { set.lastLiveMinute = Number(item.minute); set['score.minute'] = Number(item.minute); }
+          const newPs = observePeriods(row.periodScores, item, p.sport);
+          if (newPs) set.periodScores = newPs;
           await Match.updateOne({ matchId: fx.matchId }, { $set: set });
           out.waiting.push({ matchId: fx.matchId, why: 'still in play' }); continue;
         }
@@ -177,4 +237,4 @@ async function trackFixtures(fixtures, Match) {
 
 function _resetCache() { memo.clear(); }
 
-module.exports = { _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };
+module.exports = { observePeriods, classifyPeriod, _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };

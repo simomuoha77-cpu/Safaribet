@@ -230,7 +230,7 @@ function renderBets(bets){
               r==='pending' ? (s.pickLabel||s.pick) + ' ⏳' :
               (s.pickLabel||s.pick)
             }</span>
-            ${scoreStr ? `<span class="sel-score">FT: ${scoreStr}</span>` : ''}
+            ${scoreStr ? `<span class="sel-score">${s.periodLabel || 'FT'}: ${scoreStr}</span>` : ''}
             ${s.league ? `<span class="sel-league">${s.league}</span>` : ''}
           </div>
         </div>

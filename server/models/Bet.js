@@ -31,6 +31,15 @@ const selectionSchema = new mongoose.Schema({
   // may have rotated/expired by settlement time) just to know what kind of
   // market this selection belongs to.
   marketLabel:          { type: String },
+  // Parsed once at placement (server-side, never trusted from the client) so
+  // settlement knows which period/line decides this exact market.
+  marketType:     { type: String },            // e.g. DOUBLE_CHANCE, BTTS, ODD_EVEN, COMBINED
+  period:         { type: String },            // FULL_MATCH | FIRST_HALF | SECOND_HALF | ...
+  line:           { type: Number },            // total/handicap line when the market has one
+  placedAt:       { type: Date },
+  isLive:         { type: Boolean },
+  periodLabel:    { type: String },            // set when graded: 'HT' | '2H' | 'FT' (what the shown score refers to)
+  settledSource:  { type: String },            // 'market-rules' | 'provider'
   providerSelectionId: { type: String },
   providerSelectionKey:{ type: String },
   provider:             { type: String },
