@@ -291,13 +291,21 @@
   Array.prototype.forEach.call(document.querySelectorAll('script[src]'), function (s) {
     try { loadedSrc[new URL(s.src, location.href).pathname] = 1; } catch (e) {}
   });
-  Array.prototype.forEach.call(document.head.querySelectorAll('style, link[rel~="stylesheet"]'), function (el) { el.setAttribute('data-sb-own', '1'); });
+  // router.js is loaded BEFORE the page's own <style>/<link> in <head>, so the
+  // first page's styles do not exist yet at this point. They are tagged lazily,
+  // right before the first client-side swap (markOwnStyles), so that they are
+  // removed when that page is left. (Without this, e.g. the Login page's
+  // centred-flex <body> style stayed active on every page after it.)
+  function markOwnStyles() {
+    Array.prototype.forEach.call(document.head.querySelectorAll('style:not([data-sb-own]), link[rel~="stylesheet"]:not([data-sb-own])'), function (el) { el.setAttribute('data-sb-own', '1'); });
+  }
 
   function absHref(h) { try { return new URL(h, location.href).href; } catch (e) { return h; } }
 
   function prepareLinks(doc) {
     // Add stylesheet <link>s the new page needs that aren't loaded yet and wait
     // for same-origin ones, so the swap never paints unstyled.
+    markOwnStyles();
     var existing = {};
     Array.prototype.forEach.call(document.head.querySelectorAll('link[rel~="stylesheet"]'), function (l) { existing[absHref(l.getAttribute('href'))] = l; });
     var waits = [], plan = [];
