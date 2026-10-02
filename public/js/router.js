@@ -338,6 +338,11 @@
     if (doc.title) document.title = doc.title;
   }
 
+  function swapPageHeadTags(tags) {
+    Array.prototype.slice.call(document.head.querySelectorAll('[data-sb-page-head]')).forEach(function (n) { n.parentNode.removeChild(n); });
+    tags.forEach(function (n) { document.head.appendChild(document.importNode(n, true)); });
+  }
+
   // ── Fetching pages ──
   var htmlCache = {};
   function fetchHtml(u) {
@@ -373,6 +378,10 @@
 
   function swap(html, u, o) {
     var doc = new DOMParser().parseFromString(html, 'text/html');
+    // SEO tags marked data-sb-page-head (canonical, description, og:*, JSON-LD)
+    // belong to ONE page: they are removed when it is left and re-added when it
+    // is shown, so e.g. the homepage canonical never lingers on /my-bets.
+    var headTags = Array.prototype.slice.call(doc.head.querySelectorAll('[data-sb-page-head]'));
     var items = [];
     Array.prototype.forEach.call(doc.querySelectorAll('script'), function (s) {
       var src = s.getAttribute('src');
@@ -385,6 +394,7 @@
       // ── synchronous swap: nothing paints between teardown and new body ──
       teardown();
       applyHead(doc, links.plan);
+      swapPageHeadTags(headTags);
       var body = document.body, nb = doc.body, a;
       while (body.attributes.length) body.removeAttribute(body.attributes[0].name);
       for (a = 0; a < nb.attributes.length; a++) body.setAttribute(nb.attributes[a].name, nb.attributes[a].value);
