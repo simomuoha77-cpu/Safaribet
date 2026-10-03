@@ -87,7 +87,8 @@ app.use('/api', globalLimiter);
 // ── MIDDLEWARE ──
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 app.use(compression());
-app.use(express.json({ limit: '50kb' })); // limit body size
+// rawBody is kept ONLY for the JuanAI casino callbacks: their HMAC signature is over the exact bytes sent.
+app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.originalUrl && req.originalUrl.startsWith('/api/casino/juanai/')) req.rawBody = buf.toString('utf8'); } })); // limit body size
 // Parse cookies — needed for casino game launcher auth
 app.use(require('cookie-parser')());
 app.use(mongoSanitize()); // prevent NoSQL injection
@@ -132,6 +133,7 @@ app.get('/', (req, res) => {
 // ── API ROUTES ──
 app.use('/api/auth',     authRoutes);
 app.use('/api/odds',     oddsRoutes);
+app.use('/api/casino/juanai', require('./routes/juanaiCasino')); // JuanAI Casino API (casino only)
 app.use('/api/casino',   casinoRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);

@@ -170,6 +170,18 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
     </div>
   </div>
 
+
+  <!-- JUANAI CASINO CATALOGUE (dynamic provider games) -->
+  <div id="jcSection" style="display:none">
+    <div class="section-ttl" id="jcTitle">Provider Games</div>
+    <div style="padding:0 10px 8px">
+      <input id="jcSearch" type="search" placeholder="Search games or providers..." autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);font-size:14px">
+      <div id="jcChips" style="display:flex;gap:6px;overflow-x:auto;padding:8px 0 2px"></div>
+    </div>
+    <div class="game-grid" id="jcGrid"></div>
+    <div id="jcEmpty" style="display:none;padding:20px;text-align:center;color:var(--mt);font-size:13px">No games match your search</div>
+  </div>
 </main>
 
 <!-- GAME IFRAME SCREEN -->
@@ -328,6 +340,59 @@ function closeGameScreen() {
 
 loadBalance();
 loadGames();
+
+// ── JuanAI provider catalogue (dynamic; nothing is hard-coded) ──
+let jcGames = [], jcCats = ['all'], jcCat = 'all';
+function jcEsc(v){ return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function jcLoad(){
+  try{
+    const r = await fetch('/api/casino/juanai/games');
+    const d = await r.json();
+    if(!d.success || !d.data || !d.data.length) return;          // not configured / empty: the section simply stays hidden
+    jcGames = d.data;
+    jcCats = ['all'].concat(d.categories || []);
+    document.getElementById('jcSection').style.display = 'block';
+    jcDrawChips();
+    jcRender();
+  }catch(e){ /* catalogue is optional: leave the section hidden */ }
+}
+function jcDrawChips(){
+  document.getElementById('jcChips').innerHTML = jcCats.map(c =>
+    `<button type="button" data-cat="${jcEsc(c)}" style="flex:none;padding:6px 12px;border-radius:999px;border:1px solid var(--bd);background:${c===jcCat?'var(--g)':'var(--s2)'};color:${c===jcCat?'#000':'var(--tx)'};font-size:12px;font-weight:700;cursor:pointer">${jcEsc(c==='all'?'All':c)}</button>`).join('');
+}
+function jcRender(){
+  const q = document.getElementById('jcSearch').value.trim().toLowerCase();
+  const list = jcGames.filter(g => (jcCat==='all' || g.category===jcCat) && (!q || (g.name+' '+g.provider+' '+g.gameId).toLowerCase().includes(q)));
+  document.getElementById('jcTitle').textContent = list.length + ' Provider Game' + (list.length===1?'':'s');
+  document.getElementById('jcEmpty').style.display = list.length ? 'none' : 'block';
+  document.getElementById('jcGrid').innerHTML = list.map(g => `
+    <div class="game-card" data-gid="${jcEsc(g.gameId)}">
+      <div class="gc-banner" style="background:linear-gradient(135deg,#0a0a1a,#050510)">
+        ${g.image ? `<img src="${jcEsc(g.image)}" alt="" referrerpolicy="no-referrer" loading="lazy" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">` : ''}
+      </div>
+      <div class="gc-body">
+        <div class="gc-name">${jcEsc(g.name)}</div>
+        <div class="gc-desc">${jcEsc(g.provider)} · ${jcEsc(g.category)}</div>
+        <div style="font-size:10px;color:var(--mt);margin-top:2px">ID: ${jcEsc(g.gameId)}</div>
+      </div>
+    </div>`).join('');
+}
+async function jcLaunch(gameId){
+  if(!token){ SB.go('/login'); return; }
+  const g = jcGames.find(x => x.gameId===gameId); if(!g) return;
+  document.getElementById('gameScreenTitle').textContent = g.name;
+  try{
+    const r = await fetch('/api/casino/juanai/launch', { method:'POST', headers:{'Content-Type':'application/json',Authorization:'Bearer '+token}, body: JSON.stringify({ gameId }) });
+    const d = await r.json();
+    if(!d.success){ alert(d.message || 'The game could not be started'); return; }
+    document.getElementById('gameIframe').src = d.launchUrl;
+    document.getElementById('gameScreen').style.display = 'flex';
+  }catch(e){ alert('Connection error. Please try again.'); }
+}
+document.getElementById('jcGrid').addEventListener('click', e => { const c = e.target.closest('[data-gid]'); if(c) jcLaunch(c.getAttribute('data-gid')); });
+document.getElementById('jcChips').addEventListener('click', e => { const b = e.target.closest('[data-cat]'); if(!b) return; jcCat = b.getAttribute('data-cat'); jcDrawChips(); jcRender(); });
+document.getElementById('jcSearch').addEventListener('input', jcRender);
+jcLoad();
 
 // Refresh balance every 30s while on casino page
 setInterval(loadBalance, 30000);
