@@ -2911,6 +2911,7 @@ function updateSlipTotals(){
   document.getElementById('netWin').textContent=`KES ${net.toFixed(2)}`;
 }
 
+function escSlipTxt(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function renderSlipItems(){
   document.getElementById('slipBody').innerHTML=slip.map((s,i)=>`
     <div class="si">
@@ -2918,7 +2919,7 @@ function renderSlipItems(){
       <div class="si-match">${s.homeTeam} vs ${s.awayTeam}</div>
       <div class="si-bottom">
         <div>
-          <span class="si-pick">${s.market && String(s.market).startsWith('sb:') ? (s.pickLabel || s.pick) : (s.pick==='home'?'1 — Home Win':s.pick==='draw'?'X — Draw':s.pick==='away'?'2 — Away Win':s.pick)} — <strong>${s.pickLabel || ''}</strong></span>
+          <span class="si-pick">${s.market && String(s.market).startsWith('sb:') ? (s.marketLabel ? escSlipTxt(s.marketLabel) : 'More Market') : (s.pick==='home'?'1 — Home Win':s.pick==='draw'?'X — Draw':s.pick==='away'?'2 — Away Win':s.pick)} — <strong>${s.pickLabel || ''}</strong></span>
         </div>
         <span class="si-odd">${s.odds.toFixed(2)}</span>
       </div>
@@ -3031,32 +3032,42 @@ async function submitLoadCode(){
       return;
     }
 
-    // Only bring in picks that are still upcoming and still have a real price —
-    // a shared code can be loaded days after it was created, so some matches
-    // may have already kicked off or lost their odds by then. Show the user
-    // exactly what happened rather than silently dropping picks.
-    const usable=d.selections.filter(s=>s.stillAvailable && s.currentOdds);
-    const skipped=d.selections.length-usable.length;
-
-    usable.forEach(s=>{
-      if(slip.some(x=>x.matchId===s.matchId)) return; // already in slip, don't duplicate
-      slip.push({
-        matchId:s.matchId, homeTeam:s.homeTeam, awayTeam:s.awayTeam,
-        league:s.league, sport:s.sport, pick:s.pick, pickLabel:s.pickLabel,
-        market:s.market, provider:s.provider,
-        providerMarketId:s.providerMarketId, providerMarketKey:s.providerMarketKey,
-        providerSelectionId:s.providerSelectionId, providerSelectionKey:s.providerSelectionKey,
-        odds:s.currentOdds, // always use the CURRENT odds, never the odds from when it was shared
-        commenceTime:s.commenceTime
-      });
-      document.getElementById(`odd_${s.matchId}_${s.pick}`)?.classList.add('sel');
+    // EVERY selection of the shared slip is shown with its exact fixture, market,
+    // selection and odds. Available ones go into this user's slip with their full
+    // identity (More Markets stay More Markets - never reduced to Home/Draw/Away);
+    // the rest are listed as unavailable with the reason instead of vanishing.
+    const rows=[]; let added=0;
+    d.selections.forEach(s=>{
+      const mk = s.marketLabel ? escSlipTxt(s.marketLabel) : (s.market==='1x2'?'Match Result':escSlipTxt(s.market||''));
+      const odds = (s.currentOdds||s.sharedOdds||0);
+      let status;
+      if(!s.stillAvailable || !s.currentOdds){
+        status=`<span style="color:var(--rd)">Unavailable${s.unavailableReason?`  ${escSlipTxt(s.unavailableReason)}`:''}</span>`;
+      } else if(slip.some(x=>x.matchId===s.matchId)){
+        status='<span style="color:var(--yl)">Already in your slip for this match</span>';
+      } else {
+        slip.push({
+          matchId:s.matchId, homeTeam:s.homeTeam, awayTeam:s.awayTeam,
+          league:s.league, sport:s.sport, commenceTime:s.commenceTime, isLive:!!s.isLive,
+          market:s.market, pick:s.pick, pickLabel:s.pickLabel, marketLabel:s.marketLabel||undefined,
+          provider:s.provider||undefined,
+          providerMarketId:s.providerMarketId||undefined, providerMarketKey:s.providerMarketKey||undefined,
+          providerSelectionId:s.providerSelectionId||undefined, providerSelectionKey:s.providerSelectionKey||undefined,
+          odds:s.currentOdds // current price; /place re-validates server-side
+        });
+        document.getElementById(`odd_${s.matchId}_${s.pick}`)?.classList.add('sel');
+        added++;
+        status=`<span style="color:var(--g)">Added${s.oddsChanged?` (odds ${Number(s.sharedOdds).toFixed(2)}  ${Number(s.currentOdds).toFixed(2)})`:''}</span>`;
+      }
+      rows.push(`<div style="padding:6px 0;border-top:1px solid var(--bd);font-size:12px;text-align:left">
+        <div style="font-weight:700">${escSlipTxt(s.homeTeam)} vs ${escSlipTxt(s.awayTeam)}${s.isLive?' <span style="color:var(--rd)"> LIVE</span>':''}</div>
+        <div style="color:var(--mt)">${mk}  <strong style="color:var(--tx)">${escSlipTxt(s.pickLabel||s.pick)}</strong>  ${odds?Number(odds).toFixed(2):''}</div>
+        <div>${status}</div></div>`);
     });
     updateSlip();
-
-    let msg=`Loaded ${usable.length} pick${usable.length!==1?'s':''}`;
-    if(skipped>0) msg+=` — ${skipped} no longer available`;
-    resultEl.innerHTML=`<div style="padding:10px;color:var(--g);font-size:12px">${msg}</div>`;
-    setTimeout(()=>closeModal('loadCodeModal'),1200);
+    const unavailable=d.selections.filter(s=>!s.stillAvailable||!s.currentOdds).length;
+    resultEl.innerHTML=`<div style="padding:8px 0;color:var(--g);font-size:12px;font-weight:700">Loaded ${added} of ${d.selections.length} selection${d.selections.length!==1?'s':''}${unavailable?`  ${unavailable} unavailable`:''}</div>`+rows.join('');
+    if(!unavailable && added===d.selections.length) setTimeout(()=>closeModal('loadCodeModal'),2500);
   }catch(e){
     resultEl.innerHTML='<div style="padding:10px;color:var(--rd);font-size:12px">Network error — try again</div>';
   }
@@ -3073,12 +3084,20 @@ async function placeBet(){
   const btn=document.getElementById('placeBtn');
   btn.disabled=true; btn.textContent='Placing bet...';
 
+  // One key per press: a double tap or a retry after a dropped connection can
+  // never place (and charge for) the same bet twice - the server returns the
+  // original result instead. The wait is bounded so the user is never left on
+  // "Placing bet..." indefinitely.
+  const idemKey=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+Math.random().toString(36).slice(2));
+  const ctl=new AbortController(); const tmo=setTimeout(()=>ctl.abort(),20000);
   try{
     const r=await fetch('/api/bets/place',{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
-      body:JSON.stringify({selections:slip,stake})
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token'),'X-Idempotency-Key':idemKey},
+      body:JSON.stringify({selections:slip,stake}),
+      signal:ctl.signal
     });
+    clearTimeout(tmo);
     const d=await r.json();
 
     if(d.success){
@@ -3102,7 +3121,11 @@ async function placeBet(){
     } else {
       showT(d.message||'Failed','err');
     }
-  } catch{ showT('Connection error','err'); }
+  } catch(e){
+    clearTimeout(tmo);
+    if(e && e.name==='AbortError') showT('This is taking longer than expected. Check My Bets before trying again.','err');
+    else showT('Connection error','err');
+  }
 
   btn.disabled=false; btn.textContent='PLACE BET';
 }

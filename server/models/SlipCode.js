@@ -21,8 +21,16 @@ const slipSelectionSchema = new mongoose.Schema({
   providerSelectionKey: { type: String, default: '' },
   market:       { type: String, default: '' },
   pickLabel:    { type: String, default: '' },
+  // Complete selection identity (see services/slipSelection.js): a shared slip
+  // must rebuild the EXACT market + selection, not just Home/Draw/Away.
+  providerMatchId: { type: String, default: '' },
+  marketLabel:  { type: String, default: '' },
+  marketType:   { type: String, default: '' },
+  period:       { type: String, default: '' },
+  line:         { type: Number, default: null },
+  isLive:       { type: Boolean, default: false },
   odds:         { type: Number, required: true },
-  commenceTime: { type: Date, required: true }
+  commenceTime: { type: Date, required: false }
 }, { _id: false });
 
 const slipCodeSchema = new mongoose.Schema({

@@ -488,15 +488,19 @@ const MARKETS_TTL_MS = 30000;          // served instantly while younger than th
 const MARKETS_STALE_MS = 10 * 60000;   // served instantly (and refreshed in the background) up to this age
 const MARKETS_FAST_TIMEOUT_MS = 6000;  // per-request cap for these per-fixture lookups
 
-async function getMatchMarkets(providerMatchId, sportName = 'football') {
+// opts.maxAgeMs: the caller will not accept a copy older than this (e.g. placing
+// a LIVE bet needs prices younger than ~45s). Older copies are refreshed before
+// answering instead of being served stale.
+async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
   const id = String(providerMatchId || '').trim();
   if (!id) return { markets: [], bookmakers: [] };
   const name = String(sportName || 'football').toLowerCase();
   const cacheKey = name + ':' + id;
+  const maxAge = opts && Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : MARKETS_STALE_MS;
 
   const cached = matchMarketsCache.get(cacheKey);
   const age = cached ? Date.now() - cached.ts : Infinity;
-  if (cached && cached.data && cached.data.markets.length > 1) {
+  if (cached && cached.data && cached.data.markets.length > 1 && age < maxAge) {
     if (age < MARKETS_TTL_MS) return cached.data;
     if (age < MARKETS_STALE_MS) {           // stale-while-revalidate: answer now, refresh behind the scenes
       refreshMatchMarkets(id, name, cacheKey).catch(() => {});
@@ -628,7 +632,7 @@ async function getLiveMatchById(providerMatchId, sportName = 'football', options
   // Live IDs are resolved from the live feed by exact provider identity.
   // Never substitute a first, nearest, or team-name-matched fixture.
   try {
-    const liveMatches = await fetchLiveFootballFixtures(sportName);
+    const liveMatches = await fetchLiveFootballFixtures(sportName, options && options.maxStaleMs != null ? { maxStaleMs: options.maxStaleMs } : undefined);
     const exact = liveMatches.find(m => String(m?.providerMatchId || '').trim() === id);
     if (!exact) return null;
 
@@ -1136,17 +1140,29 @@ const liveFeedCache = new Map();     // sport -> { ts, data }
 const liveFeedInflight = new Map();  // sport -> Promise
 const LIVE_FEED_TTL_MS = 6000;
 
-async function fetchLiveFootballFixtures(sportName = 'football') {
+// opts.maxStaleMs: latency-critical callers (placing a bet, loading a shared slip)
+// accept a live list up to that old and get it INSTANTLY; an older-than-fresh
+// copy is refreshed in the background. Without the option the behaviour is the
+// original one: fresh (<= LIVE_FEED_TTL_MS) or fetch.
+async function fetchLiveFootballFixtures(sportName = 'football', opts) {
   const key = String(sportName || 'football').toLowerCase();
   const hit = liveFeedCache.get(key);
-  if (hit && Date.now() - hit.ts < LIVE_FEED_TTL_MS) return hit.data;
-  if (liveFeedInflight.has(key)) return liveFeedInflight.get(key);
-  const p = fetchLiveFootballFixturesUncached(sportName).then(data => {
-    if (Array.isArray(data) && data.length) liveFeedCache.set(key, { ts: Date.now(), data });
-    return data;
-  }).finally(() => liveFeedInflight.delete(key));
-  liveFeedInflight.set(key, p);
-  return p;
+  const age = hit ? Date.now() - hit.ts : Infinity;
+  if (hit && age < LIVE_FEED_TTL_MS) return hit.data;
+  const refresh = () => {
+    if (liveFeedInflight.has(key)) return liveFeedInflight.get(key);
+    const p = fetchLiveFootballFixturesUncached(sportName).then(data => {
+      if (Array.isArray(data) && data.length) liveFeedCache.set(key, { ts: Date.now(), data });
+      return data;
+    }).finally(() => liveFeedInflight.delete(key));
+    liveFeedInflight.set(key, p);
+    return p;
+  };
+  if (hit && opts && Number.isFinite(opts.maxStaleMs) && age < opts.maxStaleMs) {
+    refresh().catch(() => {});
+    return hit.data;
+  }
+  return refresh();
 }
 
 async function fetchLiveFootballFixturesUncached(sportName = 'football') {

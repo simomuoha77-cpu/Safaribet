@@ -9,16 +9,16 @@ const Transaction = require('../models/Transaction');
  * failing, since this is a user-protection feature, not optional.
  */
 
-async function checkSelfExclusion(userId) {
-  const user = await User.findById(userId).select('selfExcludedUntil');
+async function checkSelfExclusion(userId, userDoc) {
+  const user = (userDoc && userDoc.selfExcludedUntil !== undefined) ? userDoc : await User.findById(userId).select('selfExcludedUntil');
   if (user?.selfExcludedUntil && user.selfExcludedUntil > new Date()) {
     const until = user.selfExcludedUntil.toISOString().slice(0, 10);
     throw new Error(`Your account is self-excluded until ${until}. Contact support if you believe this is an error.`);
   }
 }
 
-async function checkStakeLimit(userId, stakeAmount) {
-  const user = await User.findById(userId).select('dailyStakeLimit');
+async function checkStakeLimit(userId, stakeAmount, userDoc) {
+  const user = (userDoc && userDoc.dailyStakeLimit !== undefined) ? userDoc : await User.findById(userId).select('dailyStakeLimit');
   if (!user?.dailyStakeLimit) return; // no limit set
 
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);

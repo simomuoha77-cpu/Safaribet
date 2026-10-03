@@ -433,6 +433,8 @@ function toggleMarketPick(market, pick, odds, pickLabelText, providerMarketId, p
       pickLabel: pickLabelText, odds: parseFloat(odds),
       commenceTime: matchData.commenceTime,
       ...(String(market).startsWith('sb:') ? {
+        marketLabel: ((matchData.markets || []).find(m => m.market === market) || {}).label || '',
+        isLive: matchData.status === 'live',
         provider: 'sofabets',
         providerMarketId: providerMarketId || null,
         providerMarketKey: providerMarketKey || String(market).slice(3),

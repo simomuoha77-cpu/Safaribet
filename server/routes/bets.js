@@ -22,6 +22,8 @@ const router  = express.Router();
 const ODDS_STALE_MS = 90 * 60 * 1000; // 90 minutes
 
 const { resolveOdds, isPickSuspended, getMinViableOdds } = require('../services/marketResolver');
+const placementResolver = require('../services/placementResolver');
+const slipSelection = require('../services/slipSelection');
 
 function pickLabelFor(market, pick, match) {
   const h = match.homeTeam, a = match.awayTeam;
@@ -106,7 +108,7 @@ function validateSelections(selections, maxSelections) {
 }
 
 // ── PLACE BET ──
-router.post('/place', auth, betLimiter, async (req, res) => {
+async function placeBetHandler(req, res) {
   try {
     const { selections, stake } = req.body;
 
@@ -127,21 +129,30 @@ router.post('/place', auth, betLimiter, async (req, res) => {
     if (!stakeAmt || stakeAmt < minBet) return res.status(400).json({ success: false, message: `Minimum stake is KES ${minBet}` });
     if (stakeAmt > maxBet) return res.status(400).json({ success: false, message: `Maximum stake is KES ${maxBet.toLocaleString()}` });
 
-    // Responsible gaming checks — self-exclusion and daily stake limit
-    try {
-      const rg = require('../services/responsibleGamingService');
-      await rg.checkSelfExclusion(req.user._id);
-      await rg.checkStakeLimit(req.user._id, stakeAmt);
-    } catch (rgErr) {
-      return res.status(403).json({ success: false, message: rgErr.message });
-    }
-
-    // Verify matches exist and are still bettable + verify server-side odds
+    // The independent lookups run TOGETHER (they used to run one after another):
+    //   responsible-gaming checks, fixtures in MongoDB, and - for More Markets /
+    //   provider selections - the exact market confirmation (bounded, cache-first,
+    //   see services/placementResolver.js).
     const matchIds = selections.map(s => s.matchId);
-    const matches  = await Match.find({ matchId: { $in: matchIds } });
+    const rgPromise = (async () => {
+      try {
+        const rg = require('../services/responsibleGamingService');
+        await rg.checkSelfExclusion(req.user._id, req.user);
+        await rg.checkStakeLimit(req.user._id, stakeAmt, req.user);
+        return null;
+      } catch (rgErr) { return rgErr; }
+    })();
+    const matches = await Match.find({ matchId: { $in: matchIds } });
 
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
+
+    const resolutions = new Map();
+    const resolvePromise = Promise.all(selections.filter(isSofaProviderSelection).map(async sel => {
+      resolutions.set(sel, await placementResolver.resolveProviderSelection(sel, matchMap[sel.matchId]));
+    }));
+    const [rgErr] = await Promise.all([rgPromise, resolvePromise]);
+    if (rgErr) return res.status(403).json({ success: false, message: rgErr.message });
 
     const verifiedSelections = [];
     let totalOdds = 1;
@@ -168,130 +179,30 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         : (parts.length >= 2 && Number.isNaN(Number(parts[0])) ? parts[0] : 'football');
 
       if (providerSelection) {
-        // SofaBets-native selections must be verified against the exact provider
-        // fixture and the exact market/selection keys. Never resolve by teams.
+        // SofaBets-native selections are verified against the exact provider
+        // fixture + exact market + exact selection (never by teams, never by
+        // "first item"). The confirmation was started above, in parallel, with a
+        // hard time budget - a slow provider fails fast instead of hanging.
         if (!providerId) return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
-
-        // Fast path: if this exact fixture's rich market catalogue was
-        // already fetched and persisted recently (almost always true —  the
-        // user just came from viewing this match's markets seconds ago),
-        // serve straight from MongoDB instead of repeating the full external
-        // SofaBets search, which can loop through many pages across several
-        // hosts and is what made placing a bet feel slow. Falls straight
-        // through to the full resolver below if the cached copy is missing,
-        // stale, or doesn't contain the exact selection being bet on.
-        const existingMatch = matchMap[s.matchId];
-        const MARKETS_FRESH_MS = 20000;
-        const cachedFresh = existingMatch && existingMatch.marketsRefreshedAt &&
-          (Date.now() - new Date(existingMatch.marketsRefreshedAt).getTime()) < MARKETS_FRESH_MS &&
-          Array.isArray(existingMatch.markets) && existingMatch.markets.length > 1;
-
-        let direct = null;
-        if (cachedFresh) {
-          direct = {
-            providerMatchId: providerId,
-            homeTeam: existingMatch.homeTeam,
-            awayTeam: existingMatch.awayTeam,
-            competition: existingMatch.league,
-            utcDate: existingMatch.commenceTime,
-            status: existingMatch.status === 'live' ? 'IN_PLAY' : existingMatch.status,
-            markets: existingMatch.markets,
-            score: { fullTime: existingMatch.score || {} }
-          };
+        const r = resolutions.get(s);
+        if (!r || !r.ok) {
+          console.warn('[bets/place] provider selection rejected:', s.matchId, r && r.code);
+          const status = r && r.code === 'timeout' ? 503 : 400;
+          return res.status(status).json({ success: false, code: r && r.code, message: (r && r.reason) || 'Market is currently unavailable. Please try again.' });
         }
-
-        // Never decide "is this fixture live?" from the id string alone — the
-        // main football pipeline's ids never carry a live/upcoming marker, so
-        // a fixture that kicked off after the page loaded must still be
-        // checked against the live feed. resolveExactFixture tries both, in
-        // the right order, and only trusts a result that independently
-        // confirms this exact provider id.
-        if (!direct) {
-          direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
-        }
-        if (direct && String(direct.providerMatchId) !== String(providerId)) direct = null;
-        const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
-        if (isLiveId && direct && !directIsLive) {
-          direct = null;
-        }
-
-        if (!direct || String(direct.providerMatchId) !== providerId) {
-          console.warn('[bets/place] exact provider fixture not found:', s.matchId);
-          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
-        }
-
-        const requestedMarketId = s.providerMarketId ? String(s.providerMarketId) : null;
-        const requestedMarketKey = String(s.providerMarketKey);
-        const requestedSelectionId = s.providerSelectionId ? String(s.providerSelectionId) : null;
-        const requestedSelectionKey = String(s.providerSelectionKey);
-
-        const findMarketAndOutcome = (source) => {
-          const mk = (source.markets || []).find(m =>
-            (requestedMarketId && m.id != null && String(m.id) === requestedMarketId) ||
-            (m.key != null && String(m.key) === requestedMarketKey)
-          );
-          if (!mk) return null;
-          const out = (mk.selections || []).find(o =>
-            (requestedSelectionId && o.id != null && String(o.id) === requestedSelectionId) ||
-            (o.key != null && String(o.key) === requestedSelectionKey)
-          );
-          return out ? { mk, out } : null;
-        };
-
-        let found = findMarketAndOutcome(direct);
-
-        // The cached copy didn't have this specific market/selection — rare
-        // (e.g. a market that appeared after the last refresh), but rather
-        // than reject a bet the user can clearly see on screen, fall back to
-        // a live check before giving up.
-        if (!found && cachedFresh) {
-          const fresh = await sofaBets.resolveExactFixture(providerId, sport, { rich: true, preferLive: isLiveId });
-          if (fresh && String(fresh.providerMatchId) === String(providerId)) {
-            direct = fresh;
-            found = findMarketAndOutcome(direct);
-          }
-        }
-
-        if (!found) {
-          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
-        }
-        providerMarket = found.mk;
-        providerOutcome = found.out;
-        if (!providerOutcome || !Number.isFinite(Number(providerOutcome.odds)) || Number(providerOutcome.odds) < 1.01) {
-          return res.status(400).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
-        }
-
-        serverOdds = Number(providerOutcome.odds);
-        const directStatusUpper = String(direct.status || '').toUpperCase();
-        if (['FINISHED', 'CANCELLED', 'POSTPONED', 'ABANDONED'].includes(directStatusUpper)) {
-          return res.status(400).json({ success: false, message: 'Betting has closed for this fixture' });
-        }
-        if (isLiveId && !directIsLive) {
-          return res.status(400).json({ success: false, message: 'Live betting is no longer available for this fixture' });
-        }
-
-        // Construct the same canonical match shape used by settlement and the
-        // existing bet record, while retaining the exact provider identity.
-        // Status is derived from what the provider actually reported, not
-        // from whether the id string happened to contain "live_" — the main
-        // football pipeline's bare ids never encode that, so trusting the id
-        // here would mislabel an in-play fixture resolved via the live-feed
-        // fallback as merely "upcoming".
+        providerMarket = r.mk;
+        providerOutcome = r.out;
+        serverOdds = Number(r.out.odds);
         match = {
           matchId: s.matchId,
           providerMatchId: providerId,
-          homeTeam: direct.homeTeam,
-          awayTeam: direct.awayTeam,
-          league: direct.competition || sport,
+          homeTeam: r.fixture.homeTeam,
+          awayTeam: r.fixture.awayTeam,
+          league: r.fixture.league || sport,
           sport,
-          commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-          status: directIsLive ? 'live' : 'upcoming',
-          score: {
-            home: direct.score?.fullTime?.home ?? null,
-            away: direct.score?.fullTime?.away ?? null,
-            minute: direct.minute ?? null,
-            period: direct.status || null
-          }
+          commenceTime: r.fixture.commenceTime,
+          status: r.fixture.status,
+          score: r.fixture.score || {}
         };
       } else {
         // Plain Home/Draw/Away (or other legacy market) pick. If this exact
@@ -302,7 +213,19 @@ router.post('/place', auth, betLimiter, async (req, res) => {
         // match was real and visibly on screen, just never written to Mongo,
         // so the lookup below always came back empty.
         if (!match && rawId.startsWith('sofabets_') && providerId) {
-          const direct = await sofaBets.resolveExactFixture(providerId, sport, { rich: false, preferLive: isLiveId });
+          // Bounded + cache-first: the live list is served from cache (refreshed in
+          // the background); a prematch fixture missing from MongoDB gets one capped
+          // lookup. A slow provider fails fast instead of holding the request.
+          const budget = 2500;
+          const liveR = await placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget);
+          let direct = liveR.ok ? liveR.v : null;
+          if (!direct && !isLiveId) {
+            const preR = await placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget);
+            direct = preR.ok ? preR.v : null;
+            if (!direct && (preR.timeout || liveR.timeout)) return res.status(503).json({ success: false, code: 'timeout', message: 'The odds provider is responding slowly. Please try again in a moment.' });
+          } else if (!direct && liveR.timeout) {
+            return res.status(503).json({ success: false, code: 'timeout', message: 'The odds provider is responding slowly. Please try again in a moment.' });
+          }
           if (direct && String(direct.providerMatchId) === String(providerId) && direct.homeTeam && direct.awayTeam) {
             const directIsLive = ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
             const builtMatch = {
@@ -426,16 +349,17 @@ router.post('/place', auth, betLimiter, async (req, res) => {
 
     require('../services/loyaltyService').awardPoints(req.user._id, stakeAmt).catch(()=>{});
 
-    await Transaction.create({
+    const [, newBalance] = await Promise.all([
+      Transaction.create({
       userId:      req.user._id,
       type:        'stake',
       amount:      -stakeAmt,
       balance:     deduction.wallet.main,
       reference:   bet.betCode,
       description: `Bet ${bet.betCode} — ${verifiedSelections.length} selection(s)`
-    });
-
-    const newBalance = await walletService.getBalance(req.user._id);
+    }),
+      walletService.getBalance(req.user._id)
+    ]);
 
     res.json({
       success:      true,
@@ -451,6 +375,29 @@ router.post('/place', auth, betLimiter, async (req, res) => {
     console.error('[bets/place]', e.message);
     res.status(500).json({ success: false, message: 'Failed to place bet' });
   }
+}
+
+// Duplicate-bet protection. The browser sends a fresh X-Idempotency-Key for
+// every PLACE BET press. A repeat of the same key (double tap, or a retry after
+// the connection dropped) gets the ORIGINAL result instead of placing - and
+// charging for - a second bet. Only successful results are remembered.
+const placeInflight = new Map(); // userId:key -> Promise<{status, body}>
+router.post('/place', auth, betLimiter, async (req, res) => {
+  const key = String(req.headers['x-idempotency-key'] || '').trim().slice(0, 80);
+  if (!key) return placeBetHandler(req, res);
+  const k = `${req.user._id}:${key}`;
+  let p = placeInflight.get(k);
+  if (!p) {
+    p = new Promise(resolve => {
+      const cap = { _s: 200, status(c) { this._s = c; return this; }, json(b) { resolve({ status: this._s, body: b }); return this; } };
+      placeBetHandler(req, cap).catch(() => resolve({ status: 500, body: { success: false, message: 'Failed to place bet' } }));
+    });
+    placeInflight.set(k, p);
+    p.then(r => { if (!(r.status >= 200 && r.status < 300)) placeInflight.delete(k); });
+    const t = setTimeout(() => placeInflight.delete(k), 2 * 60 * 1000); if (t.unref) t.unref();
+  }
+  const r = await p;
+  res.status(r.status).json(r.body);
 });
 
 // ── MY BETS (with filters) ──
@@ -834,20 +781,23 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
     }
     if (exists) return res.status(500).json({ success: false, message: 'Could not generate a unique code, try again' });
 
+    // Store the COMPLETE selection (fixture + market + selection + odds + period/line),
+    // never a Home/Draw/Away reduction. A More Markets selection whose market label
+    // was not sent is completed from the exact market record on the fixture.
+    const rows = await Match.find({ matchId: { $in: selections.map(x => x.matchId) } }, { matchId: 1, markets: 1 }).lean();
+    const rowBy = {}; rows.forEach(r => { rowBy[r.matchId] = r; });
+    const stored = selections.map(raw => {
+      const n = slipSelection.normalizeSelection(raw);
+      if (n.provider === 'sofabets' && !n.marketLabel) {
+        const f = placementResolver.findMarketAndOutcome((rowBy[n.matchId] || {}).markets || [], n);
+        if (f) { n.marketLabel = String(f.mk.name || f.mk.label || ''); Object.assign(n, slipSelection.normalizeSelection(n)); }
+      }
+      return n;
+    });
     const doc = await SlipCode.create({
       code,
       createdBy: req.user._id,
-      selections: selections.map(s => ({
-        matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam,
-        league: s.league||'', sport: s.sport||'', pick: s.pick,
-        provider: s.provider||'', market: s.market||'',
-        providerMarketId: s.providerMarketId||'',
-        providerMarketKey: s.providerMarketKey||'',
-        providerSelectionId: s.providerSelectionId||'',
-        providerSelectionKey: s.providerSelectionKey||'',
-        pickLabel: s.pickLabel||'',
-        odds: parseFloat(s.odds), commenceTime: new Date(s.commenceTime)
-      })),
+      selections: stored,
       expiresAt: new Date(Date.now() + 7*24*60*60*1000)
     });
 
@@ -877,36 +827,53 @@ router.get('/slip/load/:code', auth, async (req, res) => {
     if (!doc) return res.status(404).json({ success: false, message: 'Slip code not found' });
     if (doc.expiresAt < new Date()) return res.status(410).json({ success: false, message: 'This slip code has expired' });
 
-    // Cross-check each selection against the match's CURRENT status/odds so the
-    // loader immediately sees which picks are still live/bettable vs which have
-    // since kicked off, finished, or moved in price — rather than silently
-    // handing back stale data as if it were still valid.
+    // Re-check EVERY stored selection against its exact fixture + exact market +
+    // exact selection, in parallel and with a time budget. Nothing is dropped and
+    // nothing is converted to Match Result: a selection that cannot be confirmed
+    // right now is returned with stillAvailable:false and a reason, and the
+    // loader's client shows it as unavailable.
     const matchIds = doc.selections.map(s => s.matchId);
     const liveMatches = await Match.find({ matchId: { $in: matchIds } }).lean();
     const byId = {}; liveMatches.forEach(m => { byId[m.matchId] = m; });
 
-    const selections = doc.selections.map(s => {
-      const live = byId[s.matchId];
-      // A match is still bettable if it's upcoming OR currently live — only
-      // finished/cancelled matches (or ones that vanished entirely) should
-      // ever be marked unavailable. Checking only 'upcoming' incorrectly
-      // rejected perfectly valid live selections, which is most of what
-      // gets shared from the live-heavy Highlights tab.
-      const stillBettable = live && (live.status === 'upcoming' || live.status === 'live');
-      const currentOdds = live?.hasOdds ? live.odds?.[s.pick] : null;
-      return {
-        matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam,
-        league: s.league, sport: s.sport, pick: s.pick, pickLabel: s.pickLabel,
-        market: s.market, provider: s.provider,
-        providerMarketId: s.providerMarketId, providerMarketKey: s.providerMarketKey,
-        providerSelectionId: s.providerSelectionId, providerSelectionKey: s.providerSelectionKey,
-        sharedOdds: s.odds,                       // what it was when shared
-        currentOdds: currentOdds || null,         // what it is right now (null if unavailable)
-        oddsChanged: !!currentOdds && Math.abs(currentOdds - s.odds) > 0.001,
-        stillAvailable: !!stillBettable,
-        commenceTime: s.commenceTime
-      };
-    });
+    const selections = await Promise.all(doc.selections.map(async (stored) => {
+      const s = slipSelection.normalizeSelection(stored.toObject ? stored.toObject() : stored);
+      const out = Object.assign({}, s, { sharedOdds: s.odds, currentOdds: null, oddsChanged: false, stillAvailable: false, unavailableReason: null });
+      try {
+        if (s.provider === 'sofabets') {
+          const r = await placementResolver.resolveProviderSelection(s, byId[s.matchId], { budgetMs: 3500 });
+          if (r.ok) {
+            out.currentOdds = Number(r.out.odds);
+            out.stillAvailable = true;
+            out.isLive = r.fixture.status === 'live';
+            if (!out.marketLabel) out.marketLabel = String(r.mk.name || r.mk.label || '');
+            if (!out.pickLabel) out.pickLabel = String(r.out.name || r.out.key || '');
+          } else {
+            out.unavailableReason = r.reason || 'No longer available';
+          }
+        } else {
+          const live = byId[s.matchId];
+          if (live && (live.status === 'upcoming' || live.status === 'live')) {
+            const odds = getFreshServerOdds(live, s.market || '1x2', s.pick);
+            if (odds) { out.currentOdds = odds; out.stillAvailable = true; out.isLive = live.status === 'live'; }
+            else out.unavailableReason = 'Odds are not available right now';
+          } else if (!live && String(s.matchId).startsWith('sofabets_')) {
+            // Not persisted in MongoDB (e.g. a live match from the Live tab): resolve it by its exact provider id.
+            const p = require('../services/finalResultService').parseSofaMatchId(s.matchId);
+            const lr = await placementResolver.withBudget(sofaBets.getLiveMatchById(p.providerId, p.sport, { rich: false, maxStaleMs: 20000 }), 3500);
+            const fx = lr.ok && lr.v && String(lr.v.providerMatchId) === String(p.providerId) ? lr.v : null;
+            const map = { home: 'homeWin', draw: 'draw', away: 'awayWin' };
+            const o = fx && (s.market === '1x2' || !s.market) ? Number(fx.odds && fx.odds[map[s.pick]]) : null;
+            if (o && o > 1) { out.currentOdds = o; out.stillAvailable = true; out.isLive = true; }
+            else out.unavailableReason = lr.timeout ? 'Odds provider is slow right now' : 'No longer available';
+          } else {
+            out.unavailableReason = live ? 'Match is no longer open for betting' : 'Match not found';
+          }
+        }
+      } catch (e) { out.unavailableReason = 'Could not be checked right now'; }
+      out.oddsChanged = out.currentOdds != null && out.sharedOdds != null && Math.abs(out.currentOdds - out.sharedOdds) > 0.001;
+      return out;
+    }));
 
     doc.loadCount += 1;
     await doc.save();
