@@ -287,17 +287,65 @@ function applyResult(s, matchResult, homeScore, awayScore) {
 // Fixture state + market period + market type + pick decide WHEN and HOW a
 // selection settles. Returns { status, score, periodLabel, source } or
 // { status: null, reason } (stay pending).
+
+// Merge the rows of one provider fixture into a single view.
+const HT_RANK = { admin: 4, provider: 3, observed: 2, inferred: 1 };
+function mergeFixtureRows(rows) {
+  if (!rows || !rows.length) return null;
+  const out = Object.assign({}, rows.find(r => r.finalVerified) || rows[0]);
+  const fin = rows.find(r => r.finalVerified === true && r.score && r.score.home != null && r.score.away != null);
+  if (fin) { out.finalVerified = true; out.score = fin.score; out.status = 'finished'; }
+  let bestHt = null;
+  for (const r of rows) {
+    const ps = r.periodScores || {};
+    if (ps.ht && ps.ht.home != null && ps.ht.away != null) {
+      const rank = HT_RANK[ps.htSource] || 0;
+      if (!bestHt || rank > bestHt.rank) bestHt = { rank, ht: ps.ht, src: ps.htSource };
+    }
+  }
+  const scorers = { first: null, last: null };
+  for (const r of rows) {
+    const ps = r.periodScores || {};
+    if (!scorers.first && ps.firstScorer) scorers.first = ps.firstScorer;
+    if (!scorers.last && ps.lastScorer && fin && ps.lastObs && ps.lastObs.home === Number(fin.score.home) && ps.lastObs.away === Number(fin.score.away)) scorers.last = ps.lastScorer;
+  }
+  out.periodScores = { ht: bestHt ? bestHt.ht : undefined, htSource: bestHt ? bestHt.src : undefined, scorers };
+  return out;
+}
+
+
+// Plain-language reason a More Markets selection is still pending.
+function pendingMessage(g, s) {
+  const r = String((g && g.reason) || '');
+  if (!r) return 'Waiting for the match result';
+  // A half-time score is needed. If the game is already over and it was never
+  // captured, it will not arrive by itself -> flag it for a manual result.
+  if (/first-half result not available|half-time score was not recorded/i.test(r)) {
+    return (g && g.finalKnown) ? 'Half-time score was not captured - awaiting manual result' : 'Waiting for the first half to finish';
+  }
+  if (/not verified yet|not available yet|not tracked|never seen|minimum game length|not absent|last seen at/i.test(r)) return 'Waiting for the match to finish';
+  if (/half-time score was not recorded/i.test(r)) return 'Half-time score was not captured - awaiting manual result';
+  if (/first-half result not available/i.test(r)) return 'Waiting for the first half to finish';
+  if (/unrecognised market/i.test(r)) return 'Market type not supported for automatic settlement - awaiting manual result';
+  if (/feed does not provide|cannot provide/i.test(r)) return 'Needs corner/card/player data - awaiting manual result';
+  if (/order was not observed|not supported/i.test(r)) return 'Result cannot be read automatically - awaiting manual result';
+  return 'Awaiting result: ' + r;
+}
+
 const officialMemo = new Map();   // per-run: one provider lookup per fixture
 async function gradeProviderSel(s, matchRows) {
+  // The same provider fixture can have several Match rows (the Live tab id
+  // "sofabets_live_<sport>_<id>", the main-feed id "sofabets_<id>", ...), each
+  // fed by a different poller with different observations (final score, half-time,
+  // goal order). Settlement uses ALL of them for this EXACT provider fixture id.
   const key = s.matchId;
   if (!matchRows.has(key)) {
-    let row = null;
-    try { row = await Match.findOne({ matchId: key }).lean(); } catch (e) {}
-    if (!row) { // live ids and bare ids can describe the same provider fixture
-      const p = finalResults.parseSofaMatchId(key);
-      if (p) { try { row = await Match.findOne({ matchId: { $in: [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`] } }).lean(); } catch (e) {} }
-    }
-    matchRows.set(key, row);
+    const p = finalResults.parseSofaMatchId(key);
+    const ids = new Set([key]);
+    if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
+    let rows = [];
+    try { rows = await Match.find({ matchId: { $in: Array.from(ids) } }).lean(); } catch (e) {}
+    matchRows.set(key, mergeFixtureRows(rows));
   }
   const row = matchRows.get(key);
 
@@ -324,14 +372,14 @@ async function gradeProviderSel(s, matchRows) {
     ? { home: Number(row.score.home), away: Number(row.score.away) } : null;
   const htRaw = row.periodScores && row.periodScores.ht;
   const ht = htRaw && htRaw.home != null && htRaw.away != null ? { home: Number(htRaw.home), away: Number(htRaw.away) } : null;
-  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht };
+  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht, scorers: (row.periodScores && row.periodScores.scorers) || null };
 
   const r = marketRules.evaluate({
     marketLabel: s.marketLabel || s.providerMarketKey || s.market,
     pickLabel: s.pickLabel || s.providerSelectionKey || s.pick,
     homeTeam: s.homeTeam, awayTeam: s.awayTeam, sport: s.sport
   }, ps);
-  if (!r.status) return { status: null, reason: r.reason, need: r.need };
+  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft };
   const period = r.market && r.market.period;
   return { status: r.status, score: r.score || null, periodLabel: period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT', source: 'market-rules' };
 }
@@ -486,6 +534,7 @@ async function _runSettlementInner(includeApiFetch) {
             s.result = g.status;
             s.settledAt = new Date();
             s.periodLabel = g.periodLabel || undefined;
+            s.pendingReason = undefined;
             s.settledSource = g.source;
             if (g.score) s.score = { home: g.score.home, away: g.score.away };
             changed = true;
@@ -493,6 +542,9 @@ async function _runSettlementInner(includeApiFetch) {
             continue;
           }
           // Not settleable yet (period not finished / data missing): stays pending.
+          // Remember WHY, so My Bets / the admin can see what it is waiting for.
+          const why = pendingMessage(g, s);
+          if (why && s.pendingReason !== why) { s.pendingReason = why; s.pendingCheckedAt = new Date(); changed = true; }
           // If the fixture IS final but the market cannot be read, keep it for
           // manual review (never auto-void, never guess).
           const finalEntry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
@@ -584,4 +636,4 @@ async function _runSettlementInner(includeApiFetch) {
   return { settled: totalSettled, paid: totalPaid };
 }
 
-module.exports = { runSettlement };
+module.exports = { runSettlement, mergeFixtureRows };

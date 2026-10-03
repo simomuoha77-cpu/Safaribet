@@ -1100,4 +1100,72 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
   } catch (e) { return safeError(res, e, 'bets/admin/override-selection'); }
 });
 
+// ── Admin: WHY are bets still pending? ──────────────────────────────────────
+// For every pending SofaBets (More Markets) selection: what the market means
+// (type + period), what data the fixture has (final score, half-time score and
+// where it came from, goal order), and exactly what is missing.
+router.get('/admin/pending-diagnostics', requireAdmin, async (req, res) => {
+  try {
+    const marketRules = require('../services/marketRules');
+    const finalResults = require('../services/finalResultService');
+    const { mergeFixtureRows } = require('../engine/settlementEngine');
+    const bets = await Bet.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(300).lean();
+    const out = [], cache = new Map(), summary = {};
+    for (const bet of bets) {
+      for (const s of bet.selections || []) {
+        if (s.result !== 'pending' || s.provider !== 'sofabets') continue;
+        if (!cache.has(s.matchId)) {
+          const p = finalResults.parseSofaMatchId(s.matchId);
+          const ids = new Set([s.matchId]);
+          if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
+          const rows = await Match.find({ matchId: { $in: Array.from(ids) } }).lean();
+          cache.set(s.matchId, { rows, row: mergeFixtureRows(rows) });
+        }
+        const { rows, row } = cache.get(s.matchId);
+        const ft = row && row.finalVerified && row.score ? { home: Number(row.score.home), away: Number(row.score.away) } : null;
+        const htRaw = row && row.periodScores && row.periodScores.ht;
+        const ht = htRaw && htRaw.home != null ? { home: Number(htRaw.home), away: Number(htRaw.away) } : null;
+        const r = marketRules.evaluate({ marketLabel: s.marketLabel || s.market, pickLabel: s.pickLabel, homeTeam: s.homeTeam, awayTeam: s.awayTeam },
+          { ft, ftFinal: !!ft, ht, htFinal: !!ht, scorers: row && row.periodScores && row.periodScores.scorers });
+        const key = (r.market && r.market.type || 'UNRECOGNISED') + ' / ' + (r.market && r.market.period || '?');
+        summary[key] = (summary[key] || 0) + 1;
+        out.push({
+          betCode: bet.betCode, betId: bet._id, placedAt: bet.createdAt,
+          match: `${s.homeTeam} vs ${s.awayTeam}`, matchId: s.matchId, league: s.league,
+          marketLabel: s.marketLabel, pick: s.pickLabel,
+          parsedAs: { type: r.market && r.market.type, period: r.market && r.market.period, line: r.market && r.market.line },
+          fixture: { rowsFound: rows.length, finalVerified: !!ft, finalScore: ft, halfTime: ht, halfTimeSource: row && row.periodScores && row.periodScores.htSource, firstScorer: row && row.periodScores && row.periodScores.scorers && row.periodScores.scorers.first, status: row && row.status },
+          wouldSettleAs: r.status || null,
+          waitingFor: r.status ? null : r.reason,
+          needsManual: !!r.noData || /unrecognised/.test(String(r.reason || ''))
+        });
+      }
+    }
+    res.json({ success: true, pendingSelections: out.length, byMarketKind: summary, selections: out });
+  } catch (e) { return safeError(res, e, 'bets/admin/pending-diagnostics'); }
+});
+
+// ── Admin: enter a half-time (and optionally full-time) score for a fixture ──
+// Used when the live feed never exposed the half-time score. Settlement then
+// grades every pending half-time / 2nd-half market on that fixture by the rules.
+router.post('/admin/match-periods', requireAdmin, async (req, res) => {
+  try {
+    const { matchId, ht, ft, reason } = req.body || {};
+    const ok = v => v && Number.isInteger(v.home) && Number.isInteger(v.away) && v.home >= 0 && v.away >= 0;
+    if (!matchId || !ok(ht)) return res.status(400).json({ success: false, message: 'matchId and ht {home, away} (whole numbers) are required' });
+    if (ft != null && (!ok(ft) || ft.home < ht.home || ft.away < ht.away)) return res.status(400).json({ success: false, message: 'ft must be whole numbers and not lower than the half-time score' });
+    if (!reason || !String(reason).trim()) return res.status(400).json({ success: false, message: 'A reason/source is required (e.g. "per flashscore")' });
+    const p = require('../services/finalResultService').parseSofaMatchId(matchId);
+    if (!p) return res.status(400).json({ success: false, message: 'Not a SofaBets match id' });
+    const ids = [matchId, `sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`];
+    const set = { 'periodScores.ht': { home: ht.home, away: ht.away }, 'periodScores.htSource': 'admin', 'periodScores.htAt': new Date() };
+    if (ft) Object.assign(set, { status: 'finished', result: ft.home > ft.away ? 'home' : ft.away > ft.home ? 'away' : 'draw', 'score.home': ft.home, 'score.away': ft.away, 'score.period': 'FT', finalVerified: true, finalVerifiedAt: new Date(), finalSource: 'admin' });
+    const r = await Match.updateMany({ matchId: { $in: ids } }, { $set: set });
+    if (!r.matchedCount && !r.n) return res.status(404).json({ success: false, message: 'No stored fixture found for that match id' });
+    console.log(`[admin] match-periods ${matchId} HT ${ht.home}-${ht.away}${ft ? ` FT ${ft.home}-${ft.away}` : ''} by ${req.user && req.user._id || 'admin'}: ${reason}`);
+    require('../engine/settlementEngine').runSettlement(false).catch(() => {});
+    res.json({ success: true, message: 'Saved. Pending bets on this fixture are being re-checked now.' });
+  } catch (e) { return safeError(res, e, 'bets/admin/match-periods'); }
+});
+
 module.exports = router;

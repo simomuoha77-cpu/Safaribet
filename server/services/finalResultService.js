@@ -130,7 +130,7 @@ function inferEnded(row, sport, now) {
 // stays pending instead of being graded from a guess.
 // ══════════════════════════════════════════════════════════════════════════════
 const INFER_GAP_MS = 90 * 1000;
-const HT_RE = /(^|[^a-z])(ht|half[\s_-]*time|halftime)($|[^a-z])/;
+const HT_RE = /(^|[^a-z])(ht|half[\s_-]*time|halftime|interval|break)($|[^a-z])/;
 function classifyPeriod(item, sport) {
   const raw = String(item.statusRaw || item._statusRaw || '').toLowerCase().trim();
   const minute = item.minute != null ? Number(item.minute) : (item.score && item.score.minute != null ? Number(item.score.minute) : null);
@@ -138,12 +138,17 @@ function classifyPeriod(item, sport) {
   if (/(^|[^a-z0-9])(1st|first)[\s_-]*half|^1h$/.test(raw)) return 'first';
   if (/(^|[^a-z0-9])(2nd|second)[\s_-]*half|^2h$/.test(raw)) return 'second';
   if (sport === 'football' || !sport) {
-    if (String(item.status || '').toUpperCase() === 'PAUSED' && minute != null && minute >= 44 && minute <= 46) return 'break';
+    if (String(item.status || '').toUpperCase() === 'PAUSED' && minute != null && minute >= 40 && minute <= 50) return 'break';
     if (minute != null && Number.isFinite(minute)) return minute <= 45 ? 'first' : 'second';
   }
   return null;
 }
 // prev: Match.periodScores (or undefined). Returns the new periodScores, or null when unchanged.
+//
+// Besides the half-time score this also records WHO SCORED FIRST / LAST (from
+// the order in which the live score changed). Those are only recorded when the
+// order is certain: the first observation was 0-0, and each change between
+// observations is exactly one goal (or several by the same team).
 function observePeriods(prev, item, sport, now = new Date()) {
   const ps = JSON.parse(JSON.stringify(prev || {}));
   const ft = item && item.score && item.score.fullTime;
@@ -156,20 +161,45 @@ function observePeriods(prev, item, sport, now = new Date()) {
   if (prov && prov.home != null && prov.away != null && Number.isFinite(Number(prov.home)) && Number.isFinite(Number(prov.away))) {
     const h = { home: Number(prov.home), away: Number(prov.away) };
     if (!ps.ht || ps.htSource !== 'provider' || ps.ht.home !== h.home || ps.ht.away !== h.away) { set('ht', h); set('htSource', 'provider'); set('htAt', now); }
-    return changed ? ps : null;
   }
-  if (!cur) return null;
-  const phase = classifyPeriod(item, sport);
-  const hasHt = ps.ht && ps.ht.home != null && ps.ht.away != null;
+  if (!cur) return changed ? ps : null;
 
-  if (phase === 'break') {
-    if (!hasHt || ps.htSource === 'inferred') { set('ht', cur); set('htSource', 'observed'); set('htAt', now); }
-  } else if (phase === 'first') {
-    set('last1h', { home: cur.home, away: cur.away, at: now });
-  } else if (phase === 'second') {
-    if (!ps.seen2h) set('seen2h', true);
-    if (!hasHt && ps.last1h && ps.last1h.at && now.getTime() - new Date(ps.last1h.at).getTime() <= INFER_GAP_MS) {
-      set('ht', { home: ps.last1h.home, away: ps.last1h.away }); set('htSource', 'inferred'); set('htAt', now);
+  // ---- goal order ----
+  const last = ps.lastObs && ps.lastObs.home != null ? ps.lastObs : null;
+  if (!last) {
+    set('goalsComplete', cur.home === 0 && cur.away === 0);   // joined mid-game -> the order of earlier goals is unknown
+    set('lastObs', { home: cur.home, away: cur.away });
+  } else if (cur.home !== last.home || cur.away !== last.away) {
+    const dh = cur.home - last.home, da = cur.away - last.away;
+    if (dh < 0 || da < 0) { set('goalsComplete', false); set('lastScorer', null); }            // score correction: order unreliable
+    else if (dh > 0 && da > 0) { set('lastScorer', null); if (!ps.firstScorer) set('goalsComplete', false); }  // both teams scored between polls
+    else {
+      const team = dh > 0 ? 'home' : 'away';
+      if (!ps.firstScorer && ps.goalsComplete) set('firstScorer', team);
+      set('lastScorer', team);
+    }
+    set('lastObs', { home: cur.home, away: cur.away });
+  }
+
+  // ---- half-time ----
+  if (!(prov && prov.home != null)) {
+    const phase = classifyPeriod(item, sport);
+    const hasHt = ps.ht && ps.ht.home != null && ps.ht.away != null;
+    if (phase === 'break') {
+      if (!hasHt || ps.htSource === 'inferred') { set('ht', cur); set('htSource', 'observed'); set('htAt', now); }
+    } else if (phase === 'first') {
+      set('last1h', { home: cur.home, away: cur.away, at: now });
+    } else if (phase === 'second') {
+      if (!ps.seen2h) set('seen2h', true);
+      if (!hasHt && ps.last1h && ps.last1h.at) {
+        const gap = now.getTime() - new Date(ps.last1h.at).getTime();
+        const same = ps.last1h.home === cur.home && ps.last1h.away === cur.away;
+        // Scores only ever go up, so if the score is IDENTICAL before and after
+        // the gap no goal can have been scored in it: the half-time score is
+        // certain however long the gap. With a different score, only a short gap
+        // is trusted.
+        if (same || gap <= INFER_GAP_MS) { set('ht', { home: ps.last1h.home, away: ps.last1h.away }); set('htSource', 'inferred'); set('htAt', now); }
+      }
     }
   }
   return changed ? ps : null;

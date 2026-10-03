@@ -49,10 +49,19 @@ function stripPeriod(name) {
 // ── Market type detection (on a bare, period-stripped name) ──
 function detectSimpleType(bare) {
   const n = norm(bare);
+  // Markets decided by data the feed does not give us (corners, cards, players,
+  // goal timing...). They must NEVER be graded from the goals score.
+  if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b|asian|quarter\s*handicap/.test(n)) return 'NO_DATA';
+  if (/first\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*first|to\s*score\s*first/.test(n)) return 'FIRST_SCORER';
+  if (/last\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*last|to\s*score\s*last/.test(n)) return 'LAST_SCORER';
+  if (/clean\s*sheet/.test(n)) return 'CLEAN_SHEET';
+  if (/win\s*to\s*nil/.test(n)) return 'WIN_TO_NIL';
+  if (/highest\s*scoring\s*half|half\s*with\s*(the\s*)?most\s*goals|most\s*goals\s*half/.test(n)) return 'HIGHEST_HALF';
   if (/half\s*time\s*\/\s*full\s*time|ht\s*\/\s*ft|halftime\s*fulltime/.test(n)) return 'HTFT';
   if (/draw\s*no\s*bet|\bdnb\b/.test(n)) return 'DNB';
   if (/double\s*chance/.test(n)) return 'DOUBLE_CHANCE';
   if (/both\s*teams?\s*(to\s*)?score|\bbtts\b|\bgg\s*\/?\s*ng\b/.test(n)) return 'BTTS';
+  if (/(home|away)\s*(team\s*)?(to\s*)?score\b|^[a-z0-9 .'-]+\s+to\s+score$/.test(n) && !/both|first|last/.test(n)) return 'TEAM_TO_SCORE';
   if (/odd\s*\/?\s*(or\s*)?even|goals?\s*odd|total\s*goals?\s*odd/.test(n)) return 'ODD_EVEN';
   if (/correct\s*score|exact\s*score/.test(n)) return 'CORRECT_SCORE';
   if (/handicap/.test(n)) return 'HANDICAP';
@@ -171,7 +180,61 @@ function evalSimple(type, pickLabel, sc, ctx) {
       if (!m) return null;
       return W(m[2] ? total >= Number(m[1]) : total === Number(m[1]));
     }
+    case 'FIRST_SCORER': case 'LAST_SCORER': {
+      const sc = ctx.scorers || {};
+      const none = /^(none|no\s*goal|no\s*goals|no\s*team|nobody|0)$/.test(p);
+      if (total === 0) return none ? 'won' : (teamOf(pickLabel, ctx.home, ctx.away) ? 'lost' : null);
+      const who = type === 'FIRST_SCORER' ? sc.first : sc.last;
+      if (!who) return null;                              // goal order was not observed -> never guessed
+      if (none) return 'lost';
+      const pickTeam = teamOf(pickLabel, ctx.home, ctx.away);
+      if (!pickTeam || pickTeam === 'draw') return null;
+      return W(pickTeam === who);
+    }
+    case 'CLEAN_SHEET': {
+      const mt = clean(ctx.marketText || '');
+      const hc = clean(ctx.home), ac = clean(ctx.away);
+      let side = /home/.test(mt) ? 'home' : /away/.test(mt) ? 'away' : (hc && mt.includes(hc) ? 'home' : (ac && mt.includes(ac) ? 'away' : null));
+      if (!side) return null;
+      const kept = side === 'home' ? a === 0 : h === 0;
+      if (/^yes$/.test(p)) return W(kept);
+      if (/^no$/.test(p)) return W(!kept);
+      return null;
+    }
+    case 'WIN_TO_NIL': {
+      const mt = clean(ctx.marketText || '');
+      const hc = clean(ctx.home), ac = clean(ctx.away);
+      let side = /home/.test(mt) ? 'home' : /away/.test(mt) ? 'away' : (hc && mt.includes(hc) ? 'home' : (ac && mt.includes(ac) ? 'away' : null));
+      if (!side) return null;
+      const win = side === 'home' ? (h > a && a === 0) : (a > h && h === 0);
+      if (/^yes$/.test(p)) return W(win);
+      if (/^no$/.test(p)) return W(!win);
+      return null;
+    }
+    case 'TEAM_TO_SCORE': {
+      const mt = clean(ctx.marketText || '');
+      const hc = clean(ctx.home), ac = clean(ctx.away);
+      let side = /^home|home/.test(mt) ? 'home' : /away/.test(mt) ? 'away' : (hc && mt.includes(hc) ? 'home' : (ac && mt.includes(ac) ? 'away' : null));
+      if (!side) return null;
+      const scored = side === 'home' ? h > 0 : a > 0;
+      if (/^yes$/.test(p)) return W(scored);
+      if (/^no$/.test(p)) return W(!scored);
+      return null;
+    }
+    case 'HIGHEST_HALF': {
+      if (!ctx.halves) return null;
+      const f = ctx.halves.first, sh = ctx.halves.second;
+      const r = f > sh ? 'first' : sh > f ? 'second' : 'equal';
+      if (/^(1st|first)/.test(p)) return W(r === 'first');
+      if (/^(2nd|second)/.test(p)) return W(r === 'second');
+      if (/^(equal|tie|draw|same)/.test(p)) return W(r === 'equal');
+      return null;
+    }
     case 'OVER_UNDER': {
+      // Goal RANGE picks: "0-1", "2-3", "4+", "5 or more"
+      const rg = p.match(/^(\d+)\s*[-\u2013]\s*(\d+)$/), pl = p.match(/^(\d+)\s*(\+|or\s*more)$/);
+      if (rg) return W(total >= Number(rg[1]) && total <= Number(rg[2]));
+      if (pl) return W(total >= Number(pl[1]));
       const m = p.match(/^(over|under)\s*(\d+(?:\.\d+)?)/);
       if (!m) return null;
       const line = Number(m[2]);
@@ -248,8 +311,15 @@ function evaluate(sel, periodScores) {
     return { status: W(a1 === out(ps.ht.home, ps.ht.away) && a2 === out(ps.ft.home, ps.ft.away)), need: 'FT', market: pm };
   }
 
+  if (pm.type === 'NO_DATA') return { status: null, need, reason: 'needs data the results feed does not provide (corners, cards, players or goal timing) - settle manually', market: pm, noData: true };
+  if (pm.type === 'COMBINED' && pm.components.some(c => c.type === 'NO_DATA')) return { status: null, need, reason: 'combined market includes a part the results feed cannot provide - settle manually', market: pm, noData: true };
+
   const sc = scoreForPeriod(pm.period, periodScores);
   if (!sc.score) return { status: null, need, reason: sc.missing, market: pm };
+  const ps0 = periodScores || {};
+  ctx.scorers = ps0.scorers || null;
+  ctx.halves = (ps0.ht && ps0.ft && ps0.ftFinal) ? { first: ps0.ht.home + ps0.ht.away, second: (ps0.ft.home - ps0.ht.home) + (ps0.ft.away - ps0.ht.away) } : null;
+  if ((pm.type === 'FIRST_SCORER' || pm.type === 'LAST_SCORER') && pm.period !== 'FULL_MATCH') return { status: null, need, reason: 'first/last scorer by half is not supported - settle manually', market: pm, noData: true };
 
   if (pm.type === 'COMBINED') {
     const parts = pickPartsFor(sel, pm.components);

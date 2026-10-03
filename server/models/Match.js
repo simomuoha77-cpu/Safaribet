@@ -75,7 +75,11 @@ const matchSchema = new mongoose.Schema({
     htSource: { type: String },                                      // 'provider' | 'observed' | 'inferred'
     htAt:     { type: Date },
     last1h:   { home: { type: Number }, away: { type: Number }, at: { type: Date } },
-    seen2h:   { type: Boolean }
+    seen2h:   { type: Boolean },
+    lastObs:  { home: { type: Number }, away: { type: Number } },   // last score seen (to detect goals between polls)
+    goalsComplete: { type: Boolean },                                  // true when every goal since 0-0 was observed in order
+    firstScorer:   { type: String },                                   // 'home' | 'away' (only when certain)
+    lastScorer:    { type: String }
   },
   finalSource:     { type: String, default: null },   // 'provider' | 'feed-ended' (see finalResultService)
   // Live-feed observations used to confirm that a game really ended

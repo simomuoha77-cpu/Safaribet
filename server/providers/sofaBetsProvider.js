@@ -953,6 +953,10 @@ function normalizeMatch(raw) {
     return null;
   }
   const halfTimeScore = findHalfTime(source);
+  if (!global.__sbRawKeysLogged) {
+    global.__sbRawKeysLogged = true;
+    try { console.log('[sofaBetsProvider] raw fixture keys:', Object.keys(source).slice(0, 60).join(','), '| score object:', source.score && typeof source.score === 'object' ? Object.keys(source.score).join(',') : typeof source.score); } catch (e) {}
+  }
   const statusRaw = String(pick(source, ['status', 'matchStatus', 'match_status', 'gameStatus', 'eventStatus', 'state', 'period', 'phase']) || '');
 
   const odds = parseOdds(source, home, away);

@@ -38,7 +38,9 @@ const selectionSchema = new mongoose.Schema({
   line:           { type: Number },            // total/handicap line when the market has one
   placedAt:       { type: Date },
   isLive:         { type: Boolean },
-  periodLabel:    { type: String },            // set when graded: 'HT' | '2H' | 'FT' (what the shown score refers to)
+  periodLabel:    { type: String },
+  pendingReason:  { type: String },            // why this selection has not settled yet (shown in My Bets)
+  pendingCheckedAt: { type: Date },            // set when graded: 'HT' | '2H' | 'FT' (what the shown score refers to)
   settledSource:  { type: String },            // 'market-rules' | 'provider'
   providerSelectionId: { type: String },
   providerSelectionKey:{ type: String },
