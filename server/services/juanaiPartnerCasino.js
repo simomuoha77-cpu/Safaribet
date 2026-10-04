@@ -80,8 +80,9 @@ async function listGames() {
     rtp: g.rtp == null ? null : Number(g.rtp),
     providerCode: g.providerCode || null,
     source: g.source || 'juanai',
-    launchMode: g.launchMode || (g.source === 'as-tech' ? 'demo' : 'real-money')
-  })).filter(g => g.gameId);
+    launchMode: g.launchMode || (g.source === 'as-tech' ? 'provider' : 'real-money'),
+    realMoney: g.realMoney === true || g.launchMode === 'real-money' || g.source === 'juanai'
+  })).filter(g => g.gameId && g.realMoney === true);
 }
 
 async function state(gameId) {
@@ -119,4 +120,4 @@ async function cashOut(betId, userId) {
   return request('post', `/api/developer/casino/bet/${encodeURIComponent(String(betId))}/cashout`, { userId: String(userId) });
 }
 
-module.exports = { cfg, configured, configError, listGames, demoLaunch, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };
+module.exports = { cfg, configured, configError, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };
