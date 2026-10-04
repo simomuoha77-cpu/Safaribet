@@ -501,12 +501,18 @@ router.get('/my', auth, async (req, res) => {
           const rs = sib.map(i => byId[i]).filter(Boolean);
           const kick = new Date(s.commenceTime || (rs[0] && rs[0].commenceTime) || 0).getTime();
           const seen = Math.max(0, ...rs.map(r => r.lastLiveSeenAt ? new Date(r.lastLiveSeenAt).getTime() : 0));
+          // A game can be live without being in OUR live feed (not every competition is), so the clock
+          // decides too: kicked off and still inside the normal length of that sport = LIVE.
+          const sportName = ((p && p.sport) || s.sport || 'football').toLowerCase();
+          const LEN = { football: 125, basketball: 160, tennis: 240, hockey: 165, ice_hockey: 165, cricket: 600, rugby: 120, volleyball: 150, handball: 110, baseball: 200, table_tennis: 120 };
+          const lenMin = LEN[sportName] || (/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sportName) ? 180 : 125);
           let state;
           if (rs.some(r => r.finalVerified)) state = 'finished';
           else if (kick && kick > now) state = 'not_started';
           else if (seen && now - seen < 3 * 60 * 1000) state = 'live';
           else if (rs.some(r => r.status === 'live') && (!seen || now - seen < 3 * 60 * 1000)) state = 'live';
-          else state = 'awaiting';          // kicked off, no longer in the live feed, result not confirmed yet
+          else if (kick && now - kick < lenMin * 60000) state = 'live';
+          else state = 'awaiting';          // past its normal length, result not confirmed yet
           s.fixtureState = state;
           s.kickoffAt = kick || null;
         });

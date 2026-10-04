@@ -310,6 +310,7 @@
     Array.prototype.forEach.call(document.head.querySelectorAll('link[rel~="stylesheet"]'), function (l) { existing[absHref(l.getAttribute('href'))] = l; });
     var waits = [], plan = [];
     Array.prototype.forEach.call(doc.head.querySelectorAll('link[rel~="stylesheet"]'), function (l) {
+      if (l.closest && l.closest('noscript')) return;   // <noscript> fallbacks are for browsers without JavaScript
       var href = absHref(l.getAttribute('href'));
       if (existing[href]) { plan.push(existing[href]); return; }
       var el = document.createElement('link');
@@ -581,6 +582,14 @@
   _docAdd.call(document, 'mousedown', betsIntent, true);
   _winAdd.call(window, 'load', function () { _st.call(window, SB.prefetchBets, 2500); });
   _winAdd.call(window, 'sb:navigated', function () { _st.call(window, SB.prefetchBets, 1500); });
+
+
+  // ── Service worker (app opens from the phone's cache, then updates itself) ──
+  try {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      _winAdd.call(window, 'load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+    }
+  } catch (e) {}
 
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {

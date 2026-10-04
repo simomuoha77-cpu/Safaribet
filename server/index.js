@@ -88,7 +88,7 @@ app.use('/api', globalLimiter);
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 app.use(compression());
 // rawBody is kept ONLY for the JuanAI casino callbacks: their HMAC signature is over the exact bytes sent.
-app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.originalUrl && req.originalUrl.startsWith('/api/casino/juanai/')) req.rawBody = buf.toString('utf8'); } })); // limit body size
+app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.originalUrl && (req.originalUrl.startsWith('/api/casino/juanai/') || req.originalUrl.startsWith('/api/v1/casino/'))) req.rawBody = buf.toString('utf8'); } })); // limit body size
 // Parse cookies — needed for casino game launcher auth
 app.use(require('cookie-parser')());
 app.use(mongoSanitize()); // prevent NoSQL injection
@@ -118,9 +118,14 @@ app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,
   setHeaders: (res, filePath) => {
-    // No caching for HTML
+    // No caching for HTML (the service worker serves the cached copy instantly and refreshes it)
     if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache');            // the worker itself must always be re-checked
+      res.setHeader('Service-Worker-Allowed', '/');
+    } else if (/\.(png|jpe?g|webp|svg|ico|woff2?)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800'); // images/fonts: 7 days
     }
   }
 }));
@@ -133,7 +138,9 @@ app.get('/', (req, res) => {
 // ── API ROUTES ──
 app.use('/api/auth',     authRoutes);
 app.use('/api/odds',     oddsRoutes);
-app.use('/api/casino/juanai', require('./routes/juanaiCasino')); // JuanAI Casino API (casino only)
+{ const juanaiCasinoRoutes = require('./routes/juanaiCasino'); // JuanAI Casino API (casino only)
+  app.use('/api/casino/juanai', juanaiCasinoRoutes);
+  app.use('/api/v1/casino', juanaiCasinoRoutes); }  // same callbacks under JuanAI's own /api/v1/casino/wallet/* paths
 app.use('/api/casino',   casinoRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);

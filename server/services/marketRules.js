@@ -54,8 +54,8 @@ function detectSimpleType(bare) {
   // Markets decided by data the feed does not give us (corners, cards, players,
   // goal timing...). They must NEVER be graded from the goals score.
   if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b/.test(n)) return 'NO_DATA';
-  if (/first\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*first|to\s*score\s*first/.test(n)) return 'FIRST_SCORER';
-  if (/last\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*last|to\s*score\s*last/.test(n)) return 'LAST_SCORER';
+  if (/(first|1st)\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*first|to\s*score\s*first/.test(n)) return 'FIRST_SCORER';
+  if (/(last|final)\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*last|to\s*score\s*last/.test(n)) return 'LAST_SCORER';
   if (/clean\s*sheet/.test(n)) return 'CLEAN_SHEET';
   if (/win\s*to\s*nil/.test(n)) return 'WIN_TO_NIL';
   if (/highest\s*scoring\s*half|half\s*with\s*(the\s*)?most\s*goals|most\s*goals\s*half/.test(n)) return 'HIGHEST_HALF';
@@ -344,7 +344,11 @@ function evaluate(sel, periodScores) {
   const ps0 = periodScores || {};
   ctx.scorers = ps0.scorers || null;
   ctx.halves = (ps0.ht && ps0.ft && ps0.ftFinal) ? { first: ps0.ht.home + ps0.ht.away, second: (ps0.ft.home - ps0.ht.home) + (ps0.ft.away - ps0.ht.away) } : null;
-  if ((pm.type === 'FIRST_SCORER' || pm.type === 'LAST_SCORER') && pm.period !== 'FULL_MATCH') return { status: null, need, reason: 'first/last scorer by half is not supported - settle manually', market: pm, noData: true };
+  // First goal of the 1ST HALF: if the half ended 0-0 nobody scored; otherwise the first goal of the whole
+  // match was scored in that half, so the match-wide first scorer is also the first scorer of the half.
+  // Last goal of a half and 2nd-half first/last goal need goal order inside the half (not recorded).
+  if ((pm.type === 'FIRST_SCORER' && pm.period !== 'FULL_MATCH' && pm.period !== 'FIRST_HALF') ||
+      (pm.type === 'LAST_SCORER' && pm.period !== 'FULL_MATCH')) return { status: null, need, reason: 'first/last scorer for this period is not supported - will be refunded', market: pm, noData: true };
 
   if (pm.type === 'COMBINED') {
     const parts = pickPartsFor(sel, pm.components);
