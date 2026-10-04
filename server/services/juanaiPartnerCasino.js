@@ -71,14 +71,21 @@ async function listGames() {
   const data = await request('get', '/api/developer/casino/games');
   const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
   return list.map(g => ({
-    gameId: String(g.id || g.gameId || '').toLowerCase(),
+    gameId: String(g.id || g.gameId || '').trim(),
     name: String(g.name || g.title || g.id || g.gameId || 'Casino Game'),
     category: String(g.category || 'casino'),
     thumbnail: g.thumbnail || g.image || null,
     gameUrl: g.gameUrl || null,
     status: g.status || 'active',
-    rtp: g.rtp == null ? null : Number(g.rtp)
-  })).filter(g => ['aviator', 'jetx'].includes(g.gameId));
+    rtp: g.rtp == null ? null : Number(g.rtp),
+    providerCode: g.providerCode || null,
+    source: g.source || 'juanai',
+    launchMode: g.launchMode || (g.source === 'as-tech' ? 'demo' : 'real-money')
+  })).filter(g => g.gameId);
+}
+
+async function demoLaunch(gameId) {
+  return request('post', '/api/developer/casino/demo-launch', { gameId: String(gameId) });
 }
 
 async function state(gameId) {
@@ -112,4 +119,4 @@ async function cashOut(betId, userId) {
   return request('post', `/api/developer/casino/bet/${encodeURIComponent(String(betId))}/cashout`, { userId: String(userId) });
 }
 
-module.exports = { cfg, configured, configError, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };
+module.exports = { cfg, configured, configError, listGames, demoLaunch, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };

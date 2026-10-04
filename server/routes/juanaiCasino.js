@@ -32,7 +32,7 @@ function gameIdFrom(req) {
 
 // The lobby is sourced ONLY from JuanAI's real partner catalogue.
 router.get('/status', auth, requireConfigured, (req, res) => {
-  res.json({ success: true, provider: 'JuanAI', games: ['aviator', 'jetx'], currency: 'KES' });
+  res.json({ success: true, provider: 'JuanAI', currency: 'KES' });
 });
 
 router.get('/games', auth, requireConfigured, async (req, res) => {
@@ -45,7 +45,7 @@ router.get('/games', auth, requireConfigured, async (req, res) => {
 router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
   try {
     const gameId = gameIdFrom(req);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available.' });
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     const data = await juanai.state(gameId);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({ success: true, gameId, data });
@@ -55,10 +55,24 @@ router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
 router.get('/players/:gameId', auth, requireConfigured, async (req, res) => {
   try {
     const gameId = gameIdFrom(req);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available.' });
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     const data = await juanai.players(gameId);
     res.json({ success: true, data });
   } catch (e) { fail(res, e); }
+});
+
+router.post('/demo-launch', auth, requireConfigured, async (req, res) => {
+  try {
+    const gameId = String(req.body?.gameId || '').trim();
+    if (!gameId || !gameId.includes(':')) return res.status(400).json({ success: false, message: 'Demo game is not available.' });
+    const catalogue = await juanai.listGames();
+    const game = catalogue.find(g => String(g.gameId) === gameId && g.launchMode === 'demo');
+    if (!game) return res.status(404).json({ success: false, message: 'Demo game is not available.' });
+    const result = await juanai.demoLaunch(gameId);
+    const url = result?.data?.url || result?.data?.gameUrl || result?.url || result?.gameUrl;
+    if (!url || !/^https:\/\//i.test(String(url))) return res.status(502).json({ success: false, message: 'Demo game could not be launched.' });
+    res.json({ success: true, gameId, name: game.name, source: 'as-tech', mode: 'demo', url: String(url) });
+  } catch (e) { fail(res, e, 'Demo game could not be launched right now.'); }
 });
 
 router.get('/balance', auth, requireConfigured, async (req, res) => {
@@ -75,7 +89,7 @@ router.post('/bet', auth, actionLimiter, requireConfigured, async (req, res) => 
     const gameId = String(req.body?.gameId || '').trim().toLowerCase();
     const slot = Number(req.body?.slot);
     const stake = Number(req.body?.stake);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available.' });
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     if (![1, 2].includes(slot)) return res.status(400).json({ success: false, message: 'Invalid bet slot.' });
     if (!Number.isFinite(stake) || stake < 1 || stake > 50000) return res.status(400).json({ success: false, message: 'Stake must be between KES 1 and KES 50,000.' });
 
