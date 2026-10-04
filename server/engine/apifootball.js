@@ -400,7 +400,7 @@ async function updateLive() {
       try { prevRow = await Match.findOne({ matchId: m.matchId }, { finalVerified: 1, periodScores: 1 }).lean(); } catch (e) {}
       if (prevRow && prevRow.finalVerified) continue;
       try {
-        const newPs = require('../services/finalResultService').observePeriods(prevRow && prevRow.periodScores, { score: { fullTime: { home: m.score && m.score.home, away: m.score && m.score.away }, minute: m.score && m.score.minute, halfTime: m._halfTime }, _statusRaw: m._statusRaw, _halfTime: m._halfTime, status: m.score && m.score.period, minute: m.score && m.score.minute }, 'football');
+        const newPs = require('../services/finalResultService').observePeriods(prevRow && prevRow.periodScores, { score: { fullTime: { home: m.score && m.score.home, away: m.score && m.score.away }, minute: m.score && m.score.minute, halfTime: m._halfTime }, _statusRaw: m._statusRaw, _halfTime: m._halfTime, status: m.score && m.score.period, minute: m.score && m.score.minute }, 'football', new Date(), m.commenceTime);
         if (newPs) m.periodScores = newPs;
       } catch (e) { /* never block the live poll */ }
       delete m._statusRaw; delete m._halfTime;

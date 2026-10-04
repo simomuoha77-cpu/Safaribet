@@ -210,12 +210,26 @@ async function loadMatch(){
   }
 }
 
+// Half label for football: provider minute when it sends one, else time since kickoff.
+function matchLivePeriod(m){
+  const per = String(m.score?.period || '').toUpperCase();
+  const notFb = /basket|tennis|cricket|rugby|volley|hockey|handball/i.test(String(m.sport || ''));
+  if (notFb) return m.score?.minute!=null ? m.score.minute+"'" : '';
+  if (per==='HT' || per==='PAUSED') return 'HT';
+  const real = m.score?.minute!=null && !m.score?.minuteIsEstimated;
+  if (real) return (m.score.minute<=45?'1H ':'2H ')+m.score.minute+"'";
+  const el = m.commenceTime ? (Date.now()-new Date(m.commenceTime).getTime())/60000 : null;
+  if (el==null || el<=0) return '';
+  if (el<=47) return '1H ~'+Math.max(1,Math.round(el))+"'";
+  if (el<=60) return el>=50 ? 'HT' : '1H 45+';
+  return '2H ~'+Math.min(90,Math.max(46,Math.round(el-15)))+"'";
+}
 function renderHeader(){
   const m = matchData;
   document.getElementById('topLeague').textContent = m.league || 'Football';
   const isLive = m.status === 'live';
   const statusText = isLive
-    ? `<span class="mh-status live">● LIVE ${m.score?.minute!=null ? m.score.minute+"'" : ''}</span>`
+    ? `<span class="mh-status live">● LIVE ${matchLivePeriod(m)}</span>`
     : m.status === 'finished'
       ? `<span class="mh-status">Full Time</span>`
       : `<span class="mh-status">${new Date(m.commenceTime).toLocaleString([], {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</span>`;

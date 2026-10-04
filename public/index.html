@@ -2416,7 +2416,7 @@ function patchMatchesInPlace(matches){
       // estimateMinute fallback, HT/ET/Pen states) instead of a simplified
       // duplicate — a divergent copy here was the cause of incorrect/frozen
       // minute displays.
-      startLiveTimer(m.matchId, m.commenceTime, liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated);
+      startLiveTimer(m.matchId, m.commenceTime, liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.sport);
       const hs=liveScore.home, as=liveScore.away;
       const tnames = card.querySelectorAll('.tname');
       if(tnames.length===2 && hs!=null && as!=null){
@@ -2645,7 +2645,7 @@ function renderMatches(matches, silent=false){
   // Start counting timers for all live match cards
   stopAllLiveTimers();
   matches.filter(m => m.status === 'live').forEach(m => {
-    startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated);
+    startLiveTimer(m.matchId, m.commenceTime, m.score?.minute, m.score?.period || m.status, m.score?.minuteIsEstimated, m.sport);
   });
 
   // Restore selections
@@ -2705,8 +2705,22 @@ function estimateMinute(commenceTime, period) {
   if (elapsed <= 60) return 45; // halftime window
   return Math.max(46, Math.min(90, Math.round(elapsed - 15)));
 }
-function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime){
+// Which half a football match is in. Uses the provider's minute when it sends one,
+// otherwise the time since kickoff (the same windows the settlement engine uses).
+function livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport){
+  if (sport && String(sport).toLowerCase() !== 'football') return '';
+  if (minute != null && !minuteIsEstimated) return minute <= 45 ? '1st Half' : '2nd Half';
+  if (!commenceTime) return '';
+  const el = (Date.now() - new Date(commenceTime).getTime()) / 60000;
+  if (el <= 0) return '';
+  if (el <= 47) return '1st Half';
+  if (el <= 60) return el >= 50 ? 'Half Time' : '1st Half';
+  return '2nd Half';
+}
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport){
   const p = (period || '').toUpperCase();
+  const half = livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport);
+  if (half === 'Half Time' && !(p === 'ET' || p === 'PEN' || p === 'P')) return 'HT';
   if (p === 'HT' || p === 'PAUSED') return 'HT';
   if (p === 'ET') return 'ET';
   if (p === 'PEN' || p === 'P') return 'Pen';
@@ -2714,14 +2728,14 @@ function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime
   const baseMin = usingFallback ? (estimateMinute(commenceTime, period) || 1) : minute;
   const cap = p.includes('ET') ? 120 : 90;
   const isEstimated = usingFallback || minuteIsEstimated;
-  return `${isEstimated ? '~' : ''}${Math.min(baseMin, cap)}′`;
+  return `${half ? (half === '1st Half' ? '1H ' : '2H ') : ''}${isEstimated ? '~' : ''}${Math.min(baseMin, cap)}`;
 }
 
-function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated) {
+function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated, sport) {
   if (liveTimers[matchId]) { clearInterval(liveTimers[matchId]); delete liveTimers[matchId]; }
   const el = () => document.getElementById(`ltimer_${matchId}`);
   const timerEl = el();
-  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated, commenceTime);
+  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated, commenceTime, sport);
 }
 
 function stopAllLiveTimers() {
@@ -2784,7 +2798,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">

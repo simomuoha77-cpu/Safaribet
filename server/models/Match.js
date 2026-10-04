@@ -76,12 +76,14 @@ const matchSchema = new mongoose.Schema({
     htAt:     { type: Date },
     last1h:   { home: { type: Number }, away: { type: Number }, at: { type: Date } },
     seen2h:   { type: Boolean },
+    mid:      { home: { type: Number }, away: { type: Number }, at: { type: Date }, el: { type: Number } },   // score seen inside the half-time break window
     lastObs:  { home: { type: Number }, away: { type: Number } },   // last score seen (to detect goals between polls)
     goalsComplete: { type: Boolean },                                  // true when every goal since 0-0 was observed in order
     firstScorer:   { type: String },                                   // 'home' | 'away' (only when certain)
     lastScorer:    { type: String }
   },
-  finalSource:     { type: String, default: null },   // 'provider' | 'feed-ended' (see finalResultService)
+  finalSource:     { type: String, default: null },
+  trackerNote:     { type: String, default: null },   // why the tracker has not confirmed this game's end yet   // 'provider' | 'feed-ended' (see finalResultService)
   // Live-feed observations used to confirm that a game really ended
   lastLiveSeenAt:  { type: Date, default: null },
   liveAbsentSince: { type: Date, default: null },

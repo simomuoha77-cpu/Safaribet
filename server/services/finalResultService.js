@@ -113,7 +113,14 @@ function inferEnded(row, sport, now) {
   if (!absent || now - new Date(absent).getTime() < ABSENT_MS) return { ok: false, why: 'not absent from live feed long enough' };
   const minute = row.lastLiveMinute != null ? row.lastLiveMinute : (row.score && row.score.minute);
   if (sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
-  if (sport === 'football' && minute == null && now - kickoff < 150 * 60000) return { ok: false, why: 'last minute unknown' };
+  // The feed usually sends no minute. Then use the clock instead: a game last seen LIVE 97+ minutes
+  // after kickoff (90 minutes + the ~15 minute break, i.e. game minute ~82) that has since been gone
+  // from the live feed for 15+ minutes has ended. Last seen earlier than that -> it may still be
+  // in play (feed gap / suspension), so it keeps waiting.
+  if (sport === 'football' && minute == null) {
+    const seenEl = (new Date(lastSeen).getTime() - kickoff) / 60000;
+    if (!Number.isFinite(seenEl) || seenEl < 97) return { ok: false, why: `last seen only ${Math.max(0, Math.round(seenEl || 0))} min after kickoff` };
+  }
   return { ok: true, home: Number(h), away: Number(a) };
 }
 
@@ -131,7 +138,21 @@ function inferEnded(row, sport, now) {
 // ══════════════════════════════════════════════════════════════════════════════
 const INFER_GAP_MS = 90 * 1000;
 const HT_RE = /(^|[^a-z])(ht|half[\s_-]*time|halftime|interval|break)($|[^a-z])/;
-function classifyPeriod(item, sport) {
+// The live feed usually sends NO minute and NO period name (the site shows "~23'" because
+// even the provider's own dashboard only has an estimate). So the period is also worked
+// out from the kickoff time:
+//   <= 47 min after kickoff   -> 'first'  (1st half, or its first minutes of stoppage)
+//   52 .. 58 min              -> 'mid'    (almost always inside the 15-minute half-time break)
+//   >= 62 min                 -> 'second' (2nd half has started)
+// 47-52 and 58-62 are deliberately left unclassified (stoppage time / restart).
+// This is used ONLY together with the "score did not change" rule below, so a late kickoff
+// or a long first half can make it return nothing, but can never produce a wrong half-time.
+function elapsedMinutes(kickoff, now) {
+  const k = kickoff ? new Date(kickoff).getTime() : NaN;
+  if (!Number.isFinite(k)) return null;
+  return ((now ? now.getTime() : Date.now()) - k) / 60000;
+}
+function classifyPeriod(item, sport, kickoff, now) {
   const raw = String(item.statusRaw || item._statusRaw || '').toLowerCase().trim();
   const minute = item.minute != null ? Number(item.minute) : (item.score && item.score.minute != null ? Number(item.score.minute) : null);
   if (raw && HT_RE.test(raw) && !/full/.test(raw)) return 'break';
@@ -140,6 +161,12 @@ function classifyPeriod(item, sport) {
   if (sport === 'football' || !sport) {
     if (String(item.status || '').toUpperCase() === 'PAUSED' && minute != null && minute >= 40 && minute <= 50) return 'break';
     if (minute != null && Number.isFinite(minute)) return minute <= 45 ? 'first' : 'second';
+    const el = elapsedMinutes(kickoff || item._kickoff || item.kickoff, now);
+    if (el != null) {
+      if (el >= 0 && el <= 47) return 'first';
+      if (el >= 52 && el <= 58) return 'mid';
+      if (el >= 62) return 'second';
+    }
   }
   return null;
 }
@@ -149,7 +176,7 @@ function classifyPeriod(item, sport) {
 // the order in which the live score changed). Those are only recorded when the
 // order is certain: the first observation was 0-0, and each change between
 // observations is exactly one goal (or several by the same team).
-function observePeriods(prev, item, sport, now = new Date()) {
+function observePeriods(prev, item, sport, now = new Date(), kickoff) {
   const ps = JSON.parse(JSON.stringify(prev || {}));
   const ft = item && item.score && item.score.fullTime;
   const cur = ft && ft.home != null && ft.away != null && Number.isFinite(Number(ft.home)) && Number.isFinite(Number(ft.away))
@@ -183,15 +210,23 @@ function observePeriods(prev, item, sport, now = new Date()) {
 
   // ---- half-time ----
   if (!(prov && prov.home != null)) {
-    const phase = classifyPeriod(item, sport);
+    const phase = classifyPeriod(item, sport, kickoff, now);
     const hasHt = ps.ht && ps.ht.home != null && ps.ht.away != null;
     if (phase === 'break') {
       if (!hasHt || ps.htSource === 'inferred') { set('ht', cur); set('htSource', 'observed'); set('htAt', now); }
     } else if (phase === 'first') {
       set('last1h', { home: cur.home, away: cur.away, at: now });
+    } else if (phase === 'mid') {
+      set('mid', { home: cur.home, away: cur.away, at: now, el: Math.round((elapsedMinutes(kickoff, now) || 0) * 10) / 10 });
     } else if (phase === 'second') {
       if (!ps.seen2h) set('seen2h', true);
-      if (!hasHt && ps.last1h && ps.last1h.at) {
+      // Score seen inside the break window and UNCHANGED once the 2nd half is under way:
+      // no goal can have fallen in between, so that score is the half-time score.
+      // A sighting from the END of the break window (56-58 min after kickoff) is trusted even if a
+      // goal came right after the restart: by then the first half is over in virtually every game.
+      if (!hasHt && ps.mid && ((ps.mid.home === cur.home && ps.mid.away === cur.away) || (ps.mid.el != null && ps.mid.el >= 56))) {
+        set('ht', { home: ps.mid.home, away: ps.mid.away }); set('htSource', 'inferred'); set('htAt', now);
+      } else if (!hasHt && ps.last1h && ps.last1h.at) {
         const gap = now.getTime() - new Date(ps.last1h.at).getTime();
         const same = ps.last1h.home === cur.home && ps.last1h.away === cur.away;
         // Scores only ever go up, so if the score is IDENTICAL before and after
@@ -223,14 +258,31 @@ async function trackFixtures(fixtures, Match) {
       const kickoff = row.commenceTime ? new Date(row.commenceTime) : new Date(fx.commenceTime || now);
       if (kickoff.getTime() > now) continue; // not started
 
+      // The same provider fixture can have several rows (Live-tab id, main-feed id...).
+      // Decisions use what ALL of them have recorded, and a confirmed end is written to all.
+      const sibIds = Array.from(new Set([fx.matchId, `sofabets_${id}`, `sofabets_${p.sport}_${id}`, `sofabets_live_${id}`, `sofabets_live_${p.sport}_${id}`]));
+      const rows = await Match.find({ matchId: { $in: sibIds } }).lean();
+      if (rows.some(r => r.finalVerified === true && r.status === 'finished' && r.score && r.score.home != null)) {
+        const f = rows.find(r => r.finalVerified === true && r.score && r.score.home != null);
+        if (row && !(row.finalVerified === true)) await Match.updateOne({ matchId: fx.matchId }, { $set: { status: 'finished', result: f.result || resultFromScore(f.score.home, f.score.away), 'score.home': f.score.home, 'score.away': f.score.away, 'score.period': 'FT', finalVerified: true, finalVerifiedAt: f.finalVerifiedAt || new Date(), finalSource: f.finalSource || 'sibling' } });
+        continue;
+      }
+      const seenRows = rows.filter(r => r.score && r.score.home != null && r.score.away != null && r.lastLiveSeenAt)
+        .sort((a, b) => new Date(b.lastLiveSeenAt) - new Date(a.lastLiveSeenAt));
+      const best = seenRows[0] || null;
+      const eff = Object.assign({}, row, best ? {
+        score: best.score, lastLiveSeenAt: best.lastLiveSeenAt, lastLiveMinute: best.lastLiveMinute,
+        liveAbsentSince: best.liveAbsentSince || row.liveAbsentSince
+      } : {});
+
       // exact-id sources only
       let item = (await liveFeed(p.sport) || new Map()).get(id) || null;
       if (!item) item = ((await catalogue(p.sport, nairobiDate(kickoff))) || new Map()).get(id) || null;
 
       const finish = async (sc, source) => {
-        await Match.updateOne({ matchId: fx.matchId }, { $set: {
+        await Match.updateMany({ matchId: { $in: sibIds } }, { $set: {
           status: 'finished', result: resultFromScore(sc.home, sc.away), 'score.home': sc.home, 'score.away': sc.away, 'score.period': 'FT',
-          finalVerified: true, finalVerifiedAt: new Date(), finalSource: source, lastFinalCheckAt: new Date(), liveAbsentSince: row.liveAbsentSince || new Date()
+          finalVerified: true, finalVerifiedAt: new Date(), finalSource: source, lastFinalCheckAt: new Date(), trackerNote: null
         } });
         out.finalized++;
         console.log(`  [Tracker] FINAL (${source}): ${row.homeTeam} ${sc.home}-${sc.away} ${row.awayTeam} [${fx.matchId}]`);
@@ -246,19 +298,20 @@ async function trackFixtures(fixtures, Match) {
           const set = { status: 'live', lastLiveSeenAt: new Date(), liveAbsentSince: null, lastFinalCheckAt: new Date() };
           if (sc) { set['score.home'] = sc.home; set['score.away'] = sc.away; }
           if (item.minute != null && Number.isFinite(Number(item.minute))) { set.lastLiveMinute = Number(item.minute); set['score.minute'] = Number(item.minute); }
-          const newPs = observePeriods(row.periodScores, item, p.sport);
+          const newPs = observePeriods(row.periodScores, item, p.sport, new Date(), kickoff);
           if (newPs) set.periodScores = newPs;
           await Match.updateOne({ matchId: fx.matchId }, { $set: set });
           out.waiting.push({ matchId: fx.matchId, why: 'still in play' }); continue;
         }
       }
       // not live right now (absent, or listed as scheduled long after kickoff)
-      if (!row.liveAbsentSince && row.status !== 'finished') {
+      if (!eff.liveAbsentSince && row.status !== 'finished') {
         await Match.updateOne({ matchId: fx.matchId }, { $set: { liveAbsentSince: new Date(), lastFinalCheckAt: new Date() } });
-        row.liveAbsentSince = new Date();
+        eff.liveAbsentSince = new Date();
       }
-      const inf = inferEnded(row, p.sport, now);
+      const inf = inferEnded(eff, p.sport, now);
       if (inf.ok) { await finish({ home: inf.home, away: inf.away }, 'feed-ended'); continue; }
+      if (row.trackerNote !== inf.why) await Match.updateOne({ matchId: fx.matchId }, { $set: { trackerNote: inf.why } });
       out.waiting.push({ matchId: fx.matchId, why: inf.why });
     } catch (e) { out.waiting.push({ matchId: fx.matchId, why: 'tracker error: ' + e.message }); }
   }

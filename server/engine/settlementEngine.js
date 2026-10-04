@@ -293,6 +293,7 @@ const HT_RANK = { admin: 4, provider: 3, observed: 2, inferred: 1 };
 function mergeFixtureRows(rows) {
   if (!rows || !rows.length) return null;
   const out = Object.assign({}, rows.find(r => r.finalVerified) || rows[0]);
+  out.trackerNote = (rows.find(r => r.trackerNote) || {}).trackerNote || null;
   const fin = rows.find(r => r.finalVerified === true && r.score && r.score.home != null && r.score.away != null);
   if (fin) { out.finalVerified = true; out.score = fin.score; out.status = 'finished'; }
   let bestHt = null;
@@ -323,7 +324,18 @@ function pendingMessage(g, s) {
   if (/first-half result not available|half-time score was not recorded/i.test(r)) {
     return (g && g.finalKnown) ? 'Half-time score was not captured - awaiting manual result' : 'Waiting for the first half to finish';
   }
-  if (/not verified yet|not available yet|not tracked|never seen|minimum game length|not absent|last seen at/i.test(r)) return 'Waiting for the match to finish';
+  if (/not verified yet|not available yet|not tracked|never seen|minimum game length|not absent|last seen at|last seen only/i.test(r)) {
+    const n = String((g && g.trackerNote) || '');
+    const why = /no score was ever recorded/i.test(n) ? 'the live score was never captured'
+      : /never seen live/i.test(n) ? 'the match was not captured while live'
+      : /not absent/i.test(n) ? 'still listed as live'
+      : /minimum game length/i.test(n) ? 'the match is not over yet'
+      : /last seen at minute/i.test(n) ? n.replace(/^last seen at minute (\d+).*$/i, 'last seen at minute $1')
+      : /last seen only (\d+) min/i.test(n) ? n.replace(/^last seen only (\d+) min after kickoff$/i, 'last seen live $1 min after kickoff')
+      : /minute unknown/i.test(n) ? 'game length unconfirmed'
+      : '';
+    return 'Waiting for the match to finish' + (why ? ` (${why})` : '');
+  }
   if (/half-time score was not recorded/i.test(r)) return 'Half-time score was not captured - awaiting manual result';
   if (/first-half result not available/i.test(r)) return 'Waiting for the first half to finish';
   if (/unrecognised market/i.test(r)) return 'Market type not supported for automatic settlement - awaiting manual result';
@@ -379,7 +391,7 @@ async function gradeProviderSel(s, matchRows) {
     pickLabel: s.pickLabel || s.providerSelectionKey || s.pick,
     homeTeam: s.homeTeam, awayTeam: s.awayTeam, sport: s.sport
   }, ps);
-  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft };
+  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft, trackerNote: row.trackerNote || null };
   const period = r.market && r.market.period;
   return { status: r.status, score: r.score || null, periodLabel: period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT', source: 'market-rules' };
 }
