@@ -39,6 +39,7 @@ const selectionSchema = new mongoose.Schema({
   placedAt:       { type: Date },
   isLive:         { type: Boolean },
   periodLabel:    { type: String },
+  voidReason:     { type: String },            // why an unreadable market was refunded automatically
   pendingReason:  { type: String },            // why this selection has not settled yet (shown in My Bets)
   pendingCheckedAt: { type: Date },            // set when graded: 'HT' | '2H' | 'FT' (what the shown score refers to)
   settledSource:  { type: String },            // 'market-rules' | 'provider'

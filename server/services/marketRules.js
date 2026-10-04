@@ -33,6 +33,8 @@ function detectPeriod(name) {
   if (/\b(3rd|third)\s*quarter\b|\bq3\b/.test(n)) return 'QUARTER_3';
   if (/\b(4th|fourth)\s*quarter\b|\bq4\b/.test(n)) return 'QUARTER_4';
   if (/\bset\s*\d\b|\b\d(st|nd|rd|th)\s*set\b/.test(n)) return 'SET';
+  if (/\b(excl(uding|uded|\.)?)\s*(overtime|extra\s*time|ot)\b|\bregular\s*time\b|\bregulation\b/.test(n)) return 'REGULATION_TIME';   // needs the score before overtime (not recorded)
+  if (/\bincl(uding|uded|\.)?\s*(overtime|extra\s*time|ot)\b/.test(n)) return 'FULL_MATCH';                                               // the normal final result
   if (/\bextra\s*time\b|\bovertime\b/.test(n)) return 'EXTRA_TIME';
   return 'FULL_MATCH';
 }
@@ -51,7 +53,7 @@ function detectSimpleType(bare) {
   const n = norm(bare);
   // Markets decided by data the feed does not give us (corners, cards, players,
   // goal timing...). They must NEVER be graded from the goals score.
-  if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b|asian|quarter\s*handicap/.test(n)) return 'NO_DATA';
+  if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b/.test(n)) return 'NO_DATA';
   if (/first\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*first|to\s*score\s*first/.test(n)) return 'FIRST_SCORER';
   if (/last\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*last|to\s*score\s*last/.test(n)) return 'LAST_SCORER';
   if (/clean\s*sheet/.test(n)) return 'CLEAN_SHEET';
@@ -135,6 +137,9 @@ function shorthandSet(label) {
   if (t === '12') return new Set(['home', 'away']);
   return null;
 }
+
+const NON_FOOTBALL = ['basketball', 'tennis', 'hockey', 'ice_hockey', 'icehockey', 'cricket', 'volleyball', 'rugby', 'handball', 'baseball', 'table_tennis', 'darts', 'snooker', 'american_football', 'mma', 'boxing'];
+const isFootballLike = sport => !sport || !NON_FOOTBALL.includes(String(sport).toLowerCase());
 
 const out = (h, a) => (h > a ? 'home' : a > h ? 'away' : 'draw');
 const W = b => (b ? 'won' : 'lost');
@@ -248,6 +253,26 @@ function evalSimple(type, pickLabel, sc, ctx) {
       return W(m[1] === 'over' ? rel > line : rel < line);
     }
     case 'HANDICAP': {
+      const twoWay = /asian/.test(String(ctx.marketText || '').toLowerCase()) || !isFootballLike(ctx.sport);
+      if (twoWay) {
+        // 2-way handicap: the picked side gets the line added to its score. Whole line + tie = push (void);
+        // half lines never push. Quarter lines (x.25 / x.75) split the stake and are not graded here.
+        const pl = String(pickLabel);
+        const mm = pl.match(/^(.*?)\s*\(?\s*([+-]\d+(?:\.\d+)?)\s*\)?\s*$/);
+        let who, hcap;
+        if (mm) { who = teamOf(mm[1], ctx.home, ctx.away); hcap = Number(mm[2]); }
+        else {
+          who = teamOf(pl, ctx.home, ctx.away);
+          const ml = String(ctx.marketText || '').match(/([+-]?\d+(?:\.\d+)?)\s*$/) || String(ctx.marketText || '').match(/([+-]\d+(?:\.\d+)?)/);
+          if (!ml) return null;
+          hcap = Number(ml[1]); if (who === 'away') hcap = -hcap;        // the market line is the HOME side's handicap
+        }
+        if (!who || who === 'draw' || !Number.isFinite(hcap)) return null;
+        const frac = Math.abs(hcap * 4) % 4;
+        if (frac === 1 || frac === 3) return null;                      // quarter line
+        const diff = (who === 'home' ? h + hcap - a : a + hcap - h);
+        return diff > 0 ? 'won' : diff < 0 ? 'lost' : 'void';
+      }
       // 3-way / european style label: "Team (-1)" / "Team (+1)" / "Draw (-1)"; Asian handicaps are not graded here.
       const m = String(pickLabel).match(/^(.*?)\s*\(?\s*([+-]?\d+(?:\.\d+)?)\s*\)?\s*$/);
       if (!m) return null;
@@ -296,7 +321,7 @@ function scoreForPeriod(period, ps) {
 function evaluate(sel, periodScores) {
   const marketText = sel.marketLabel || sel.marketName || '';
   const pm = parseMarket(marketText);
-  const ctx = { home: sel.homeTeam, away: sel.awayTeam, marketText };
+  const ctx = { home: sel.homeTeam, away: sel.awayTeam, marketText, sport: sel.sport };
   const need = requirementFor(pm.period);
   if (!pm.type) return { status: null, need, reason: `unrecognised market "${marketText}"`, market: pm };
   if (need === 'UNSUPPORTED') return { status: null, need, reason: `period ${pm.period} not supported`, market: pm };

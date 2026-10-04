@@ -264,6 +264,7 @@ function renderBets(bets){
           </div>
           ${r==='pending' ? fixtureBadge(s) : ''}
           ${s.marketLabel ? `<div class="sel-mkt" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.marketLabel).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
+          ${r==='void' && s.voidReason ? `<div class="sel-why" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.voidReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
           ${r==='pending' && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
         </div>
         <div class="sel-odds">${(s.odds||0).toFixed(2)}</div>

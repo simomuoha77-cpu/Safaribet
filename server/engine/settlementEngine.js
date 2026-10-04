@@ -295,7 +295,7 @@ function mergeFixtureRows(rows) {
   const out = Object.assign({}, rows.find(r => r.finalVerified) || rows[0]);
   out.trackerNote = (rows.find(r => r.trackerNote) || {}).trackerNote || null;
   const fin = rows.find(r => r.finalVerified === true && r.score && r.score.home != null && r.score.away != null);
-  if (fin) { out.finalVerified = true; out.score = fin.score; out.status = 'finished'; }
+  if (fin) { out.finalVerified = true; out.score = fin.score; out.status = 'finished'; out.finalVerifiedAt = fin.finalVerifiedAt || fin.updatedAt || null; }
   let bestHt = null;
   for (const r of rows) {
     const ps = r.periodScores || {};
@@ -319,10 +319,9 @@ function mergeFixtureRows(rows) {
 function pendingMessage(g, s) {
   const r = String((g && g.reason) || '');
   if (!r) return 'Waiting for the match result';
-  // A half-time score is needed. If the game is already over and it was never
-  // captured, it will not arrive by itself -> flag it for a manual result.
+  const refundNote = ' - refunded automatically if it cannot be confirmed';
   if (/first-half result not available|half-time score was not recorded/i.test(r)) {
-    return (g && g.finalKnown) ? 'Half-time score was not captured - awaiting manual result' : 'Waiting for the first half to finish';
+    return (g && g.finalKnown) ? 'Half-time score was not captured' + refundNote : 'Waiting for the first half to finish';
   }
   if (/not verified yet|not available yet|not tracked|never seen|minimum game length|not absent|last seen at|last seen only/i.test(r)) {
     const n = String((g && g.trackerNote) || '');
@@ -336,14 +335,13 @@ function pendingMessage(g, s) {
       : '';
     return 'Waiting for the match to finish' + (why ? ` (${why})` : '');
   }
-  if (/half-time score was not recorded/i.test(r)) return 'Half-time score was not captured - awaiting manual result';
-  if (/first-half result not available/i.test(r)) return 'Waiting for the first half to finish';
-  if (/unrecognised market/i.test(r)) return 'Market type not supported for automatic settlement - awaiting manual result';
-  if (/feed does not provide|cannot provide/i.test(r)) return 'Needs corner/card/player data - awaiting manual result';
-  if (/order was not observed|not supported/i.test(r)) return 'Result cannot be read automatically - awaiting manual result';
+  if (/unrecognised market|feed does not provide|cannot provide|order was not observed|not supported|cannot read pick|cannot grade|cannot split|inconsistent/i.test(r)) {
+    return 'This market cannot be read automatically' + refundNote.replace('if it cannot be confirmed', 'after the match');
+  }
   return 'Awaiting result: ' + r;
 }
 
+const AUTO_VOID_GRACE_MS = 30 * 60 * 1000;   // after the match is verified final
 const officialMemo = new Map();   // per-run: one provider lookup per fixture
 async function gradeProviderSel(s, matchRows) {
   // The same provider fixture can have several Match rows (the Live tab id
@@ -557,10 +555,25 @@ async function _runSettlementInner(includeApiFetch) {
           // Remember WHY, so My Bets / the admin can see what it is waiting for.
           const why = pendingMessage(g, s);
           if (why && s.pendingReason !== why) { s.pendingReason = why; s.pendingCheckedAt = new Date(); changed = true; }
-          // If the fixture IS final but the market cannot be read, keep it for
-          // manual review (never auto-void, never guess).
+          // The match is over and verified, but this market cannot be graded from the data we have
+          // (needs corners/cards/players, or a period score we never captured). Nothing is left for
+          // manual approval: after a short grace period the leg is VOIDED automatically and the
+          // stake is refunded - never guessed, never left pending.
           const finalEntry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
-          if (finalEntry) { console.log(`   Pending (needs review): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`); continue; }
+          if (finalEntry) {
+            const mrow = matchRows.get(s.matchId);
+            const finalAt = mrow && mrow.finalVerifiedAt ? new Date(mrow.finalVerifiedAt).getTime()
+              : (s.commenceTime ? new Date(s.commenceTime).getTime() + 4 * 3600000 : now);
+            if (now - finalAt >= AUTO_VOID_GRACE_MS) {
+              s.result = 'void'; s.settledAt = new Date(); s.settledSource = 'auto-void';
+              s.voidReason = 'This market could not be settled automatically - stake refunded';
+              s.pendingReason = undefined; changed = true;
+              console.log(`   Auto-VOID (unreadable market, match final): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`);
+            } else {
+              console.log(`   Unreadable market, match final - will auto-void after grace: ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`);
+            }
+            continue;
+          }
         }
 
         // Look up the VERIFIED-FINAL result by exact fixture identity only.
