@@ -42,10 +42,38 @@ router.get('/games', auth, requireConfigured, async (req, res) => {
   } catch (e) { fail(res, e, 'JuanAI casino games are unavailable right now.'); }
 });
 
+// Universal JuanAI launcher. SafariBet never contacts AS Tech directly.
+// Provider games may currently return mode=demo/realMoney=false until an
+// authorized production provider wallet contract is configured in JuanAI.
+router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) => {
+  try {
+    const gameId = String(req.body?.gameId || '').trim();
+    if (!gameId) return res.status(400).json({ success: false, message: 'gameId is required.' });
+
+    const games = await juanai.listGames();
+    const game = games.find(g => String(g.gameId) === gameId);
+    if (!game) return res.status(404).json({ success: false, message: 'Casino game is not available.' });
+    if (game.status && game.status !== 'active') return res.status(400).json({ success: false, message: 'Casino game is unavailable.' });
+    if (game.launchAvailable === false) return res.status(400).json({ success: false, message: 'Casino game cannot be launched right now.' });
+
+    const result = await juanai.launch(gameId, req.user._id);
+    return res.json({
+      success: true,
+      gameId,
+      name: game.name,
+      providerCode: game.providerCode || null,
+      source: game.source || 'juanai',
+      mode: result.mode || game.launchMode || 'demo',
+      realMoney: result.realMoney === true || game.realMoney === true,
+      launchUrl: result.launchUrl || null,
+      data: result
+    });
+  } catch (e) { fail(res, e, 'Casino game could not be launched right now.'); }
+});
+
 router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
   try {
     const gameId = gameIdFrom(req);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     const data = await juanai.state(gameId);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({ success: true, gameId, data });
@@ -55,7 +83,6 @@ router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
 router.get('/players/:gameId', auth, requireConfigured, async (req, res) => {
   try {
     const gameId = gameIdFrom(req);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     const data = await juanai.players(gameId);
     res.json({ success: true, data });
   } catch (e) { fail(res, e); }
@@ -76,7 +103,6 @@ router.post('/bet', auth, actionLimiter, requireConfigured, async (req, res) => 
     const gameId = String(req.body?.gameId || '').trim().toLowerCase();
     const slot = Number(req.body?.slot);
     const stake = Number(req.body?.stake);
-    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     if (![1, 2].includes(slot)) return res.status(400).json({ success: false, message: 'Invalid bet slot.' });
     if (!Number.isFinite(stake) || stake < 1 || stake > 50000) return res.status(400).json({ success: false, message: 'Stake must be between KES 1 and KES 50,000.' });
 

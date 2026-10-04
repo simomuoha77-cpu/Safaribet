@@ -1,30 +1,62 @@
-# SafariBet → JuanAI Casino Developer API
+# SafariBet → JuanAI Casino API
 
-SafariBet's casino integration uses the **JuanAI Casino Developer API credential pair** created in JuanAI Developer API:
+SafariBet uses **only the JuanAI Casino Developer API key + secret**. AS Tech is never called directly by SafariBet.
 
-- `JUANAI_CASINO_URL=https://bitfreezee-lav2.onrender.com`
-- `JUANAI_CASINO_API_KEY=jsk_casino_...`
-- `JUANAI_CASINO_API_SECRET=jss_casino_...`
+Required server environment:
 
-The key and matching secret stay on the SafariBet server. They are sent only from SafariBet's backend to JuanAI's backend using `X-JuanAI-Key` and `X-JuanAI-Secret`.
+```env
+JUANAI_CASINO_URL=https://YOUR-JUANAI-HOST
+JUANAI_CASINO_API_KEY=jsk_casino_...
+JUANAI_CASINO_API_SECRET=jss_casino_...
+JUANAI_CASINO_WALLET_BASE_URL=https://safaribet.top
+JUANAI_CASINO_TIMEOUT_MS=10000
+```
 
-Do **not** use the old legacy `jsk_...` football/general key and do **not** use `JUANAI_CASINO_PARTNER_KEY`.
+Keep these values server-side. Never put the key/secret in browser JavaScript.
 
-## Casino flow
+## Catalogue
 
-SafariBet → JuanAI Casino Developer API → JuanAI casino catalogue / Aviator / JetX / provider catalogue.
+SafariBet calls:
 
-Aviator and JetX use the SafariBet wallet for real-money betting through the authenticated server-to-server casino API.
+`GET /api/casino/juanai/games`
 
-The JuanAI provider catalogue is displayed in SafariBet as provider catalogue entries. SafariBet does not label those entries as real-money games unless JuanAI exposes a real-money launch/betting contract for them.
+The route calls JuanAI:
 
-## Required endpoints
+`GET /api/developer/casino/games`
 
-- `GET /api/developer/casino/games`
-- `GET /api/developer/casino/state/:gameId`
-- `GET /api/developer/casino/players/:gameId`
-- `POST /api/developer/casino/wallet/register`
-- `GET /api/developer/casino/balance`
-- `POST /api/developer/casino/bet`
-- `GET /api/developer/casino/bet/:betId`
-- `POST /api/developer/casino/bet/:betId/cashout`
+That catalogue includes JuanAI-owned games and the AS Tech catalogue discovered by JuanAI. SafariBet does not hard-code a provider list.
+
+## Launch
+
+SafariBet calls:
+
+`POST /api/casino/juanai/launch`
+
+```json
+{"gameId":"spribe:737"}
+```
+
+SafariBet sends the request to JuanAI. JuanAI resolves the game and performs the upstream launch. SafariBet never sends AS Tech credentials.
+
+Provider games are displayed even when `realMoney:false`; this prevents the lobby from silently hiding games merely because the upstream production wallet contract has not been configured.
+
+## Real-money games
+
+JuanAI-owned games such as Aviator/JetX can use the SafariBet wallet endpoints:
+
+- `GET /api/casino/juanai/balance`
+- `POST /api/casino/juanai/bet`
+- `GET /api/casino/juanai/bet/:betId`
+- `POST /api/casino/juanai/bet/:betId/cashout`
+
+The UI only enables those native betting controls for games explicitly marked `realMoney:true`.
+
+## AS Tech production boundary
+
+The JuanAI public AS Tech adapter currently exposes catalogue/demo launch. SafariBet therefore must not pretend those games are real-money until JuanAI has an authorized AS Tech production session/wallet/callback contract.
+
+This code intentionally displays and launches the available provider games through JuanAI without inventing wallet settlement behavior.
+
+## SofaBets
+
+SafariBet Casino does not use SofaBets. The old Sofa casino launcher is disabled. The football SofaBets provider, if present elsewhere in the repository, is unrelated and is not used by the casino page.
