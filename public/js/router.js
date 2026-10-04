@@ -557,6 +557,31 @@
   _docAdd.call(document, 'mousedown', mmIntent, true);
   _docAdd.call(document, 'mouseover', mmIntent, { passive: true });
 
+
+  // ── My Bets prefetch ──
+  // Keeps a copy of the player's latest bets so the My Bets page can paint instantly; it is
+  // refreshed in the background when idle and as soon as the My Bets button is touched.
+  function betsKey() { try { var u = JSON.parse(localStorage.getItem('user') || 'null'); return 'sb_mybets_cache_' + ((u && (u._id || u.id)) || 'u'); } catch (e) { return null; } }
+  var betsInflight = null;
+  SB.prefetchBets = function () {
+    var tok = null; try { tok = localStorage.getItem('token'); } catch (e) {}
+    var key = betsKey();
+    if (!tok || !key || !_fetch || betsInflight) return;
+    betsInflight = _fetch('/api/bets/my', { headers: { Authorization: 'Bearer ' + tok }, cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.success && Array.isArray(d.data)) { try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: d.data.slice(0, 20) })); } catch (e) {} } })
+      .catch(function () {})
+      .then(function () { betsInflight = null; });
+  };
+  function betsIntent(ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[onclick*="/my-bets"], a[href="/my-bets"]') : null;
+    if (el) SB.prefetchBets();
+  }
+  _docAdd.call(document, 'touchstart', betsIntent, { passive: true });
+  _docAdd.call(document, 'mousedown', betsIntent, true);
+  _winAdd.call(window, 'load', function () { _st.call(window, SB.prefetchBets, 2500); });
+  _winAdd.call(window, 'sb:navigated', function () { _st.call(window, SB.prefetchBets, 1500); });
+
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}

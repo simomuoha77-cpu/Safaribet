@@ -108,9 +108,25 @@ function validateSelections(selections, maxSelections) {
 }
 
 // ── PLACE BET ──
+// Response body for a bet that exists (used for the original answer AND for replays / status checks).
+async function placedBody(bet) {
+  const bal = await walletService.getBalance(bet.userId);
+  return {
+    success: true, betCode: bet.betCode, selections: (bet.selections || []).length, totalOdds: bet.totalOdds,
+    stake: bet.stake, potentialWin: bet.potentialWin, newBalance: bal.spendable, wallet: bal, replay: true
+  };
+}
+
 async function placeBetHandler(req, res) {
+  const t0 = Date.now(), marks = {};
+  const mark = k => { marks[k] = Date.now() - t0; };
   try {
     const { selections, stake } = req.body;
+    // A repeat of a press that already produced a bet: answer with that bet. Nothing is charged twice.
+    if (req.idemKey) {
+      const prior = await Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey });
+      if (prior) return res.json(await placedBody(prior));
+    }
 
     // Read live limits from admin panel (persisted, see admin.js) — single source
     // of truth shared with deposit/withdraw validation, instead of separately
@@ -152,6 +168,7 @@ async function placeBetHandler(req, res) {
       resolutions.set(sel, await placementResolver.resolveProviderSelection(sel, matchMap[sel.matchId]));
     }));
     const [rgErr] = await Promise.all([rgPromise, resolvePromise]);
+    mark('validated');
     if (rgErr) return res.status(403).json({ success: false, message: rgErr.message });
 
     const verifiedSelections = [];
@@ -327,6 +344,7 @@ async function placeBetHandler(req, res) {
 
     // Deduct stake atomically — bonus balance used first, then main (anti-race-condition)
     const deduction = await walletService.deductStake(req.user._id, stakeAmt, null);
+    mark('wallet');
     if (!deduction) return res.status(400).json({ success: false, message: 'Insufficient balance' });
 
     if (deduction.fromBonus > 0) {
@@ -344,8 +362,10 @@ async function placeBetHandler(req, res) {
       tax,
       ipAddress:   req.ip,
       stakeFromBonus: deduction.fromBonus,
-      stakeFromMain:  deduction.fromMain
+      stakeFromMain:  deduction.fromMain,
+      ...(req.idemKey ? { idempotencyKey: req.idemKey } : {})
     });
+    mark('betSaved');
 
     require('../services/loyaltyService').awardPoints(req.user._id, stakeAmt).catch(()=>{});
 
@@ -361,6 +381,9 @@ async function placeBetHandler(req, res) {
       walletService.getBalance(req.user._id)
     ]);
 
+    mark('done');
+    // Where the time goes: logged whenever a placement is slow, so a slow step can be pinned down.
+    if (marks.done > 3000) console.warn(`[bets/place] SLOW ${marks.done}ms for ${req.user._id}:`, JSON.stringify(marks), `legs=${verifiedSelections.length}`);
     res.json({
       success:      true,
       betCode:      bet.betCode,
@@ -372,32 +395,50 @@ async function placeBetHandler(req, res) {
       wallet:       newBalance
     });
   } catch (e) {
-    console.error('[bets/place]', e.message);
+    console.error('[bets/place]', e.message, JSON.stringify(marks));
     res.status(500).json({ success: false, message: 'Failed to place bet' });
   }
 }
 
-// Duplicate-bet protection. The browser sends a fresh X-Idempotency-Key for
-// every PLACE BET press. A repeat of the same key (double tap, or a retry after
-// the connection dropped) gets the ORIGINAL result instead of placing - and
-// charging for - a second bet. Only successful results are remembered.
-const placeInflight = new Map(); // userId:key -> Promise<{status, body}>
+// Duplicate-bet protection. The browser sends a fresh X-Idempotency-Key for every PLACE BET press.
+// A repeat of the same key (double tap, or a retry after the connection dropped / the answer was
+// slow) gets the ORIGINAL result instead of placing - and charging for - a second bet. The key is
+// also stored on the bet itself, so this still works after a restart or once the in-memory entry
+// has expired. GET /place-status/:key lets the app ask "was my bet placed?" while it waits.
+const placeInflight = new Map(); // userId:key -> { done, result, p }
 router.post('/place', auth, betLimiter, async (req, res) => {
   const key = String(req.headers['x-idempotency-key'] || '').trim().slice(0, 80);
   if (!key) return placeBetHandler(req, res);
+  req.idemKey = key;
   const k = `${req.user._id}:${key}`;
-  let p = placeInflight.get(k);
-  if (!p) {
-    p = new Promise(resolve => {
+  let entry = placeInflight.get(k);
+  if (entry && entry.done && !(entry.result.status >= 200 && entry.result.status < 300)) { placeInflight.delete(k); entry = null; } // a failed attempt may be retried
+  if (!entry) {
+    entry = { done: false, result: null };
+    entry.p = new Promise(resolve => {
       const cap = { _s: 200, status(c) { this._s = c; return this; }, json(b) { resolve({ status: this._s, body: b }); return this; } };
       placeBetHandler(req, cap).catch(() => resolve({ status: 500, body: { success: false, message: 'Failed to place bet' } }));
-    });
-    placeInflight.set(k, p);
-    p.then(r => { if (!(r.status >= 200 && r.status < 300)) placeInflight.delete(k); });
-    const t = setTimeout(() => placeInflight.delete(k), 2 * 60 * 1000); if (t.unref) t.unref();
+    }).then(r => { entry.done = true; entry.result = r; return r; });
+    placeInflight.set(k, entry);
+    const t = setTimeout(() => placeInflight.delete(k), 5 * 60 * 1000); if (t.unref) t.unref();
   }
-  const r = await p;
+  const r = await entry.p;
   res.status(r.status).json(r.body);
+});
+
+router.get('/place-status/:key', auth, async (req, res) => {
+  try {
+    const key = String(req.params.key || '').trim().slice(0, 80);
+    if (!key) return res.status(400).json({ success: false, message: 'key required' });
+    const entry = placeInflight.get(`${req.user._id}:${key}`);
+    if (entry && !entry.done) return res.json({ success: true, state: 'processing' });
+    if (entry && entry.done && !(entry.result.status >= 200 && entry.result.status < 300)) {
+      return res.json({ success: true, state: 'failed', message: (entry.result.body && entry.result.body.message) || 'Bet was not placed' });
+    }
+    const bet = await Bet.findOne({ userId: req.user._id, idempotencyKey: key });
+    if (bet) return res.json({ success: true, state: 'placed', bet: await placedBody(bet) });
+    res.json({ success: true, state: 'unknown' });
+  } catch (e) { return safeError(res, e, 'bets/place-status'); }
 });
 
 // ── MY BETS (with filters) ──
@@ -438,6 +479,39 @@ router.get('/my', auth, async (req, res) => {
     ]);
     const stats = statsAgg[0] || { totalBets:0, wonCount:0, lostCount:0, pendingCount:0, totalStake:0, totalWon:0 };
     delete stats._id;
+
+    // Where is each still-pending game right now? (live / not started / finished, awaiting result)
+    try {
+      const fin = require('../services/finalResultService');
+      const pend = [];
+      bets.forEach(bt => (bt.selections || []).forEach(s => { if ((s.result || 'pending') === 'pending') pend.push(s); }));
+      const ids = new Set();
+      pend.forEach(s => {
+        ids.add(s.matchId);
+        const p = fin.parseSofaMatchId(s.matchId);
+        if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
+      });
+      if (ids.size) {
+        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1 }).lean();
+        const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
+        const now = Date.now();
+        pend.forEach(s => {
+          const p = fin.parseSofaMatchId(s.matchId);
+          const sib = p ? [s.matchId, `sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`] : [s.matchId];
+          const rs = sib.map(i => byId[i]).filter(Boolean);
+          const kick = new Date(s.commenceTime || (rs[0] && rs[0].commenceTime) || 0).getTime();
+          const seen = Math.max(0, ...rs.map(r => r.lastLiveSeenAt ? new Date(r.lastLiveSeenAt).getTime() : 0));
+          let state;
+          if (rs.some(r => r.finalVerified)) state = 'finished';
+          else if (kick && kick > now) state = 'not_started';
+          else if (seen && now - seen < 3 * 60 * 1000) state = 'live';
+          else if (rs.some(r => r.status === 'live') && (!seen || now - seen < 3 * 60 * 1000)) state = 'live';
+          else state = 'awaiting';          // kicked off, no longer in the live feed, result not confirmed yet
+          s.fixtureState = state;
+          s.kickoffAt = kick || null;
+        });
+      }
+    } catch (e) { /* purely informational - never block the bet list */ }
 
     res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });
   } catch (e) {

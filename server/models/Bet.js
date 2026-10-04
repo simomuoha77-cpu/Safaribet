@@ -83,6 +83,7 @@ const betSchema = new mongoose.Schema({
   netPayout:   { type: Number, default: 0 },
   tax:         { type: Number, default: 0 },
   status:      { type: String, enum: ['pending','won','lost','void','cancelled','cashed_out'], default: 'pending', index: true },
+  idempotencyKey: { type: String },
   settledAt:   { type: Date },
   ipAddress:   { type: String },
   // Cash Out
@@ -92,6 +93,8 @@ const betSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 betSchema.index({ userId: 1, createdAt: -1 });
+// One bet per (user, PLACE BET press): lets a retry or a status check find the bet that was already placed.
+betSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
 betSchema.index({ status: 1, createdAt: -1 });
 betSchema.index({ 'selections.matchId': 1, status: 1 });
 

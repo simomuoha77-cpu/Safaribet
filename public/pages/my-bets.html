@@ -163,9 +163,29 @@ window.addEventListener('DOMContentLoaded',async()=>{
   if(!t||!u){SB.go('/login');return}
   USER=JSON.parse(u);
   document.getElementById('balTop').textContent=parseFloat(USER.balance||0).toFixed(2);
+  // Show the last known bets INSTANTLY (they are kept up to date in the background), then refresh.
+  const cached=readBetsCache();
+  if(cached){ applyBets(cached); }
   refreshBalance();
-  await loadBets();
+  await loadBets(!!cached);
 });
+
+function betsCacheKey(){ return 'sb_mybets_cache_'+((USER&&(USER._id||USER.id))||'u'); }
+function readBetsCache(){
+  try{ const r=JSON.parse(localStorage.getItem(betsCacheKey())||'null'); return r&&Array.isArray(r.data)?r.data:null; }catch(e){ return null; }
+}
+function writeBetsCache(list){ try{ localStorage.setItem(betsCacheKey(), JSON.stringify({ts:Date.now(),data:list.slice(0,20)})); }catch(e){} }
+function applyBets(list){
+  allBets=list;
+  const won=allBets.filter(b=>b.status==='won');
+  const totalWin=won.reduce((a,b)=>a+(b.netPayout||0),0);
+  document.getElementById('sTotal').textContent=allBets.length;
+  document.getElementById('sWon').textContent=won.length;
+  document.getElementById('sWin').textContent=totalWin.toFixed(0);
+  const on=document.querySelector('.ftab.on');
+  const f=on&&on.getAttribute('data-f');
+  renderBets(f&&f!=='all'?allBets.filter(b=>b.status===f):allBets);
+}
 
 // Same live wallet fetch used on the homepage and Account — keeps this page's
 // header in sync with the real balance instead of the snapshot cached at login.
@@ -181,26 +201,35 @@ async function refreshBalance(){
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshBalance(); });
 
-async function loadBets(){
+async function loadBets(hadCache){
   try{
     const r=await fetch('/api/bets/my',{headers:{'Authorization':'Bearer '+localStorage.getItem('token')}});
     const d=await r.json();
-    if(!d.success){renderEmpty();return}
-    allBets=d.data;
-    // Stats
-    const won=allBets.filter(b=>b.status==='won');
-    const totalWin=won.reduce((a,b)=>a+(b.netPayout||0),0);
-    document.getElementById('sTotal').textContent=allBets.length;
-    document.getElementById('sWon').textContent=won.length;
-    document.getElementById('sWin').textContent=totalWin.toFixed(0);
-    renderBets(allBets);
-  }catch{document.getElementById('betsList').innerHTML='<div class="loading">Failed to load bets.</div>'}
+    if(!d.success){ if(!hadCache) renderEmpty(); return; }
+    writeBetsCache(d.data);
+    applyBets(d.data);
+  }catch{ if(!hadCache) document.getElementById('betsList').innerHTML='<div class="loading">Failed to load bets. Pull to refresh.</div>'; }
 }
 
 function filter(f,el){
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
-  el.classList.add('on');
+  el.classList.add('on'); el.setAttribute('data-f',f);
   renderBets(f==='all'?allBets:allBets.filter(b=>b.status===f));
+}
+
+// Where a still-pending game is right now: live / not started / finished (awaiting result).
+function fixtureBadge(s){
+  let st=s.fixtureState, kick=s.kickoffAt||(s.commenceTime?new Date(s.commenceTime).getTime():0);
+  if(!st){ st = kick && kick>Date.now() ? 'not_started' : null; }
+  if(!st) return '';
+  const base='display:inline-block;font-size:11px;font-weight:700;margin-top:3px;padding:2px 8px;border-radius:999px;';
+  if(st==='live') return `<div><span style="${base}color:#ff4d4d;background:rgba(255,77,77,0.12)">&#9679; LIVE</span></div>`;
+  if(st==='not_started'){
+    const when=kick?new Date(kick).toLocaleString('en-KE',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    return `<div><span style="${base}color:#9fb3a5;background:rgba(159,179,165,0.12)">&#128339; Not started${when?' &middot; '+when:''}</span></div>`;
+  }
+  if(st==='finished') return `<div><span style="${base}color:#00c853;background:rgba(0,200,83,0.10)">&#10003; Match finished</span></div>`;
+  return `<div><span style="${base}color:#ffd600;background:rgba(255,214,0,0.10)">&#8987; Match over &mdash; awaiting result</span></div>`;
 }
 
 function renderBets(bets){
@@ -233,6 +262,7 @@ function renderBets(bets){
             ${scoreStr ? `<span class="sel-score">${s.periodLabel || 'FT'}: ${scoreStr}</span>` : ''}
             ${s.league ? `<span class="sel-league">${s.league}</span>` : ''}
           </div>
+          ${r==='pending' ? fixtureBadge(s) : ''}
           ${s.marketLabel ? `<div class="sel-mkt" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.marketLabel).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
           ${r==='pending' && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
         </div>

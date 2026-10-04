@@ -3098,49 +3098,79 @@ async function placeBet(){
   const btn=document.getElementById('placeBtn');
   btn.disabled=true; btn.textContent='Placing bet...';
 
-  // One key per press: a double tap or a retry after a dropped connection can
-  // never place (and charge for) the same bet twice - the server returns the
-  // original result instead. The wait is bounded so the user is never left on
-  // "Placing bet..." indefinitely.
+  // One key per press. The server answers a repeat of the same key with the ORIGINAL bet, so
+  // nothing here can place (or charge for) a bet twice, and the app can always ask the server
+  // "was my bet placed?". A slow answer is therefore never reported as a failure: the app keeps
+  // waiting / asking and tells the user the real outcome.
   const idemKey=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+Math.random().toString(36).slice(2));
-  const ctl=new AbortController(); const tmo=setTimeout(()=>ctl.abort(),20000);
-  try{
-    const r=await fetch('/api/bets/place',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token'),'X-Idempotency-Key':idemKey},
-      body:JSON.stringify({selections:slip,stake}),
-      signal:ctl.signal
-    });
-    clearTimeout(tmo);
-    const d=await r.json();
+  const auth=()=>({'Authorization':'Bearer '+localStorage.getItem('token')});
+  const body=JSON.stringify({selections:slip,stake});
+  let done=false, release; const finished=new Promise(r=>{release=r;});
 
-    if(d.success){
-      USER.balance=d.newBalance;
-      localStorage.setItem('user',JSON.stringify(USER));
-      document.getElementById('balv').textContent=parseFloat(d.newBalance).toFixed(2);
-      refreshBalance(); // reconcile against the authoritative wallet endpoint
+  const success=(d)=>{
+    if(done) return; done=true; release();
+    USER.balance=d.newBalance;
+    localStorage.setItem('user',JSON.stringify(USER));
+    document.getElementById('balv').textContent=parseFloat(d.newBalance).toFixed(2);
+    refreshBalance(); // reconcile against the authoritative wallet endpoint
+    document.getElementById('mBetCode').textContent=d.betCode;
+    document.getElementById('mSels').textContent=d.selections+' selection'+(d.selections>1?'s':'');
+    document.getElementById('mOdds').textContent=Number(d.totalOdds).toFixed(2);
+    document.getElementById('mStake').textContent='KES '+stake.toFixed(2);
+    document.getElementById('mPayout').textContent='KES '+Number(d.potentialWin).toFixed(2);
+    document.getElementById('mBal').textContent='KES '+parseFloat(d.newBalance).toFixed(2);
+    document.getElementById('successModal').classList.add('on');
+    closeSlip(); clearSlip();
+    if(window.SB&&SB.prefetchBets) SB.prefetchBets(); // refresh the cached My Bets list so the new bet is already there
+  };
+  const failure=(msg)=>{ if(done) return; done=true; release(); showT(msg||'Failed','err'); };
 
-      const gross=stake*d.totalOdds;
-      const tax=Math.max(0,(gross-stake)*0.20);
+  // the request itself (no abort: a slow answer is still an answer)
+  const send=()=>fetch('/api/bets/place',{method:'POST',headers:Object.assign({'Content-Type':'application/json','X-Idempotency-Key':idemKey},auth()),body}).then(r=>r.json());
 
-      document.getElementById('mBetCode').textContent=d.betCode;
-      document.getElementById('mSels').textContent=d.selections+' selection'+(d.selections>1?'s':'');
-      document.getElementById('mOdds').textContent=d.totalOdds.toFixed(2);
-      document.getElementById('mStake').textContent='KES '+stake.toFixed(2);
-      document.getElementById('mPayout').textContent='KES '+d.potentialWin.toFixed(2);
-      document.getElementById('mBal').textContent='KES '+parseFloat(d.newBalance).toFixed(2);
-      document.getElementById('successModal').classList.add('on');
+  // meanwhile, after a few seconds, also ask the server directly whether the bet exists
+  let pollTimer=null, polls=0;
+  const poll=async()=>{
+    if(done) return;
+    polls++;
+    try{
+      const r=await fetch('/api/bets/place-status/'+encodeURIComponent(idemKey),{headers:auth()});
+      const d=await r.json();
+      if(d.success&&d.state==='placed') return success(d.bet);
+      if(d.success&&d.state==='failed') return failure(d.message);
+    }catch(e){}
+    if(!done&&polls<30) pollTimer=setTimeout(poll,2000);
+  };
+  const t1=setTimeout(()=>{ if(!done) btn.textContent='Still working - please wait...'; },6000);
+  const t2=setTimeout(()=>{ if(!done){ btn.textContent='Confirming your bet...'; poll(); } },9000);
 
-      closeSlip(); clearSlip();
-    } else {
-      showT(d.message||'Failed','err');
+  const flow=async()=>{
+    let d;
+    try{ d=await send(); }
+    catch(e){
+      // connection dropped: the bet may or may not have reached the server. Retrying with the SAME key is
+      // safe - it either returns the bet that was already placed or places it exactly once.
+      btn.textContent='Confirming your bet...';
+      let lastErr=e;
+      for(let i=0;i<3&&!done;i++){
+        await new Promise(r=>setTimeout(r,1500*(i+1)));
+        try{ d=await send(); lastErr=null; break; }catch(e2){ lastErr=e2; }
+      }
+      if(lastErr&&!done) throw lastErr;
     }
-  } catch(e){
-    clearTimeout(tmo);
-    if(e && e.name==='AbortError') showT('This is taking longer than expected. Check My Bets before trying again.','err');
-    else showT('Connection error','err');
+    if(d&&d.success) success(d);
+    else if(d) failure(d.message);
+  };
+  try{
+    // whichever comes first: the request's own answer, or the status check finding the bet
+    await Promise.race([flow(), finished]);
+  }catch(e){
+    // could not reach the server at all, even after retries
+    if(!done) failure('No connection. Your bet was not confirmed - check My Bets before trying again.');
+  }finally{
+    clearTimeout(t1); clearTimeout(t2); if(pollTimer) clearTimeout(pollTimer);
   }
-
+  done=true;
   btn.disabled=false; btn.textContent='PLACE BET';
 }
 
