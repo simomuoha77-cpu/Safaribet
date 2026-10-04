@@ -1,43 +1,52 @@
-// JuanAI real-money partner casino adapter — CASINO ONLY.
-// Uses JuanAI's existing server-to-server partner contract for the games
-// actually exposed by JuanAI's casinoIntegration layer (Aviator + JetX).
-// The API key stays server-side. SafariBet remains the wallet of record.
+// JuanAI Developer API casino adapter — CASINO ONLY.
+// Uses the product-scoped JuanAI Casino API credential pair:
+//   X-JuanAI-Key / X-JuanAI-Secret
+// SafariBet's wallet remains the real-money source of truth.
 const axios = require('axios');
 
 function cfg() {
   return {
     base: String(process.env.JUANAI_CASINO_URL || process.env.JUANAI_URL || '').replace(/\/+$/, ''),
-    key: String(process.env.JUANAI_CASINO_PARTNER_KEY || '').trim(),
+    key: String(process.env.JUANAI_CASINO_API_KEY || process.env.JUANAI_CASINO_KEY || '').trim(),
+    secret: String(process.env.JUANAI_CASINO_API_SECRET || process.env.JUANAI_CASINO_SECRET || '').trim(),
+    walletBase: String(process.env.JUANAI_CASINO_WALLET_BASE_URL || process.env.SAFARIBET_PUBLIC_URL || 'https://safaribet.top').replace(/\/+$/, ''),
     timeout: Number(process.env.JUANAI_CASINO_TIMEOUT_MS || 10000)
   };
 }
 
 function configured() {
   const c = cfg();
-  return !!(c.base && c.key);
+  return !!(c.base && c.key && c.secret);
 }
 
 function configError() {
   const c = cfg();
   if (!c.base) return 'JUANAI_CASINO_URL is not configured';
-  if (!c.key) return 'JUANAI_CASINO_PARTNER_KEY is not configured';
+  if (!c.key) return 'JUANAI_CASINO_API_KEY is not configured';
+  if (!c.secret) return 'JUANAI_CASINO_API_SECRET is not configured';
   return null;
 }
 
+let walletRegistrationPromise = null;
+
 async function request(method, path, body, params) {
   const c = cfg();
-  const q = Object.assign({}, params || {}, { key: c.key });
   const r = await axios({
     method,
     url: c.base + path,
-    params: q,
+    params: params || undefined,
     data: body,
     timeout: c.timeout,
     validateStatus: () => true,
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-JuanAI-Key': c.key,
+      'X-JuanAI-Secret': c.secret
+    }
   });
   if (r.status < 200 || r.status >= 300) {
-    const msg = r.data && (r.data.message || r.data.error);
+    const msg = r.data && (r.data.message || (r.data.error && r.data.error.message) || r.data.error);
     const err = new Error(typeof msg === 'string' ? msg : `JuanAI returned HTTP ${r.status}`);
     err.status = r.status;
     err.upstream = r.data;
@@ -46,55 +55,61 @@ async function request(method, path, body, params) {
   return r.data;
 }
 
-function gamePath(gameId, suffix) {
-  const id = String(gameId || '').toLowerCase();
-  if (id === 'aviator') return `/api/casino/aviator/${suffix}`;
-  if (id === 'jetx') return `/api/jetx/${suffix}`;
-  throw Object.assign(new Error('Unsupported JuanAI casino game'), { code: 'UNSUPPORTED_GAME' });
+async function ensureWalletRegistered() {
+  if (walletRegistrationPromise) return walletRegistrationPromise;
+  walletRegistrationPromise = (async () => {
+    const c = cfg();
+    await request('post', '/api/developer/casino/wallet/register', { baseUrl: c.walletBase });
+  })().catch(err => {
+    walletRegistrationPromise = null;
+    throw err;
+  });
+  return walletRegistrationPromise;
 }
 
 async function listGames() {
-  const data = await request('get', '/api/casino/games');
-  const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : []);
-  return list
-    .filter(g => g && ['aviator', 'jetx'].includes(String(g.id || g.gameId || '').toLowerCase()))
-    .map(g => ({
-      gameId: String(g.id || g.gameId).toLowerCase(),
-      name: String(g.name || g.title || g.id || g.gameId),
-      category: String(g.category || 'crash'),
-      thumbnail: g.thumbnail || g.image || null,
-      status: g.status || 'active',
-      rtp: g.rtp == null ? null : Number(g.rtp)
-    }));
+  const data = await request('get', '/api/developer/casino/games');
+  const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+  return list.map(g => ({
+    gameId: String(g.id || g.gameId || '').toLowerCase(),
+    name: String(g.name || g.title || g.id || g.gameId || 'Casino Game'),
+    category: String(g.category || 'casino'),
+    thumbnail: g.thumbnail || g.image || null,
+    gameUrl: g.gameUrl || null,
+    status: g.status || 'active',
+    rtp: g.rtp == null ? null : Number(g.rtp)
+  })).filter(g => ['aviator', 'jetx'].includes(g.gameId));
 }
 
 async function state(gameId) {
-  return request('get', gamePath(gameId, 'state'));
+  return request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`);
 }
 
 async function players(gameId) {
-  return request('get', gamePath(gameId, 'players'));
+  return request('get', `/api/developer/casino/players/${encodeURIComponent(String(gameId).toLowerCase())}`);
 }
 
 async function balance(userId) {
-  return request('get', '/api/casino/balance', null, { userId: String(userId) });
+  await ensureWalletRegistered();
+  return request('get', '/api/developer/casino/balance', null, { userId: String(userId) });
 }
 
 async function placeBet(userId, gameId, slot, stake) {
-  return request('post', '/api/casino/bet', {
-    gameId: String(gameId).toLowerCase(),
+  await ensureWalletRegistered();
+  return request('post', '/api/developer/casino/bet', {
     userId: String(userId),
+    gameId: String(gameId).toLowerCase(),
     slot: Number(slot),
     stake: Number(stake)
   });
 }
 
-async function betResult(betId) {
-  return request('get', `/api/casino/bet/${encodeURIComponent(String(betId))}`);
+async function betResult(betId, userId) {
+  return request('get', `/api/developer/casino/bet/${encodeURIComponent(String(betId))}`, null, { userId: String(userId) });
 }
 
-async function cashOut(betId) {
-  return request('post', `/api/casino/bet/${encodeURIComponent(String(betId))}/cashout`, {});
+async function cashOut(betId, userId) {
+  return request('post', `/api/developer/casino/bet/${encodeURIComponent(String(betId))}/cashout`, { userId: String(userId) });
 }
 
-module.exports = { cfg, configured, configError, listGames, state, players, balance, placeBet, betResult, cashOut };
+module.exports = { cfg, configured, configError, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };

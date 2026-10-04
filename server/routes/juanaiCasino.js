@@ -87,7 +87,7 @@ router.post('/bet', auth, actionLimiter, requireConfigured, async (req, res) => 
 
 router.get('/bet/:betId', auth, requireConfigured, async (req, res) => {
   try {
-    const result = await juanai.betResult(req.params.betId);
+    const result = await juanai.betResult(req.params.betId, req.user._id);
     if (!result?.success) return res.status(404).json({ success: false, message: 'Bet not found.' });
     if (String(result.userId) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'Bet does not belong to this account.' });
     res.json({ success: true, data: result });
@@ -96,10 +96,10 @@ router.get('/bet/:betId', auth, requireConfigured, async (req, res) => {
 
 router.post('/bet/:betId/cashout', auth, actionLimiter, requireConfigured, async (req, res) => {
   try {
-    const existing = await juanai.betResult(req.params.betId);
+    const existing = await juanai.betResult(req.params.betId, req.user._id);
     if (!existing?.success) return res.status(404).json({ success: false, message: 'Bet not found.' });
     if (String(existing.userId) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'Bet does not belong to this account.' });
-    const result = await juanai.cashOut(req.params.betId);
+    const result = await juanai.cashOut(req.params.betId, req.user._id);
     if (!result?.success) return res.status(400).json({ success: false, message: result?.message || 'Cash out was not accepted.' });
     res.json({ success: true, data: result });
   } catch (e) { fail(res, e, 'Cash out was not accepted. Please try again.'); }

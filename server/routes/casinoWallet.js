@@ -18,7 +18,9 @@ const router      = express.Router();
 
 const crypto = require('crypto');
 
-const SHARED_SECRET = () => process.env.CASINO_WEBHOOK_SECRET || '';
+const SHARED_SECRET = () => process.env.CASINO_WEBHOOK_SECRET || process.env.JUANAI_CASINO_API_SECRET || '';
+// For the JuanAI Developer API integration, the same server-side Casino
+// secret is used for the signed wallet channel. It is never exposed to the browser.
 
 // Verify HMAC-SHA256 signature from Juan AI
 // Signature = HMAC_SHA256(secret, method + "\n" + fullPathWithQuery + "\n" + timestamp + "\n" + body)
@@ -103,7 +105,7 @@ router.post('/debit', verifyWebhook, async (req, res) => {
     }
 
     // Idempotency — don't debit twice for same round
-    const existing = await Transaction.findOne({ reference: `casino_debit_${roundId}` }).lean();
+    const existing = await Transaction.findOne({ reference: `casino_debit_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
       return res.json({ success: true, balance: bal.spendable, newBalance: bal.spendable, duplicate: true });
@@ -117,12 +119,12 @@ router.post('/debit', verifyWebhook, async (req, res) => {
 
     // Deduct from wallet main bucket
     const wallet = await walletService.debit(userId, 'main', debitAmount, 'casino_bet',
-      `casino_debit_${roundId}`, { gameId, roundId });
+      `casino_debit_${userId}_${roundId}`, { gameId, roundId });
 
     await Transaction.create({
       userId, type: 'casino_bet', amount: -debitAmount,
       balance: wallet.main,
-      reference: `casino_debit_${roundId}`,
+      reference: `casino_debit_${userId}_${roundId}`,
       description: `${gameId || 'Casino'} bet — Round ${roundId}`
     });
 
@@ -157,7 +159,7 @@ router.post('/credit', verifyWebhook, async (req, res) => {
     }
 
     // Idempotency — don't credit twice for same round
-    const existing = await Transaction.findOne({ reference: `casino_credit_${roundId}` }).lean();
+    const existing = await Transaction.findOne({ reference: `casino_credit_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
       return res.json({ success: true, balance: bal.spendable, duplicate: true });
@@ -167,14 +169,14 @@ router.post('/credit', verifyWebhook, async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const wallet = await walletService.credit(userId, 'main', creditAmount, 'casino_win',
-      `casino_credit_${roundId}`, { gameId, roundId });
+      `casino_credit_${userId}_${roundId}`, { gameId, roundId });
 
     await Transaction.create({
       userId,
       type:        'casino_win',
       amount:      creditAmount,
       balance:     wallet.main,
-      reference:   `casino_credit_${roundId}`,
+      reference:   `casino_credit_${userId}_${roundId}`,
       description: `${gameId || 'Casino'} win — Round ${roundId}`
     });
 
@@ -211,14 +213,14 @@ router.post('/rollback', verifyWebhook, async (req, res) => {
     }
 
     // Idempotency check
-    const existing = await Transaction.findOne({ reference: `casino_rollback_${roundId}` }).lean();
+    const existing = await Transaction.findOne({ reference: `casino_rollback_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
       return res.json({ success: true, balance: bal.spendable, duplicate: true });
     }
 
     // Only rollback if original debit exists
-    const debit = await Transaction.findOne({ reference: `casino_debit_${roundId}` }).lean();
+    const debit = await Transaction.findOne({ reference: `casino_debit_${userId}_${roundId}` }).lean();
     if (!debit) {
       return res.status(404).json({ success: false, message: 'Original bet not found — nothing to rollback' });
     }
@@ -228,14 +230,14 @@ router.post('/rollback', verifyWebhook, async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const wallet = await walletService.credit(userId, 'main', refundAmount, 'casino_refund',
-      `casino_rollback_${roundId}`, { gameId, roundId });
+      `casino_rollback_${userId}_${roundId}`, { gameId, roundId });
 
     await Transaction.create({
       userId,
       type:        'casino_refund',
       amount:      refundAmount,
       balance:     wallet.main,
-      reference:   `casino_rollback_${roundId}`,
+      reference:   `casino_rollback_${userId}_${roundId}`,
       description: `${gameId || 'Casino'} round voided — refund Round ${roundId}`
     });
 
