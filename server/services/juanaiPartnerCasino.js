@@ -84,12 +84,12 @@ async function listGames() {
   })).filter(g => g.gameId);
 }
 
-async function demoLaunch(gameId) {
-  return request('post', '/api/developer/casino/demo-launch', { gameId: String(gameId) });
-}
-
 async function state(gameId) {
-  return request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`);
+  const response = await request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`);
+  // JuanAI returns the state inside `data`; older builds returned the state
+  // object directly. Normalize both shapes so SafariBet never gets stuck on
+  // the initial "Waiting for round…" screen.
+  return response?.data && typeof response.data === 'object' ? response.data : response;
 }
 
 async function players(gameId) {

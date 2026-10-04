@@ -61,18 +61,18 @@ router.get('/players/:gameId', auth, requireConfigured, async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-router.post('/demo-launch', auth, requireConfigured, async (req, res) => {
-  try {
-    const gameId = String(req.body?.gameId || '').trim();
-    if (!gameId || !gameId.includes(':')) return res.status(400).json({ success: false, message: 'Demo game is not available.' });
-    const catalogue = await juanai.listGames();
-    const game = catalogue.find(g => String(g.gameId) === gameId && g.launchMode === 'demo');
-    if (!game) return res.status(404).json({ success: false, message: 'Demo game is not available.' });
-    const result = await juanai.demoLaunch(gameId);
-    const url = result?.data?.url || result?.data?.gameUrl || result?.url || result?.gameUrl;
-    if (!url || !/^https:\/\//i.test(String(url))) return res.status(502).json({ success: false, message: 'Demo game could not be launched.' });
-    res.json({ success: true, gameId, name: game.name, source: 'as-tech', mode: 'demo', url: String(url) });
-  } catch (e) { fail(res, e, 'Demo game could not be launched right now.'); }
+router.post('/provider-launch', auth, requireConfigured, async (req, res) => {
+  // AS Tech catalogue entries are displayed from JuanAI, but this integration
+  // must never pretend that JuanAI exposes a real-money AS Tech wallet/launch
+  // contract when it does not. Keep them visible and report their actual
+  // availability instead of silently converting them into a fake real-money
+  // game.
+  const gameId = String(req.body?.gameId || '').trim();
+  if (!gameId) return res.status(400).json({ success: false, message: 'Casino game is unavailable.' });
+  const catalogue = await juanai.listGames();
+  const game = catalogue.find(g => String(g.gameId) === gameId);
+  if (!game || game.source !== 'as-tech') return res.status(404).json({ success: false, message: 'Casino game is unavailable.' });
+  return res.status(409).json({ success: false, message: 'This provider game is catalogued by JuanAI, but real-money launch is not exposed by the current JuanAI Casino API.' });
 });
 
 router.get('/balance', auth, requireConfigured, async (req, res) => {
