@@ -68,61 +68,22 @@ async function ensureWalletRegistered() {
 }
 
 async function listGames() {
+  const c = cfg();
   const data = await request('get', '/api/developer/casino/games');
   const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
-  return list.map(g => {
-    const source = String(g.source || 'juanai').toLowerCase();
-    const launchMode = String(g.launchMode || (source === 'as-tech' ? 'demo' : 'real-money')).toLowerCase();
-    const realMoney = g.realMoney === true || (source === 'juanai' && launchMode === 'real-money');
-
-    return {
-      gameId: String(g.id || g.gameId || '').trim(),
-      name: String(g.name || g.title || g.id || g.gameId || 'Casino Game'),
-      category: String(g.category || 'casino'),
-      thumbnail: g.thumbnail || g.image || null,
-      image: g.image || g.thumbnail || null,
-      gameUrl: g.gameUrl || null,
-      status: g.status || 'active',
-      rtp: g.rtp == null ? null : Number(g.rtp),
-      providerCode: g.providerCode || null,
-      source,
-      launchMode,
-      realMoney,
-      // AS Tech games are available through JuanAI's catalogue/launch gateway.
-      // They are not falsely marked real-money until JuanAI has an authorized
-      // production wallet/session contract for that provider.
-      launchAvailable: g.launchAvailable !== false,
-      launchEndpoint: g.launchEndpoint || '/api/casino/juanai/launch'
-    };
-  }).filter(g => g.gameId);
-}
-
-async function launch(gameId, userId) {
-  const id = String(gameId || '').trim();
-  if (!id) throw Object.assign(new Error('gameId is required'), { status: 400 });
-
-  // JuanAI is the only upstream used by SafariBet. The JuanAI developer
-  // endpoint resolves AS Tech games and performs the provider launch.
-  const response = await request('post', '/api/developer/casino/launch', {
-    gameId: id,
-    userId: String(userId || '')
-  });
-
-  const data = response?.data && typeof response.data === 'object'
-    ? response.data
-    : response;
-
-  const launchUrl = data?.launchUrl || data?.launch_url || data?.gameUrl ||
-    data?.game_url || data?.url || data?.iframeSrc || data?.iframe_src ||
-    data?.data?.launchUrl || data?.data?.url || null;
-
-  return {
-    ...response,
-    gameId: id,
-    launchUrl: launchUrl ? String(launchUrl) : null,
-    mode: response?.mode || data?.mode || 'demo',
-    realMoney: response?.realMoney === true || data?.realMoney === true
-  };
+  return list.map(g => ({
+    gameId: String(g.id || g.gameId || '').trim(),
+    name: String(g.name || g.title || g.id || g.gameId || 'Casino Game'),
+    category: String(g.category || 'casino'),
+    thumbnail: (() => { const u = g.thumbnail || g.image || null; return u && /^\//.test(String(u)) ? c.base + String(u) : u; })(),
+    gameUrl: g.gameUrl || null,
+    status: g.status || 'active',
+    rtp: g.rtp == null ? null : Number(g.rtp),
+    providerCode: g.providerCode || null,
+    source: g.source || 'juanai',
+    launchMode: g.launchMode || (g.source === 'as-tech' ? 'provider' : 'real-money'),
+    realMoney: g.realMoney === true || g.launchMode === 'real-money' || g.source === 'juanai'
+  })).filter(g => g.gameId && g.realMoney === true);
 }
 
 async function state(gameId) {
@@ -160,4 +121,15 @@ async function cashOut(betId, userId) {
   return request('post', `/api/developer/casino/bet/${encodeURIComponent(String(betId))}/cashout`, { userId: String(userId) });
 }
 
-module.exports = { cfg, configured, configError, listGames, launch, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered };
+
+async function launch(gameId, userId, username) {
+  if (!userId) throw Object.assign(new Error('userId is required'), { status: 400 });
+  const response = await request('post', '/api/developer/casino/launch', {
+    gameId: String(gameId),
+    userId: String(userId),
+    username: String(username || userId)
+  });
+  return response;
+}
+
+module.exports = { cfg, configured, configError, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launch };
