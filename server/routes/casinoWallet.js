@@ -18,7 +18,7 @@ const router      = express.Router();
 
 const crypto = require('crypto');
 
-const SHARED_SECRET = () => process.env.CASINO_WEBHOOK_SECRET || 'a00bae21762b70e0a8e3ce6672562301d6b3c863f1c91daf8cce62777399b922';
+const SHARED_SECRET = () => process.env.CASINO_WEBHOOK_SECRET || '';
 
 // Verify HMAC-SHA256 signature from Juan AI
 // Signature = HMAC_SHA256(secret, method + "\n" + fullPathWithQuery + "\n" + timestamp + "\n" + body)
@@ -27,12 +27,8 @@ function verifyWebhook(req, res, next) {
     const timestamp = req.headers['x-juanai-timestamp'];
     const signature = req.headers['x-juanai-signature'];
 
-    // Fallback: also accept static secret for testing
-    if (!signature) {
-      const staticSecret = req.headers['x-casino-secret'] || req.query.secret || req.body?.secret;
-      if (staticSecret && staticSecret === SHARED_SECRET()) return next();
-      return res.status(401).json({ success: false, message: 'Missing signature' });
-    }
+    if (!SHARED_SECRET()) return res.status(503).json({ success: false, message: 'Casino wallet integration is not configured' });
+    if (!signature) return res.status(401).json({ success: false, message: 'Missing signature' });
 
     if (!timestamp) {
       return res.status(401).json({ success: false, message: 'Missing timestamp' });
