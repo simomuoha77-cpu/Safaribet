@@ -66,7 +66,16 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
       launchUrl,
       game: data.game || game
     });
-  } catch (e) { fail(res, e, 'JuanAI could not launch the real casino game.'); }
+  } catch (e) {
+    console.error('[juanai-casino-launch] FULL ERROR:', {
+      message: e?.message,
+      status: e?.status,
+      code: e?.code,
+      upstream: e?.upstream,
+      response: e?.response?.data
+    });
+    fail(res, e, e?.message || 'JuanAI could not launch the casino game.');
+  }
 });
 
 router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
