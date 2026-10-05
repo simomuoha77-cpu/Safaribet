@@ -54,13 +54,16 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
     // to be launched through the same server-side gateway. JuanAI decides
     // whether the returned session is real-money or demo/provider mode.
     const data = await juanai.launch(gameId, req.user._id, req.user.username || req.user.name || String(req.user._id));
-    if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
+    // JuanAI returns launchUrl at the top level in the current contract, but
+    // accept the nested data.gameUrl/url shapes used by older builds too.
+    const launchUrl = data?.launchUrl || data?.gameUrl || data?.url || data?.data?.gameUrl || data?.data?.url || null;
+    if (!launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
     res.json({
       success: true,
       gameId,
       mode: data.mode || game.launchMode || 'demo',
       realMoney: data.realMoney === true,
-      launchUrl: data.launchUrl,
+      launchUrl,
       game: data.game || game
     });
   } catch (e) { fail(res, e, 'JuanAI could not launch the real casino game.'); }

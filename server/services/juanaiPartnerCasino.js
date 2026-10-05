@@ -10,7 +10,7 @@ function cfg() {
     key: String(process.env.JUANAI_CASINO_API_KEY || process.env.JUANAI_CASINO_KEY || '').trim(),
     secret: String(process.env.JUANAI_CASINO_API_SECRET || process.env.JUANAI_CASINO_SECRET || '').trim(),
     walletBase: String(process.env.JUANAI_CASINO_WALLET_BASE_URL || process.env.SAFARIBET_PUBLIC_URL || 'https://safaribet.top').replace(/\/+$/, ''),
-    timeout: Number(process.env.JUANAI_CASINO_TIMEOUT_MS || 10000)
+    timeout: Number(process.env.JUANAI_CASINO_TIMEOUT_MS || 30000)
   };
 }
 
