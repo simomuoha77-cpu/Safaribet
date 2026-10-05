@@ -71,19 +71,24 @@ async function listGames() {
   const c = cfg();
   const data = await request('get', '/api/developer/casino/games');
   const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+  // Return the COMPLETE catalogue supplied by JuanAI.  Do not filter out
+  // provider/demo games here: SafariBet must be able to discover every game
+  // JuanAI exposes, including AS Tech games.  The launch response determines
+  // whether a particular game is demo or real-money.
   return list.map(g => ({
     gameId: String(g.id || g.gameId || '').trim(),
     name: String(g.name || g.title || g.id || g.gameId || 'Casino Game'),
     category: String(g.category || 'casino'),
     thumbnail: (() => { const u = g.thumbnail || g.image || null; return u && /^\//.test(String(u)) ? c.base + String(u) : u; })(),
+    image: (() => { const u = g.image || g.thumbnail || null; return u && /^\//.test(String(u)) ? c.base + String(u) : u; })(),
     gameUrl: g.gameUrl || null,
     status: g.status || 'active',
     rtp: g.rtp == null ? null : Number(g.rtp),
     providerCode: g.providerCode || null,
     source: g.source || 'juanai',
-    launchMode: g.launchMode || (g.source === 'as-tech' ? 'provider' : 'real-money'),
+    launchMode: g.launchMode || (g.source === 'as-tech' ? 'demo' : 'real-money'),
     realMoney: g.realMoney === true || g.launchMode === 'real-money' || g.source === 'juanai'
-  })).filter(g => g.gameId && g.realMoney === true);
+  })).filter(g => g.gameId);
 }
 
 async function state(gameId) {

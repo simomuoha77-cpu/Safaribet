@@ -27,7 +27,7 @@ function requireConfigured(req, res, next) {
 }
 
 function gameIdFrom(req) {
-  return String(req.params.gameId || req.body?.gameId || '').trim().toLowerCase();
+  return String(req.params.gameId || req.body?.gameId || '').trim();
 }
 
 // The lobby is sourced ONLY from JuanAI's real partner catalogue.
@@ -49,12 +49,20 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
     if (!gameId) return res.status(400).json({ success: false, message: 'gameId is required.' });
     const game = (await juanai.listGames()).find(g => g.gameId === gameId);
     if (!game) return res.status(404).json({ success: false, message: 'JuanAI game not found.' });
-    if (game.realMoney !== true || !['aviator', 'jetx'].includes(gameId)) {
-      return res.status(400).json({ success: false, message: 'This game does not have a JuanAI real-money launch.' });
-    }
+
+    // Universal JuanAI launch: every game in the JuanAI catalogue is eligible
+    // to be launched through the same server-side gateway. JuanAI decides
+    // whether the returned session is real-money or demo/provider mode.
     const data = await juanai.launch(gameId, req.user._id, req.user.username || req.user.name || String(req.user._id));
     if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
-    res.json({ success: true, gameId, mode: data.mode || 'real-money', realMoney: data.realMoney !== false, launchUrl: data.launchUrl, game: data.game || game });
+    res.json({
+      success: true,
+      gameId,
+      mode: data.mode || game.launchMode || 'demo',
+      realMoney: data.realMoney === true,
+      launchUrl: data.launchUrl,
+      game: data.game || game
+    });
   } catch (e) { fail(res, e, 'JuanAI could not launch the real casino game.'); }
 });
 
