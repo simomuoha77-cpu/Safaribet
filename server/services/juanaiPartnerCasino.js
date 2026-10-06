@@ -8,6 +8,10 @@ function cfg() {
   return {
     base: String(process.env.JUANAI_CASINO_URL || process.env.JUANAI_URL || '').replace(/\/+$/, ''),
     key: String(process.env.JUANAI_CASINO_API_KEY || process.env.JUANAI_CASINO_KEY || '').trim(),
+    // JuanAI's in-house Aviator/JetX browser games use the normal jsk_
+    // partner key. Keep this server-side; it is appended only to the final
+    // JuanAI game URL returned to the authenticated player.
+    legacyKey: String(process.env.JUANAI_API_KEY || '').trim(),
     secret: String(process.env.JUANAI_CASINO_API_SECRET || process.env.JUANAI_CASINO_SECRET || '').trim(),
     walletBase: String(process.env.JUANAI_CASINO_WALLET_BASE_URL || process.env.SAFARIBET_PUBLIC_URL || 'https://safaribet.top').replace(/\/+$/, ''),
     // JuanAI's server sleeps when idle and can take 20-40s to wake up. A short timeout (e.g. 10s from an
@@ -186,6 +190,55 @@ async function cashOut(betId, userId) {
 }
 
 
+async function launchDirect(gameId, userId, username) {
+  const c = cfg();
+  const id = String(gameId || '').trim().toLowerCase();
+  if (!['aviator', 'jetx'].includes(id)) {
+    throw Object.assign(new Error('Casino game is not available.'), { status: 400, code: 'UNSUPPORTED_GAME' });
+  }
+  if (!c.legacyKey) {
+    throw Object.assign(new Error('JUANAI_API_KEY is not configured.'), { status: 503, code: 'LEGACY_KEY_NOT_CONFIGURED' });
+  }
+  if (!c.base) {
+    throw Object.assign(new Error('JUANAI_URL is not configured.'), { status: 503, code: 'NOT_CONFIGURED' });
+  }
+
+  // Do NOT fetch the catalogue here. The player already selected one of the
+  // two JuanAI games. Create the signed user session in one server-to-server
+  // call, then open the actual JuanAI game immediately.
+  const r = await axios({
+    method: 'post',
+    url: c.base + '/api/casino/session',
+    data: {
+      key: c.legacyKey,
+      userId: String(userId),
+      username: String(username || userId)
+    },
+    timeout: Math.max(15000, c.timeout),
+    validateStatus: () => true,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+  });
+
+  if (r.status < 200 || r.status >= 300 || !r.data?.success || !r.data?.utoken) {
+    const e = new Error(r.data?.message || `JuanAI session returned HTTP ${r.status}`);
+    e.status = r.status; e.upstream = r.data;
+    throw e;
+  }
+
+  const path = `/casino/${id}.html`;
+  const launchUrl = `${c.base}${path}?key=${encodeURIComponent(c.legacyKey)}&utoken=${encodeURIComponent(r.data.utoken)}`;
+  return {
+    success: true,
+    mode: 'real-money',
+    realMoney: true,
+    currency: 'KES',
+    gameId: id,
+    username: String(username || userId),
+    balance: r.data.balance == null ? null : Number(r.data.balance),
+    launchUrl
+  };
+}
+
 async function launch(gameId, userId, username) {
   if (!userId) throw Object.assign(new Error('userId is required'), { status: 400 });
   // A launch only creates a session, so it is safe to retry while the game server wakes up.
@@ -197,4 +250,4 @@ async function launch(gameId, userId, username) {
   return response;
 }
 
-module.exports = { cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launch };
+module.exports = { cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };

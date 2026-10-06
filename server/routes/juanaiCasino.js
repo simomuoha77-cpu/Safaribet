@@ -63,27 +63,28 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
   try {
     const gameId = gameIdFrom(req);
     if (!gameId) return res.status(400).json({ success: false, message: 'gameId is required.' });
-    const game = (await juanai.listGames()).find(g => g.gameId === gameId);
-    if (!game) return res.status(404).json({ success: false, message: 'JuanAI game not found.' });
-
-    // Make sure JuanAI knows where THIS site's wallet is (registered once, remembered). Real-money
-    // games bet and win through the SafariBet wallet; a slow/failed registration must not block a launch.
-    await Promise.race([juanai.ensureWalletRegistered().catch(e => console.warn('[juanai-casino] wallet registration:', e?.message)), sleep(4000)]);
-
-    // Universal JuanAI launch: every game in the JuanAI catalogue is eligible to be launched through the
-    // same server-side gateway. JuanAI decides whether the returned session is real-money or demo.
-    const data = await juanai.launch(gameId, req.user._id, req.user.username || req.user.name || String(req.user._id));
-    // JuanAI returns launchUrl at the top level in the current contract, but
-    // accept the nested data.gameUrl/url shapes used by older builds too.
-    const launchUrl = data?.launchUrl || data?.gameUrl || data?.url || data?.data?.gameUrl || data?.data?.url || null;
-    if (!launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
+    // The only real-money games in JuanAI are Aviator and JetX. Do not call
+    // /games here and do not wait for a cold catalogue. The player already
+    // tapped the game, so go straight to JuanAI's session endpoint and open
+    // the exact game URL with the signed utoken.
+    if (!['aviator', 'jetx'].includes(gameId)) {
+      return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
+    }
+    const data = await juanai.launchDirect(
+      gameId,
+      req.user._id,
+      req.user.username || req.user.name || String(req.user._id)
+    );
+    if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
     res.json({
       success: true,
       gameId,
-      mode: data.mode || game.launchMode || 'demo',
-      realMoney: data.realMoney === true,
-      launchUrl,
-      game: data.game || game
+      mode: 'real-money',
+      realMoney: true,
+      currency: 'KES',
+      launchUrl: data.launchUrl,
+      balance: data.balance,
+      game: { gameId, id: gameId, name: gameId === 'aviator' ? 'Aviator' : 'JetX', launchMode: 'real-money', realMoney: true }
     });
   } catch (e) {
     console.error('[juanai-casino-launch] FULL ERROR:', {
