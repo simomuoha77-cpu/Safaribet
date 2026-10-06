@@ -35,42 +35,69 @@ main{padding:54px 0 70px}.hero{padding:24px 16px;background:linear-gradient(135d
 <script type="text/sb-page">
 const token=localStorage.getItem('token'); if(!token) SB.go('/login');
 const headers=()=>({Authorization:'Bearer '+token,'Content-Type':'application/json'});
-let games=[];
+
+// Always render the two JuanAI real-money games immediately. The API refreshes
+// their artwork/details in the background, so a cold JuanAI server can never
+// leave the casino page empty.
+const FALLBACK_GAMES=[
+  {gameId:'aviator',name:'Aviator',category:'crash',thumbnail:'/casino/assets/aviator-thumb.png',source:'juanai',launchMode:'real-money',realMoney:true,status:'active'},
+  {gameId:'jetx',name:'JetX',category:'crash',thumbnail:'/casino/assets/jetx-thumb.png',source:'juanai',launchMode:'real-money',realMoney:true,status:'active'}
+];
+let games=FALLBACK_GAMES.slice();
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function api(url,opt={}){const r=await fetch(url,Object.assign({headers:headers(),cache:'no-store'},opt));let d={};try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d.message||'Request failed');e.retryable=!!d.retryable||r.status===503;throw e;}return d;}
 async function loadBalance(){try{const d=await api('/api/casino/juanai/balance');if(d.success)document.getElementById('balance').textContent='KES '+Number(d.balance).toFixed(2)}catch(_){} }
+function normalizeGames(list){
+  const seen=new Set();
+  return (Array.isArray(list)?list:[]).filter(g=>g&&g.gameId).map(g=>({
+    ...g,
+    gameId:String(g.gameId).trim().toLowerCase(),
+    name:String(g.name||g.gameId),
+    source:g.source||'juanai',
+    launchMode:g.launchMode||'real-money',
+    realMoney:g.realMoney!==false,
+    thumbnail:g.thumbnail||g.image||null
+  })).filter(g=>{
+    if(seen.has(g.gameId))return false; seen.add(g.gameId); return true;
+  });
+}
 function renderGames(list){
   const grid=document.getElementById('grid'),msg=document.getElementById('message');
-  const d={data:list};
-
-    // Show the COMPLETE catalogue returned by JuanAI, including AS Tech
-    // provider games. Never hide a game merely because its current launch
-    // mode is demo/provider; the launch endpoint will return the authoritative
-    // mode and URL. SafariBet never recreates the provider game locally.
-    games=(d.data||[]).filter(g=>g&&g.gameId);
-    grid.innerHTML=games.map(g=>{
-      const image=g.thumbnail||g.image;
-      const imageHtml=image?`<img src="${esc(image)}" alt="${esc(g.name)}" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('noimg')">`:'';
-      const fallback=g.gameId==='aviator'?'✈️':g.gameId==='jetx'?'🚀':'🎰';
-      const isReal=g.realMoney===true && g.launchMode==='real-money';
-      const label=isReal?'REAL MONEY':(g.source==='as-tech'?'AS TECH · DEMO':'DEMO');
-      return `<div class="card" data-id="${esc(g.gameId)}"><div class="art">${imageHtml}<span class="fallback">${fallback}</span></div><div class="body"><div class="name">${esc(g.name)}</div><div class="meta">JuanAI · ${esc(g.providerCode||g.category||'casino')}</div><span class="tag">${label}</span></div></div>`;
-    }).join('');
-    msg.style.display=games.length?'none':'block';
-    if(!games.length)msg.textContent='No JuanAI casino games are available right now.';
-  }
-async function loadGames(){
+  games=normalizeGames(list);
+  if(!games.length) games=FALLBACK_GAMES.slice();
+  grid.innerHTML=games.map(g=>{
+    const image=g.thumbnail||g.image;
+    const imageHtml=image?`<img src="${esc(image)}" alt="${esc(g.name)}" loading="eager" onerror="this.style.display='none';this.parentNode.classList.add('noimg')">`:'';
+    const fallback=g.gameId==='aviator'?'✈️':g.gameId==='jetx'?'🚀':'🎰';
+    const isReal=g.realMoney===true && g.launchMode==='real-money';
+    const label=isReal?'REAL MONEY':'AVAILABLE';
+    return `<div class="card" data-id="${esc(g.gameId)}" role="button" tabindex="0"><div class="art">${imageHtml}<span class="fallback">${fallback}</span></div><div class="body"><div class="name">${esc(g.name)}</div><div class="meta">JuanAI · ${esc(g.category||'crash')}</div><span class="tag">${label}</span></div></div>`;
+  }).join('');
+  msg.style.display='none';
+}
+function showLoadStatus(text){
   const msg=document.getElementById('message');
-  // show the last catalogue instantly (if any), then refresh it in the background
-  let hadCache=false;
-  try{const c=JSON.parse(localStorage.getItem('sb_casino_games')||'null');if(c&&Array.isArray(c.data)&&c.data.length){renderGames(c.data);hadCache=true;}}catch(_){}
-  fetch('/api/casino/juanai/status',{headers:headers()}).catch(()=>{});   // wakes the game server while the lobby loads
+  msg.textContent=text; msg.style.display='block'; msg.style.padding='10px 18px'; msg.style.fontSize='11px';
+}
+async function loadGames(){
+  // The fallback cards are already visible. Use any previously saved catalogue
+  // if available, then refresh from JuanAI without blocking the lobby.
+  try{
+    const c=JSON.parse(localStorage.getItem('sb_casino_games')||'null');
+    if(c&&Array.isArray(c.data)&&c.data.length) renderGames(c.data);
+  }catch(_){}
+  fetch('/api/casino/juanai/status',{headers:headers(),cache:'no-store'}).catch(()=>{});
   try{
     const d=await api('/api/casino/juanai/games');
-    try{localStorage.setItem('sb_casino_games',JSON.stringify({ts:Date.now(),data:d.data||[]}));}catch(_){}
-    renderGames(d.data||[]);
+    const fresh=normalizeGames(d.data||[]);
+    if(fresh.length){
+      try{localStorage.setItem('sb_casino_games',JSON.stringify({ts:Date.now(),data:fresh}));}catch(_){}
+      renderGames(fresh);
+    }
   }catch(e){
-    if(!hadCache)msg.innerHTML='The casino is starting up. Please try again in a few seconds.<br><button class="retry" onclick="loadGames()">Retry</button>';
+    // Never blank the lobby because JuanAI is waking up. Keep Aviator + JetX visible.
+    showLoadStatus('Aviator and JetX are ready. Game server is connecting…');
+    setTimeout(()=>{ const m=document.getElementById('message'); if(m)m.style.display='none'; },3500);
   }
 }
 let launching=false, launchTimer=null;
@@ -90,34 +117,38 @@ async function openGame(id){
   const g=games.find(x=>x.gameId===id); if(!g)return;
   lastGameId=id; launching=true;
   let secs=0;
-  showLaunch('Starting '+g.name+'...','Connecting to the game server',false);
-  launchTimer=setInterval(()=>{secs++;document.getElementById('launchSub').textContent=secs<8?'Connecting to the game server':'The game server is waking up - this can take up to 30 seconds the first time ('+secs+'s)';},1000);
+  showLaunch('Starting '+g.name+'...','Connecting to JuanAI game server',false);
+  launchTimer=setInterval(()=>{secs++;document.getElementById('launchSub').textContent=secs<8?'Connecting to JuanAI game server':'JuanAI is waking up - this can take up to 30 seconds the first time ('+secs+'s)';},1000);
   const ctl=new AbortController(); const abort=setTimeout(()=>ctl.abort(),130000);
   try{
-    let d=null,lastErr=null;
+    let d=null;
     for(let attempt=0;attempt<2;attempt++){
       try{
         d=await api('/api/casino/juanai/launch',{method:'POST',body:JSON.stringify({gameId:id}),signal:ctl.signal});
         break;
       }catch(e){
-        lastErr=e;
         if(!e.retryable||attempt===1)throw e;
-        await new Promise(r=>setTimeout(r,3000));      // the server said "starting up": give it a moment and try again
+        await new Promise(r=>setTimeout(r,3000));
       }
     }
-    if(!d||!d.success||!d.launchUrl)throw new Error('The game could not be started.');
+    if(!d||!d.success||!d.launchUrl)throw new Error('JuanAI did not return a playable game URL.');
     showLaunch('Opening '+g.name+'...','',false);
-    // Navigate to JuanAI's actual game page (SafariBet never recreates the provider game).
     window.location.href=d.launchUrl;
   }catch(e){
     const aborted=e&&e.name==='AbortError';
-    showLaunch('Could not start the game',aborted?'The game server did not answer in time. Please try again.':(e&&e.message)||'Please try again.',true);
+    showLaunch('Could not start the game',aborted?'JuanAI did not answer in time. Please try again.':(e&&e.message)||'Please try again.',true);
   }finally{
     clearTimeout(abort); if(launchTimer){clearInterval(launchTimer);launchTimer=null;} launching=false;
   }
 }
-document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
-loadBalance(); loadGames();
+const grid=document.getElementById('grid');
+grid.addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
+grid.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const c=e.target.closest('[data-id]');if(c){e.preventDefault();openGame(c.dataset.id)}}});
+
+// Render before any network request — this is the important fast-path.
+renderGames(FALLBACK_GAMES);
+loadBalance();
+loadGames();
 setInterval(loadBalance,5000);
 </script><script>SB.run()</script>
 </body></html>
