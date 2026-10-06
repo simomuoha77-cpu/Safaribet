@@ -326,6 +326,15 @@ const PAGE_MAP = {
   '/jackpot':    'jackpot.html',
 };
 
+// JuanAI game wrapper: keeps the player's browser URL on SafariBet while
+// the real JuanAI game runs inside the page. The wrapper itself is static;
+// it uses the logged-in SafariBet token to request the signed JuanAI launch URL.
+app.get('/casino/play/:gameId', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim().toLowerCase();
+  if (!['aviator', 'jetx'].includes(gameId)) return res.redirect('/casino');
+  res.sendFile(path.join(__dirname, '../public/pages/casino-game.html'));
+});
+
 // Serve clean URLs
 Object.entries(PAGE_MAP).forEach(([route, file]) => {
   app.get(route, (req, res) => {

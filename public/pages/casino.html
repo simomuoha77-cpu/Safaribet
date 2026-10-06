@@ -118,8 +118,11 @@ async function openGame(id){
     const d=await api('/api/casino/juanai/launch',{method:'POST',body:JSON.stringify({gameId:id}),signal:ctl.signal});
     if(!d||!d.success||!d.launchUrl)throw new Error('The game could not be started.');
     showLaunch('Opening '+g.name+'...','',false);
-    // Navigate to JuanAI's actual game page (SafariBet never recreates the provider game).
-    window.location.href=d.launchUrl;
+    // Keep the browser on SafariBet. The SafariBet game wrapper creates the
+    // JuanAI session and embeds the real JuanAI game inside an iframe.
+    // The provider page still runs on JuanAI, but the player's address bar
+    // remains safaribet.top/casino/play/<game>.
+    window.location.href='/casino/play/'+encodeURIComponent(id);
   }catch(e){
     const aborted=e&&e.name==='AbortError';
     showLaunch('Could not start the game',aborted?'The game server did not answer in time. Please try again.':(e&&e.message)||'Please try again.',true);

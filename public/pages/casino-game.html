@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SafariBet Casino</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#050a07;color:#fff;font-family:Arial,sans-serif;overflow:hidden}.bar{height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#07110c;border-bottom:1px solid rgba(0,200,83,.18);position:relative;z-index:2}.back{border:0;background:none;color:#00c853;font-size:25px;line-height:1;padding:4px 8px;cursor:pointer}.title{font-weight:800;font-size:15px;flex:1}.status{font-size:11px;color:#789078}.frame{width:100%;height:calc(100% - 48px);border:0;display:block;background:#0b0a14}.loading{position:absolute;inset:48px 0 0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;background:#050a07;z-index:1}.spin{width:34px;height:34px;border:3px solid rgba(0,200,83,.2);border-top-color:#00c853;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.err{display:none;text-align:center;padding:24px;color:#9aae9d}.retry{margin-top:12px;padding:11px 18px;border:0;border-radius:10px;background:#00c853;color:#001;font-weight:800}
+</style>
+</head>
+<body>
+<div class="bar"><button class="back" id="back" aria-label="Back">←</button><div class="title" id="title">JuanAI Casino</div><div class="status">SafariBet</div></div>
+<div class="loading" id="loading"><div class="spin"></div><div>Opening game…</div><div class="err" id="err"><div id="errText"></div><button class="retry" id="retry">Try again</button></div></div>
+<iframe id="game" class="frame" title="Casino game" allow="fullscreen; autoplay" allowfullscreen></iframe>
+<script>
+(function(){
+  const id=location.pathname.split('/').filter(Boolean).pop().toLowerCase();
+  const names={aviator:'Aviator',jetx:'JetX'};
+  if(!names[id]){location.replace('/casino');return;}
+  document.getElementById('title').textContent=names[id];
+  const loading=document.getElementById('loading'), frame=document.getElementById('game'), err=document.getElementById('err'), errText=document.getElementById('errText');
+  const token=localStorage.getItem('token');
+  function back(){location.href='/casino';}
+  document.getElementById('back').addEventListener('click',back);
+  async function start(){
+    if(!token){location.href='/login';return;}
+    loading.style.display='flex';err.style.display='none';
+    try{
+      const r=await fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({gameId:id})});
+      let d={};try{d=await r.json()}catch(_){ }
+      if(!r.ok||!d.success||!d.launchUrl) throw new Error(d.message||'Could not start the game.');
+      frame.src=d.launchUrl;
+      frame.onload=()=>{loading.style.display='none';};
+      setTimeout(()=>{if(frame.src&&loading.style.display!=='none')loading.style.display='none';},2500);
+    }catch(e){
+      errText.textContent=e.message||'Could not start the game. Please try again.';
+      err.style.display='block';
+    }
+  }
+  document.getElementById('retry').addEventListener('click',start);
+  start();
+})();
+</script>
+</body>
+</html>
