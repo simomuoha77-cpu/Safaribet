@@ -19,7 +19,7 @@ main{padding:54px 0 70px}.hero{padding:24px 16px;background:linear-gradient(135d
 </head>
 <body>
 <header><a class="back" href="/">←</a><div class="logo">Safari<span>Bet</span> Casino</div><div class="bal" id="balance">KES —</div></header>
-<main><section class="hero"><h1>🎰 JuanAI Casino</h1><p>Games are supplied by JuanAI. Each game shows its current play mode.</p></section><div class="section">JuanAI Games</div><div id="grid" class="grid"></div><div id="message" class="msg">Loading JuanAI casino games…</div></main>
+<main><section class="hero"><h1>🎰 JuanAI Casino</h1><p>Games are supplied by JuanAI. Each game shows its current play mode.</p></section><div class="section">JuanAI Games</div><div id="grid" class="grid"></div><div id="message" class="msg" style="display:none"></div></main>
 <div id="screen" class="screen"><div class="top"><span class="close" onclick="closeGame()">←</span><div id="gameTitle" class="title"></div><div id="screenBalance" class="screenbal">KES —</div></div><div class="game"><div class="round"><div id="gameName" class="game-name">JuanAI</div><div id="mult" class="mult">1.00x</div><div id="stateText" class="status">Waiting for round…</div><div id="history" class="history"></div></div><div class="controls"><div class="slots"><div class="slot"><small>Bet 1</small><strong id="bet1">No active bet</strong></div><div class="slot"><small>Bet 2</small><strong id="bet2">No active bet</strong></div></div><div class="stake"><input id="stake" type="number" min="1" max="50000" step="1" value="10" inputmode="decimal"><button class="btn bet" id="betBtn" onclick="placeBet()">Place Bet</button><button class="btn cash" id="cashBtn" onclick="cashOut()" disabled>Cash Out</button></div><div id="notice" class="notice"></div></div></div></div>
 <div id="launching" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(6,10,6,.96);flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center">
   <div id="launchSpin" style="width:44px;height:44px;border:4px solid rgba(0,200,83,.2);border-top-color:#00c853;border-radius:50%;animation:sbspin 0.9s linear infinite"></div>
@@ -35,43 +35,34 @@ main{padding:54px 0 70px}.hero{padding:24px 16px;background:linear-gradient(135d
 <script type="text/sb-page">
 const token=localStorage.getItem('token'); if(!token) SB.go('/login');
 const headers=()=>({Authorization:'Bearer '+token,'Content-Type':'application/json'});
-let games=[];
-function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+// Known JuanAI real-money games render immediately. The lobby never waits for a network call.
+let games=[
+  {gameId:'aviator',id:'aviator',name:'Aviator',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true},
+  {gameId:'jetx',id:'jetx',name:'JetX',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true}
+];
+function esc(v){return String(v??'').replace(/[&<>\'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function api(url,opt={}){const r=await fetch(url,Object.assign({headers:headers(),cache:'no-store'},opt));let d={};try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d.message||'Request failed');e.retryable=!!d.retryable||r.status===503;throw e;}return d;}
 async function loadBalance(){try{const d=await api('/api/casino/juanai/balance');if(d.success)document.getElementById('balance').textContent='KES '+Number(d.balance).toFixed(2)}catch(_){} }
 function renderGames(list){
-  const grid=document.getElementById('grid'),msg=document.getElementById('message');
-  const d={data:list};
-
-    // Show the COMPLETE catalogue returned by JuanAI, including AS Tech
-    // provider games. Never hide a game merely because its current launch
-    // mode is demo/provider; the launch endpoint will return the authoritative
-    // mode and URL. SafariBet never recreates the provider game locally.
-    games=(d.data||[]).filter(g=>g&&g.gameId);
-    grid.innerHTML=games.map(g=>{
-      const image=g.thumbnail||g.image;
-      const imageHtml=image?`<img src="${esc(image)}" alt="${esc(g.name)}" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('noimg')">`:'';
-      const fallback=g.gameId==='aviator'?'✈️':g.gameId==='jetx'?'🚀':'🎰';
-      const isReal=g.realMoney===true && g.launchMode==='real-money';
-      const label=isReal?'REAL MONEY':(g.source==='as-tech'?'AS TECH · DEMO':'DEMO');
-      return `<div class="card" data-id="${esc(g.gameId)}"><div class="art">${imageHtml}<span class="fallback">${fallback}</span></div><div class="body"><div class="name">${esc(g.name)}</div><div class="meta">JuanAI · ${esc(g.providerCode||g.category||'casino')}</div><span class="tag">${label}</span></div></div>`;
-    }).join('');
-    msg.style.display=games.length?'none':'block';
-    if(!games.length)msg.textContent='No JuanAI casino games are available right now.';
-  }
+  const grid=document.getElementById('grid');
+  const byId=new Map((Array.isArray(list)?list:[]).filter(g=>g&&String(g.gameId||g.id||'')).map(g=>[String(g.gameId||g.id).toLowerCase(),g]));
+  // Preserve the two local cards even when JuanAI is offline or its catalogue is slow.
+  games=[
+    {gameId:'aviator',id:'aviator',name:'Aviator',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true,...(byId.get('aviator')||{})},
+    {gameId:'jetx',id:'jetx',name:'JetX',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true,...(byId.get('jetx')||{})}
+  ];
+  grid.innerHTML=games.map(g=>{
+    const id=String(g.gameId||g.id).toLowerCase();
+    const image=g.thumbnail||g.image;
+    const imageHtml=image?`<img src="${esc(image)}" alt="${esc(g.name)}" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('noimg')">`:'';
+    const fallback=id==='aviator'?'✈️':'🚀';
+    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art">${imageHtml}<span class="fallback">${fallback}</span></div><div class="body"><div class="name">${esc(id==='aviator'?'Aviator':'JetX')}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
+  }).join('');
+  document.getElementById('message').style.display='none';
+}
 async function loadGames(){
-  const msg=document.getElementById('message');
-  // show the last catalogue instantly (if any), then refresh it in the background
-  let hadCache=false;
-  try{const c=JSON.parse(localStorage.getItem('sb_casino_games')||'null');if(c&&Array.isArray(c.data)&&c.data.length){renderGames(c.data);hadCache=true;}}catch(_){}
-  fetch('/api/casino/juanai/status',{headers:headers()}).catch(()=>{});   // wakes the game server while the lobby loads
-  try{
-    const d=await api('/api/casino/juanai/games');
-    try{localStorage.setItem('sb_casino_games',JSON.stringify({ts:Date.now(),data:d.data||[]}));}catch(_){}
-    renderGames(d.data||[]);
-  }catch(e){
-    if(!hadCache)msg.innerHTML='The casino is starting up. Please try again in a few seconds.<br><button class="retry" onclick="loadGames()">Retry</button>';
-  }
+  // This request only enriches artwork/metadata; it never controls whether cards appear.
+  try{const d=await api('/api/casino/juanai/games');if(d.success&&Array.isArray(d.data))renderGames(d.data);}catch(_){}
 }
 let launching=false, launchTimer=null;
 function showLaunch(text,sub,showRetry){
@@ -106,6 +97,8 @@ async function openGame(id){
   }
 }
 document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
+document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openGame(e.target.dataset.id)}});
+renderGames([]); // paint both cards before any network request
 loadBalance(); loadGames();
 setInterval(loadBalance,5000);
 </script><script>SB.run()</script>
