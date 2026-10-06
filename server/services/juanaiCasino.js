@@ -33,7 +33,7 @@ const cfg = () => ({
   sessionPath: process.env.JUANAI_CASINO_SESSION_PATH || '/api/casino/session',
   authStyle: process.env.JUANAI_CASINO_AUTH_STYLE || 'headers',
   env: process.env.JUANAI_CASINO_ENV || 'sandbox',
-  timeout: Number(process.env.JUANAI_CASINO_TIMEOUT_MS || 10000)
+  timeout: Math.max(Number(process.env.JUANAI_CASINO_TIMEOUT_MS || 0), 45000)   // the provider host sleeps; a short timeout breaks every first launch
 });
 
 const isConfigured = () => { const c = cfg(); return !!(c.base && c.key && c.secret); };

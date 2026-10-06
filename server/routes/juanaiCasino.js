@@ -15,10 +15,25 @@ const actionLimiter = rateLimit({
   message: { success: false, message: 'Too many casino requests. Please wait a moment.' }
 });
 
+// What the player is told. Raw upstream/axios messages (e.g. "timeout of 10000ms exceeded") are
+// logged for us but never shown to the player.
 function fail(res, e, fallback = 'Casino service is unavailable right now. Please try again.') {
-  const status = e?.status === 404 ? 404 : e?.code === 'UNSUPPORTED_GAME' ? 400 : 502;
-  console.error('[juanai-casino]', e?.message || e);
-  return res.status(status).json({ success: false, message: fallback });
+  console.error('[juanai-casino]', e?.code || e?.status || '', e?.message || e);
+  if (e?.code === 'UNSUPPORTED_GAME') return res.status(400).json({ success: false, message: 'This casino game is not available.' });
+  if (e?.status === 404) return res.status(404).json({ success: false, message: 'Game not found.' });
+  if (e?.transient || juanai.isTransient(e)) {
+    return res.status(503).json({ success: false, code: 'WARMING', retryable: true,
+      message: 'The game server is starting up. Please try again in a few seconds.' });
+  }
+  return res.status(502).json({ success: false, message: fallback });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Keep JuanAI awake and the catalogue warm (so the lobby and launches never wait on a cold start).
+if (juanai.configured()) {
+  const t0 = setTimeout(() => juanai.warm(), 3000); if (t0.unref) t0.unref();
+  const t1 = setInterval(() => juanai.warm(), 9 * 60 * 1000); if (t1.unref) t1.unref();
 }
 
 function requireConfigured(req, res, next) {
@@ -32,6 +47,7 @@ function gameIdFrom(req) {
 
 // The lobby is sourced ONLY from JuanAI's real partner catalogue.
 router.get('/status', auth, requireConfigured, (req, res) => {
+  juanai.warm();                      // opening the casino page wakes JuanAI before a game is tapped
   res.json({ success: true, provider: 'JuanAI', currency: 'KES' });
 });
 
@@ -50,9 +66,12 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
     const game = (await juanai.listGames()).find(g => g.gameId === gameId);
     if (!game) return res.status(404).json({ success: false, message: 'JuanAI game not found.' });
 
-    // Universal JuanAI launch: every game in the JuanAI catalogue is eligible
-    // to be launched through the same server-side gateway. JuanAI decides
-    // whether the returned session is real-money or demo/provider mode.
+    // Make sure JuanAI knows where THIS site's wallet is (registered once, remembered). Real-money
+    // games bet and win through the SafariBet wallet; a slow/failed registration must not block a launch.
+    await Promise.race([juanai.ensureWalletRegistered().catch(e => console.warn('[juanai-casino] wallet registration:', e?.message)), sleep(4000)]);
+
+    // Universal JuanAI launch: every game in the JuanAI catalogue is eligible to be launched through the
+    // same server-side gateway. JuanAI decides whether the returned session is real-money or demo.
     const data = await juanai.launch(gameId, req.user._id, req.user.username || req.user.name || String(req.user._id));
     // JuanAI returns launchUrl at the top level in the current contract, but
     // accept the nested data.gameUrl/url shapes used by older builds too.
@@ -74,7 +93,7 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
       upstream: e?.upstream,
       response: e?.response?.data
     });
-    fail(res, e, e?.message || 'JuanAI could not launch the casino game.');
+    fail(res, e, 'JuanAI could not launch this game right now. Please try again.');
   }
 });
 

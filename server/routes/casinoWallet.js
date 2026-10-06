@@ -81,8 +81,8 @@ router.get('/balance', verifyWebhook, async (req, res) => {
       success:    true,
       userId:     userId,
       username:   user.username,
-      balance:    bal.spendable,
-      newBalance: bal.spendable,
+      balance:    bal.main,
+      newBalance: bal.main,
       currency:   'KES'
     });
   } catch(e) {
@@ -108,13 +108,13 @@ router.post('/debit', verifyWebhook, async (req, res) => {
     const existing = await Transaction.findOne({ reference: `casino_debit_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
-      return res.json({ success: true, balance: bal.spendable, newBalance: bal.spendable, duplicate: true });
+      return res.json({ success: true, balance: bal.main, newBalance: bal.main, duplicate: true });
     }
 
     // Check balance first
     const bal = await walletService.getBalance(userId);
-    if (bal.spendable < debitAmount) {
-      return res.status(400).json({ success: false, message: 'Insufficient balance', balance: bal.spendable });
+    if (bal.main < debitAmount) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance', balance: bal.main });
     }
 
     // Deduct from wallet main bucket
@@ -129,15 +129,15 @@ router.post('/debit', verifyWebhook, async (req, res) => {
     });
 
     const newBal = await walletService.getBalance(userId);
-    console.log(`[casino/debit] -KES ${debitAmount} (round:${roundId}) → balance: ${newBal.spendable}`);
+    console.log(`[casino/debit] -KES ${debitAmount} (round:${roundId}) → balance: ${newBal.main}`);
 
     res.json({
       success:    true,
       userId,
       roundId,
       debited:    debitAmount,
-      balance:    newBal.spendable,
-      newBalance: newBal.spendable,
+      balance:    newBal.main,
+      newBalance: newBal.main,
       currency:   'KES'
     });
   } catch(e) {
@@ -162,7 +162,7 @@ router.post('/credit', verifyWebhook, async (req, res) => {
     const existing = await Transaction.findOne({ reference: `casino_credit_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
-      return res.json({ success: true, balance: bal.spendable, duplicate: true });
+      return res.json({ success: true, balance: bal.main, duplicate: true });
     }
 
     const user = await User.findById(userId).select('username').lean();
@@ -181,7 +181,7 @@ router.post('/credit', verifyWebhook, async (req, res) => {
     });
 
     const newBal = await walletService.getBalance(userId);
-    console.log(`[casino/credit] ${user.username} +KES ${creditAmount} (round: ${roundId}) → balance: ${newBal.spendable}`);
+    console.log(`[casino/credit] ${user.username} +KES ${creditAmount} (round: ${roundId}) → balance: ${newBal.main}`);
 
     // Notify user of win
     require('../services/notificationService')
@@ -195,8 +195,8 @@ router.post('/credit', verifyWebhook, async (req, res) => {
       userId,
       roundId,
       credited:   creditAmount,
-      balance:    newBal.spendable,
-      newBalance: newBal.spendable,  // Juan AI expects newBalance
+      balance:    newBal.main,
+      newBalance: newBal.main,  // Juan AI expects newBalance
       currency:   'KES'
     });
   } catch(e) {
@@ -216,7 +216,7 @@ router.post('/rollback', verifyWebhook, async (req, res) => {
     const existing = await Transaction.findOne({ reference: `casino_rollback_${userId}_${roundId}` }).lean();
     if (existing) {
       const bal = await walletService.getBalance(userId);
-      return res.json({ success: true, balance: bal.spendable, duplicate: true });
+      return res.json({ success: true, balance: bal.main, duplicate: true });
     }
 
     // Only rollback if original debit exists
@@ -242,14 +242,14 @@ router.post('/rollback', verifyWebhook, async (req, res) => {
     });
 
     const newBal = await walletService.getBalance(userId);
-    console.log(`[casino/rollback] ${user.username} +KES ${refundAmount} refund (round: ${roundId}) → balance: ${newBal.spendable}`);
+    console.log(`[casino/rollback] ${user.username} +KES ${refundAmount} refund (round: ${roundId}) → balance: ${newBal.main}`);
 
     res.json({
       success:  true,
       userId,
       roundId,
       refunded: refundAmount,
-      balance:  newBal.spendable,
+      balance:  newBal.main,
       currency: 'KES'
     });
   } catch(e) {
@@ -293,7 +293,7 @@ router.post('/session', auth, async (req, res) => {
       success:  true,
       userId:   req.user._id,
       username: user.username,
-      balance:  bal.spendable,
+      balance:  bal.main,
       token:    data.utoken,  // real Juan AI utoken
       currency: 'KES'
     });
@@ -312,7 +312,7 @@ router.get('/verify-token', verifyWebhook, async (req, res) => {
     const user = await User.findById(userId).select('username').lean();
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     const bal = await walletService.getBalance(userId);
-    res.json({ success: true, userId, username: user.username, balance: bal.spendable, currency: 'KES' });
+    res.json({ success: true, userId, username: user.username, balance: bal.main, currency: 'KES' });
   } catch(e) {
     return safeError(res, e, 'casino/verify-token', 500, 'Could not verify session');
   }
