@@ -154,6 +154,15 @@ async function fetchGames() {
   })).filter(g => g.gameId);
 }
 
+async function getImages() {
+  const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
+  const images = data && data.images && typeof data.images === 'object' ? data.images : {};
+  return {
+    aviator: typeof images.aviator === 'string' ? images.aviator : null,
+    jetx: typeof images.jetx === 'string' ? images.jetx : null
+  };
+}
+
 async function state(gameId) {
   const response = await request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`, null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
   // JuanAI returns the state inside `data`; older builds returned the state
@@ -250,4 +259,4 @@ async function launch(gameId, userId, username) {
   return response;
 }
 
-module.exports = { cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };
+module.exports = { getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };

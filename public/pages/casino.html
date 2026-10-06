@@ -43,27 +43,58 @@ let games=[
 function esc(v){return String(v??'').replace(/[&<>\'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function api(url,opt={}){const r=await fetch(url,Object.assign({headers:headers(),cache:'no-store'},opt));let d={};try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d.message||'Request failed');e.retryable=!!d.retryable||r.status===503;throw e;}return d;}
 async function loadBalance(){try{const d=await api('/api/casino/juanai/balance');if(d.success)document.getElementById('balance').textContent='KES '+Number(d.balance).toFixed(2)}catch(_){} }
-function renderGames(list){
-  const grid=document.getElementById('grid');
-  const byId=new Map((Array.isArray(list)?list:[]).filter(g=>g&&String(g.gameId||g.id||'')).map(g=>[String(g.gameId||g.id).toLowerCase(),g]));
-  // Preserve the two local cards even when JuanAI is offline or its catalogue is slow.
+function renderGames(){
+  // JuanAI owns the games. SafariBet already knows the two real-money games,
+  // so the lobby must never wait for a remote catalogue request.
   games=[
-    {gameId:'aviator',id:'aviator',name:'Aviator',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true,...(byId.get('aviator')||{})},
-    {gameId:'jetx',id:'jetx',name:'JetX',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true,...(byId.get('jetx')||{})}
+    {gameId:'aviator',id:'aviator',name:'Aviator',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true},
+    {gameId:'jetx',id:'jetx',name:'JetX',category:'crash',source:'juanai',launchMode:'real-money',realMoney:true}
   ];
+  const grid=document.getElementById('grid');
   grid.innerHTML=games.map(g=>{
-    const id=String(g.gameId||g.id).toLowerCase();
-    const image=g.thumbnail||g.image;
-    const imageHtml=image?`<img src="${esc(image)}" alt="${esc(g.name)}" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('noimg')">`:'';
+    const id=g.gameId;
     const fallback=id==='aviator'?'✈️':'🚀';
-    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art">${imageHtml}<span class="fallback">${fallback}</span></div><div class="body"><div class="name">${esc(id==='aviator'?'Aviator':'JetX')}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
+    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art"><span class="fallback">${fallback}</span></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
   }).join('');
   document.getElementById('message').style.display='none';
 }
+
 async function loadGames(){
-  // This request only enriches artwork/metadata; it never controls whether cards appear.
-  try{const d=await api('/api/casino/juanai/games');if(d.success&&Array.isArray(d.data))renderGames(d.data);}catch(_){}
+  // Intentionally empty. Do NOT call JuanAI's catalogue from the lobby.
+  // JuanAI is contacted only when the player actually launches Aviator/JetX.
 }
+
+function applyCasinoImages(images){
+  if(!images || typeof images!=='object') return;
+  for(const id of ['aviator','jetx']){
+    const src=typeof images[id]==='string' ? images[id] : '';
+    const card=document.querySelector(`.card[data-id="${id}"]`);
+    if(!card || !src) continue;
+    const art=card.querySelector('.art');
+    if(!art) continue;
+    let img=art.querySelector('img');
+    if(!img){
+      img=document.createElement('img');
+      img.alt=id==='aviator'?'Aviator':'JetX';
+      img.loading='eager';
+      img.decoding='async';
+      art.appendChild(img);
+    }
+    img.onload=()=>art.classList.remove('noimg');
+    img.onerror=()=>art.classList.add('noimg');
+    img.src=src;
+  }
+}
+
+async function loadCasinoImages(){
+  // Artwork is optional: cards are already visible. If JuanAI is sleeping,
+  // this background request can fail without hiding or delaying the games.
+  try{
+    const d=await api('/api/casino/juanai/images');
+    if(d && d.success) applyCasinoImages(d.images);
+  }catch(_){ /* keep fallback artwork visible */ }
+}
+
 let launching=false, launchTimer=null;
 function showLaunch(text,sub,showRetry){
   const o=document.getElementById('launching');
@@ -98,8 +129,9 @@ async function openGame(id){
 }
 document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
 document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openGame(e.target.dataset.id)}});
-renderGames([]); // paint both cards before any network request
-loadBalance(); loadGames();
+renderGames(); // paint both cards before any network request
+loadCasinoImages(); // artwork sync is background-only and never blocks the lobby
+loadBalance();
 setInterval(loadBalance,5000);
 </script><script>SB.run()</script>
 </body></html>

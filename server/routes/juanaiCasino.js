@@ -51,6 +51,16 @@ router.get('/status', auth, requireConfigured, (req, res) => {
   res.json({ success: true, provider: 'JuanAI', currency: 'KES' });
 });
 
+// JuanAI dashboard artwork is stored on JuanAI. SafariBet fetches it in the background
+// so game cards can render immediately without making the casino lobby depend on JuanAI startup.
+router.get('/images', auth, requireConfigured, async (req, res) => {
+  try {
+    const images = await juanai.getImages();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({ success: true, images });
+  } catch (e) { fail(res, e, 'JuanAI casino images are unavailable right now.'); }
+});
+
 router.get('/games', auth, requireConfigured, async (req, res) => {
   try {
     const data = await juanai.listGames();
