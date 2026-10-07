@@ -2155,34 +2155,48 @@ function onSearch(val) {
   overlay.innerHTML = '<div class="loading" style="padding:20px"><div class="spin"></div>Searching...</div>';
 
   clearTimeout(srchTimer);
-  srchTimer = setTimeout(() => doSearch(val.trim()), 350);
+  srchTimer = setTimeout(() => doSearch(val.trim()), 200);
 }
 
-async function doSearch(q) {
+let srchSeq = 0;
+async function doSearch(q, attempt = 0) {
   const overlay = document.getElementById('srchResults');
+  const seq = ++srchSeq;
+  const ctl = new AbortController();
+  const killer = setTimeout(() => ctl.abort(), 6000);
   try {
-    const r = await fetch(`/api/sports/search?q=${encodeURIComponent(q)}`);
+    const r = await fetch(`/api/sports/search?q=${encodeURIComponent(q)}`, { signal: ctl.signal, cache: 'no-store' });
     const d = await r.json();
+    clearTimeout(killer);
     // Ignore stale responses if the user kept typing.
-    if (document.getElementById('srchInp').value.trim() !== q) return;
+    if (seq !== srchSeq || document.getElementById('srchInp').value.trim() !== q) return;
     if (!d.data?.length) {
-      overlay.innerHTML = `<div class="no-results">No matches found for "<strong>${q}</strong>"</div>`;
+      // Server still loading its game index (first seconds after a restart):
+      // keep the spinner and retry quietly instead of claiming "no matches".
+      if (d.warming && attempt < 4) {
+        setTimeout(() => { if (document.getElementById('srchInp').value.trim() === q) doSearch(q, attempt + 1); }, 1500);
+        return;
+      }
+      overlay.innerHTML = `<div class="no-results">No matches found for "<strong>${escapeHtml(q)}</strong>"</div>`;
       return;
     }
     overlay.innerHTML = d.data.map(m => {
       const icon = m.sportIcon || '⚽';
       const time = m.commenceTime ? fmtTime(m.commenceTime) : 'TBD';
       const oddsStr = m.hasOdds ? `${m.odds?.home||'-'} / ${m.odds?.draw||'-'} / ${m.odds?.away||'-'}` : 'Odds TBD';
-      return `<div class="srch-result-item" onclick="pickMatchFromSearch('${m.matchId}','${m.sport || m.leagueKey}')">
+      return `<div class="srch-result-item" onclick="pickMatchFromSearch('${esc(m.matchId)}','${esc(m.sport || m.leagueKey || '')}')">
         <span class="srch-sport-badge">${icon}</span>
         <div class="srch-teams">
-          <div class="srch-match">${m.homeTeam} vs ${m.awayTeam}</div>
-          <div class="srch-meta">${m.league} · ${time}</div>
+          <div class="srch-match">${escapeHtml(m.homeTeam)} vs ${escapeHtml(m.awayTeam)}</div>
+          <div class="srch-meta">${escapeHtml(m.league)} · ${time}</div>
         </div>
         <div class="srch-odds">${oddsStr}</div>
       </div>`;
     }).join('');
   } catch(e) {
+    clearTimeout(killer);
+    if (seq !== srchSeq) return;
+    if (attempt < 2) { setTimeout(() => { if (document.getElementById('srchInp').value.trim() === q) doSearch(q, attempt + 1); }, 800); return; }
     overlay.innerHTML = '<div class="no-results">Search failed — check connection</div>';
   }
 }

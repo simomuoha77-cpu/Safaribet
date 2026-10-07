@@ -374,54 +374,96 @@ router.get('/category/:sport', async (req, res) => {
 });
 
 // ── SEARCH ──
-// Searches every feed already cached by the other routes (football, live and
-// each SofaBets sport) by team / league name. Cold sport caches are warmed in
-// the background so later searches cover them too; the request itself only
-// ever waits on football, never on all feeds.
+// Search is answered 100% from memory. A background job keeps a full index of
+// every game (football 8 days, all other sports 4 days, plus live) warm, so a
+// request never waits on SofaBets. Typing "Avai" returns in a few ms.
 const normSearch = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+let searchFootball = [];
+let searchBuildPromise = null;
+let searchBuiltAt = 0;
+const hayCache = new WeakMap();
+const hayOf = m => {
+  let h = hayCache.get(m);
+  if (h === undefined) {
+    h = { all: normSearch(`${m.homeTeam} ${m.awayTeam} ${m.league} ${m.sportLabel || ''} ${m.sport || ''}`), teams: normSearch(`${m.homeTeam} ${m.awayTeam}`) };
+    hayCache.set(m, h);
+  }
+  return h;
+};
+
+function buildSearchIndex() {
+  if (searchBuildPromise) return searchBuildPromise;
+  searchBuildPromise = (async () => {
+    const dates = [0,1,2,3].map(nairobiDatePlus);
+    const jobs = [
+      getFixtures(7).then(list => { if (Array.isArray(list) && list.length) searchFootball = list; })
+        .catch(e => console.warn('[sports/search-index] football:', e.message)),
+      ...Object.keys(SPORT_CONFIG).map(sp =>
+        refreshSportCategory(sp, dates, true).catch(e => console.warn(`[sports/search-index] ${sp}:`, e.message)))
+    ];
+    await Promise.allSettled(jobs);
+    searchBuiltAt = Date.now();
+    console.log(`[sports/search-index] ready: ${searchFootball.length} football + other sports`);
+  })().finally(() => { searchBuildPromise = null; });
+  return searchBuildPromise;
+}
+
+function searchPools() {
+  return [
+    searchFootball,
+    cache.football?.data || [],
+    ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || []),
+    cache[LIVE_CACHE_KEY]?.data || []
+  ];
+}
+
+// Warm at boot, then keep fresh.
+buildSearchIndex().catch(() => {});
+setInterval(() => { buildSearchIndex().catch(() => {}); }, 90000);
 
 router.get('/search', async (req, res) => {
   try {
     const q = normSearch(req.query.q);
     if (q.length < 2) return res.json({ success:true, data:[], count:0 });
 
-    let football = C.get('football', 60000) || cache.football?.data;
-    if (!Array.isArray(football)) {
-      try { football = await getFixtures(0); C.set('football', football); }
-      catch (e) { football = []; console.warn('[sports/search] football:', e.message); }
-    }
+    let pools = searchPools();
+    let warming = false;
 
-    // Warm any sport that has not been opened yet (non-blocking).
-    const dates = [0,1,2,3].map(nairobiDatePlus);
-    for (const sport of Object.keys(SPORT_CONFIG)) {
-      if (!sportCategoryCache.get(sport)?.data?.length) refreshSportCategory(sport, dates, true).catch(() => {});
+    // Cold start only: wait at most 2s for the first index build, then answer
+    // with whatever exists. Never blocks longer than that.
+    if (!pools.some(p => p.length)) {
+      warming = true;
+      if (!searchBuildPromise) buildSearchIndex().catch(() => {});
+      for (let i = 0; i < 20 && !searchPools().some(p => p.length); i++) await new Promise(r => setTimeout(r, 100));
+      pools = searchPools();
+      warming = !pools.some(p => p.length);
+    } else if (Date.now() - searchBuiltAt > 180000) {
+      buildSearchIndex().catch(() => {});
     }
-
-    const pools = [
-      football,
-      ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || []),
-      C.get(LIVE_CACHE_KEY, 600000) || cache[LIVE_CACHE_KEY]?.data || []
-    ];
 
     const terms = q.split(' ');
-    const seen = new Set();
+    const seenId = new Set();
+    const seenPair = new Set();
     const out = [];
-    for (const m of pools.flat()) {
-      if (!m || !m.matchId) continue;
-      const hay = normSearch(`${m.homeTeam} ${m.awayTeam} ${m.league}`);
-      if (!terms.every(t => hay.includes(t))) continue;
-      const key = normSearch(m.homeTeam) + '|' + normSearch(m.awayTeam);
-      if (seen.has(key) || seen.has(m.matchId)) continue;
-      seen.add(key); seen.add(m.matchId);
-      const teamHit = normSearch(`${m.homeTeam} ${m.awayTeam}`).includes(q) ? 0 : 1;
-      out.push({ m, teamHit });
+    for (const list of pools) {
+      for (const m of list) {
+        if (!m || !m.matchId || m.status === 'finished') continue;
+        const h = hayOf(m);
+        if (!terms.every(t => h.all.includes(t))) continue;
+        const pair = normSearch(m.homeTeam) + '|' + normSearch(m.awayTeam) + '|' + (m.commenceTime ? new Date(m.commenceTime).toISOString().slice(0, 10) : '');
+        if (seenId.has(m.matchId) || seenPair.has(pair)) continue;
+        seenId.add(m.matchId); seenPair.add(pair);
+        out.push({ m, rank: h.teams.includes(q) ? 0 : 1, t: new Date(m.commenceTime || 0).getTime() || 0 });
+      }
     }
-    out.sort((a,b) => a.teamHit - b.teamHit || new Date(a.m.commenceTime || 0) - new Date(b.m.commenceTime || 0));
-    const data = out.slice(0, 30).map(x => x.m);
-    res.json({ success:true, data, count:data.length });
+    out.sort((a, b) => a.rank - b.rank || a.t - b.t);
+    const data = out.slice(0, 40).map(x => x.m);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success:true, data, count:data.length, warming });
   } catch (e) {
     console.error('[sports/search]', e.message);
-    res.json({ success:true, data:[], count:0 });
+    res.json({ success:true, data:[], count:0, warming:true });
   }
 });
 
