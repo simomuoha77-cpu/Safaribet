@@ -1,5 +1,5 @@
 const express = require('express');
-const { getFixtures } = require('../engine/apifootball');
+const { getFixtures, getLastFixtures } = require('../engine/apifootball');
 const sofaBets = require('../providers/sofaBetsProvider');
 const router = express.Router();
 
@@ -283,56 +283,45 @@ function mergeSportMatches(sport, lists) {
   }).sort((a,b) => new Date(a.commenceTime || 0) - new Date(b.commenceTime || 0));
 }
 
+const sportFullRefreshAt = new Map();
+const sportFullRefreshing = new Set();
+
+// ONE crawl per sport covering every wanted date (this used to be one full
+// crawl per date, and the provider has no cache, so it hammered SofaBets).
+async function fullRefreshSport(sport, dates, force) {
+  if (sportFullRefreshing.has(sport)) return;
+  if (!force && Date.now() - (sportFullRefreshAt.get(sport) || 0) < 150000) return;
+  sportFullRefreshing.add(sport);
+  try {
+    const raw = await sofaBets.getMatchesForDates(dates, { sport });
+    if (Array.isArray(raw) && raw.length) {
+      const merged = mergeSportMatches(sport, [raw]);
+      sportCategoryCache.set(sport, { data: merged, ts: Date.now() });
+      console.log(`[sports/sofabets] ${sport}: ${merged.length} matches (full refresh)`);
+    }
+    sportFullRefreshAt.set(sport, Date.now());
+  } catch (e) {
+    console.warn(`[sports/sofabets/${sport}/full]`, e.message);
+  } finally { sportFullRefreshing.delete(sport); }
+}
+
 async function refreshSportCategory(sport, dates, background) {
   if (sportCategoryRefresh.has(sport)) return sportCategoryRefresh.get(sport);
   const run = (async () => {
+    const existing = sportCategoryCache.get(sport);
     try {
-      // First fetch today's list only. This is the critical path and keeps a
-      // tab from waiting on 4 days of fixtures.
-      const todayRaw = await sofaBets.getMatchesForDate(dates[0], { sport, fast: true });
-      const today = mergeSportMatches(sport, [todayRaw]);
-      const existing = sportCategoryCache.get(sport);
-      // Keep later-date games already cached (they are re-merged below) so the
-      // list never shrinks to "today only" between refreshes.
-      const keep = (existing?.data || []).filter(x => x.commenceTime && new Date(x.commenceTime).getTime() > Date.now() - 3 * 3600000);
-      const seed = today.length ? mergeSportMatches(sport, [keep, today]) : (existing?.data || []);
-      sportCategoryCache.set(sport, { data: seed, ts: Date.now() });
-      console.log(`[sports/sofabets] ${sport}: ${seed.length} today matches`);
-
-      // Refresh the complete today feed in the background. The HTTP response
-      // above only uses the first couple of upstream pages so the tab can paint
-      // quickly; the full SofaBets catalogue is merged later without replacing
-      // anything the user is already viewing.
-      sofaBets.getMatchesForDate(dates[0], { sport, fast: false }).then(fullToday => {
-        if (!Array.isArray(fullToday) || !fullToday.length) return;
-        const latest = sportCategoryCache.get(sport)?.data || seed;
-        const merged = mergeSportMatches(sport, [latest, fullToday]);
-        sportCategoryCache.set(sport, { data: merged, ts: Date.now() });
-        console.log(`[sports/sofabets] ${sport}: ${merged.length} matches after full today refresh`);
-      }).catch(e => console.warn(`[sports/sofabets/${sport}/today-bg]`, e.message));
-
-      // Future dates are deliberately NOT awaited by the HTTP request.
-      // Start them after today's list has been cached so the first games can
-      // reach the browser immediately.
-      const futureDates = dates.slice(1);
-      if (futureDates.length) {
-        (async () => {
-          const futureLists = [];
-          for (const date of futureDates) {
-            try { futureLists.push(await sofaBets.getMatchesForDate(date, { sport })); }
-            catch (e) { console.warn(`[sports/sofabets/${sport}/${date}]`, e.message); }
-          }
-          if (futureLists.length) {
-            const latest = sportCategoryCache.get(sport)?.data || seed;
-            const merged = mergeSportMatches(sport, [latest, ...futureLists]);
-            sportCategoryCache.set(sport, { data: merged, ts: Date.now() });
-            console.log(`[sports/sofabets] ${sport}: ${merged.length} matches after background update`);
-          }
-        })().catch(() => {});
+      let seed = existing?.data || [];
+      if (!seed.length) {
+        // Cold: a quick first-pages fetch so the very first paint is fast.
+        const todayRaw = await sofaBets.getMatchesForDate(dates[0], { sport, fast: true });
+        seed = mergeSportMatches(sport, [todayRaw]);
+        sportCategoryCache.set(sport, { data: seed, ts: Date.now() });
+        console.log(`[sports/sofabets] ${sport}: ${seed.length} today matches`);
       }
+      // Complete multi-day list in the background (rate-limited, one crawl).
+      fullRefreshSport(sport, dates, !existing?.data?.length).catch(() => {});
       return seed;
     } catch (e) {
-      const existing = sportCategoryCache.get(sport);
       if (existing?.data?.length) return existing.data;
       if (!background) throw e;
       return [];
@@ -413,13 +402,23 @@ function buildSearchIndex() {
   if (searchBuildPromise) return searchBuildPromise;
   searchBuildPromise = (async () => {
     const dates = [0,1,2,3].map(nairobiDatePlus);
-    const jobs = [
-      getFixtures(7).then(list => { if (Array.isArray(list) && list.length) searchFootball = list; })
-        .catch(e => console.warn('[sports/search-index] football:', e.message)),
-      ...Object.keys(SPORT_CONFIG).map(sp =>
-        refreshSportCategory(sp, dates, true).catch(e => console.warn(`[sports/search-index] ${sp}:`, e.message)))
-    ];
-    await Promise.allSettled(jobs);
+
+    // Football: reuse what the app's own sync / homepage already fetched. Only
+    // crawl here on a cold start (nothing fetched yet) or if that data is stale.
+    try {
+      let last = getLastFixtures();
+      if (!last.data.length || Date.now() - last.ts > 8 * 60000) {
+        await getFixtures(1);
+        last = getLastFixtures();
+      }
+      if (last.data.length) searchFootball = last.data;
+    } catch (e) { console.warn('[sports/search-index] football:', e.message); }
+
+    // Other sports one after another (never all at once), each one crawl.
+    for (const sp of Object.keys(SPORT_CONFIG)) {
+      try { await refreshSportCategory(sp, dates, true); }
+      catch (e) { console.warn(`[sports/search-index] ${sp}:`, e.message); }
+    }
     searchBuiltAt = Date.now();
     console.log(`[sports/search-index] ready: ${searchFootball.length} football + other sports`);
   })().finally(() => { searchBuildPromise = null; });
@@ -428,6 +427,7 @@ function buildSearchIndex() {
 
 function searchPools() {
   return [
+    getLastFixtures().data,
     searchFootball,
     cache.football?.data || [],
     ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || []),
@@ -455,6 +455,7 @@ function lookupIndexedMatch(matchId) {
   if (!want) return null;
   const pools = [
     cache[LIVE_CACHE_KEY]?.data || [],
+    getLastFixtures().data,
     searchFootball,
     cache.football?.data || [],
     ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || [])
@@ -483,7 +484,7 @@ async function prewarmMarkets() {
     const now = Date.now();
     const live = (cache[LIVE_CACHE_KEY]?.data || []);
     const upcoming = [...searchFootball]
-      .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 24 * 3600000)
+      .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 6 * 3600000)
       .sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
     const todo = [];
     const seen = new Set();
@@ -493,12 +494,12 @@ async function prewarmMarkets() {
       const k = id.sport + ':' + id.providerId;
       if (seen.has(k)) continue;
       seen.add(k);
-      if ((sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(id.providerId, id.sport) : Infinity) < 8 * 60000) continue;
+      if ((sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(id.providerId, id.sport) : Infinity) < 9 * 60000) continue;
       todo.push(id);
-      if (todo.length >= 30) break;
+      if (todo.length >= 10) break;
     }
     let i = 0;
-    await Promise.all([0, 1, 2].map(async () => {
+    await Promise.all([0, 1].map(async () => {
       while (i < todo.length) {
         const id = todo[i++];
         try { await sofaBets.getMatchMarkets(id.providerId, id.sport); } catch (_) {}
@@ -511,7 +512,8 @@ async function prewarmMarkets() {
 // Warm at boot, then keep fresh.
 const refreshIndexAndMarkets = () => buildSearchIndex().then(() => prewarmMarkets()).catch(() => {});
 refreshIndexAndMarkets();
-setInterval(refreshIndexAndMarkets, 90000);
+setInterval(() => { searchFootball = (getLastFixtures().data.length ? getLastFixtures().data : searchFootball); }, 30000);
+setInterval(refreshIndexAndMarkets, 5 * 60000);
 
 router.get('/search', async (req, res) => {
   try {

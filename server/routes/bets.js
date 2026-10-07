@@ -165,8 +165,8 @@ async function placeBetHandler(req, res) {
     const { selections, stake } = req.body;
     // A repeat of a press that already produced a bet: answer with that bet. Nothing is charged twice.
     // (started now, awaited together with the fixture lookup below - one round trip instead of two)
-    const priorP = req.idemKey ? Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey }) : null;
-    if (priorP) priorP.catch(() => {});
+    const priorP = req.idemKey ? Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey }).exec() : Promise.resolve(null);
+    priorP.catch(() => {});
 
     // Read live limits from admin panel (persisted, see admin.js) — single source
     // of truth shared with deposit/withdraw validation, instead of separately

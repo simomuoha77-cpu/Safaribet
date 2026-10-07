@@ -262,6 +262,9 @@ function normalizeDirectSofaMatch(m) {
   };
 }
 
+let lastFixtures = { ts: 0, daysAhead: -1, data: [] };
+function getLastFixtures() { return lastFixtures; }
+
 async function getFixtures(daysAhead = 7) {
   const dates = [];
   const base = new Date();
@@ -304,6 +307,12 @@ async function getFixtures(daysAhead = 7) {
 
   if (!succeeded) throw new Error('SofaBets direct feed unreachable');
   console.log(`  [sofabets] getFixtures(0-${daysAhead}): ${all.length} total matches`);
+  // Remember the most useful recent result so other parts of the server (search,
+  // match lookup, bet placement) can read the games from memory instead of
+  // crawling SofaBets again.
+  if (all.length && (daysAhead >= lastFixtures.daysAhead || Date.now() - lastFixtures.ts > 10 * 60000)) {
+    lastFixtures = { ts: Date.now(), daysAhead, data: all };
+  }
   return all;
 }
 
@@ -476,4 +485,4 @@ async function cleanFakeMatches() {
   return del.deletedCount;
 }
 
-module.exports = { syncFixtures, updateLive, cleanFakeMatches, getFixtures, getLive, competitionKey };
+module.exports = { syncFixtures, updateLive, cleanFakeMatches, getFixtures, getLastFixtures, getLive, competitionKey };

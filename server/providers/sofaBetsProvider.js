@@ -1267,4 +1267,14 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', marketsCacheAge, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+// ONE catalogue crawl, filtered locally to several calendar dates (instead of one
+// full crawl per date).
+async function getMatchesForDates(dates, options) {
+  options = options || {};
+  const sportName = String(options.sport || 'football').toLowerCase();
+  const sportId = Number(options.sportId || SPORT_IDS[sportName] || FOOTBALL_SPORT_ID);
+  const all = await fetchAllFixturesForSport(sportId, sportName, options.fast ? { maxPages: 2 } : {});
+  return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
+}
+
+module.exports = { providerName: 'sofabets', marketsCacheAge, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
