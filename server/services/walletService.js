@@ -64,11 +64,12 @@ async function credit(userId, bucket, amount, reason, reference, meta) {
  * Debit a bucket atomically — only succeeds if sufficient balance exists.
  * Returns null if insufficient funds (caller must handle).
  */
-async function debit(userId, bucket, amount, reason, reference, meta) {
+async function debit(userId, bucket, amount, reason, reference, meta, opts) {
   if (amount <= 0) throw new Error('Debit amount must be positive');
   amount = parseFloat(amount.toFixed(2));
 
-  await getOrCreateWallet(userId);
+  // opts.skipEnsure: caller already loaded/created the wallet this request.
+  if (!(opts && opts.skipEnsure)) await getOrCreateWallet(userId);
 
   const wallet = await Wallet.findOneAndUpdate(
     { userId, [bucket]: { $gte: amount } },
@@ -78,10 +79,18 @@ async function debit(userId, bucket, amount, reason, reference, meta) {
 
   if (!wallet) return null; // insufficient funds
 
-  await WalletHistory.create({
+  const history = WalletHistory.create({
     userId, bucket, change: -amount, balanceAfter: wallet[bucket],
     reason, reference, meta
   });
+  // opts.deferHistory: the money is already moved atomically above; let the
+  // caller await the audit row in parallel with its next write instead of
+  // making the player wait for it separately.
+  if (opts && opts.deferHistory) {
+    wallet.__history = history.catch(e => { console.error('[wallet] history write failed', userId, bucket, amount, e.message); });
+  } else {
+    await history;
+  }
 
   return wallet;
 }
@@ -109,21 +118,25 @@ async function deductStake(userId, amount, reference) {
   const fromBonus = Math.min(wallet.bonus, amount);
   const fromMain = parseFloat((amount - fromBonus).toFixed(2));
 
+  const opts = { skipEnsure: true, deferHistory: true };
+  const history = [];
   let updated = wallet;
   if (fromBonus > 0) {
-    updated = await debit(userId, 'bonus', fromBonus, 'bet_stake', reference);
+    updated = await debit(userId, 'bonus', fromBonus, 'bet_stake', reference, undefined, opts);
     if (!updated) return null;
+    if (updated.__history) history.push(updated.__history);
   }
   if (fromMain > 0) {
-    updated = await debit(userId, 'main', fromMain, 'bet_stake', reference);
+    updated = await debit(userId, 'main', fromMain, 'bet_stake', reference, undefined, opts);
     if (!updated) {
       // roll back bonus debit since main debit failed (race condition safety)
       if (fromBonus > 0) await credit(userId, 'bonus', fromBonus, 'refund', reference);
       return null;
     }
+    if (updated.__history) history.push(updated.__history);
   }
 
-  return { wallet: updated, fromBonus, fromMain };
+  return { wallet: updated, fromBonus, fromMain, history };
 }
 
 /**

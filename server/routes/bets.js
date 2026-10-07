@@ -38,6 +38,47 @@ function pickLabelFor(market, pick, match) {
   return LABELS[market]?.[pick] || pick;
 }
 
+// Fresh copy of a game from the server's own in-memory feed (the same data the
+// site lists), used so placing a bet never has to crawl SofaBets when the match
+// is missing from / stale in MongoDB. Live games must be <=45s old, prematch <=10min.
+function indexedFresh(matchId) {
+  try {
+    const idx = require('./sports').lookupIndexedMatch(matchId);
+    if (!idx || !idx.homeTeam || !idx.awayTeam) return null;
+    if (idx.status === 'finished' || idx.status === 'cancelled') return null;
+    const age = Date.now() - new Date(idx.fetchedAt || 0).getTime();
+    return age <= (idx.status === 'live' ? 45000 : 10 * 60000) ? idx : null;
+  } catch (_) { return null; }
+}
+function matchFromIndexed(idx, matchId, sport, providerId, base) {
+  return Object.assign({}, base || {}, {
+    matchId,
+    providerMatchId: providerId,
+    homeTeam: idx.homeTeam,
+    awayTeam: idx.awayTeam,
+    league: idx.league || sport,
+    sport: (base && base.sport) || sport,
+    commenceTime: idx.commenceTime ? new Date(idx.commenceTime) : new Date(),
+    status: idx.status === 'live' ? 'live' : 'upcoming',
+    hasOdds: !!idx.hasOdds,
+    odds: {
+      home: Number(idx.odds?.home) || null,
+      draw: Number(idx.odds?.draw) || null,
+      away: Number(idx.odds?.away) || null,
+      updatedAt: new Date(idx.fetchedAt || Date.now())
+    },
+    aiOdds: idx.aiOdds || (base && base.aiOdds) || undefined,
+    providerOdds: idx.providerOdds || null,
+    markets: Array.isArray(idx.markets) ? idx.markets : [],
+    score: {
+      home: idx.score?.home ?? null,
+      away: idx.score?.away ?? null,
+      minute: idx.score?.minute ?? null,
+      period: idx.score?.period || null
+    }
+  });
+}
+
 function getFreshServerOdds(match, market, pick) {
   if (market === '1x2' || !market) {
     // Legacy path — existing frontend calls still send just `pick` with no `market`
@@ -123,10 +164,9 @@ async function placeBetHandler(req, res) {
   try {
     const { selections, stake } = req.body;
     // A repeat of a press that already produced a bet: answer with that bet. Nothing is charged twice.
-    if (req.idemKey) {
-      const prior = await Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey });
-      if (prior) return res.json(await placedBody(prior));
-    }
+    // (started now, awaited together with the fixture lookup below - one round trip instead of two)
+    const priorP = req.idemKey ? Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey }) : null;
+    if (priorP) priorP.catch(() => {});
 
     // Read live limits from admin panel (persisted, see admin.js) — single source
     // of truth shared with deposit/withdraw validation, instead of separately
@@ -158,7 +198,8 @@ async function placeBetHandler(req, res) {
         return null;
       } catch (rgErr) { return rgErr; }
     })();
-    const matches = await Match.find({ matchId: { $in: matchIds } });
+    const [matches, prior] = await Promise.all([Match.find({ matchId: { $in: matchIds } }), priorP]);
+    if (prior) return res.json(await placedBody(prior));
 
     const matchMap = {};
     matches.forEach(m => { matchMap[m.matchId] = m; });
@@ -229,6 +270,27 @@ async function placeBetHandler(req, res) {
         // selections already do. This is what was breaking live betting: the
         // match was real and visibly on screen, just never written to Mongo,
         // so the lookup below always came back empty.
+        // Instant path: the server's own in-memory feed. Used when the fixture is
+        // missing from MongoDB, or its stored odds are stale (>2 min) - so the bet
+        // is priced from the same fresh numbers the player is looking at and never
+        // waits on (or fails because of) a slow provider crawl.
+        if (rawId.startsWith('sofabets_') && providerId && (!match || !['finished', 'cancelled'].includes(match.status))) {
+          const stored = match && match.odds && match.odds.updatedAt ? Date.now() - new Date(match.odds.updatedAt).getTime() : Infinity;
+          if (!match || stored > 120000) {
+            const idx = indexedFresh(s.matchId);
+            if (idx) {
+              const base = match ? (typeof match.toObject === 'function' ? match.toObject() : match) : null;
+              const built = matchFromIndexed(idx, s.matchId, sport, providerId, base);
+              if (!match) {
+                const toSave = Object.assign({}, built, { providerSource: 'sofabets', realOddsSource: 'SofaBets' });
+                Match.findOneAndUpdate({ matchId: s.matchId }, { $set: toSave }, { upsert: true })
+                  .catch(err => console.warn('[bets/place] failed to persist indexed match:', err.message));
+              }
+              match = built;
+            }
+          }
+        }
+
         if (!match && rawId.startsWith('sofabets_') && providerId) {
           // Bounded + cache-first: the live list is served from cache (refreshed in
           // the background); a prematch fixture missing from MongoDB gets one capped
@@ -353,32 +415,50 @@ async function placeBetHandler(req, res) {
       });
     }
 
-    const bet = await Bet.create({
-      userId:      req.user._id,
-      selections:  verifiedSelections,
-      stake:       stakeAmt,
-      totalOdds,
-      potentialWin: netPayout,
-      tax,
-      ipAddress:   req.ip,
-      stakeFromBonus: deduction.fromBonus,
-      stakeFromMain:  deduction.fromMain,
-      ...(req.idemKey ? { idempotencyKey: req.idemKey } : {})
-    });
+    let bet;
+    try {
+      bet = await Bet.create({
+        userId:      req.user._id,
+        selections:  verifiedSelections,
+        stake:       stakeAmt,
+        totalOdds,
+        potentialWin: netPayout,
+        tax,
+        ipAddress:   req.ip,
+        stakeFromBonus: deduction.fromBonus,
+        stakeFromMain:  deduction.fromMain,
+        ...(req.idemKey ? { idempotencyKey: req.idemKey } : {})
+      });
+    } catch (createErr) {
+      // The stake is already taken: if the bet could not be saved, give it back.
+      try {
+        if (deduction.fromBonus > 0) await walletService.credit(req.user._id, 'bonus', deduction.fromBonus, 'refund', 'bet_create_failed');
+        if (deduction.fromMain > 0) await walletService.credit(req.user._id, 'main', deduction.fromMain, 'refund', 'bet_create_failed');
+      } catch (refundErr) { console.error('[bets/place] REFUND FAILED', req.user._id, stakeAmt, refundErr.message); }
+      throw createErr;
+    }
     mark('betSaved');
 
     require('../services/loyaltyService').awardPoints(req.user._id, stakeAmt).catch(()=>{});
 
-    const [, newBalance] = await Promise.all([
+    // The wallet returned by the atomic debit already holds the post-stake
+    // balances - no need for another database read.
+    const w = deduction.wallet;
+    const newBalance = {
+      main: w.main, bonus: w.bonus, locked: w.locked, pending: w.pending,
+      spendable: parseFloat((w.main + w.bonus).toFixed(2)),
+      withdrawable: w.main
+    };
+    await Promise.all([
       Transaction.create({
-      userId:      req.user._id,
-      type:        'stake',
-      amount:      -stakeAmt,
-      balance:     deduction.wallet.main,
-      reference:   bet.betCode,
-      description: `Bet ${bet.betCode} — ${verifiedSelections.length} selection(s)`
-    }),
-      walletService.getBalance(req.user._id)
+        userId:      req.user._id,
+        type:        'stake',
+        amount:      -stakeAmt,
+        balance:     deduction.wallet.main,
+        reference:   bet.betCode,
+        description: `Bet ${bet.betCode} — ${verifiedSelections.length} selection(s)`
+      }),
+      ...(deduction.history || [])
     ]);
 
     mark('done');
