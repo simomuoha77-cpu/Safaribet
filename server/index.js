@@ -157,15 +157,6 @@ app.use('/api/settings',     settingsRoutes);
 app.use('/api/sports',       sportsRoutes);
 app.use('/api/casino/wallet', casinoWalletRoutes);
 
-// Legacy SofaBets casino launch URLs are intentionally disabled.
-// SafariBet Casino now uses JuanAI-only casino routes under /api/casino/juanai.
-app.get('/casino/sofa-play/:provider/:ref', (req, res) => {
-  return res.status(410).send('This casino launcher is no longer used. SafariBet Casino uses JuanAI only.');
-});
-app.get('/casino/play/:gameId', (req, res) => {
-  return res.status(410).send('This casino launcher is no longer used. SafariBet Casino uses JuanAI only.');
-});
-
 // B2C callbacks (no auth needed — called by Safaricom)
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);

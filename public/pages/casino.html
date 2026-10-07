@@ -115,13 +115,9 @@ async function openGame(id){
   showLaunch('Opening '+g.name+'...','',false);
   const ctl=new AbortController(); const abort=setTimeout(()=>ctl.abort(),130000);
   try{
-    const d=await api('/api/casino/juanai/launch',{method:'POST',body:JSON.stringify({gameId:id}),signal:ctl.signal});
-    if(!d||!d.success||!d.launchUrl)throw new Error('The game could not be started.');
-    showLaunch('Opening '+g.name+'...','',false);
-    // Keep the browser on SafariBet. The SafariBet game wrapper creates the
-    // JuanAI session and embeds the real JuanAI game inside an iframe.
-    // The provider page still runs on JuanAI, but the player's address bar
-    // remains safaribet.top/casino/play/<game>.
+    // The SafariBet game wrapper is the only launch entry point. It requests
+    // the signed JuanAI session and embeds the real game while the address bar
+    // stays on safaribet.top/casino/play/<game>. Do not launch twice here.
     window.location.href='/casino/play/'+encodeURIComponent(id);
   }catch(e){
     const aborted=e&&e.name==='AbortError';
