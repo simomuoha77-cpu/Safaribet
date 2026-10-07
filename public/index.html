@@ -2163,6 +2163,8 @@ async function doSearch(q) {
   try {
     const r = await fetch(`/api/sports/search?q=${encodeURIComponent(q)}`);
     const d = await r.json();
+    // Ignore stale responses if the user kept typing.
+    if (document.getElementById('srchInp').value.trim() !== q) return;
     if (!d.data?.length) {
       overlay.innerHTML = `<div class="no-results">No matches found for "<strong>${q}</strong>"</div>`;
       return;

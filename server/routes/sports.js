@@ -373,4 +373,56 @@ router.get('/category/:sport', async (req, res) => {
   }
 });
 
+// ── SEARCH ──
+// Searches every feed already cached by the other routes (football, live and
+// each SofaBets sport) by team / league name. Cold sport caches are warmed in
+// the background so later searches cover them too; the request itself only
+// ever waits on football, never on all feeds.
+const normSearch = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+router.get('/search', async (req, res) => {
+  try {
+    const q = normSearch(req.query.q);
+    if (q.length < 2) return res.json({ success:true, data:[], count:0 });
+
+    let football = C.get('football', 60000) || cache.football?.data;
+    if (!Array.isArray(football)) {
+      try { football = await getFixtures(0); C.set('football', football); }
+      catch (e) { football = []; console.warn('[sports/search] football:', e.message); }
+    }
+
+    // Warm any sport that has not been opened yet (non-blocking).
+    const dates = [0,1,2,3].map(nairobiDatePlus);
+    for (const sport of Object.keys(SPORT_CONFIG)) {
+      if (!sportCategoryCache.get(sport)?.data?.length) refreshSportCategory(sport, dates, true).catch(() => {});
+    }
+
+    const pools = [
+      football,
+      ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || []),
+      C.get(LIVE_CACHE_KEY, 600000) || cache[LIVE_CACHE_KEY]?.data || []
+    ];
+
+    const terms = q.split(' ');
+    const seen = new Set();
+    const out = [];
+    for (const m of pools.flat()) {
+      if (!m || !m.matchId) continue;
+      const hay = normSearch(`${m.homeTeam} ${m.awayTeam} ${m.league}`);
+      if (!terms.every(t => hay.includes(t))) continue;
+      const key = normSearch(m.homeTeam) + '|' + normSearch(m.awayTeam);
+      if (seen.has(key) || seen.has(m.matchId)) continue;
+      seen.add(key); seen.add(m.matchId);
+      const teamHit = normSearch(`${m.homeTeam} ${m.awayTeam}`).includes(q) ? 0 : 1;
+      out.push({ m, teamHit });
+    }
+    out.sort((a,b) => a.teamHit - b.teamHit || new Date(a.m.commenceTime || 0) - new Date(b.m.commenceTime || 0));
+    const data = out.slice(0, 30).map(x => x.m);
+    res.json({ success:true, data, count:data.length });
+  } catch (e) {
+    console.error('[sports/search]', e.message);
+    res.json({ success:true, data:[], count:0 });
+  }
+});
+
 module.exports = router;
