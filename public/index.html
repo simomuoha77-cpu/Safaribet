@@ -596,7 +596,14 @@ header{
   <div class="sp-tab on" data-cat="featured" onclick="pickCat(this)"><span class="sp-tab-icon">⭐</span><span class="sp-tab-lbl">Highlights</span></div>
   <div class="sp-tab" data-cat="live" onclick="pickCat(this)"><span class="sp-tab-icon">🔴</span><span class="sp-tab-lbl">Live</span></div>
   <div class="sp-tab" data-cat="football" onclick="pickCat(this)"><span class="sp-tab-icon">⚽</span><span class="sp-tab-lbl">Football</span></div>
-  <!-- Other sport tabs injected by loadSportTabs() -->
+  <div class="sp-tab" data-cat="basketball" onclick="pickCat(this)"><span class="sp-tab-icon">🏀</span><span class="sp-tab-lbl">Basketball</span></div>
+  <div class="sp-tab" data-cat="tennis" onclick="pickCat(this)"><span class="sp-tab-icon">🎾</span><span class="sp-tab-lbl">Tennis</span></div>
+  <div class="sp-tab" data-cat="cricket" onclick="pickCat(this)"><span class="sp-tab-icon">🏏</span><span class="sp-tab-lbl">Cricket</span></div>
+  <div class="sp-tab" data-cat="rugby" onclick="pickCat(this)"><span class="sp-tab-icon">🏉</span><span class="sp-tab-lbl">Rugby</span></div>
+  <div class="sp-tab" data-cat="hockey" onclick="pickCat(this)"><span class="sp-tab-icon">🏒</span><span class="sp-tab-lbl">Ice Hockey</span></div>
+  <div class="sp-tab" data-cat="volleyball" onclick="pickCat(this)"><span class="sp-tab-icon">🏐</span><span class="sp-tab-lbl">Volleyball</span></div>
+  <div class="sp-tab" data-cat="handball" onclick="pickCat(this)"><span class="sp-tab-icon">🤾</span><span class="sp-tab-lbl">Handball</span></div>
+  <!-- Any extra sport tabs the server adds later are appended by loadSportTabs() -->
 </div>
 
 <!-- Search Results Overlay -->
@@ -1855,15 +1862,59 @@ function pickCat(el) {
   loadCat(currentCat);
 }
 
-// Load sport tabs dynamically from Juan API
+// Sport tabs are already in the HTML (instant). This only (a) appends any extra
+// tab the server may add later and (b) fills every sport's list in the
+// background so tapping Basketball/Tennis/etc. paints with zero wait.
+const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball'];
+
+function storeSportList(sport, list) {
+  if (!Array.isArray(list) || !list.length) return false;
+  sportTabCache.set(sport, list);
+  try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:list, ts:Date.now()})); } catch(e) {}
+  if (currentCat === sport) renderNonFootball(list);
+  return true;
+}
+
+function warmAllSports() {
+  // 1) Instant: last visit's lists straight from localStorage (same JS turn).
+  SPORT_KEYS.forEach(sport => {
+    if (sportTabCache.has(sport)) return;
+    try {
+      const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
+      if (cached?.data?.length && (Date.now() - cached.ts) < 6 * 3600000) sportTabCache.set(sport, cached.data);
+    } catch(e) {}
+  });
+  // 2) One request for every sport (served from server memory), then per-sport
+  //    fallback only for any sport that came back empty.
+  fetch('/api/sports/all-categories', { cache:'no-store' })
+    .then(r => r.json())
+    .then(d => {
+      const all = (d && d.data) || {};
+      SPORT_KEYS.forEach(sport => storeSportList(sport, all[sport]));
+    })
+    .catch(() => {})
+    .finally(() => {
+      SPORT_KEYS.filter(sp => !sportTabCache.get(sp)?.length).forEach((sport, i) => {
+        setTimeout(() => {
+          if (sportTabCache.get(sport)?.length || sportTabRequests.has(sport)) return;
+          fetch(`/api/sports/category/${sport}`, { cache:'no-store' })
+            .then(r => r.json())
+            .then(d2 => { if (d2.success) storeSportList(sport, d2.data); })
+            .catch(() => {});
+        }, i * 150);
+      });
+    });
+}
+
 async function loadSportTabs() {
+  warmAllSports();
   try {
     const r = await fetch('/api/sports/tabs');
     const d = await r.json();
     if (!d.success) return;
     const container = document.getElementById('sportTabs');
-    // Append non-football tabs
-    d.data.filter(t => !['featured','live','football'].includes(t.key)).forEach(t => {
+    // Append only tabs that are not already in the HTML
+    d.data.filter(t => !['featured','live','football'].includes(t.key) && !container.querySelector(`[data-cat="${t.key}"]`)).forEach(t => {
       const el = document.createElement('div');
       el.className = `sp-tab${t.comingSoon ? ' coming' : ''}`;
       el.dataset.cat = t.key;
@@ -1872,61 +1923,7 @@ async function loadSportTabs() {
       else el.onclick = () => showComingSoon(t.label, t.icon);
       container.appendChild(el);
     });
-
-    // Warm every real sport quietly after the homepage is painted. Each tab
-    // gets a local cache entry before the user taps it, so Football/Basketball/
-    // Tennis/etc. do not feel like a new page load. Only two requests run at
-    // once so this does not flood SofaBets or the user's connection.
-    const warmSports = d.data.map(t => t.key).filter(k => !['featured','live','football'].includes(k));
-    setTimeout(() => {
-      let wi = 0;
-      const worker = () => {
-        const sport = warmSports[wi++];
-        if (!sport) return;
-        if (sportTabCache.has(sport) || sportTabRequests.has(sport)) { worker(); return; }
-        let local = null;
-        try {
-          const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
-          if (cached?.data?.length && (Date.now() - cached.ts) < 900000) {
-            local = cached.data;
-            sportTabCache.set(sport, local);
-          }
-        } catch(e) {}
-        fetch(`/api/sports/category/${sport}`, { cache:'no-store' })
-          .then(r => r.json())
-          .then(d2 => {
-            if (d2.success && Array.isArray(d2.data) && d2.data.length) {
-              sportTabCache.set(sport, d2.data);
-              try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:d2.data, ts:Date.now()})); } catch(e) {}
-              if (currentCat === sport) renderNonFootball(d2.data);
-            }
-          })
-          .catch(() => {})
-          .finally(() => setTimeout(worker, 120));
-      };
-      worker(); worker();
-    }, 500);
-  } catch(e) {
-    // Fallback: add all sports as coming soon
-    const fallback = [
-      {key:'basketball',label:'Basketball',icon:'🏀'},
-      {key:'tennis',label:'Tennis',icon:'🎾'},
-      {key:'cricket',label:'Cricket',icon:'🏏'},
-      {key:'rugby',label:'Rugby',icon:'🏉'},
-      {key:'nfl',label:'NFL',icon:'🏈'},
-      {key:'baseball',label:'Baseball',icon:'⚾'},
-      {key:'hockey',label:'Ice Hockey',icon:'🏒'},
-      {key:'mma',label:'MMA',icon:'🥊'},
-    ];
-    const container = document.getElementById('sportTabs');
-    fallback.forEach(t => {
-      const el = document.createElement('div');
-      el.className = 'sp-tab coming';
-      el.innerHTML = `<span class="sp-tab-icon">${t.icon}</span><span class="sp-tab-lbl">${t.label}</span>`;
-      el.onclick = () => showComingSoon(t.label, t.icon);
-      container.appendChild(el);
-    });
-  }
+  } catch(e) {}
 }
 
 function showComingSoon(label, icon) {
@@ -2051,8 +2048,9 @@ async function loadCat(cat) {
   if (cachedSport?.length) {
     renderNonFootball(cachedSport);
   } else {
-    // No cache yet: keep whatever is currently painted and show only the small
-    // updating indicator. The moment SofaBets returns, games replace it.
+    // No cache yet: show a loader (never the previous tab's games under this
+    // tab's name). The moment the games arrive they replace it.
+    el.innerHTML = '<div class="loading" style="padding:30px"><div class="spin"></div>Loading games...</div>';
     setUpdatingIndicator(true);
   }
 
@@ -2060,7 +2058,7 @@ async function loadCat(cat) {
   const request = (async () => {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), cachedSport?.length ? 10000 : 5000);
+      const timer = setTimeout(() => ctrl.abort(), 9000);
       let r;
       try { r = await fetch(`/api/sports/category/${cat}`, { signal: ctrl.signal }); }
       finally { clearTimeout(timer); }

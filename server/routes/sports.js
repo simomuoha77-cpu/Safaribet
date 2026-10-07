@@ -276,7 +276,7 @@ function nairobiDatePlus(days) {
 
 function mergeSportMatches(sport, lists) {
   const seen = new Set();
-  return lists.flat().map(x => normalizeSofaSportMatch(x, sport)).filter(Boolean).filter(x => {
+  return lists.flat().map(x => (x && x.matchId && !x.providerMatchId) ? x /* already normalized */ : normalizeSofaSportMatch(x, sport)).filter(Boolean).filter(x => {
     if (seen.has(x.matchId)) return false;
     seen.add(x.matchId);
     return true;
@@ -292,7 +292,10 @@ async function refreshSportCategory(sport, dates, background) {
       const todayRaw = await sofaBets.getMatchesForDate(dates[0], { sport, fast: true });
       const today = mergeSportMatches(sport, [todayRaw]);
       const existing = sportCategoryCache.get(sport);
-      const seed = today.length ? today : (existing?.data || []);
+      // Keep later-date games already cached (they are re-merged below) so the
+      // list never shrinks to "today only" between refreshes.
+      const keep = (existing?.data || []).filter(x => x.commenceTime && new Date(x.commenceTime).getTime() > Date.now() - 3 * 3600000);
+      const seed = today.length ? mergeSportMatches(sport, [keep, today]) : (existing?.data || []);
       sportCategoryCache.set(sport, { data: seed, ts: Date.now() });
       console.log(`[sports/sofabets] ${sport}: ${seed.length} today matches`);
 
@@ -340,6 +343,20 @@ async function refreshSportCategory(sport, dates, background) {
   sportCategoryRefresh.set(sport, run);
   return run;
 }
+
+// Every non-football sport in ONE response, straight from memory (kept warm by
+// the background index). The homepage uses this to fill all tabs at once.
+router.get('/all-categories', (req, res) => {
+  const data = {};
+  for (const sport of Object.keys(SPORT_CONFIG)) {
+    const list = sportCategoryCache.get(sport)?.data || [];
+    data[sport] = list.filter(m => m.status !== 'finished').slice(0, 150);
+  }
+  const warming = !Object.values(data).some(l => l.length);
+  if (warming) buildSearchIndex().catch(() => {});
+  res.set('Cache-Control', 'no-store');
+  res.json({ success:true, data, warming });
+});
 
 router.get('/category/:sport', async (req, res) => {
   const sport = String(req.params.sport || '').toLowerCase();
