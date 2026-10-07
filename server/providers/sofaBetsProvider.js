@@ -510,6 +510,12 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
   return refreshMatchMarkets(id, name, cacheKey);
 }
 
+// Age (ms) of the cached market list for a fixture, Infinity when none/thin.
+function marketsCacheAge(providerMatchId, sportName = 'football') {
+  const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
+  return (c && c.data && c.data.markets.length > 1) ? Date.now() - c.ts : Infinity;
+}
+
 function refreshMatchMarkets(id, name, cacheKey) {
   if (matchMarketsInflight.has(cacheKey)) return matchMarketsInflight.get(cacheKey);
   const p = fetchMatchMarketsParallel(id, name, cacheKey).finally(() => matchMarketsInflight.delete(cacheKey));
@@ -1261,4 +1267,4 @@ async function getMatchesForDate(dateStr, options) {
   return result;
 }
 
-module.exports = { providerName: 'sofabets', isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', marketsCacheAge, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

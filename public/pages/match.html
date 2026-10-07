@@ -190,6 +190,10 @@ async function loadMatch(){
     // Re-uses a request already started by the touch/hover prefetch if there is one
     const d = (window.SB && SB.prefetchMatch) ? await SB.prefetchMatch(matchId)
       : await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
+    if (d && d.pending) {            // server is still resolving this fixture — keep polling quietly
+      pollFullMarkets();
+      return;
+    }
     if (!d.success) {
       // Only show the error state if we had nothing to show at all —
       // never blow away an already-painted cached view over a background
@@ -203,11 +207,36 @@ async function loadMatch(){
     renderHeader();
     renderMarkets(false);
     updateSlipBar();
+    // Server answered fast with the basics; the full market list is still being
+    // fetched upstream. Quietly pick it up the moment it is ready.
+    if (d.data.marketsPending) pollFullMarkets();
   } catch(e) {
     if (!paintedFromCache) {
       document.getElementById('matchHeader').innerHTML = '<div class="loading">Market is currently unavailable. Please try again.</div>';
     }
   }
+}
+
+let _pollingMarkets = false;
+async function pollFullMarkets(){
+  if (_pollingMarkets) return;
+  _pollingMarkets = true;
+  try {
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, i < 2 ? 1200 : 2500));
+      try {
+        const d = await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
+        if (d && d.success && d.data) {
+          matchData = d.data; matchData.__full = true;
+          renderHeader(); renderMarkets(false); updateSlipBar();
+          if (!d.data.marketsPending) return;
+        }
+      } catch (e) { /* keep trying */ }
+    }
+    if (!matchData || !(matchData.markets || []).length) {
+      document.getElementById('marketsContainer').innerHTML = '<div class="loading">Markets are taking longer than usual. Pull to refresh to try again.</div>';
+    }
+  } finally { _pollingMarkets = false; }
 }
 
 // Half label for football: provider minute when it sends one, else time since kickoff.

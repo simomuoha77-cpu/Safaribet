@@ -526,7 +526,7 @@
     var p = _fetch('/api/odds/match/' + encodeURIComponent(id) + '?rich=1', { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (d && d.success && d.data) {
+        if (d && d.success && d.data && !d.data.marketsPending) {
           try {
             sessionStorage.setItem(mmKey(id), JSON.stringify({ ts: Date.now(), data: d.data }));
             var idx = JSON.parse(sessionStorage.getItem('sb_mm_index') || '[]').filter(function (x) { return x !== id; });

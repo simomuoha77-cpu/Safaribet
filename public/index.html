@@ -2170,6 +2170,7 @@ async function doSearch(q, attempt = 0) {
     clearTimeout(killer);
     // Ignore stale responses if the user kept typing.
     if (seq !== srchSeq || document.getElementById('srchInp').value.trim() !== q) return;
+    window._srchPool = Array.isArray(d.data) ? d.data : [];
     if (!d.data?.length) {
       // Server still loading its game index (first seconds after a restart):
       // keep the spinner and retry quietly instead of claiming "no matches".
@@ -2879,7 +2880,7 @@ function esc(s){return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 // full provider market catalogue is then fetched in the background on that
 // page and merged in once it arrives.
 function findKnownMatch(matchId){
-  const pools = [allMatches, progressiveMatches, liveTabCache.data, ...Array.from(sportTabCache.values())];
+  const pools = [allMatches, progressiveMatches, liveTabCache.data, window._srchPool, ...Array.from(sportTabCache.values())];
   for (const pool of pools){
     if (!Array.isArray(pool)) continue;
     const found = pool.find(m => m && String(m.matchId) === String(matchId));

@@ -374,8 +374,20 @@ router.get('/history/:matchId', async (req, res) => {
 });
 
 // ── MATCH DETAIL WITH ALL MARKETS ──
+// A match page must open in under ~3s no matter how slow SofaBets is. Anything
+// that has to hit the provider is raced against this deadline; on timeout we
+// answer with what we already have (flagged marketsPending) while the provider
+// call keeps running and fills its cache, so the page's quiet re-poll gets the
+// full catalogue instantly.
+const MATCH_DEADLINE_MS = 1800;
+const DEADLINE = Symbol('deadline');
+const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
+  Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
+
 router.get('/match/:matchId', async (req, res) => {
   try {
+    let marketsTimedOut = false;
+    let resolveTimedOut = false;
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
 
     // SofaBets live IDs are authoritative provider identities. Resolve the
@@ -390,10 +402,55 @@ router.get('/match/:matchId', async (req, res) => {
       const parsed = parseSofaMatchId(req.params.matchId);
       if (parsed && parsed.providerId) {
         const { isLive: isLiveId, sport, providerId } = parsed;
-        const direct = await sofaBets.resolveExactFixture(providerId, sport, {
-          rich: req.query.rich === '1',
-          preferLive: isLiveId
-        });
+
+        // 1) Instant: the server already holds every game it lists in memory.
+        let idx = null;
+        try { idx = require('./sports').lookupIndexedMatch(req.params.matchId); } catch (_) {}
+        if (idx && idx.homeTeam && idx.awayTeam) {
+          const mk = Array.isArray(idx.markets) ? idx.markets : [];
+          m = {
+            matchId: req.params.matchId,
+            sport,
+            league: idx.league || sport,
+            homeTeam: idx.homeTeam,
+            awayTeam: idx.awayTeam,
+            commenceTime: idx.commenceTime ? new Date(idx.commenceTime) : new Date(),
+            status: idx.status || 'upcoming',
+            odds: {
+              home: Number(idx.odds?.home) || null,
+              draw: Number(idx.odds?.draw) || null,
+              away: Number(idx.odds?.away) || null,
+              updatedAt: new Date()
+            },
+            hasOdds: !!idx.hasOdds,
+            score: {
+              home: idx.score?.home ?? null,
+              away: idx.score?.away ?? null,
+              minute: idx.score?.minute ?? null,
+              period: idx.score?.period || null
+            },
+            markets: mk,
+            bookmakers: idx.bookmakers || [],
+            providerOdds: idx.providerOdds || null,
+            providerSource: 'sofabets',
+            realOddsSource: 'SofaBets',
+            providerMatchId: String(providerId),
+            marketsRefreshedAt: mk.length > 1 ? new Date() : null
+          };
+          Match.findOneAndUpdate({ matchId: req.params.matchId }, { $set: m }, { upsert: true })
+            .catch(err => console.warn('[odds/match] failed to persist indexed match:', err.message));
+        }
+
+        // 2) Not indexed: ask the provider, but never wait past the deadline.
+        let direct = null;
+        if (!m) {
+          const lookup = sofaBets.resolveExactFixture(providerId, sport, {
+            rich: req.query.rich === '1',
+            preferLive: isLiveId
+          }).catch(() => null);
+          const got = await raceDeadline(lookup);
+          if (got === DEADLINE) resolveTimedOut = true; else direct = got;
+        }
 
         const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
 
@@ -466,10 +523,14 @@ router.get('/match/:matchId', async (req, res) => {
           // Ask for just this exact fixture's markets (every candidate payload
           // is checked against the exact provider id inside getMatchMarkets)
           // and, in parallel, whether it is live right now (cached live feed).
-          const [details, liveNow] = await Promise.all([
+          const richP = Promise.all([
             sofaBets.getMatchMarkets(providerId, sport).catch(() => null),
             sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null)
           ]);
+          const raced = await raceDeadline(richP);
+          let details = null, liveNow = null;
+          if (raced === DEADLINE) { marketsTimedOut = true; richP.catch(() => {}); }
+          else { details = raced[0]; liveNow = raced[1]; }
           const liveIsExact = liveNow && String(liveNow.providerMatchId) === String(providerId);
           const haveRich = details && Array.isArray(details.markets) && details.markets.length > 0;
 
@@ -506,6 +567,9 @@ router.get('/match/:matchId', async (req, res) => {
       }
     }
 
+    if (!m && resolveTimedOut) {
+      return res.status(202).json({ success: false, pending: true, message: 'Loading match…' });
+    }
     if (!m) return res.status(404).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
 
     // SafariBet builds its own markets from the 1X2 odds already on the match.
@@ -608,7 +672,9 @@ router.get('/match/:matchId', async (req, res) => {
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }
     }
 
-    res.json({ success: true, data: { ...m, markets } });
+    const marketsPending = (marketsTimedOut || resolveTimedOut) && richMarkets.length <= 1;
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: { ...m, markets, marketsPending } });
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }
 });
 

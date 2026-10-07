@@ -418,9 +418,83 @@ function searchPools() {
   ];
 }
 
+// Same id shapes as routes/odds.js: sofabets_<id> | sofabets_<sport>_<id> | sofabets_live_<sport>_<id>
+function parseIdShape(rawId) {
+  const str = String(rawId || '');
+  if (!str.startsWith('sofabets_')) return null;
+  let parts = str.slice(9).split('_').filter(Boolean);
+  if (!parts.length) return null;
+  let isLive = false;
+  if (parts[0] === 'live') { isLive = true; parts = parts.slice(1); }
+  if (parts.length >= 2 && Number.isNaN(Number(parts[0]))) return { isLive, sport: parts[0], providerId: parts.slice(1).join('_') };
+  return { isLive, sport: 'football', providerId: parts.join('_') };
+}
+
+// Instant in-memory lookup of a match (with its provider markets when the feed
+// carried them) so the match page never has to crawl SofaBets just to open.
+// Live feed wins (freshest score), then football / sport caches.
+function lookupIndexedMatch(matchId) {
+  const want = parseIdShape(matchId);
+  if (!want) return null;
+  const pools = [
+    cache[LIVE_CACHE_KEY]?.data || [],
+    searchFootball,
+    cache.football?.data || [],
+    ...Object.keys(SPORT_CONFIG).map(sp => sportCategoryCache.get(sp)?.data || [])
+  ];
+  for (const list of pools) {
+    for (const m of list) {
+      if (!m || !m.matchId) continue;
+      if (m.matchId === matchId) return m;
+      const got = parseIdShape(m.matchId);
+      if (got && got.providerId === want.providerId && got.sport === want.sport) return m;
+    }
+  }
+  return null;
+}
+router.lookupIndexedMatch = lookupIndexedMatch;
+
+// Keep the provider's per-fixture market cache warm for the games people open
+// most (live now + kicking off soonest), so opening a match is instant even
+// right after a restart. Light touch: concurrency 3, max 30 per cycle, and only
+// fixtures whose cached markets are missing or older than 8 minutes.
+let prewarmRunning = false;
+async function prewarmMarkets() {
+  if (prewarmRunning || typeof sofaBets.getMatchMarkets !== 'function') return;
+  prewarmRunning = true;
+  try {
+    const now = Date.now();
+    const live = (cache[LIVE_CACHE_KEY]?.data || []);
+    const upcoming = [...searchFootball]
+      .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 24 * 3600000)
+      .sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
+    const todo = [];
+    const seen = new Set();
+    for (const m of [...live, ...upcoming]) {
+      const id = parseIdShape(m.matchId);
+      if (!id) continue;
+      const k = id.sport + ':' + id.providerId;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if ((sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(id.providerId, id.sport) : Infinity) < 8 * 60000) continue;
+      todo.push(id);
+      if (todo.length >= 30) break;
+    }
+    let i = 0;
+    await Promise.all([0, 1, 2].map(async () => {
+      while (i < todo.length) {
+        const id = todo[i++];
+        try { await sofaBets.getMatchMarkets(id.providerId, id.sport); } catch (_) {}
+      }
+    }));
+    if (todo.length) console.log(`[sports/prewarm] warmed markets for ${todo.length} fixtures`);
+  } finally { prewarmRunning = false; }
+}
+
 // Warm at boot, then keep fresh.
-buildSearchIndex().catch(() => {});
-setInterval(() => { buildSearchIndex().catch(() => {}); }, 90000);
+const refreshIndexAndMarkets = () => buildSearchIndex().then(() => prewarmMarkets()).catch(() => {});
+refreshIndexAndMarkets();
+setInterval(refreshIndexAndMarkets, 90000);
 
 router.get('/search', async (req, res) => {
   try {
