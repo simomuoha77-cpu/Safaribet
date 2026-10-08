@@ -149,6 +149,8 @@ async function openGame(id){
 document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
 document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openGame(e.target.dataset.id)}});
 renderGames(); // paint both cards before any network request
+// Wake JuanAI and prepare the player's game sessions NOW, so a tap opens the game instantly.
+try{ fetch('/api/casino/juanai/prelaunch',{method:'POST',headers:headers(),cache:'no-store'}).catch(()=>{}); }catch(_){}
 loadCasinoImages(); // artwork sync is background-only and never blocks the lobby
 loadBalance();
 setInterval(loadBalance,5000);
