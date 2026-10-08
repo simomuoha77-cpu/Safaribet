@@ -54,7 +54,7 @@ function renderGames(){
   grid.innerHTML=games.map(g=>{
     const id=g.gameId;
     const fallback=id==='aviator'?'✈️':'🚀';
-    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art"><span class="fallback">${fallback}</span></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
+    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art noimg"><span class="fallback">${fallback}</span><img alt="${g.name}" src="/api/casino/juanai/art/${id}" referrerpolicy="no-referrer" onload="this.parentNode.classList.remove('noimg')" onerror="this.parentNode.classList.add('noimg')"></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
   }).join('');
   document.getElementById('message').style.display='none';
 }

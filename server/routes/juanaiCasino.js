@@ -53,6 +53,16 @@ router.get('/status', auth, requireConfigured, (req, res) => {
 
 // JuanAI dashboard artwork is stored on JuanAI. SafariBet fetches it in the background
 // so game cards can render immediately without making the casino lobby depend on JuanAI startup.
+// Instant artwork: send the browser straight to JuanAI's public, cached image route.
+// No API key, no login and no JuanAI round-trip from our server, so it works even while JuanAI is asleep.
+router.get('/art/:gameId', (req, res) => {
+  const id = String(req.params.gameId || '').toLowerCase();
+  const base = juanai.cfg().base;
+  if (!['aviator', 'jetx'].includes(id) || !base) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=300');
+  res.redirect(302, `${base}/api/casino/games/${id}/image`);
+});
+
 // Public on purpose: it is only game artwork, and it must show even before login / with an expired session.
 router.get('/images', requireConfigured, async (req, res) => {
   try {
