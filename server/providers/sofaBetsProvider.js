@@ -485,7 +485,7 @@ const matchMarketsCache = new Map();
 
 const matchMarketsInflight = new Map();
 const MARKETS_TTL_MS = 30000;          // served instantly while younger than this
-const MARKETS_STALE_MS = 10 * 60000;   // served instantly (and refreshed in the background) up to this age
+const MARKETS_STALE_MS = 45 * 60000;   // served instantly (and refreshed in the background) up to this age. Bet placement passes its own stricter maxAgeMs, so prices are still re-verified when a bet is placed.
 const MARKETS_FAST_TIMEOUT_MS = 6000;  // per-request cap for these per-fixture lookups
 
 // opts.maxAgeMs: the caller will not accept a copy older than this (e.g. placing
@@ -524,33 +524,54 @@ function shouldSkipEndpoint(st) {
   return false;
 }
 
-// Background warm-up queue: 3 at a time, de-duplicated, skips fixtures whose
-// markets are already cached (<9 min). Used by the server pre-warm and by the
-// homepage (cards scrolling into view) so a match is ready before it is tapped.
+// Background market crawler queue: 4 at a time, de-duplicated. A job always does
+// a REAL refresh (not "serve stale and refresh later"), so the queue is the true
+// throttle on upstream load. maxAgeMs = how fresh the cached copy must be to skip.
 const warmQueue = [];
 const warmKeys = new Set();
+const lastWarmTry = new Map();      // key -> time of last attempt (also for games with no extra markets)
+const recentWarm = [];              // last results: true when a rich list came back
 let warmActive = 0;
-function queueWarmMarkets(providerMatchId, sportName, onDone) {
+let warmPausedUntil = 0;
+function queueWarmMarkets(providerMatchId, sportName, onDone, maxAgeMs) {
   const id = String(providerMatchId || '').trim();
   const name = String(sportName || 'football').toLowerCase();
-  if (!id) return false;
+  if (!id || Date.now() < warmPausedUntil) return false;
   const key = name + ':' + id;
-  if (marketsCacheAge(id, name) < 9 * 60000 || warmKeys.has(key) || warmQueue.length >= 80) return false;
+  const maxAge = Number.isFinite(maxAgeMs) ? maxAgeMs : 9 * 60000;
+  if (marketsCacheAge(id, name) < maxAge || warmKeys.has(key) || warmQueue.length >= 60) return false;
+  if (Date.now() - (lastWarmTry.get(key) || 0) < maxAge) return false;
   warmKeys.add(key);
+  lastWarmTry.set(key, Date.now());
   warmQueue.push({ id, name, key, onDone });
   pumpWarm();
   return true;
 }
 function pumpWarm() {
-  while (warmActive < 3 && warmQueue.length) {
+  while (warmActive < 4 && warmQueue.length && Date.now() >= warmPausedUntil) {
     const job = warmQueue.shift();
     warmActive++;
-    getMatchMarkets(job.id, job.name)
-      .then(d => { if (job.onDone && d && Array.isArray(d.markets) && d.markets.length > 1) job.onDone(d); })
+    refreshMatchMarkets(job.id, job.name, job.key)
+      .then(d => {
+        const ok = !!(d && Array.isArray(d.markets) && d.markets.length > 1);
+        recentWarm.push(ok); if (recentWarm.length > 30) recentWarm.shift();
+        if (ok && job.onDone) job.onDone(d);
+        // Everything failing at once = upstream unhappy (rate limit / outage): ease off for a minute.
+        if (recentWarm.length >= 30 && !recentWarm.some(Boolean)) { warmPausedUntil = Date.now() + 60000; recentWarm.length = 0; console.warn('[sofaBetsProvider] market crawler paused 60s: no market lists coming back'); }
+      })
       .catch(() => {})
       .finally(() => { warmActive--; warmKeys.delete(job.key); pumpWarm(); });
   }
 }
+function warmQueueSize() { return warmQueue.length + warmActive; }
+function marketsCacheSize() { return matchMarketsCache.size; }
+
+// Keep memory bounded: forget market lists / attempt times older than 3 hours.
+setInterval(() => {
+  const cutoff = Date.now() - 3 * 3600000;
+  for (const [k, v] of matchMarketsCache) if (!v || v.ts < cutoff) matchMarketsCache.delete(k);
+  for (const [k, t] of lastWarmTry) if (t < cutoff) lastWarmTry.delete(k);
+}, 10 * 60000).unref();
 
 function refreshMatchMarkets(id, name, cacheKey) {
   if (matchMarketsInflight.has(cacheKey)) return matchMarketsInflight.get(cacheKey);
@@ -1329,4 +1350,4 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { providerName: 'sofabets', marketsCacheAge, queueWarmMarkets, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

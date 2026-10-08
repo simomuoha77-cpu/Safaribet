@@ -476,32 +476,73 @@ router.lookupIndexedMatch = lookupIndexedMatch;
 // most (live now + kicking off soonest), so opening a match is instant even
 // right after a restart. Light touch: concurrency 3, max 30 per cycle, and only
 // fixtures whose cached markets are missing or older than 8 minutes.
-async function prewarmMarkets() {
-  if (typeof sofaBets.queueWarmMarkets !== 'function') return;
+// ── ALL-MARKETS BACKGROUND CRAWLER ──
+// Continuously keeps the full market list of EVERY live and upcoming game fresh in
+// memory (and a durable copy in MongoDB), so a tap on any game is answered
+// instantly. Priority by how soon it matters; most-overdue first; throttled by the
+// provider's queue (4 at a time) and it eases off if SofaBets stops answering.
+//   live: ~75s | starts <3h: 4min | <24h: 8min | later: 25min
+let Match = null;
+try { Match = require('../models/Match'); } catch (_) {}
+
+function crawlCandidates() {
   const now = Date.now();
-  const live = (cache[LIVE_CACHE_KEY]?.data || []);
-  const upcoming = [...getLastFixtures().data]
-    .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 12 * 3600000)
-    .sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
-  const seen = new Set();
-  let queued = 0;
-  for (const m of [...live, ...upcoming]) {
+  const out = new Map();
+  const add = (m, isLiveFeed) => {
+    if (!m || !m.matchId || m.status === 'finished' || m.status === 'cancelled') return;
     const id = parseIdShape(m.matchId);
-    if (!id) continue;
+    if (!id) return;
+    const t = m.commenceTime ? new Date(m.commenceTime).getTime() : now + 86400000;
+    const isLive = isLiveFeed || m.status === 'live';
+    const until = t - now;
+    if (!isLive && until < -3 * 3600000) return;               // long past and not live
+    const interval = isLive ? 75000 : until < 3 * 3600000 ? 240000 : until < 24 * 3600000 ? 480000 : 1500000;
     const k = id.sport + ':' + id.providerId;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (sofaBets.queueWarmMarkets(id.providerId, id.sport)) queued++;
-    if (queued >= 40) break;
+    const prev = out.get(k);
+    if (!prev || interval < prev.interval) out.set(k, { id, matchId: m.matchId, interval });
+  };
+  (cache[LIVE_CACHE_KEY]?.data || []).forEach(m => add(m, true));
+  getLastFixtures().data.forEach(m => add(m, false));
+  Object.keys(SPORT_CONFIG).forEach(sp => (sportCategoryCache.get(sp)?.data || []).forEach(m => add(m, false)));
+  return [...out.values()];
+}
+
+let crawlerLogAt = 0;
+function crawlerTick() {
+  if (typeof sofaBets.queueWarmMarkets !== 'function') return;
+  const room = 24 - sofaBets.warmQueueSize();
+  if (room <= 0) return;
+  const scored = [];
+  for (const c of crawlCandidates()) {
+    const age = sofaBets.marketsCacheAge(c.id.providerId, c.id.sport);
+    const score = Number.isFinite(age) ? age / c.interval : 100 + 1e7 / c.interval;   // never-fetched: nearest kickoff first
+    if (score >= 1) scored.push({ c, score });
   }
-  if (queued) console.log(`[sports/prewarm] queued market warm-up for ${queued} fixtures`);
+  scored.sort((a, b) => b.score - a.score);
+  let queued = 0;
+  for (const { c } of scored) {
+    if (queued >= room) break;
+    const onDone = Match ? (d => {
+      Match.updateOne(
+        { matchId: String(c.matchId), finalVerified: { $ne: true } },
+        { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(c.id.providerId), marketsRefreshedAt: new Date() } }
+      ).catch(() => {});
+    }) : undefined;
+    if (sofaBets.queueWarmMarkets(c.id.providerId, c.id.sport, onDone, c.interval)) queued++;
+  }
+  if (queued && Date.now() - crawlerLogAt > 60000) {
+    crawlerLogAt = Date.now();
+    console.log(`[markets-crawler] queued ${queued}; ${scored.length} games due; ${sofaBets.marketsCacheSize()} market lists in memory`);
+  }
 }
 
 // Warm at boot, then keep fresh.
-const refreshIndexAndMarkets = () => buildSearchIndex().then(() => prewarmMarkets()).catch(() => {});
-refreshIndexAndMarkets();
+const refreshIndex = () => buildSearchIndex().catch(() => {});
+refreshIndex();
 setInterval(() => { searchFootball = (getLastFixtures().data.length ? getLastFixtures().data : searchFootball); }, 30000);
-setInterval(refreshIndexAndMarkets, 5 * 60000);
+setInterval(refreshIndex, 5 * 60000);
+// Start crawling once the first game lists exist, then tick every 15s.
+setTimeout(() => { crawlerTick(); setInterval(crawlerTick, 15000); }, 20000);
 
 router.get('/search', async (req, res) => {
   try {
