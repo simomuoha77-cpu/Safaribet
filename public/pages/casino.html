@@ -132,7 +132,6 @@ async function openGame(id){
   const g=games.find(x=>x.gameId===id); if(!g)return;
   lastGameId=id; launching=true;
   let secs=0;
-  showLaunch('Opening '+g.name+'...','',false);
   const ctl=new AbortController(); const abort=setTimeout(()=>ctl.abort(),130000);
   try{
     // The SafariBet game wrapper is the only launch entry point. It requests
