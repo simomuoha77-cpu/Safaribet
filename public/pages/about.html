@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Terms & Conditions – SafariBet</title>
+<title>About SafariBet – Sports Betting, Live Betting &amp; Casino</title>
 <link rel="icon" type="image/png" href="/favicon.png"/>
 <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"/>
@@ -8,14 +8,14 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#00c853"/>
-<meta name="description" content="SafariBet terms and conditions for sports betting and casino." data-sb-page-head/>
-<link rel="canonical" href="https://safaribet.top/terms" data-sb-page-head/>
+<meta name="description" content="About SafariBet: online sports betting on football, basketball, tennis, cricket and rugby, live betting, casino games and M-Pesa deposits." data-sb-page-head/>
+<link rel="canonical" href="https://safaribet.top/about" data-sb-page-head/>
 <meta property="og:site_name" content="SafariBet" data-sb-page-head/>
+<meta property="og:title" content="About SafariBet" data-sb-page-head/>
+<meta property="og:url" content="https://safaribet.top/about" data-sb-page-head/>
 <meta property="og:image" content="https://safaribet.top/logo.png" data-sb-page-head/>
-
 <script src="/js/theme.js"></script>
 <script src="/js/router.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/><noscript><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/></noscript>
 <style>
 :root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--hh:52px;--bn:0px;--hdr:rgba(8,12,8,0.98)}
 html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#fff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--hdr:rgba(255,255,255,0.98)}
@@ -28,21 +28,28 @@ header{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hh);backgrou
 .content h3{font-size:15px;font-weight:700;margin:20px 0 8px;color:var(--g)}
 .content p,.content li{font-size:13px;line-height:1.8;color:var(--mt)}
 .content ul{padding-left:18px;margin-bottom:8px}
+
+.content h2{font-size:17px;font-weight:700;margin:22px 0 8px;color:var(--g)}
+.content p{font-size:14px;line-height:1.8;color:var(--tx);margin-bottom:10px}
+.content ul{padding-left:20px;margin-bottom:10px}.content li{font-size:14px;line-height:1.8;color:var(--tx)}
+.content a{color:var(--g)}
 </style></head><body>
-<header><a class="back" href="/account">←</a><a class="logo" href="/" style="text-decoration:none">Safari<span>Bet</span></a></header>
+<header><a class="back" href="/">←</a><a class="logo" href="/" style="text-decoration:none">Safari<span>Bet</span></a></header>
 <main class="main">
-  <div class="pg-title">Terms & Conditions</div>
-  <div class="pg-date" id="pgDate">Loading...</div>
-  <div class="content" id="content">Loading...</div>
+  <h1 class="pg-title">About SafariBet</h1>
+  <div class="content">
+    <p><strong>SafariBet</strong> (<a href="https://safaribet.top/">safaribet.top</a>) is an online sports betting and casino platform built for mobile players in Kenya.</p>
+    <h2>What you can do on SafariBet</h2>
+    <ul>
+      <li>Bet on football, basketball, tennis, cricket, rugby and more, with many markets per match.</li>
+      <li>Follow live matches and place live bets.</li>
+      <li>Play casino games such as Aviator and JetX with your SafariBet balance.</li>
+      <li>Deposit and withdraw with M-Pesa.</li>
+    </ul>
+    <h2>Play responsibly</h2>
+    <p>You must be 18 or older to use SafariBet. Gambling can be addictive. Read our <a href="/responsible">responsible gaming</a> page for limits and self-exclusion tools.</p>
+    <h2>More information</h2>
+    <p><a href="/terms">Terms &amp; Conditions</a> · <a href="/privacy">Privacy Policy</a> · <a href="/contact">Contact Us</a> · <a href="/register">Create an account</a> · <a href="/">Back to SafariBet home</a></p>
+  </div>
 </main>
-<script type="text/sb-page">
-fetch('/api/settings/site').then(r=>r.json()).then(d=>{
-  if(!d.success) return;
-  const s=d.data;
-  document.title=`Terms & Conditions – ${s.site_name}`;
-  document.querySelector('.logo').innerHTML=`${s.site_name.replace(/(\w+)(\w)/,(_,a,b)=>`${a}<span style="color:var(--yl)">${b}</span>`)}`;
-  document.getElementById('pgDate').textContent=`Effective as of January 2025 · ${s.site_name}`;
-  document.getElementById('content').innerHTML=s.terms_content;
-});
-</script>
 <script>SB.run()</script></body></html>

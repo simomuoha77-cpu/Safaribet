@@ -1,0 +1,14 @@
+{
+  "name": "SafariBet",
+  "short_name": "SafariBet",
+  "description": "SafariBet Kenya - sports betting, live betting and casino.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0e0a",
+  "theme_color": "#00c853",
+  "icons": [
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

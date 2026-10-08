@@ -1,4 +1,9 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /internal/
+Disallow: /x9panel
+Disallow: /admin
+Disallow: /casino/play/
 
 Sitemap: https://safaribet.top/sitemap.xml
