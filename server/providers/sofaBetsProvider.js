@@ -1248,12 +1248,23 @@ async function fetchLiveFootballFixtures(sportName = 'football', opts) {
   return refresh();
 }
 
+// A live endpoint that answers 404 for a sport (some hosts only serve football) is remembered
+// for 30 minutes, so we neither retry it every refresh nor spam the logs.
+const liveDead = new Map();
+const LIVE_DEAD_MS = 30 * 60 * 1000;
+const liveDeadLogged = new Set();
+
 async function fetchLiveFootballFixturesUncached(sportName = 'football') {
   const livePaths = ['/api/live-games'];
   let lastError = null;
+  let anyTried = false;
 
   for (const base of BASES) {
     for (const path of livePaths) {
+      const deadKey = base + path + '|' + String(sportName).toLowerCase();
+      const deadAt = liveDead.get(deadKey);
+      if (deadAt && Date.now() - deadAt < LIVE_DEAD_MS) continue;
+      anyTried = true;
       try {
         const all = [];
         for (let page = 1; page <= MAX_PAGES_PER_FETCH; page += 1) {
@@ -1288,13 +1299,18 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
           return matches;
         }
       } catch (e) {
-        lastError = e;
-        console.warn('[sofaBetsProvider] live ' + base + path + ' failed: ' + e.message);
+        if (/HTTP 404/.test(String(e.message))) {
+          liveDead.set(deadKey, Date.now());
+          if (!liveDeadLogged.has(deadKey)) { liveDeadLogged.add(deadKey); console.log('[sofaBetsProvider] ' + base + path + ' has no live feed for ' + sportName + ' (will not retry for 30 min)'); }
+        } else {
+          lastError = e;
+          console.warn('[sofaBetsProvider] live ' + base + path + ' failed: ' + e.message);
+        }
       }
     }
   }
 
-  if (lastError) console.warn('[sofaBetsProvider] live feed unavailable: ' + lastError.message);
+  if (lastError && anyTried) console.warn('[sofaBetsProvider] live feed unavailable: ' + lastError.message);
   return [];
 }
 
