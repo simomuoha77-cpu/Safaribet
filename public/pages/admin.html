@@ -283,6 +283,7 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
       <div class="sb-label">Promotions</div>
       <div class="sb-item" onclick="nav('bonus',this)"><span class="ic">🎁</span>Bonus & Promos</div>
       <div class="sb-item" onclick="nav('notifications',this)"><span class="ic">📢</span>Notifications</div>
+      <div class="sb-item" onclick="nav('sms',this)"><span class="ic">📲</span>SMS Messages</div>
       <div class="sb-item" onclick="nav('content',this)"><span class="ic">🖼️</span>Content / Banners</div>
     </div>
     <div class="sb-section">
@@ -922,6 +923,50 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
   </div>
 </div>
 
+<!-- 17b. SMS (CommsGrid / SMS Grid) -->
+<div class="panel" id="panel-sms">
+  <div class="sec">
+    <div class="sec-hdr"><h3>📲 Send SMS (SMS Grid)</h3></div>
+    <label class="lbl">Send to</label>
+    <select class="inp" id="smsMode" onchange="smsModeChanged()">
+      <option value="numbers">Single / specific number(s)</option>
+      <option value="all">Many users (all registered users)</option>
+    </select>
+
+    <div id="smsNumbersBox">
+      <label class="lbl">Phone number(s)</label>
+      <textarea class="inp" id="smsNumbers" rows="3" placeholder="0712345678&#10;0722000111, 254733222333 (one or many — separate with commas, spaces or new lines)" oninput="smsNumbersChanged()"></textarea>
+      <div class="mt" id="smsNumbersInfo" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)"></div>
+    </div>
+
+    <div id="smsAudienceBox" style="display:none">
+      <label class="lbl">Which users</label>
+      <select class="inp" id="smsAudience" onchange="smsLoadAudience()">
+        <option value="all">All users</option>
+        <option value="active">Active bettors (bet in last 30 days)</option>
+        <option value="inactive">Inactive users (no bet in 30 days)</option>
+      </select>
+      <div class="mt" id="smsAudienceInfo" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)"></div>
+    </div>
+
+    <label class="lbl">Message</label>
+    <textarea class="inp" id="smsText" rows="4" maxlength="459" placeholder="Type your SMS..." oninput="smsCount()"></textarea>
+    <div class="mt" id="smsCounter" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)">0 / 459 characters</div>
+
+    <button class="btn btn-g btn-full" id="smsSendBtn" onclick="smsSend()">📲 Send SMS</button>
+    <div class="res" id="smsRes"></div>
+    <div id="smsProgress" style="display:none;margin-top:10px">
+      <div style="height:8px;background:#0a100a;border-radius:6px;overflow:hidden"><div id="smsBar" style="height:100%;width:0;background:var(--g);transition:width .3s"></div></div>
+      <div class="mt" id="smsProgressTxt" style="font-size:12px;margin-top:6px;color:var(--mt)"></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-hdr"><h3>🕘 SMS History</h3><button class="hdr-btn" onclick="smsLoadHistory()">Refresh</button></div>
+    <div id="smsHistory"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
 <!-- 18. CONTENT -->
 <div class="panel" id="panel-content">
   <div class="sec">
@@ -1448,6 +1493,7 @@ function nav(name,el){
   else if(name==='backup') loadStorageStats();
   else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
+  else if(name==='sms') { smsModeChanged(); smsLoadHistory(); }
 }
 
 function toggleSidebar(){
@@ -2362,6 +2408,109 @@ async function sendNotif(){
   el.style.display='block';
   if(d.success){el.className='res ok';el.textContent=`✅ Broadcast sent to ${d.sent||0} users`;}
   else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
+}
+
+// ══ SMS (SMS Grid) ══
+let smsPoll = null;
+function smsModeChanged(){
+  const all = document.getElementById('smsMode').value === 'all';
+  document.getElementById('smsNumbersBox').style.display = all ? 'none' : '';
+  document.getElementById('smsAudienceBox').style.display = all ? '' : 'none';
+  if (all) smsLoadAudience();
+}
+function smsParseNumbers(txt){
+  const raw = String(txt||'').split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
+  const ok = new Set(), bad = [];
+  raw.forEach(r=>{
+    let p = r.replace(/[^\d]/g,'');
+    if (p.startsWith('0')) p = '254'+p.slice(1);
+    else if (p.length===9) p = '254'+p;
+    if (/^254[17]\d{8}$/.test(p)) ok.add(p); else bad.push(r);
+  });
+  return { ok:[...ok], bad };
+}
+function smsNumbersChanged(){
+  const { ok, bad } = smsParseNumbers(document.getElementById('smsNumbers').value);
+  document.getElementById('smsNumbersInfo').textContent = ok.length || bad.length
+    ? `${ok.length} valid number${ok.length===1?'':'s'}` + (bad.length ? ` · ${bad.length} invalid will be skipped (${bad.slice(0,3).join(', ')}${bad.length>3?'…':''})` : '')
+    : '';
+}
+function smsCount(){
+  const t = document.getElementById('smsText').value;
+  const uni = /[^\u0000-\u007F]/.test(t);                 // emoji / non-GSM chars use shorter segments
+  const per = uni ? (t.length>70?67:70) : (t.length>160?153:160);
+  const seg = Math.max(1, Math.ceil(t.length/per));
+  document.getElementById('smsCounter').textContent = `${t.length} / 459 characters · ${t.length?seg:0} SMS segment${seg===1?'':'s'}${uni?' (special characters/emoji — shorter segments)':''}`;
+}
+async function smsLoadAudience(){
+  const aud = document.getElementById('smsAudience').value;
+  const el = document.getElementById('smsAudienceInfo');
+  el.textContent = 'Counting…';
+  try {
+    const d = await api('/api/admin/sms/audience?audience='+aud);
+    el.textContent = d.success ? `Will send to ${d.count} user${d.count===1?'':'s'}` + (d.invalid?` (${d.invalid} skipped — invalid phone)`:'') : (d.message||'Could not count users');
+    el.dataset.count = d.success ? d.count : 0;
+  } catch(e){ el.textContent = e.message; }
+}
+async function smsSend(){
+  const mode = document.getElementById('smsMode').value;
+  const message = document.getElementById('smsText').value.trim();
+  const res = document.getElementById('smsRes');
+  const btn = document.getElementById('smsSendBtn');
+  const show = (cls,txt)=>{ res.style.display='block'; res.className='res '+cls; res.textContent=txt; };
+  if (!message) return show('er','Type a message first.');
+  let body = { mode, message };
+  if (mode === 'numbers') {
+    const { ok, bad } = smsParseNumbers(document.getElementById('smsNumbers').value);
+    if (!ok.length) return show('er','Enter at least one valid number (07XXXXXXXX or 2547XXXXXXXX).');
+    body.numbers = ok;
+    if (!confirm(`Send this SMS to ${ok.length} number${ok.length===1?'':'s'}?` + (bad.length?`\n(${bad.length} invalid skipped)`:''))) return;
+  } else {
+    body.audience = document.getElementById('smsAudience').value;
+    const n = document.getElementById('smsAudienceInfo').dataset.count || '?';
+    if (!confirm(`Send this SMS to ${n} users? This cannot be undone.`)) return;
+  }
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const d = await api('/api/admin/sms/send',{method:'POST',body:JSON.stringify(body)});
+    if (!d.success) { show('er','❌ '+(d.message||'Failed')); btn.disabled=false; btn.textContent='📲 Send SMS'; return; }
+    show('ok',`Sending to ${d.total} number${d.total===1?'':'s'}…` + (d.skipped&&d.skipped.length?` (${d.skipped.length} invalid skipped)`:''));
+    smsWatch(d.jobId, d.total);
+  } catch(e){ show('er','❌ '+e.message); btn.disabled=false; btn.textContent='📲 Send SMS'; }
+}
+function smsWatch(jobId, total){
+  const box = document.getElementById('smsProgress'), bar = document.getElementById('smsBar'), txt = document.getElementById('smsProgressTxt');
+  const btn = document.getElementById('smsSendBtn'), res = document.getElementById('smsRes');
+  box.style.display = 'block'; clearInterval(smsPoll);
+  const tick = async ()=>{
+    try {
+      const d = await api('/api/admin/sms/job/'+jobId);
+      if (!d.success) { clearInterval(smsPoll); btn.disabled=false; btn.textContent='📲 Send SMS'; smsLoadHistory(); return; }
+      const j = d.job, pct = total ? Math.round(j.done/total*100) : 0;
+      bar.style.width = pct+'%'; txt.textContent = `${j.done} / ${total} processed`;
+      if (j.status !== 'sending') {
+        clearInterval(smsPoll); bar.style.width='100%';
+        res.style.display='block'; res.className = 'res '+(j.failed? 'er':'ok');
+        res.textContent = j.status==='error' ? '❌ '+j.error : `✅ Done: ${j.accepted} accepted by SMS Grid` + (j.failed?` · ❌ ${j.failed} failed${j.error?' ('+j.error+')':''}`:'');
+        txt.textContent = 'Finished'; btn.disabled=false; btn.textContent='📲 Send SMS';
+        document.getElementById('smsText').value=''; smsCount(); smsLoadHistory();
+      }
+    } catch(e){ /* keep polling */ }
+  };
+  smsPoll = setInterval(tick, 1500); tick();
+}
+async function smsLoadHistory(){
+  const el = document.getElementById('smsHistory');
+  try {
+    const d = await api('/api/admin/sms/history');
+    if (!d.success || !d.data.length) { el.innerHTML = '<div class="empty">No SMS sent yet</div>'; return; }
+    el.innerHTML = '<table class="tbl"><thead><tr><th>When</th><th>To</th><th>Message</th><th>Result</th></tr></thead><tbody>' + d.data.map(x=>{
+      const to = x.mode==='all' ? `Users (${x.audience||'all'}) · ${x.total}` : `${x.total} number${x.total===1?'':'s'}` + (x.sample&&x.sample.length?`<br><span style="color:var(--mt);font-size:11px">${x.sample.join(', ')}${x.total>x.sample.length?'…':''}</span>`:'');
+      const st = x.status==='sending' ? '⏳ sending' : x.status==='error' ? '❌ error' : `✅ ${x.accepted}` + (x.failed?` · ❌ ${x.failed}`:'');
+      const msg = String(x.message).replace(/</g,'&lt;');
+      return `<tr><td>${new Date(x.createdAt).toLocaleString()}</td><td>${to}</td><td style="max-width:260px;white-space:normal">${msg.length>90?msg.slice(0,90)+'…':msg}</td><td>${st}</td></tr>`;
+    }).join('') + '</tbody></table>';
+  } catch(e){ el.innerHTML = '<div class="empty">'+e.message+'</div>'; }
 }
 
 // ══ BANNER CAROUSEL (multi-banner) ══
