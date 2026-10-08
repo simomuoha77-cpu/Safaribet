@@ -151,6 +151,15 @@ document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Ente
 renderGames(); // paint both cards before any network request
 // Wake JuanAI and prepare the player's game sessions NOW, so a tap opens the game instantly.
 try{ fetch('/api/casino/juanai/prelaunch',{method:'POST',headers:headers(),cache:'no-store'}).catch(()=>{}); }catch(_){}
+// Keep each game's launch link ready on this phone so the game page opens with no waiting.
+['aviator','jetx'].forEach(id=>{
+  try{
+    const c=JSON.parse(localStorage.getItem('sb_launch_'+id)||'null');
+    if(c && Date.now()-c.at<20*60*1000) return;
+  }catch(_){}
+  fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:headers(),body:JSON.stringify({gameId:id})})
+    .then(r=>r.json()).then(d=>{ if(d&&d.success&&d.launchUrl){ try{localStorage.setItem('sb_launch_'+id,JSON.stringify({at:Date.now(),url:d.launchUrl}));}catch(_){} } }).catch(()=>{});
+});
 loadCasinoImages(); // artwork sync is background-only and never blocks the lobby
 loadBalance();
 setInterval(loadBalance,5000);
