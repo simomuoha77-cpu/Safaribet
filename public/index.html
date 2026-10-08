@@ -2221,6 +2221,49 @@ function pickMatchFromSearch(matchId, sport) {
   openMatchDetail(matchId);
 }
 
+// ── MARKET WARM-UP ──
+// As match cards scroll into view, quietly ask the server to start fetching
+// their full markets, so by the time a card is tapped the markets are ready.
+(function(){
+  if (!('IntersectionObserver' in window)) return;
+  const seen = new Map();            // matchId -> time last warmed
+  let batch = [], timer = null, observed = null, mo = null;
+  const flush = () => {
+    timer = null;
+    const ids = batch.splice(0, 12);
+    if (ids.length) { try { fetch('/api/odds/warm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }), keepalive:true }).catch(()=>{}); } catch(e) {} }
+    if (batch.length) timer = setTimeout(flush, 700);
+  };
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      io.unobserve(e.target);
+      const id = String(e.target.id || '').slice(3);
+      if (!id) return;
+      const t = seen.get(id);
+      if (t && Date.now() - t < 8 * 60000) return;
+      seen.set(id, Date.now());
+      batch.push(id);
+      if (!timer) timer = setTimeout(flush, 350);
+    });
+  }, { rootMargin: '300px 0px' });
+  const scan = () => document.querySelectorAll('#matchList .mc[id^="mc_"]').forEach(el => { if (!el.__warm) { el.__warm = 1; io.observe(el); } });
+  const attach = () => {
+    const list = document.getElementById('matchList');
+    if (!list) return;
+    if (list !== observed) {
+      observed = list;
+      if (mo) mo.disconnect();
+      let t = null;
+      mo = new MutationObserver(() => { clearTimeout(t); t = setTimeout(scan, 150); });
+      mo.observe(list, { childList:true, subtree:true });
+    }
+    scan();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach); else attach();
+  window.addEventListener('sb:navigated', () => setTimeout(attach, 300));
+})();
+
 function logout(){
   localStorage.removeItem('token'); localStorage.removeItem('user'); SB.reload();
 }

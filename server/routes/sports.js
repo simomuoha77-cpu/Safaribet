@@ -476,37 +476,25 @@ router.lookupIndexedMatch = lookupIndexedMatch;
 // most (live now + kicking off soonest), so opening a match is instant even
 // right after a restart. Light touch: concurrency 3, max 30 per cycle, and only
 // fixtures whose cached markets are missing or older than 8 minutes.
-let prewarmRunning = false;
 async function prewarmMarkets() {
-  if (prewarmRunning || typeof sofaBets.getMatchMarkets !== 'function') return;
-  prewarmRunning = true;
-  try {
-    const now = Date.now();
-    const live = (cache[LIVE_CACHE_KEY]?.data || []);
-    const upcoming = [...searchFootball]
-      .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 6 * 3600000)
-      .sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
-    const todo = [];
-    const seen = new Set();
-    for (const m of [...live, ...upcoming]) {
-      const id = parseIdShape(m.matchId);
-      if (!id) continue;
-      const k = id.sport + ':' + id.providerId;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      if ((sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(id.providerId, id.sport) : Infinity) < 9 * 60000) continue;
-      todo.push(id);
-      if (todo.length >= 10) break;
-    }
-    let i = 0;
-    await Promise.all([0, 1].map(async () => {
-      while (i < todo.length) {
-        const id = todo[i++];
-        try { await sofaBets.getMatchMarkets(id.providerId, id.sport); } catch (_) {}
-      }
-    }));
-    if (todo.length) console.log(`[sports/prewarm] warmed markets for ${todo.length} fixtures`);
-  } finally { prewarmRunning = false; }
+  if (typeof sofaBets.queueWarmMarkets !== 'function') return;
+  const now = Date.now();
+  const live = (cache[LIVE_CACHE_KEY]?.data || []);
+  const upcoming = [...getLastFixtures().data]
+    .filter(m => m && m.status !== 'finished' && m.commenceTime && new Date(m.commenceTime).getTime() - now < 12 * 3600000)
+    .sort((a, b) => new Date(a.commenceTime) - new Date(b.commenceTime));
+  const seen = new Set();
+  let queued = 0;
+  for (const m of [...live, ...upcoming]) {
+    const id = parseIdShape(m.matchId);
+    if (!id) continue;
+    const k = id.sport + ':' + id.providerId;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (sofaBets.queueWarmMarkets(id.providerId, id.sport)) queued++;
+    if (queued >= 40) break;
+  }
+  if (queued) console.log(`[sports/prewarm] queued market warm-up for ${queued} fixtures`);
 }
 
 // Warm at boot, then keep fresh.

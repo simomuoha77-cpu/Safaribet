@@ -374,6 +374,33 @@ router.get('/history/:matchId', async (req, res) => {
 });
 
 // ── MATCH DETAIL WITH ALL MARKETS ──
+// ── WARM MARKETS ──
+// The homepage tells us which games are on screen; we start fetching their full
+// markets in the background (fire-and-forget) so they are ready before a tap.
+const warmLimiter = require('express-rate-limit')({
+  windowMs: 60 * 1000, max: 90,
+  message: { success: false, message: 'Too many requests' }
+});
+router.post('/warm', warmLimiter, express.json({ limit: '4kb' }), (req, res) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 12) : [];
+    let queued = 0;
+    for (const matchId of ids) {
+      const parsed = parseSofaMatchId(matchId);
+      if (!parsed || !parsed.providerId) continue;
+      const ok = sofaBets.queueWarmMarkets(parsed.providerId, parsed.sport, d => {
+        // keep a durable copy so the next visit (even after a restart) is instant
+        Match.updateOne(
+          { matchId: String(matchId), finalVerified: { $ne: true } },
+          { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(parsed.providerId), marketsRefreshedAt: new Date() } }
+        ).catch(() => {});
+      });
+      if (ok) queued++;
+    }
+    res.json({ success: true, queued });
+  } catch (e) { res.json({ success: true, queued: 0 }); }
+});
+
 // A match page must open in under ~3s no matter how slow SofaBets is. Anything
 // that has to hit the provider is raced against this deadline; on timeout we
 // answer with what we already have (flagged marketsPending) while the provider

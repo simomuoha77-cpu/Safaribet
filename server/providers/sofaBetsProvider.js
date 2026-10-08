@@ -516,6 +516,42 @@ function marketsCacheAge(providerMatchId, sportName = 'football') {
   return (c && c.data && c.data.markets.length > 1) ? Date.now() - c.ts : Infinity;
 }
 
+const endpointStats = new Map();   // endpoint -> { tries, useful, last }
+function shouldSkipEndpoint(st) {
+  if (st.tries < 8 || st.useful > 0) return false;
+  if (Date.now() - st.last > 20 * 60000) return false;           // time to probe again
+  for (const v of endpointStats.values()) if (v.useful > 0) return true;   // only skip once something else works
+  return false;
+}
+
+// Background warm-up queue: 3 at a time, de-duplicated, skips fixtures whose
+// markets are already cached (<9 min). Used by the server pre-warm and by the
+// homepage (cards scrolling into view) so a match is ready before it is tapped.
+const warmQueue = [];
+const warmKeys = new Set();
+let warmActive = 0;
+function queueWarmMarkets(providerMatchId, sportName, onDone) {
+  const id = String(providerMatchId || '').trim();
+  const name = String(sportName || 'football').toLowerCase();
+  if (!id) return false;
+  const key = name + ':' + id;
+  if (marketsCacheAge(id, name) < 9 * 60000 || warmKeys.has(key) || warmQueue.length >= 80) return false;
+  warmKeys.add(key);
+  warmQueue.push({ id, name, key, onDone });
+  pumpWarm();
+  return true;
+}
+function pumpWarm() {
+  while (warmActive < 3 && warmQueue.length) {
+    const job = warmQueue.shift();
+    warmActive++;
+    getMatchMarkets(job.id, job.name)
+      .then(d => { if (job.onDone && d && Array.isArray(d.markets) && d.markets.length > 1) job.onDone(d); })
+      .catch(() => {})
+      .finally(() => { warmActive--; warmKeys.delete(job.key); pumpWarm(); });
+  }
+}
+
 function refreshMatchMarkets(id, name, cacheKey) {
   if (matchMarketsInflight.has(cacheKey)) return matchMarketsInflight.get(cacheKey);
   const p = fetchMatchMarketsParallel(id, name, cacheKey).finally(() => matchMarketsInflight.delete(cacheKey));
@@ -531,11 +567,27 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
   const sportIds = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
   const result = { markets: [], bookmakers: [] };
   const hosts = Array.from(new Set([...BASES, 'https://feed.sofabets.com']));
-  const get = (base, path, query) => sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
+  // Endpoint learning: some host/path combinations never return markets (404,
+  // wrong shape). After enough failed tries they are skipped (re-probed every 20
+  // min) so each lookup only asks the endpoints that actually work - far fewer
+  // requests, no 429s, quicker answers. The dedicated live endpoint is never skipped.
+  const epKey = (base, path) => base + String(path).split(encodeURIComponent(id)).join(':id');
+  const get = async (base, path, query) => {
+    const k = epKey(base, path);
+    const st = endpointStats.get(k) || { tries: 0, useful: 0, last: 0 };
+    if (!String(path).startsWith('/api/live-games/') && shouldSkipEndpoint(st)) throw new Error('skipped endpoint (no markets so far)');
+    st.tries++; st.last = Date.now(); endpointStats.set(k, st);
+    return sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
+  };
 
   const saveIfRicher = (payload, source) => {
     try {
       const markets = normalizeMarketList(payload && payload.fixture || payload);
+      if (Array.isArray(markets) && markets.length > 1) {
+        const k = String(source).split(String(id)).join(':id').replace(/:item$/, '');
+        const st = endpointStats.get(k) || { tries: 0, useful: 0, last: 0 };
+        st.useful++; endpointStats.set(k, st);
+      }
       if (!Array.isArray(markets) || markets.length <= result.markets.length) return;
       result.markets = markets;
       result.bookmakers = Array.from(new Set(markets.flatMap(m => [m.bookmaker, ...((m.selections || []).map(x => x.bookmaker))].filter(Boolean))));
@@ -1277,4 +1329,4 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { providerName: 'sofabets', marketsCacheAge, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { providerName: 'sofabets', marketsCacheAge, queueWarmMarkets, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

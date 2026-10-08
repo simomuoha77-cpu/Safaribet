@@ -222,8 +222,8 @@ async function pollFullMarkets(){
   if (_pollingMarkets) return;
   _pollingMarkets = true;
   try {
-    for (let i = 0; i < 8; i++) {
-      await new Promise(r => setTimeout(r, i < 2 ? 1200 : 2500));
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, i < 4 ? 700 : 2000));
       try {
         const d = await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
         if (d && d.success && d.data) {
