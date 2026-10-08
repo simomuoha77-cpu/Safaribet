@@ -509,7 +509,7 @@ router.post('/sms/send', async (req, res) => {
       admin: req.admin?.username || '', mode, audience: mode === 'all' ? (audience || 'all') : (mode === 'filter' ? String(req.body.segment || 'all') : ''),
       message, total: phones.length, sample: phones.slice(0, 5).map(maskPhone), status: 'sending'
     });
-    const job = { id: String(log._id), status: 'sending', total: phones.length, done: 0, accepted: 0, failed: 0, error: '' };
+    const job = { id: String(log._id), status: 'sending', total: phones.length, done: 0, accepted: 0, failed: 0, unconfirmed: 0, error: '', ms: 0 };
     smsJobs.set(job.id, job);
     smsRunning = true;
     audit('BULK_SMS_START', { mode, audience, total: phones.length, by: req.admin?.username });
@@ -517,8 +517,8 @@ router.post('/sms/send', async (req, res) => {
     // run in the background; the request returns immediately
     sendBulkSms(phones, message, done => { job.done = done; })
       .then(async r => {
-        job.status = 'done'; job.done = r.total; job.accepted = r.accepted; job.failed = r.failed; job.error = r.error || '';
-        await SmsLog.updateOne({ _id: log._id }, { $set: { status: 'done', accepted: r.accepted, failed: r.failed, error: r.error || '', failedNumbers: r.failedNumbers.slice(0, 50), finishedAt: new Date() } }).catch(() => {});
+        job.status = 'done'; job.done = r.total; job.accepted = r.accepted; job.failed = r.failed; job.unconfirmed = r.unconfirmed || 0; job.error = r.error || ''; job.ms = r.ms || 0;
+        await SmsLog.updateOne({ _id: log._id }, { $set: { status: 'done', accepted: r.accepted, failed: r.failed, unconfirmed: r.unconfirmed || 0, error: r.error || '', failedNumbers: r.failedNumbers.slice(0, 50), finishedAt: new Date() } }).catch(() => {});
         audit('BULK_SMS_DONE', { total: r.total, accepted: r.accepted, failed: r.failed });
         require('../services/auditService').log('admin.sms.broadcast', { meta: { mode, total: r.total, accepted: r.accepted, failed: r.failed } }).catch(() => {});
       })

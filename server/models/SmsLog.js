@@ -9,6 +9,7 @@ const smsLogSchema = new mongoose.Schema({
   total:        { type: Number, default: 0 },
   accepted:     { type: Number, default: 0 },
   failed:       { type: Number, default: 0 },
+  unconfirmed:  { type: Number, default: 0 },
   failedNumbers:[{ _id: false, phone: String, reason: String }],
   sample:       [String],                               // first few numbers (masked)
   status:       { type: String, enum: ['sending', 'done', 'error'], default: 'sending' },

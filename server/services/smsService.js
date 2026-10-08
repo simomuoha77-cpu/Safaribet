@@ -58,7 +58,8 @@ async function sendSms(phoneE164, message) {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        timeout: 15000
+        timeout: 15000,
+        family: 4            // IPv4 only: a broken IPv6 route makes calls hang until they time out
       }
     );
 
@@ -114,20 +115,23 @@ function normalizeKePhone(raw) {
 async function sendBulkSms(phones, message, onProgress) {
   const key = COMMSGRID_KEY();
   const list = Array.from(new Set((phones || []).map(String)));
-  const out = { total: list.length, accepted: 0, failed: 0, failedNumbers: [], error: null };
+  const out = { total: list.length, accepted: 0, failed: 0, unconfirmed: 0, failedNumbers: [], error: null, ms: 0 };
   if (!key) { out.failed = list.length; out.error = 'SMS service not configured (COMMSGRID_API_KEY missing)'; return out; }
 
   const BATCH = 100;
+  const t0 = Date.now();
   for (let i = 0; i < list.length; i += BATCH) {
     const chunk = list.slice(i, i + BATCH);
     const recipients = chunk.map(p => (p.startsWith('+') ? p : '+' + p));
+    const tb = Date.now();
     try {
       const r = await axios.post(
         `${COMMSGRID_BASE}/sms/send`,
         { recipient: recipients, message, sender_id: COMMSGRID_SENDER },
-        { headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'Content-Type': 'application/json' }, timeout: 30000 }
+        { headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'Content-Type': 'application/json' }, timeout: 60000, family: 4 }
       );
       const data = r.data;
+      console.log(`[sms/bulk] batch of ${chunk.length} answered in ${Date.now() - tb}ms:`, JSON.stringify(data).slice(0, 300));
       const details = data?.data?.details;
       if (data?.status === 'success' && Array.isArray(details) && details.length) {
         for (const d of details) {
@@ -135,12 +139,13 @@ async function sendBulkSms(phones, message, onProgress) {
           if (st === 'SENT' || st === 'QUEUED' || st === 'DELIVERED') out.accepted++;
           else { out.failed++; out.failedNumbers.push({ phone: String(d.to || '').replace('+', ''), reason: d.reason || st || 'failed' }); }
         }
-        // anything the API did not itemise counts as accepted only if the API said so
         const itemised = details.length;
         if (itemised < chunk.length) {
-          const extraOk = Math.max(0, (Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0)) - details.filter(d => ['SENT','QUEUED','DELIVERED'].includes(String(d.status || '').toUpperCase())).length);
-          out.accepted += Math.min(extraOk, chunk.length - itemised);
-          out.failed += (chunk.length - itemised) - Math.min(extraOk, chunk.length - itemised);
+          const okSoFar = details.filter(d => ['SENT','QUEUED','DELIVERED'].includes(String(d.status || '').toUpperCase())).length;
+          const extraOk = Math.max(0, (Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0)) - okSoFar);
+          const add = Math.min(extraOk, chunk.length - itemised);
+          out.accepted += add;
+          out.failed += (chunk.length - itemised) - add;
         }
       } else if (data?.status === 'success') {
         const ok = Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0);
@@ -148,20 +153,29 @@ async function sendBulkSms(phones, message, onProgress) {
         out.failed += chunk.length - Math.min(ok, chunk.length);
       } else {
         out.failed += chunk.length;
-        out.error = data?.message || 'CommsGrid rejected the batch';
+        out.error = data?.message || 'SMS Grid rejected the batch';
         chunk.forEach(p => out.failedNumbers.push({ phone: p, reason: out.error }));
       }
     } catch (e) {
-      const reason = e.response?.data?.message || e.message;
-      console.error('[sms/bulk] batch failed:', e.response?.data || e.message);
-      out.failed += chunk.length;
-      out.error = reason;
-      chunk.forEach(p => out.failedNumbers.push({ phone: p, reason }));
+      const isTimeout = e.code === 'ECONNABORTED' || /timeout/i.test(e.message || '');
+      const apiMsg = e.response?.data?.message || (typeof e.response?.data === 'string' ? e.response.data.slice(0, 120) : '');
+      console.error(`[sms/bulk] batch of ${chunk.length} failed after ${Date.now() - tb}ms:`, e.code || '', e.response?.status || '', e.response?.data || e.message);
+      if (isTimeout) {
+        // No answer is NOT proof of failure - the provider may have queued it. Never retry
+        // automatically (that could text people twice); tell the admin to check first.
+        out.unconfirmed += chunk.length;
+        out.error = 'SMS Grid did not answer in time — the message may still have been sent. Check the phone / SMS Grid dashboard before sending again.';
+      } else {
+        out.failed += chunk.length;
+        out.error = apiMsg || (e.response?.status ? `SMS Grid returned HTTP ${e.response.status}` : (e.code ? `${e.code}: ${e.message}` : e.message));
+        chunk.forEach(p => out.failedNumbers.push({ phone: p, reason: out.error }));
+      }
     }
     if (typeof onProgress === 'function') { try { onProgress(Math.min(i + BATCH, list.length)); } catch (_) {} }
     if (i + BATCH < list.length) await new Promise(r => setTimeout(r, 300));   // gentle pacing between batches
   }
-  console.log(`[sms/bulk] done: ${out.accepted} accepted, ${out.failed} failed of ${out.total}`);
+  out.ms = Date.now() - t0;
+  console.log(`[sms/bulk] done in ${out.ms}ms: ${out.accepted} accepted, ${out.failed} failed, ${out.unconfirmed} unconfirmed of ${out.total}`);
   return out;
 }
 

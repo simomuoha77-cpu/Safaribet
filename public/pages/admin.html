@@ -2510,8 +2510,12 @@ function smsWatch(jobId, total){
       bar.style.width = pct+'%'; txt.textContent = `${j.done} / ${total} processed`;
       if (j.status !== 'sending') {
         clearInterval(smsPoll); bar.style.width='100%';
-        res.style.display='block'; res.className = 'res '+(j.failed? 'er':'ok');
-        res.textContent = j.status==='error' ? '❌ '+j.error : `✅ Done: ${j.accepted} accepted by SMS Grid` + (j.failed?` · ❌ ${j.failed} failed${j.error?' ('+j.error+')':''}`:'');
+        const bad = j.failed || j.unconfirmed;
+        res.style.display='block'; res.className = 'res '+(bad? 'er':'ok');
+        res.textContent = j.status==='error' ? '❌ '+j.error :
+          (j.accepted ? `✅ ${j.accepted} accepted by SMS Grid` : 'Nothing accepted') +
+          (j.failed ? ` · ❌ ${j.failed} failed` : '') + (j.unconfirmed ? ` · ⚠️ ${j.unconfirmed} unconfirmed` : '') +
+          (j.error ? ` — ${j.error}` : '') + (j.ms ? ` (${(j.ms/1000).toFixed(1)}s)` : '');
         txt.textContent = 'Finished'; btn.disabled=false;
         document.getElementById('smsText').value=''; smsCount(); smsClearSel(); smsLoadHistory();
       }
@@ -2526,7 +2530,7 @@ async function smsLoadHistory(){
     if (!d.success || !d.data.length) { el.innerHTML = '<div class="empty">No SMS sent yet</div>'; return; }
     el.innerHTML = '<table class="tbl"><thead><tr><th>When</th><th>To</th><th>Message</th><th>Result</th></tr></thead><tbody>' + d.data.map(x=>{
       const to = (x.mode==='all'||x.mode==='filter') ? `${x.total} users${x.audience&&x.audience!=='all'?' ('+x.audience+')':''}` : x.mode==='users' ? `${x.total} selected user${x.total===1?'':'s'}` : `${x.total} number${x.total===1?'':'s'}` + (x.sample&&x.sample.length?`<br><span style="color:var(--mt);font-size:11px">${x.sample.join(', ')}${x.total>x.sample.length?'…':''}</span>`:'');
-      const st = x.status==='sending' ? '⏳ sending' : x.status==='error' ? '❌ error' : `✅ ${x.accepted}` + (x.failed?` · ❌ ${x.failed}`:'');
+      const st = x.status==='sending' ? '⏳ sending' : x.status==='error' ? '❌ error' : `✅ ${x.accepted}` + (x.failed?` · ❌ ${x.failed}`:'') + (x.unconfirmed?` · ⚠️ ${x.unconfirmed}`:'') + (x.error?`<br><span style="color:var(--mt);font-size:11px">${smsEsc(String(x.error).slice(0,110))}</span>`:'');
       const msg = String(x.message).replace(/</g,'&lt;');
       return `<tr><td>${new Date(x.createdAt).toLocaleString()}</td><td>${to}</td><td style="max-width:260px;white-space:normal">${msg.length>90?msg.slice(0,90)+'…':msg}</td><td>${st}</td></tr>`;
     }).join('') + '</tbody></table>';
