@@ -926,33 +926,32 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 <!-- 17b. SMS (CommsGrid / SMS Grid) -->
 <div class="panel" id="panel-sms">
   <div class="sec">
-    <div class="sec-hdr"><h3>📲 Send SMS (SMS Grid)</h3></div>
-    <label class="lbl">Send to</label>
-    <select class="inp" id="smsMode" onchange="smsModeChanged()">
-      <option value="numbers">Single / specific number(s)</option>
-      <option value="all">Many users (all registered users)</option>
-    </select>
-
-    <div id="smsNumbersBox">
-      <label class="lbl">Phone number(s)</label>
-      <textarea class="inp" id="smsNumbers" rows="3" placeholder="0712345678&#10;0722000111, 254733222333 (one or many — separate with commas, spaces or new lines)" oninput="smsNumbersChanged()"></textarea>
-      <div class="mt" id="smsNumbersInfo" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)"></div>
-    </div>
-
-    <div id="smsAudienceBox" style="display:none">
-      <label class="lbl">Which users</label>
-      <select class="inp" id="smsAudience" onchange="smsLoadAudience()">
+    <div class="sec-hdr"><h3>📲 Send SMS — pick users</h3></div>
+    <div class="inp-row">
+      <input class="inp" id="smsSearch" placeholder="Search username or phone…" oninput="smsSearchChanged()"/>
+      <select class="inp" id="smsSegment" style="max-width:190px" onchange="smsSegmentChanged()">
         <option value="all">All users</option>
-        <option value="active">Active bettors (bet in last 30 days)</option>
-        <option value="inactive">Inactive users (no bet in 30 days)</option>
+        <option value="active">Active bettors (30d)</option>
+        <option value="inactive">Inactive (30d)</option>
+        <option value="balance">With balance</option>
       </select>
-      <div class="mt" id="smsAudienceInfo" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)"></div>
     </div>
 
-    <label class="lbl">Message</label>
+    <div id="smsSelBar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 10px">
+      <span id="smsSelCount" style="font-weight:700;color:var(--g)">0 selected</span>
+      <button class="btn" style="padding:6px 10px;font-size:12px" onclick="smsSelectPage()">Select this page</button>
+      <button class="btn" id="smsSelAllBtn" style="padding:6px 10px;font-size:12px" onclick="smsSelectAllMatching()">Select all</button>
+      <button class="btn" style="padding:6px 10px;font-size:12px" onclick="smsClearSel()">Clear</button>
+    </div>
+
+    <div class="tbl-wrap" id="smsUsers"><div class="empty">Loading users…</div></div>
+    <div id="smsPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12px;color:var(--mt)"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-hdr"><h3>✉️ Message</h3></div>
     <textarea class="inp" id="smsText" rows="4" maxlength="459" placeholder="Type your SMS..." oninput="smsCount()"></textarea>
     <div class="mt" id="smsCounter" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)">0 / 459 characters</div>
-
     <button class="btn btn-g btn-full" id="smsSendBtn" onclick="smsSend()">📲 Send SMS</button>
     <div class="res" id="smsRes"></div>
     <div id="smsProgress" style="display:none;margin-top:10px">
@@ -1493,7 +1492,7 @@ function nav(name,el){
   else if(name==='backup') loadStorageStats();
   else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
-  else if(name==='sms') { smsModeChanged(); smsLoadHistory(); }
+  else if(name==='sms') { smsLoadUsers(1); smsLoadHistory(); }
 }
 
 function toggleSidebar(){
@@ -2411,30 +2410,67 @@ async function sendNotif(){
 }
 
 // ══ SMS (SMS Grid) ══
-let smsPoll = null;
-function smsModeChanged(){
-  const all = document.getElementById('smsMode').value === 'all';
-  document.getElementById('smsNumbersBox').style.display = all ? 'none' : '';
-  document.getElementById('smsAudienceBox').style.display = all ? '' : 'none';
-  if (all) smsLoadAudience();
+let smsPoll = null, smsSearchTimer = null;
+const smsState = { page:1, pages:1, total:0, rows:[], sel:new Set(), allMatching:false, excluded:new Set(), search:'', segment:'all' };
+
+function smsEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function smsIsSel(id){ return smsState.allMatching ? !smsState.excluded.has(id) : smsState.sel.has(id); }
+function smsSelCount(){ return smsState.allMatching ? Math.max(0, smsState.total - smsState.excluded.size) : smsState.sel.size; }
+
+async function smsLoadUsers(page){
+  smsState.page = page || 1;
+  const box = document.getElementById('smsUsers');
+  box.innerHTML = '<div class="empty">Loading users…</div>';
+  try {
+    const q = new URLSearchParams({ page:smsState.page, search:smsState.search, segment:smsState.segment });
+    const d = await api('/api/admin/sms/users?'+q.toString());
+    if (!d.success) { box.innerHTML = '<div class="empty">'+smsEsc(d.message||'Failed to load users')+'</div>'; return; }
+    smsState.rows = d.data; smsState.total = d.total; smsState.pages = d.pages;
+    smsRender();
+  } catch(e){ box.innerHTML = '<div class="empty">'+smsEsc(e.message)+'</div>'; }
 }
-function smsParseNumbers(txt){
-  const raw = String(txt||'').split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
-  const ok = new Set(), bad = [];
-  raw.forEach(r=>{
-    let p = r.replace(/[^\d]/g,'');
-    if (p.startsWith('0')) p = '254'+p.slice(1);
-    else if (p.length===9) p = '254'+p;
-    if (/^254[17]\d{8}$/.test(p)) ok.add(p); else bad.push(r);
+function smsRender(){
+  const box = document.getElementById('smsUsers');
+  if (!smsState.rows.length) box.innerHTML = '<div class="empty">No users found</div>';
+  else {
+    const allOnPage = smsState.rows.every(r=>smsIsSel(r._id));
+    box.innerHTML = '<table class="tbl"><thead><tr><th style="width:32px"><input type="checkbox" '+(allOnPage?'checked':'')+' onchange="smsTogglePage(this.checked)"/></th><th>User</th><th>Phone</th><th>Balance</th><th>Joined</th></tr></thead><tbody>' +
+      smsState.rows.map(r=>`<tr style="cursor:pointer" onclick="smsToggle('${r._id}')"><td><input type="checkbox" ${smsIsSel(r._id)?'checked':''} onclick="event.stopPropagation();smsToggle('${r._id}')"/></td><td>${smsEsc(r.username)}</td><td>${smsEsc(fmtPhone(r.phone))}</td><td>KES ${Number(r.balance||0).toLocaleString('en-KE',{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td>${new Date(r.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</td></tr>`).join('') +
+      '</tbody></table>';
+  }
+  document.getElementById('smsPager').innerHTML =
+    `<button class="btn" style="padding:6px 12px;font-size:12px" ${smsState.page<=1?'disabled':''} onclick="smsLoadUsers(${smsState.page-1})">← Prev</button>` +
+    `<span>Page ${smsState.page} of ${smsState.pages} · ${smsState.total} user${smsState.total===1?'':'s'}</span>` +
+    `<button class="btn" style="padding:6px 12px;font-size:12px" ${smsState.page>=smsState.pages?'disabled':''} onclick="smsLoadUsers(${smsState.page+1})">Next →</button>`;
+  smsUpdateSel();
+}
+function smsUpdateSel(){
+  const n = smsSelCount();
+  document.getElementById('smsSelCount').textContent = n + ' selected';
+  document.getElementById('smsSelAllBtn').textContent = `Select all ${smsState.total}`;
+  document.getElementById('smsSendBtn').textContent = n ? `📲 Send SMS to ${n} user${n===1?'':'s'}` : '📲 Send SMS';
+}
+function smsToggle(id){
+  if (smsState.allMatching) { smsState.excluded.has(id) ? smsState.excluded.delete(id) : smsState.excluded.add(id); }
+  else { smsState.sel.has(id) ? smsState.sel.delete(id) : smsState.sel.add(id); }
+  smsRender();
+}
+function smsTogglePage(on){
+  smsState.rows.forEach(r=>{
+    if (smsState.allMatching) { on ? smsState.excluded.delete(r._id) : smsState.excluded.add(r._id); }
+    else { on ? smsState.sel.add(r._id) : smsState.sel.delete(r._id); }
   });
-  return { ok:[...ok], bad };
+  smsRender();
 }
-function smsNumbersChanged(){
-  const { ok, bad } = smsParseNumbers(document.getElementById('smsNumbers').value);
-  document.getElementById('smsNumbersInfo').textContent = ok.length || bad.length
-    ? `${ok.length} valid number${ok.length===1?'':'s'}` + (bad.length ? ` · ${bad.length} invalid will be skipped (${bad.slice(0,3).join(', ')}${bad.length>3?'…':''})` : '')
-    : '';
+function smsSelectPage(){ smsTogglePage(true); }
+function smsSelectAllMatching(){ smsState.allMatching = true; smsState.excluded.clear(); smsState.sel.clear(); smsRender(); }
+function smsClearSel(){ smsState.allMatching = false; smsState.excluded.clear(); smsState.sel.clear(); smsRender(); }
+function smsSearchChanged(){
+  clearTimeout(smsSearchTimer);
+  smsSearchTimer = setTimeout(()=>{ smsState.search = document.getElementById('smsSearch').value.trim(); if (smsState.allMatching) smsClearSel(); smsLoadUsers(1); }, 350);
 }
+function smsSegmentChanged(){ smsState.segment = document.getElementById('smsSegment').value; if (smsState.allMatching) smsClearSel(); smsLoadUsers(1); }
+
 function smsCount(){
   const t = document.getElementById('smsText').value;
   const uni = /[^\u0000-\u007F]/.test(t);                 // emoji / non-GSM chars use shorter segments
@@ -2442,41 +2478,25 @@ function smsCount(){
   const seg = Math.max(1, Math.ceil(t.length/per));
   document.getElementById('smsCounter').textContent = `${t.length} / 459 characters · ${t.length?seg:0} SMS segment${seg===1?'':'s'}${uni?' (special characters/emoji — shorter segments)':''}`;
 }
-async function smsLoadAudience(){
-  const aud = document.getElementById('smsAudience').value;
-  const el = document.getElementById('smsAudienceInfo');
-  el.textContent = 'Counting…';
-  try {
-    const d = await api('/api/admin/sms/audience?audience='+aud);
-    el.textContent = d.success ? `Will send to ${d.count} user${d.count===1?'':'s'}` + (d.invalid?` (${d.invalid} skipped — invalid phone)`:'') : (d.message||'Could not count users');
-    el.dataset.count = d.success ? d.count : 0;
-  } catch(e){ el.textContent = e.message; }
-}
 async function smsSend(){
-  const mode = document.getElementById('smsMode').value;
   const message = document.getElementById('smsText').value.trim();
   const res = document.getElementById('smsRes');
   const btn = document.getElementById('smsSendBtn');
   const show = (cls,txt)=>{ res.style.display='block'; res.className='res '+cls; res.textContent=txt; };
+  const n = smsSelCount();
+  if (!n) return show('er','Select at least one user from the list.');
   if (!message) return show('er','Type a message first.');
-  let body = { mode, message };
-  if (mode === 'numbers') {
-    const { ok, bad } = smsParseNumbers(document.getElementById('smsNumbers').value);
-    if (!ok.length) return show('er','Enter at least one valid number (07XXXXXXXX or 2547XXXXXXXX).');
-    body.numbers = ok;
-    if (!confirm(`Send this SMS to ${ok.length} number${ok.length===1?'':'s'}?` + (bad.length?`\n(${bad.length} invalid skipped)`:''))) return;
-  } else {
-    body.audience = document.getElementById('smsAudience').value;
-    const n = document.getElementById('smsAudienceInfo').dataset.count || '?';
-    if (!confirm(`Send this SMS to ${n} users? This cannot be undone.`)) return;
-  }
+  const body = smsState.allMatching
+    ? { mode:'filter', message, search:smsState.search, segment:smsState.segment, excludeIds:[...smsState.excluded] }
+    : { mode:'users', message, userIds:[...smsState.sel] };
+  if (!confirm(`Send this SMS to ${n} user${n===1?'':'s'}?` + (n>1?'\nThis cannot be undone.':''))) return;
   btn.disabled = true; btn.textContent = 'Sending…';
   try {
     const d = await api('/api/admin/sms/send',{method:'POST',body:JSON.stringify(body)});
-    if (!d.success) { show('er','❌ '+(d.message||'Failed')); btn.disabled=false; btn.textContent='📲 Send SMS'; return; }
-    show('ok',`Sending to ${d.total} number${d.total===1?'':'s'}…` + (d.skipped&&d.skipped.length?` (${d.skipped.length} invalid skipped)`:''));
+    if (!d.success) { show('er','❌ '+(d.message||'Failed')); btn.disabled=false; smsUpdateSel(); return; }
+    show('ok',`Sending to ${d.total} number${d.total===1?'':'s'}…` + (d.skipped&&d.skipped.length?` (${d.skipped.length} skipped — invalid phone)`:''));
     smsWatch(d.jobId, d.total);
-  } catch(e){ show('er','❌ '+e.message); btn.disabled=false; btn.textContent='📲 Send SMS'; }
+  } catch(e){ show('er','❌ '+e.message); btn.disabled=false; smsUpdateSel(); }
 }
 function smsWatch(jobId, total){
   const box = document.getElementById('smsProgress'), bar = document.getElementById('smsBar'), txt = document.getElementById('smsProgressTxt');
@@ -2485,15 +2505,15 @@ function smsWatch(jobId, total){
   const tick = async ()=>{
     try {
       const d = await api('/api/admin/sms/job/'+jobId);
-      if (!d.success) { clearInterval(smsPoll); btn.disabled=false; btn.textContent='📲 Send SMS'; smsLoadHistory(); return; }
+      if (!d.success) { clearInterval(smsPoll); btn.disabled=false; smsUpdateSel(); smsLoadHistory(); return; }
       const j = d.job, pct = total ? Math.round(j.done/total*100) : 0;
       bar.style.width = pct+'%'; txt.textContent = `${j.done} / ${total} processed`;
       if (j.status !== 'sending') {
         clearInterval(smsPoll); bar.style.width='100%';
         res.style.display='block'; res.className = 'res '+(j.failed? 'er':'ok');
         res.textContent = j.status==='error' ? '❌ '+j.error : `✅ Done: ${j.accepted} accepted by SMS Grid` + (j.failed?` · ❌ ${j.failed} failed${j.error?' ('+j.error+')':''}`:'');
-        txt.textContent = 'Finished'; btn.disabled=false; btn.textContent='📲 Send SMS';
-        document.getElementById('smsText').value=''; smsCount(); smsLoadHistory();
+        txt.textContent = 'Finished'; btn.disabled=false;
+        document.getElementById('smsText').value=''; smsCount(); smsClearSel(); smsLoadHistory();
       }
     } catch(e){ /* keep polling */ }
   };
@@ -2505,7 +2525,7 @@ async function smsLoadHistory(){
     const d = await api('/api/admin/sms/history');
     if (!d.success || !d.data.length) { el.innerHTML = '<div class="empty">No SMS sent yet</div>'; return; }
     el.innerHTML = '<table class="tbl"><thead><tr><th>When</th><th>To</th><th>Message</th><th>Result</th></tr></thead><tbody>' + d.data.map(x=>{
-      const to = x.mode==='all' ? `Users (${x.audience||'all'}) · ${x.total}` : `${x.total} number${x.total===1?'':'s'}` + (x.sample&&x.sample.length?`<br><span style="color:var(--mt);font-size:11px">${x.sample.join(', ')}${x.total>x.sample.length?'…':''}</span>`:'');
+      const to = (x.mode==='all'||x.mode==='filter') ? `${x.total} users${x.audience&&x.audience!=='all'?' ('+x.audience+')':''}` : x.mode==='users' ? `${x.total} selected user${x.total===1?'':'s'}` : `${x.total} number${x.total===1?'':'s'}` + (x.sample&&x.sample.length?`<br><span style="color:var(--mt);font-size:11px">${x.sample.join(', ')}${x.total>x.sample.length?'…':''}</span>`:'');
       const st = x.status==='sending' ? '⏳ sending' : x.status==='error' ? '❌ error' : `✅ ${x.accepted}` + (x.failed?` · ❌ ${x.failed}`:'');
       const msg = String(x.message).replace(/</g,'&lt;');
       return `<tr><td>${new Date(x.createdAt).toLocaleString()}</td><td>${to}</td><td style="max-width:260px;white-space:normal">${msg.length>90?msg.slice(0,90)+'…':msg}</td><td>${st}</td></tr>`;
