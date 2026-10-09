@@ -554,7 +554,7 @@ function queueWarmMarkets(providerMatchId, sportName, onDone, maxAgeMs) {
   return true;
 }
 function pumpWarm() {
-  while (warmActive < 4 && warmQueue.length && Date.now() >= warmPausedUntil) {
+  while (warmActive < 6 && warmQueue.length && Date.now() >= warmPausedUntil) {
     const job = warmQueue.shift();
     warmActive++;
     refreshMatchMarkets(job.id, job.name, job.key)
@@ -1310,6 +1310,8 @@ async function fetchLiveFootballFixtures(sportName = 'football', opts) {
 
 // A live endpoint that answers 404 for a sport (some hosts only serve football) is remembered
 // for 30 minutes, so we neither retry it every refresh nor spam the logs.
+const liveEmptyUntil = new Map();
+const liveGoodVariant = new Map();
 const liveDead = new Map();
 const LIVE_DEAD_MS = 30 * 60 * 1000;
 const liveDeadLogged = new Set();
@@ -1327,6 +1329,14 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
     ...ids.map(id => ({ sportId: String(id) }))
   ];
   if (sport === 'football') variants.length = 1;
+  // Non-football sports with nothing live are re-probed only every 90s, and the
+  // variant that worked last time is tried first. Keeps the extra live probing
+  // from competing with market lookups for SofaBets' rate limit.
+  if (sport !== 'football') {
+    if (Date.now() < (liveEmptyUntil.get(sport) || 0)) return [];
+    const good = liveGoodVariant.get(sport);
+    if (good != null && good < variants.length) variants.unshift(variants.splice(good, 1)[0]);
+  }
   let lastError = null;
   let anyTried = false;
 
@@ -1363,6 +1373,7 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
           matches = matches.map(m => Object.assign(m, { status: 'IN_PLAY' }));
 
           if (matches.length) {
+            if (sport !== 'football') liveGoodVariant.set(sport, vi);
             console.log(`[sofaBetsProvider] live sync: ${matches.length} live ${sport} fixtures from ${base}${path} (variant ${vi})`);
             return matches;
           }
@@ -1379,6 +1390,7 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
     }
   }
 
+  if (sport !== 'football' && !lastError) liveEmptyUntil.set(sport, Date.now() + 90000);
   if (lastError && anyTried) console.warn('[sofaBetsProvider] live feed unavailable (' + sport + '): ' + lastError.message);
   return [];
 }

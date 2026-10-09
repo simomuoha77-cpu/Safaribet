@@ -523,7 +523,8 @@
     if (!id || !_fetch) return Promise.resolve(null);
     var e = mmInflight[id];
     if (e && Date.now() - e.ts < 20000) return e.p;
-    var p = _fetch('/api/odds/match/' + encodeURIComponent(id) + '?rich=1', { cache: 'no-store' })
+    var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null; if (ac) setTimeout(function () { try { ac.abort(); } catch (e) {} }, 8000);
+    var p = _fetch('/api/odds/match/' + encodeURIComponent(id) + '?rich=1', ac ? { cache: 'no-store', signal: ac.signal } : { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d && d.success && d.data && !d.data.marketsPending) {
