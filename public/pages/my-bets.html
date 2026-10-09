@@ -199,11 +199,13 @@ async function refreshBalance(){
     }
   }catch(e){}
 }
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshBalance(); });
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshBalance(); loadBets(true); } });
+setInterval(()=>{ if(!document.hidden){ loadBets(true); } }, 30000);
 
 async function loadBets(hadCache){
   try{
     const r=await fetch('/api/bets/my',{headers:{'Authorization':'Bearer '+localStorage.getItem('token')}});
+    if(r.status===401||r.status===403){ try{localStorage.removeItem('token');localStorage.removeItem('user');localStorage.removeItem(betsCacheKey());}catch(e){} SB.go('/login'); return; }
     const d=await r.json();
     if(!d.success){ if(!hadCache) renderEmpty(); return; }
     writeBetsCache(d.data);
@@ -221,6 +223,12 @@ function filter(f,el){
 function fixtureBadge(s){
   let st=s.fixtureState, kick=s.kickoffAt||(s.commenceTime?new Date(s.commenceTime).getTime():0);
   if(!st){ st = kick && kick>Date.now() ? 'not_started' : null; }
+  // A saved copy can be older than kick-off: always let the clock correct it.
+  if(st==='not_started' && kick && kick<=Date.now()){
+    const sp=String(s.sport||'football').toLowerCase();
+    const LEN={football:125,basketball:160,tennis:240,hockey:165,ice_hockey:165,cricket:600,rugby:120,volleyball:150,handball:110,baseball:200,table_tennis:120};
+    st = (Date.now()-kick) < (LEN[sp]||(/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sp)?180:125))*60000 ? 'live' : 'awaiting';
+  }
   if(!st) return '';
   const base='display:inline-block;font-size:11px;font-weight:700;margin-top:3px;padding:2px 8px;border-radius:999px;';
   if(st==='live') return `<div><span style="${base}color:#ff4d4d;background:rgba(255,77,77,0.12)">&#9679; LIVE</span></div>`;
