@@ -41,6 +41,33 @@ function requireConfigured(req, res, next) {
   next();
 }
 
+// Launch sessions are stateless signed tokens (valid hours), so a recent one is reused:
+// tapping a game opens instantly. The lobby also pre-creates them in the background.
+const launchCache = new Map();           // `${userId}:${gameId}` -> { at, data }
+const launchInflight = new Map();
+const LAUNCH_TTL_MS = 25 * 60 * 1000;
+
+function launchFor(user, gameId) {
+  const key = `${user._id}:${gameId}`;
+  const hit = launchCache.get(key);
+  if (hit && Date.now() - hit.at < LAUNCH_TTL_MS) return Promise.resolve(hit.data);
+  if (launchInflight.has(key)) return launchInflight.get(key);
+  const p = juanai.launchDirect(gameId, user._id, user.username || user.name || String(user._id))
+    .then(data => { if (data && data.launchUrl) launchCache.set(key, { at: Date.now(), data }); return data; })
+    .finally(() => launchInflight.delete(key));
+  launchInflight.set(key, p);
+  return p;
+}
+const launchSweep = setInterval(() => { const now = Date.now(); for (const [k, v] of launchCache) if (now - v.at > LAUNCH_TTL_MS * 2) launchCache.delete(k); }, 10 * 60 * 1000);
+if (launchSweep.unref) launchSweep.unref();
+
+// Keep JuanAI's server awake (free hosting sleeps after ~15 min idle and takes 30-50s to wake).
+if (juanai.configured()) {
+  const ping = () => { try { require('axios').get(juanai.cfg().base + '/', { timeout: 20000, validateStatus: () => true }).catch(() => {}); } catch (_) {} };
+  const k0 = setTimeout(ping, 2000); if (k0.unref) k0.unref();
+  const k1 = setInterval(ping, 4 * 60 * 1000); if (k1.unref) k1.unref();
+}
+
 function gameIdFrom(req) {
   return String(req.params.gameId || req.body?.gameId || '').trim();
 }
@@ -79,6 +106,13 @@ router.get('/games', auth, requireConfigured, async (req, res) => {
   } catch (e) { fail(res, e, 'JuanAI casino games are unavailable right now.'); }
 });
 
+// Called by the lobby in the background: wakes JuanAI and creates the player's game session
+// ahead of time, so the tap on Aviator/JetX opens instantly. Always answers at once.
+router.post('/prelaunch', auth, requireConfigured, (req, res) => {
+  ['aviator', 'jetx'].forEach(id => launchFor(req.user, id).catch(() => {}));
+  res.json({ success: true });
+});
+
 // Return the actual JuanAI game URL. SafariBet never recreates the provider game.
 router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) => {
   try {
@@ -91,11 +125,7 @@ router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) 
     if (!['aviator', 'jetx'].includes(gameId)) {
       return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     }
-    const data = await juanai.launchDirect(
-      gameId,
-      req.user._id,
-      req.user.username || req.user.name || String(req.user._id)
-    );
+    const data = await launchFor(req.user, gameId);
     if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
     res.json({
       success: true,
