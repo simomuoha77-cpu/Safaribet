@@ -475,6 +475,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
   USER=JSON.parse(u);
   renderProfile();
   syncThemeUI();
+  paintCached(); // balances + stats appear instantly from the last known values; the fetches below refresh them
   await Promise.all([loadWallet(),loadStats(),loadTx(),loadKycStatus(),loadLoyaltyStatus()]);
 });
 
@@ -501,31 +502,46 @@ function renderProfile(){
   document.getElementById('editEmail').value=USER.email||'';
 }
 
+// Last known wallet/stats are kept per user so this page never opens on blank 0.00 placeholders.
+function acctKey(n){ return 'sb_acct_'+n+'_'+((USER&&(USER._id||USER.id))||'u'); }
+function paintWallet(w){
+  document.getElementById('balTop').textContent=Number(w.spendable||0).toFixed(2);
+  document.getElementById('mainBal').textContent=Number(w.main||0).toFixed(2);
+  document.getElementById('bonusBal').textContent=Number(w.bonus||0).toFixed(2);
+  document.getElementById('lockedBal').textContent=Number(w.locked||0).toFixed(2);
+}
+function paintStats(s){
+  document.getElementById('sTot').textContent=s.totalBets||0;
+  document.getElementById('sWon').textContent=s.wonCount||0;
+  document.getElementById('sLost').textContent=s.lostCount||0;
+  document.getElementById('sPend').textContent=s.pendingCount||0;
+  document.getElementById('sStake').textContent=parseFloat(s.totalStake||0).toFixed(0);
+  document.getElementById('sEarn').textContent=parseFloat(s.totalWon||0).toFixed(0);
+}
+function paintCached(){
+  try{ const w=JSON.parse(localStorage.getItem(acctKey('wallet'))||'null'); if(w) paintWallet(w); }catch{}
+  try{ const s=JSON.parse(localStorage.getItem(acctKey('stats'))||'null'); if(s) paintStats(s); }catch{}
+}
+
 // Wallet: main/bonus/locked balances from the real wallet endpoint (not USER.balance)
 async function loadWallet(){
   try{
     const r=await fetch('/api/wallet/balance',{headers:authHeaders()});
     const d=await r.json();
     if(!d.success) return;
-    document.getElementById('balTop').textContent=d.data.spendable.toFixed(2);
-    document.getElementById('mainBal').textContent=d.data.main.toFixed(2);
-    document.getElementById('bonusBal').textContent=d.data.bonus.toFixed(2);
-    document.getElementById('lockedBal').textContent=d.data.locked.toFixed(2);
+    paintWallet(d.data);
+    try{ localStorage.setItem(acctKey('wallet'),JSON.stringify(d.data)); }catch{}
   }catch{}
 }
 
 async function loadStats(){
   try{
-    const r=await fetch('/api/bets/my?limit=1',{headers:authHeaders()});
+    const r=await fetch('/api/bets/my?statsOnly=1',{headers:authHeaders()});
     const d=await r.json();
     if(!d.success) return;
     const s=d.stats||{};
-    document.getElementById('sTot').textContent=s.totalBets||0;
-    document.getElementById('sWon').textContent=s.wonCount||0;
-    document.getElementById('sLost').textContent=s.lostCount||0;
-    document.getElementById('sPend').textContent=s.pendingCount||0;
-    document.getElementById('sStake').textContent=parseFloat(s.totalStake||0).toFixed(0);
-    document.getElementById('sEarn').textContent=parseFloat(s.totalWon||0).toFixed(0);
+    paintStats(s);
+    try{ localStorage.setItem(acctKey('stats'),JSON.stringify(s)); }catch{}
   }catch{}
 }
 

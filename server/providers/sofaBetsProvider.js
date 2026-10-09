@@ -513,11 +513,22 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
       return cached.data;
     }
   }
+  const releaseCrawler = holdCrawler(8000);
+  return refreshMatchMarkets(id, name, cacheKey).finally(releaseCrawler);
+}
+
+// Pauses the background crawler while a customer is waiting (auto-released after
+// maxMs at the latest, so a stuck lookup can never freeze the crawler).
+function holdCrawler(maxMs) {
   userMarketsActive++;
-  return refreshMatchMarkets(id, name, cacheKey).finally(() => {
+  let done = false;
+  const release = () => {
+    if (done) return; done = true; clearTimeout(timer);
     userMarketsActive = Math.max(0, userMarketsActive - 1);
     if (userMarketsActive === 0) setTimeout(pumpWarm, 1500).unref();   // let the crawler resume shortly after
-  });
+  };
+  const timer = setTimeout(release, maxMs || 5000); if (timer.unref) timer.unref();
+  return release;
 }
 
 // Age (ms) of the cached market list for a fixture, Infinity when none/thin.
@@ -1456,4 +1467,4 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { holdCrawler, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

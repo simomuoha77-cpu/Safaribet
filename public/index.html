@@ -2320,6 +2320,8 @@ async function refreshBalance(){
     if(d.success){
       document.getElementById('balv').textContent=parseFloat(d.data.spendable).toFixed(2);
       if(USER){ USER.balance=d.data.spendable; localStorage.setItem('user',JSON.stringify(USER)); }
+      // Same cache the Account page paints from, so it opens with the right numbers instantly.
+      try{ localStorage.setItem('sb_acct_wallet_'+((USER&&(USER._id||USER.id))||'u'),JSON.stringify(d.data)); }catch(e2){}
     }
   }catch(e){ /* non-fatal — keep showing last known value */ }
 }

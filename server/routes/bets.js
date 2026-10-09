@@ -161,6 +161,7 @@ async function placedBody(bet) {
 async function placeBetHandler(req, res) {
   const t0 = Date.now(), marks = {};
   const mark = k => { marks[k] = Date.now() - t0; };
+  try { sofaBets.holdCrawler(3500); } catch (_) {}   // a customer placing a bet outranks the background crawler
   try {
     const { selections, stake } = req.body;
     // A repeat of a press that already produced a bet: answer with that bet. Nothing is charged twice.
@@ -296,10 +297,12 @@ async function placeBetHandler(req, res) {
           // the background); a prematch fixture missing from MongoDB gets one capped
           // lookup. A slow provider fails fast instead of holding the request.
           const budget = 2500;
-          const liveR = await placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget);
+          const liveP = placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget);
+          const preP = !isLiveId ? placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget) : null;   // started together with the live lookup (was: one after the other, up to 5s)
+          const liveR = await liveP;
           let direct = liveR.ok ? liveR.v : null;
           if (!direct && !isLiveId) {
-            const preR = await placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget);
+            const preR = await preP;
             direct = preR.ok ? preR.v : null;
             if (!direct && (preR.timeout || liveR.timeout)) return res.status(503).json({ success: false, code: 'timeout', message: 'The odds provider is responding slowly. Please try again in a moment.' });
           } else if (!direct && liveR.timeout) {
@@ -449,7 +452,9 @@ async function placeBetHandler(req, res) {
       spendable: parseFloat((w.main + w.bonus).toFixed(2)),
       withdrawable: w.main
     };
-    await Promise.all([
+    // Audit rows are written in parallel with the response instead of making the player wait
+    // for them (the stake is already taken and the bet is already saved at this point).
+    Promise.all([
       Transaction.create({
         userId:      req.user._id,
         type:        'stake',
@@ -459,11 +464,11 @@ async function placeBetHandler(req, res) {
         description: `Bet ${bet.betCode} — ${verifiedSelections.length} selection(s)`
       }),
       ...(deduction.history || [])
-    ]);
+    ]).catch(e => console.error('[bets/place] audit write failed', bet.betCode, e.message));
 
     mark('done');
     // Where the time goes: logged whenever a placement is slow, so a slow step can be pinned down.
-    if (marks.done > 3000) console.warn(`[bets/place] SLOW ${marks.done}ms for ${req.user._id}:`, JSON.stringify(marks), `legs=${verifiedSelections.length}`);
+    if (marks.done > 1500) console.warn(`[bets/place] SLOW ${marks.done}ms for ${req.user._id}:`, JSON.stringify(marks), `legs=${verifiedSelections.length}`);
     res.json({
       success:      true,
       betCode:      bet.betCode,
@@ -522,8 +527,28 @@ router.get('/place-status/:key', auth, async (req, res) => {
 });
 
 // ── MY BETS (with filters) ──
+// Totals across ALL of a user's bets (account summary cards).
+async function betStatsFor(userId) {
+  const statsAgg = await Bet.aggregate([
+    { $match: { userId } },
+    { $group: {
+      _id: null,
+      totalBets: { $sum: 1 },
+      wonCount: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, 1, 0] } },
+      lostCount: { $sum: { $cond: [{ $eq: ['$status', 'lost'] }, 1, 0] } },
+      pendingCount: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+      totalStake: { $sum: '$stake' },
+      totalWon: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, { $ifNull: ['$netPayout', '$cashOutAmount'] }, 0] } }
+    } }
+  ]);
+  const stats = statsAgg[0] || { totalBets:0, wonCount:0, lostCount:0, pendingCount:0, totalStake:0, totalWon:0 };
+  delete stats._id;
+  return stats;
+}
+
 router.get('/my', auth, async (req, res) => {
   try {
+    if (req.query.statsOnly === '1') return res.json({ success: true, stats: await betStatsFor(req.user._id) });   // account page: totals only, no bet list
     const { status, from, to, page = 1 } = req.query;
     const limit = 20;
     const skip = (parseInt(page) - 1) * limit;
@@ -545,20 +570,7 @@ router.get('/my', auth, async (req, res) => {
     // Aggregate stats across ALL of the user's bets (not just this page) — used by
     // the account summary cards. Computed here rather than a separate endpoint to
     // avoid an extra round trip on every account page load.
-    const statsAgg = await Bet.aggregate([
-      { $match: { userId: req.user._id } },
-      { $group: {
-        _id: null,
-        totalBets: { $sum: 1 },
-        wonCount: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, 1, 0] } },
-        lostCount: { $sum: { $cond: [{ $eq: ['$status', 'lost'] }, 1, 0] } },
-        pendingCount: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
-        totalStake: { $sum: '$stake' },
-        totalWon: { $sum: { $cond: [{ $in: ['$status', ['won','cashed_out']] }, { $ifNull: ['$netPayout', '$cashOutAmount'] }, 0] } }
-      } }
-    ]);
-    const stats = statsAgg[0] || { totalBets:0, wonCount:0, lostCount:0, pendingCount:0, totalStake:0, totalWon:0 };
-    delete stats._id;
+    const stats = await betStatsFor(req.user._id);
 
     // Where is each still-pending game right now? (live / not started / finished, awaiting result)
     try {
