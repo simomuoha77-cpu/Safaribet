@@ -43,6 +43,11 @@ let games=[
 function esc(v){return String(v??'').replace(/[&<>\'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function api(url,opt={}){const r=await fetch(url,Object.assign({headers:headers(),cache:'no-store'},opt));let d={};try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d.message||'Request failed');e.retryable=!!d.retryable||r.status===503;throw e;}return d;}
 async function loadBalance(){try{const d=await api('/api/casino/juanai/balance');if(d.success)document.getElementById('balance').textContent='KES '+Number(d.balance).toFixed(2)}catch(_){} }
+function artRetry(img,id){
+  img.parentNode.classList.add('noimg');
+  const n=(+img.dataset.try||0)+1; img.dataset.try=n;
+  if(n<=8) setTimeout(()=>{ img.src='/casino-art/'+id+'.png?r='+n; },2500*n);
+}
 function renderGames(){
   // JuanAI owns the games. SafariBet already knows the two real-money games,
   // so the lobby must never wait for a remote catalogue request.
@@ -54,7 +59,7 @@ function renderGames(){
   grid.innerHTML=games.map(g=>{
     const id=g.gameId;
     const fallback=id==='aviator'?'✈️':'🚀';
-    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art noimg"><span class="fallback">${fallback}</span><img alt="${g.name}" src="/api/casino/juanai/art/${id}" referrerpolicy="no-referrer" onload="this.parentNode.classList.remove('noimg')" onerror="this.parentNode.classList.add('noimg')"></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
+    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art noimg"><span class="fallback">${fallback}</span><img alt="${g.name}" src="/casino-art/${id}.png" onload="this.parentNode.classList.remove('noimg')" onerror="artRetry(this,'${id}')"></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
   }).join('');
   document.getElementById('message').style.display='none';
 }

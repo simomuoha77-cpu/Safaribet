@@ -128,7 +128,7 @@ async function listGames() {
 }
 
 // Wakes JuanAI up (and keeps the catalogue warm) without ever blocking or failing a request.
-function warm() { if (configured()) { refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); refreshImages().catch(() => {}); } }
+function warm() { if (configured()) { refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); refreshImages().catch(() => {}); warmArt(); } }
 
 async function fetchGames() {
   const c = cfg();
@@ -235,6 +235,36 @@ async function getImages() {
   ]);
 }
 
+// ── Lobby artwork bytes (Aviator / JetX) ──
+// Downloaded from JuanAI's public image route and kept in memory, so the lobby paints the pictures
+// instantly from OUR server — never waiting on a sleeping JuanAI.
+const artCache = new Map();      // id -> { buf, type, at }
+const artInflight = new Map();
+
+async function fetchArt(id) {
+  const base = cfg().base;
+  if (!base) throw new Error('JuanAI URL not configured');
+  const r = await axios({ method: 'get', url: `${base}/api/casino/games/${id}/image`, responseType: 'arraybuffer', timeout: 45000, validateStatus: () => true, maxContentLength: 8 * 1024 * 1024 });
+  const type = String(r.headers && r.headers['content-type'] || '');
+  if (r.status !== 200 || !/^image\//i.test(type) || !r.data || !r.data.length) throw new Error(`art ${id}: HTTP ${r.status} ${type}`);
+  const item = { buf: Buffer.from(r.data), type: type.split(';')[0], at: Date.now() };
+  artCache.set(id, item);
+  return item;
+}
+
+function refreshArt(id) {
+  if (!artInflight.has(id)) artInflight.set(id, fetchArt(id).catch(e => { console.warn('[juanai-casino] artwork', id, 'failed:', e.message); return null; }).finally(() => artInflight.delete(id)));
+  return artInflight.get(id);
+}
+
+async function getArt(id, waitMs = 8000) {
+  const hit = artCache.get(id);
+  if (hit) { if (Date.now() - hit.at > 10 * 60 * 1000) refreshArt(id); return hit; }
+  return Promise.race([refreshArt(id), new Promise(r => setTimeout(() => r(null), waitMs))]);
+}
+
+function warmArt() { if (cfg().base) ['aviator', 'jetx'].forEach(id => refreshArt(id)); }
+
 async function state(gameId) {
   const response = await request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`, null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
   // JuanAI returns the state inside `data`; older builds returned the state
@@ -331,4 +361,4 @@ async function launch(gameId, userId, username) {
   return response;
 }
 
-module.exports = { getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };
+module.exports = { getArt, warmArt, getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };
