@@ -2,22 +2,35 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<link rel="icon" type="image/png" href="/favicon.png"/>
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"/>
+<link rel="shortcut icon" href="/favicon.ico"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#00c853"/>
+
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SafariBet Kenya – Sports Betting, Live Betting &amp; Casino</title>
-<meta name="description" content="SafariBet Kenya – online sports betting, live betting and casino. Bet on football, basketball, tennis, cricket and rugby, and deposit with M-Pesa." data-sb-page-head/>
+<meta name="description" content="SafariBet Kenya — online sports betting, live betting and casino. Bet on football, basketball, tennis, cricket and rugby, with convenient M-Pesa deposits." data-sb-page-head/>
 <link rel="canonical" href="https://safaribet.top/" data-sb-page-head/>
 <meta property="og:site_name" content="SafariBet" data-sb-page-head/>
 <meta property="og:type" content="website" data-sb-page-head/>
 <meta property="og:title" content="SafariBet Kenya – Sports Betting, Live Betting &amp; Casino" data-sb-page-head/>
-<meta property="og:description" content="SafariBet Kenya – online sports betting, live betting and casino. Bet on football, basketball, tennis, cricket and rugby, and deposit with M-Pesa." data-sb-page-head/>
+<meta property="og:description" content="SafariBet Kenya — online sports betting, live betting and casino." data-sb-page-head/>
 <meta property="og:url" content="https://safaribet.top/" data-sb-page-head/>
 <meta property="og:image" content="https://safaribet.top/logo.png" data-sb-page-head/>
+<meta name="twitter:card" content="summary_large_image" data-sb-page-head/>
+<meta name="twitter:title" content="SafariBet Kenya – Sports Betting, Live Betting &amp; Casino" data-sb-page-head/>
+<meta name="twitter:description" content="SafariBet Kenya — online sports betting, live betting and casino." data-sb-page-head/>
+<meta name="twitter:image" content="https://safaribet.top/logo.png" data-sb-page-head/>
+
 <script type="application/ld+json" data-sb-page-head>
 {
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "SafariBet",
-  "alternateName": "Safari Bet",
+  "alternateName": "SafariBet Kenya",
   "url": "https://safaribet.top/"
 }
 </script>
@@ -26,7 +39,7 @@
   "@context": "https://schema.org",
   "@type": "Organization",
   "name": "SafariBet",
-  "alternateName": "Safari Bet",
+  "alternateName": "SafariBet Kenya",
   "url": "https://safaribet.top/",
   "logo": "https://safaribet.top/logo.png"
 }
@@ -477,6 +490,7 @@ header{
 </style>
 </head>
 <body>
+<noscript><div style="padding:24px;font-family:Arial,sans-serif;color:#e8f5e9;background:#0a0e0a"><h1>SafariBet Kenya – Sports Betting, Live Betting &amp; Casino</h1><p>SafariBet offers online sports betting on football, basketball, tennis, cricket and rugby, live betting, and casino games, with M-Pesa deposits. Please enable JavaScript to place bets.</p><p><a href="/about" style="color:#00c853">About SafariBet</a> · <a href="/register" style="color:#00c853">Register</a> · <a href="/login" style="color:#00c853">Login</a> · <a href="/casino" style="color:#00c853">Casino</a> · <a href="/terms" style="color:#00c853">Terms</a> · <a href="/responsible" style="color:#00c853">Responsible gaming</a> · <a href="/contact" style="color:#00c853">Contact</a></p></div></noscript>
 
 <!-- OPEN IN APP BANNER — for people who typed/land on the site in a mobile
      browser rather than tapping a link from another app. App Links can't
@@ -603,6 +617,7 @@ header{
   <div class="sp-tab" data-cat="hockey" onclick="pickCat(this)"><span class="sp-tab-icon">🏒</span><span class="sp-tab-lbl">Ice Hockey</span></div>
   <div class="sp-tab" data-cat="volleyball" onclick="pickCat(this)"><span class="sp-tab-icon">🏐</span><span class="sp-tab-lbl">Volleyball</span></div>
   <div class="sp-tab" data-cat="handball" onclick="pickCat(this)"><span class="sp-tab-icon">🤾</span><span class="sp-tab-lbl">Handball</span></div>
+  <div class="sp-tab" data-cat="tabletennis" onclick="pickCat(this)"><span class="sp-tab-icon">🏓</span><span class="sp-tab-lbl">Table Tennis</span></div>
   <!-- Any extra sport tabs the server adds later are appended by loadSportTabs() -->
 </div>
 
@@ -796,6 +811,7 @@ header{
     <!-- Copyright -->
     <div style="margin:14px 14px 0;padding-top:14px;border-top:1px solid var(--bd)">
       <div id="footerCopy" style="font-size:12px;color:var(--mt)"></div>
+      <div style="font-size:12px;color:var(--mt);margin-top:6px"><a href="/" style="color:var(--g);font-weight:700;text-decoration:none">SafariBet</a> Kenya – sports betting, live betting &amp; casino · <a href="/about" style="color:var(--mt)">About SafariBet</a></div>
     </div>
 
   </footer>
@@ -1865,7 +1881,8 @@ function pickCat(el) {
 // Sport tabs are already in the HTML (instant). This only (a) appends any extra
 // tab the server may add later and (b) fills every sport's list in the
 // background so tapping Basketball/Tennis/etc. paints with zero wait.
-const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball'];
+const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball','tabletennis'];
+const TWO_WAY_CLIENT = new Set(['tennis','tabletennis','basketball','volleyball','cricket']);
 
 function storeSportList(sport, list) {
   if (!Array.isArray(list) || !list.length) return false;
@@ -2073,7 +2090,7 @@ async function loadCat(cat) {
         try { localStorage.setItem('sb_sport_cache_' + cat, JSON.stringify({data:merged, ts:Date.now()})); } catch(e) {}
         if (currentCat === cat) renderNonFootball(merged);
       } else if (!cachedSport && currentCat === cat) {
-        const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
+        const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾',tabletennis:'🏓'};
         showComingSoon(cat.charAt(0).toUpperCase()+cat.slice(1), icons[cat]||'🏆');
       }
     } catch(e) {
@@ -2127,7 +2144,7 @@ function renderNonFootball(matches) {
         </div>
         ${m.hasOdds
           ? oddBtn(m.matchId,'home','1',m.odds?.home,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)
-            + (m.odds?.draw ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m) : '')
+            + (m.odds?.draw && !TWO_WAY_CLIENT.has(m.sport) ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m) : '')
             + oddBtn(m.matchId,'away','2',m.odds?.away,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m)
           : '<div style="padding:12px 8px;font-size:11px;color:var(--mt)">Odds unavailable</div>'
         }
@@ -2557,7 +2574,7 @@ function sportBadgeForMatch(m){
   const map = {
     football:['⚽','Football'], soccer:['⚽','Football'], basketball:['🏀','Basketball'],
     tennis:['🎾','Tennis'], cricket:['🏏','Cricket'], rugby:['🏉','Rugby'],
-    hockey:['🏒','Ice Hockey'], volleyball:['🏐','Volleyball'], handball:['🤾','Handball']
+    hockey:['🏒','Ice Hockey'], volleyball:['🏐','Volleyball'], handball:['🤾','Handball'], tabletennis:['🏓','Table Tennis']
   };
   if(map[key]) return map[key];
   if(m?.sportIcon || m?.sportLabel) return [m.sportIcon || '🏆', m.sportLabel || 'Sport'];
@@ -2799,7 +2816,24 @@ function livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport){
   if (el <= 60) return el >= 50 ? 'Half Time' : '1st Half';
   return '2nd Half';
 }
-function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport){
+// Non-football live label from the provider's own text: "4th set", "2nd quarter", "Second break"...
+function nonFootballLiveLabel(periodLabel){
+  const t = String(periodLabel || '').trim();
+  if (!t || /^(in[_\s-]?play|live|inprogress|started|1|2)$/i.test(t)) return '';
+  const ord = {1:'1st',2:'2nd',3:'3rd',4:'4th',5:'5th',6:'6th',7:'7th'};
+  let x = t.replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+  x = x.replace(/\b(set|quarter|period|half|inning|game|round)\s*(\d)\b/i,(a,w,n)=>`${ord[n]||n+'th'} ${w.toLowerCase()}`);
+  x = x.replace(/\b(\d)(st|nd|rd|th)?\s*(set|quarter|period|half)\b/i,(a,n,sfx,w)=>`${ord[n]||n+'th'} ${w.toLowerCase()}`);
+  x = x.replace(/\bq(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} quarter`).replace(/\bset(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} set`);
+  return x.charAt(0).toUpperCase()+x.slice(1);
+}
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport, periodLabel){
+  if (sport && String(sport).toLowerCase() !== 'football') {
+    const lbl = nonFootballLiveLabel(periodLabel) || nonFootballLiveLabel(period);
+    if (lbl) return lbl;
+    if (minute != null && !minuteIsEstimated) return `${minute}'`;
+    return 'Live';
+  }
   const p = (period || '').toUpperCase();
   const half = livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport);
   if (half === 'Half Time' && !(p === 'ET' || p === 'PEN' || p === 'P')) return 'HT';
@@ -2880,7 +2914,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport, liveScore.periodLabel || m.statusRaw)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">
@@ -2912,9 +2946,11 @@ function renderMatch(m){
     const h = m.odds?.home ?? ao.homeWin ?? m.providerOdds?.homeWin;
     const d = m.odds?.draw ?? ao.draw ?? m.providerOdds?.draw;
     const a = m.odds?.away ?? ao.awayWin ?? m.providerOdds?.awayWin;
+    const twoWay = m.twoWay || TWO_WAY_CLIENT.has(String(m.sport||'').toLowerCase());
+    if (twoWay) rowClass='mc-row-dc';
     oddsHtml=
       oddBtn(m.matchId,'home','1',h,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)+
-      oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m)+
+      (twoWay ? '' : oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m))+
       oddBtn(m.matchId,'away','2',a,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m);
   }
 

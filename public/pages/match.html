@@ -4,6 +4,15 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Match – SafariBet</title>
+<link rel="icon" type="image/png" href="/favicon.png"/>
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"/>
+<link rel="shortcut icon" href="/favicon.ico"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#00c853"/>
+<meta name="robots" content="noindex,nofollow" data-sb-page-head/>
+
 <script src="/js/theme.js"></script>
 <script src="/js/router.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/><noscript><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/></noscript>
@@ -66,6 +75,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .res{margin-top:8px;font-size:12px;text-align:center}
 .res.ok{color:var(--g)}
 .res.er{color:var(--rd)}
+  .mkt-closed{opacity:.45;pointer-events:none}
+  .odds-flash .odd-val{animation:oddsflash 1.1s ease}
+  @keyframes oddsflash{0%{background:rgba(255,200,0,.45)}100%{background:transparent}}
 </style>
 </head>
 <body>
@@ -155,6 +167,26 @@ function summaryToMatchData(s){
   };
 }
 
+// ── Timings (ms since this page started loading markets) ──
+const __mmT0 = performance.now();
+const mmTimings = window.__mmTimings = { start: 0 };
+function mmMark(k){ if (mmTimings[k] == null) mmTimings[k] = Math.round(performance.now() - __mmT0); }
+function mmReport(src, d){
+  try {
+    const st = d && d.timings ? d.timings : null;
+    console.log('[markets-timing]', JSON.stringify({ client: mmTimings, server: st, src }));
+  } catch(e) {}
+}
+// Newest-wins guard: a slow older response can never overwrite newer odds.
+let lastFetchedAt = 0;
+function isStaleResponse(d){
+  const t = d && d.data && d.data.fetchedAt;
+  if (!t) return false;
+  if (t < lastFetchedAt) return true;
+  lastFetchedAt = t;
+  return false;
+}
+
 async function loadMatch(){
   // Instant paint: if we already know roughly what this match looks like
   // from the page the user just came from, render it immediately — no
@@ -170,6 +202,7 @@ async function loadMatch(){
         renderHeader();
         renderMarkets(true); // true = this is the preliminary/instant paint, not the final answer yet
         updateSlipBar();
+        mmMark('paintSummary');
         paintedFromCache = true;
       }
     }
@@ -182,6 +215,7 @@ async function loadMatch(){
     if (full && Array.isArray(full.markets) && full.markets.length) {
       matchData = full; matchData.__full = true;
       renderHeader(); renderMarkets(false); updateSlipBar();
+      mmMark('paintCachedMarkets');
       paintedFromCache = true;
     }
   }
@@ -190,6 +224,7 @@ async function loadMatch(){
     // Re-uses a request already started by the touch/hover prefetch if there is one
     const d = (window.SB && SB.prefetchMatch) ? await SB.prefetchMatch(matchId)
       : await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
+    mmMark('networkDone');
     if (d && d.pending) {            // server is still resolving this fixture — keep polling quietly
       pollFullMarkets();
       return;
@@ -203,10 +238,14 @@ async function loadMatch(){
       }
       return;
     }
+    if (isStaleResponse(d)) return;
     matchData = d.data; matchData.__full = true;
     renderHeader();
     renderMarkets(false);
     updateSlipBar();
+    mmMark('renderedMarkets');
+    mmReport('initial', d.data);
+    startMarketsRefresh();
     // Server answered fast with the basics; the full market list is still being
     // fetched upstream. Quietly pick it up the moment it is ready.
     if (d.data.marketsPending) pollFullMarkets();
@@ -226,10 +265,11 @@ async function pollFullMarkets(){
       await new Promise(r => setTimeout(r, i < 4 ? 700 : 2000));
       try {
         const d = await (await fetch(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, { cache: 'no-store' })).json();
-        if (d && d.success && d.data) {
+        if (d && d.success && d.data && !isStaleResponse(d)) {
           matchData = d.data; matchData.__full = true;
           renderHeader(); renderMarkets(false); updateSlipBar();
-          if (!d.data.marketsPending) return;
+          mmMark('renderedMarkets');
+          if (!d.data.marketsPending) { mmReport('poll', d.data); startMarketsRefresh(); return; }
         }
       } catch (e) { /* keep trying */ }
     }
@@ -304,7 +344,7 @@ function renderMarkets(isPreliminary){
   // though the header above had already rendered fine from a separate call.
   container.innerHTML = markets.map(mk => {
     try {
-      return renderOneMarket(mk);
+      return renderCard(mk);
     } catch (e) {
       console.warn('[match] failed to render a market — skipping it, not the whole page:', mk, e);
       return '';
@@ -319,6 +359,86 @@ function renderMarkets(isPreliminary){
     }
   });
 }
+
+// Each card carries its market key so a refresh can swap only the cards whose
+// prices changed (everything else, scroll position and the slip stay untouched).
+function renderCard(mk){
+  const html = renderOneMarket(mk);
+  const cls = mk.__closed ? 'market-card mkt-closed' : 'market-card';
+  const note = mk.__closed ? '<div class="suspended-note">Market closed or unavailable right now.</div>' : '';
+  return html.replace('class="market-card"', 'class="' + cls + '" data-mk="' + escapeHtml(mk.market) + '"').replace(/<\/div>\s*$/, note + '</div>');
+}
+function cardSig(mk){
+  return JSON.stringify([mk.label, mk.wholeMarketSuspended, mk.hasSuspendedPick,
+    (mk.options || []).map(o => [o.pick, o.pickLabel, o.odds, o.boostedOdds, o.suspended]), !!mk.__closed]);
+}
+
+// Apply a newer response IN PLACE: unchanged cards are not touched, changed
+// cards get a quick flash, markets that vanished are greyed out as unavailable.
+function patchMarkets(newData){
+  const container = document.getElementById('marketsContainer');
+  const next = (newData.markets || []).filter(mk => Array.isArray(mk.options) && mk.options.length > 0);
+  const old = (matchData && matchData.markets || []).filter(mk => Array.isArray(mk.options) && mk.options.length > 0);
+  // Never replace a full list with a thin/empty one (a slow provider answered badly).
+  if (next.length < 2 && old.length >= 2) return false;
+  // A market that was open and is no longer offered is shown greyed out as
+  // closed (never silently dropped, never bettable) until the next full load.
+  const nextKeys = new Set(next.map(mk => mk.market));
+  const closed = old.filter(mk => !nextKeys.has(mk.market)).map(mk => Object.assign({}, mk, { __closed: true }));
+  const oldSig = new Map(old.map(mk => [mk.market, cardSig(mk)]));
+  newData = Object.assign({}, newData, { markets: next.concat(closed) });
+  next.push(...closed);
+  const cards = new Map();
+  container.querySelectorAll('.market-card[data-mk]').forEach(el => cards.set(el.getAttribute('data-mk'), el));
+  // Same set of markets in the same order -> pure in-place patch. Otherwise re-render.
+  const sameLayout = cards.size === next.length && next.every((mk, i) => {
+    const el = cards.get(mk.market); return el && container.children[i] === el;
+  });
+  matchData = Object.assign({}, newData, { __full: true });
+  if (!sameLayout) { renderMarkets(false); return true; }
+  next.forEach(mk => {
+    if (oldSig.get(mk.market) === cardSig(mk)) return;
+    const el = cards.get(mk.market);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderCard(mk).trim();
+    const fresh = tmp.firstElementChild;
+    if (!fresh) return;
+    fresh.classList.add('odds-flash');
+    el.replaceWith(fresh);
+    setTimeout(() => fresh.classList.remove('odds-flash'), 1200);
+  });
+  slip.forEach(sl => {
+    if (sl.matchId === matchId) { const el = document.getElementById('mkt_' + sl.market + '_' + sl.pick); if (el) el.classList.add('sel'); }
+  });
+  return true;
+}
+
+// ONE background refresher for this page: no overlapping requests, no duplicate
+// timers, paused while the tab is hidden, backs off after errors.
+let _refreshTimer = null, _refreshBusy = false, _refreshFails = 0, _refreshSeq = 0;
+function startMarketsRefresh(){
+  if (_refreshTimer || !matchId) return;
+  const host = document.getElementById('marketsContainer');
+  const tick = async () => {
+    _refreshTimer = null;
+    if (!host || !host.isConnected) { return; }   // page was navigated away: stop for good
+    const delay = () => (_refreshFails ? Math.min(60000, 8000 * Math.pow(2, _refreshFails)) : (matchData && matchData.status === 'live' ? 8000 : 15000));
+    if (document.hidden || _refreshBusy || !document.getElementById('marketsContainer')) { _refreshTimer = setTimeout(tick, delay()); return; }
+    _refreshBusy = true;
+    const mySeq = ++_refreshSeq;
+    try {
+      const r = await fetch('/api/odds/match/' + encodeURIComponent(matchId) + '?rich=1', { cache: 'no-store' });
+      const d = await r.json();
+      if (mySeq === _refreshSeq && d && d.success && d.data && !d.data.marketsPending && !isStaleResponse(d)) {
+        if (patchMarkets(d.data)) { renderHeader(); updateSlipBar(); }
+        _refreshFails = 0;
+      } else if (!d || !d.success) _refreshFails++;
+    } catch (e) { _refreshFails++; }
+    finally { _refreshBusy = false; _refreshTimer = setTimeout(tick, delay()); }
+  };
+  _refreshTimer = setTimeout(tick, 8000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && _refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; _refreshBusy = false; startMarketsRefresh(); } });
 
 const REASON_LABELS = {
   stale_data: 'Live data updating',
@@ -568,7 +688,7 @@ function updateSlipBar(){
 }
 
 // Refresh live score/minute periodically without losing selections
-setInterval(() => { if (matchData?.status === 'live') loadMatch(); }, 20000);
+// (live score / odds refresh is handled by startMarketsRefresh() above)
 </script>
 <script>SB.run()</script>
 </body>

@@ -9,12 +9,14 @@ const C = {
   set:(k,d)=>{cache[k]={data:d,ts:Date.now()};}
 };
 
+const TWO_WAY = new Set(['tennis','tabletennis','basketball','volleyball','cricket','hockeyus']);
 const SPORT_CONFIG = {
   basketball: { label:'Basketball', icon:'🏀' },
   tennis:     { label:'Tennis',     icon:'🎾' },
   cricket:    { label:'Cricket',    icon:'🏏' },
   rugby:      { label:'Rugby',      icon:'🏉' },
   hockey:     { label:'Ice Hockey', icon:'🏒' },
+  tabletennis:{ label:'Table Tennis', icon:'🏓' },
   volleyball: { label:'Volleyball', icon:'🏐' },
   handball:   { label:'Handball',   icon:'🤾' }
 };
@@ -65,10 +67,11 @@ function normalizeSofaSportMatch(m, sport) {
     hasOdds,
     odds: {
       home: hasOdds ? +home.toFixed(2) : null,
-      draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+      draw: !TWO_WAY.has(sport) && Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
       away: hasOdds ? +away.toFixed(2) : null,
       updatedAt: new Date()
     },
+    twoWay: TWO_WAY.has(sport),
     providerOdds: o,
     markets: m.markets || [],
     score: m.score || null,
@@ -126,10 +129,11 @@ function buildLiveMatches(sport, matches) {
       hasOdds,
       odds: {
         home: hasOdds ? +home.toFixed(2) : null,
-        draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+        draw: !TWO_WAY.has(sport) && Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
         away: hasOdds ? +away.toFixed(2) : null,
         updatedAt: new Date()
       },
+      twoWay: TWO_WAY.has(sport),
       providerOdds: o,
       markets: m.markets || [],
       score: {
@@ -137,7 +141,8 @@ function buildLiveMatches(sport, matches) {
         away: s.away ?? null,
         minute: m.minute ?? m.score?.minute ?? null,
         minuteIsEstimated: !!m.minuteIsEstimated,
-        period: m.status || null
+        period: m.status || null,
+        periodLabel: m.periodText || m.statusRaw || null
       },
       source: 'sofabets',
       oddsSource: m.oddsSource || 'SofaBets',
