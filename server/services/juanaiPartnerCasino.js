@@ -199,6 +199,7 @@ async function fetchImagesFresh() {
   try {
     const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 20000, retries: 1, backoffMs: 800 });
     got = pickImages(data);
+    try { console.log('[juanai-casino] images endpoint ->', JSON.stringify(data, (k, v) => (typeof v === 'string' && v.length > 120 ? v.slice(0, 60) + '…(' + v.length + ' chars)' : v)).slice(0, 600), '| usable:', !!got.aviator, !!got.jetx); } catch (_) {}
   } catch (e) { console.warn('[juanai-casino] images endpoint failed:', e.message); }
   if (!got.aviator || !got.jetx) {
     // Fall back to the artwork attached to each game in the catalogue.
