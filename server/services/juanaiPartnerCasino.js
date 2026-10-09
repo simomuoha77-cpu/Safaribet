@@ -128,7 +128,7 @@ async function listGames() {
 }
 
 // Wakes JuanAI up (and keeps the catalogue warm) without ever blocking or failing a request.
-function warm() { if (configured()) { refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); refreshImages().catch(() => {}); warmArt(); } }
+function warm() { if (configured()) refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); }
 
 async function fetchGames() {
   const c = cfg();
@@ -154,116 +154,14 @@ async function fetchGames() {
   })).filter(g => g.gameId);
 }
 
-// ── Game artwork (Aviator / JetX) ──
-// Cached in memory: the last good copy is served instantly, and refreshed in the background,
-// so the lobby never waits on a sleeping JuanAI server.
-let imagesCache = { at: 0, data: { aviator: null, jetx: null } };
-let imagesInflight = null;
-
-function absUrl(u) {
-  if (!u || typeof u !== 'string') return null;
-  u = u.trim();
-  if (!u) return null;
-  if (/^(https?:)?\/\//i.test(u) || /^data:image\//i.test(u)) return u;
-  const base = cfg().base;
-  return base ? base + (u.startsWith('/') ? '' : '/') + u : null;
-}
-
-function pickImages(payload) {
-  const out = { aviator: null, jetx: null };
-  const grab = (key, v) => {
-    const k = String(key || '').toLowerCase().replace(/[^a-z]/g, '');
-    if (k !== 'aviator' && k !== 'jetx') return;
-    const url = absUrl(typeof v === 'string' ? v : (v && (v.image || v.thumbnail || v.url || v.src)));
-    if (url && !out[k]) out[k] = url;
-  };
-  const walk = (node, depth) => {
-    if (!node || depth > 3) return;
-    if (Array.isArray(node)) {
-      node.forEach(g => { if (g && typeof g === 'object') grab(g.id || g.gameId || g.name, g); });
-      return;
-    }
-    if (typeof node === 'object') {
-      Object.keys(node).forEach(k => {
-        if (k === 'images' || k === 'data' || k === 'games') walk(node[k], depth + 1);
-        else grab(k, node[k]);
-      });
-    }
-  };
-  walk(payload, 0);
-  return out;
-}
-
-async function fetchImagesFresh() {
-  let got = { aviator: null, jetx: null };
-  try {
-    const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 20000, retries: 1, backoffMs: 800 });
-    got = pickImages(data);
-    try { console.log('[juanai-casino] images endpoint ->', JSON.stringify(data, (k, v) => (typeof v === 'string' && v.length > 120 ? v.slice(0, 60) + '…(' + v.length + ' chars)' : v)).slice(0, 600), '| usable:', !!got.aviator, !!got.jetx); } catch (_) {}
-  } catch (e) { console.warn('[juanai-casino] images endpoint failed:', e.message); }
-  if (!got.aviator || !got.jetx) {
-    // Fall back to the artwork attached to each game in the catalogue.
-    try {
-      const list = await fetchGames();
-      list.forEach(g => {
-        const k = String(g.gameId).toLowerCase();
-        if ((k === 'aviator' || k === 'jetx') && !got[k]) got[k] = absUrl(g.image || g.thumbnail);
-      });
-    } catch (e) { console.warn('[juanai-casino] catalogue artwork fallback failed:', e.message); }
-  }
-  const merged = { aviator: got.aviator || imagesCache.data.aviator, jetx: got.jetx || imagesCache.data.jetx };
-  if (merged.aviator || merged.jetx) imagesCache = { at: Date.now(), data: merged };
-  return merged;
-}
-
-function refreshImages() {
-  if (!imagesInflight) imagesInflight = fetchImagesFresh().finally(() => { imagesInflight = null; });
-  return imagesInflight;
-}
-
 async function getImages() {
-  const c = imagesCache;
-  const fresh = c.at && Date.now() - c.at < 10 * 60 * 1000;
-  if (c.data.aviator || c.data.jetx) {
-    if (!fresh) refreshImages().catch(() => {});
-    return c.data;                      // instant: last good artwork
-  }
-  // Nothing cached yet: wait, but never longer than 8s (the page retries by itself).
-  return Promise.race([
-    refreshImages(),
-    new Promise(r => setTimeout(() => r(imagesCache.data), 8000))
-  ]);
+  const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
+  const images = data && data.images && typeof data.images === 'object' ? data.images : {};
+  return {
+    aviator: typeof images.aviator === 'string' ? images.aviator : null,
+    jetx: typeof images.jetx === 'string' ? images.jetx : null
+  };
 }
-
-// ── Lobby artwork bytes (Aviator / JetX) ──
-// Downloaded from JuanAI's public image route and kept in memory, so the lobby paints the pictures
-// instantly from OUR server — never waiting on a sleeping JuanAI.
-const artCache = new Map();      // id -> { buf, type, at }
-const artInflight = new Map();
-
-async function fetchArt(id) {
-  const base = cfg().base;
-  if (!base) throw new Error('JuanAI URL not configured');
-  const r = await axios({ method: 'get', url: `${base}/api/casino/games/${id}/image`, responseType: 'arraybuffer', timeout: 45000, validateStatus: () => true, maxContentLength: 8 * 1024 * 1024 });
-  const type = String(r.headers && r.headers['content-type'] || '');
-  if (r.status !== 200 || !/^image\//i.test(type) || !r.data || !r.data.length) throw new Error(`art ${id}: HTTP ${r.status} ${type}`);
-  const item = { buf: Buffer.from(r.data), type: type.split(';')[0], at: Date.now() };
-  artCache.set(id, item);
-  return item;
-}
-
-function refreshArt(id) {
-  if (!artInflight.has(id)) artInflight.set(id, fetchArt(id).catch(e => { console.warn('[juanai-casino] artwork', id, 'failed:', e.message); return null; }).finally(() => artInflight.delete(id)));
-  return artInflight.get(id);
-}
-
-async function getArt(id, waitMs = 8000) {
-  const hit = artCache.get(id);
-  if (hit) { if (Date.now() - hit.at > 10 * 60 * 1000) refreshArt(id); return hit; }
-  return Promise.race([refreshArt(id), new Promise(r => setTimeout(() => r(null), waitMs))]);
-}
-
-function warmArt() { if (cfg().base) ['aviator', 'jetx'].forEach(id => refreshArt(id)); }
 
 async function state(gameId) {
   const response = await request('get', `/api/developer/casino/state/${encodeURIComponent(String(gameId).toLowerCase())}`, null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
@@ -314,21 +212,6 @@ async function launchDirect(gameId, userId, username) {
     throw Object.assign(new Error('JUANAI_URL is not configured.'), { status: 503, code: 'NOT_CONFIGURED' });
   }
 
-  // FASTEST PATH: if SafariBet holds the shared JUANAI_USER_TOKEN_SECRET, sign the player's token
-  // right here (same format JuanAI's /api/casino/session issues) - no call to JuanAI, so the
-  // launch URL is ready in a few milliseconds even while JuanAI is asleep.
-  const secret = String(process.env.JUANAI_USER_TOKEN_SECRET || '').trim();
-  if (secret) {
-    const crypto = require('crypto');
-    const payload = `${String(userId)}.${Date.now() + 6 * 60 * 60 * 1000}`;
-    const utoken = `${payload}.${crypto.createHmac('sha256', secret).update(payload).digest('hex')}`;
-    return {
-      success: true, mode: 'real-money', realMoney: true, currency: 'KES', gameId: id,
-      username: String(username || userId), balance: null,
-      launchUrl: `${c.base}/casino/${id}.html?key=${encodeURIComponent(c.legacyKey)}&utoken=${encodeURIComponent(utoken)}`
-    };
-  }
-
   // Do NOT fetch the catalogue here. The player already selected one of the
   // two JuanAI games. Create the signed user session in one server-to-server
   // call, then open the actual JuanAI game immediately.
@@ -376,4 +259,4 @@ async function launch(gameId, userId, username) {
   return response;
 }
 
-module.exports = { getArt, warmArt, getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };
+module.exports = { getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };

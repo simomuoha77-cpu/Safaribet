@@ -138,19 +138,6 @@ app.get('/', (req, res) => {
 // ── API ROUTES ──
 app.use('/api/auth',     authRoutes);
 app.use('/api/odds',     oddsRoutes);
-// Aviator / JetX lobby artwork, served from our own memory cache (see juanaiPartnerCasino.getArt).
-// The .png-style path lets the service worker keep a copy on the phone too.
-app.get('/casino-art/:file', async (req, res) => {
-  const id = String(req.params.file || '').toLowerCase().replace(/\.[a-z0-9]+$/, '');
-  if (!['aviator', 'jetx'].includes(id)) return res.status(404).end();
-  try {
-    const art = await require('./services/juanaiPartnerCasino').getArt(id);
-    if (!art) return res.status(404).end();
-    res.set({ 'Content-Type': art.type, 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' });
-    res.send(art.buf);
-  } catch (e) { res.status(404).end(); }
-});
-
 { const juanaiCasinoRoutes = require('./routes/juanaiCasino'); // JuanAI Casino API (casino only)
   app.use('/api/casino/juanai', juanaiCasinoRoutes);
   app.use('/api/v1/casino', juanaiCasinoRoutes); }  // same callbacks under JuanAI's own /api/v1/casino/wallet/* paths
