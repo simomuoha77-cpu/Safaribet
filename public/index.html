@@ -617,6 +617,7 @@ header{
   <div class="sp-tab" data-cat="hockey" onclick="pickCat(this)"><span class="sp-tab-icon">🏒</span><span class="sp-tab-lbl">Ice Hockey</span></div>
   <div class="sp-tab" data-cat="volleyball" onclick="pickCat(this)"><span class="sp-tab-icon">🏐</span><span class="sp-tab-lbl">Volleyball</span></div>
   <div class="sp-tab" data-cat="handball" onclick="pickCat(this)"><span class="sp-tab-icon">🤾</span><span class="sp-tab-lbl">Handball</span></div>
+  <div class="sp-tab" data-cat="tabletennis" onclick="pickCat(this)"><span class="sp-tab-icon">🏓</span><span class="sp-tab-lbl">Table Tennis</span></div>
   <!-- Any extra sport tabs the server adds later are appended by loadSportTabs() -->
 </div>
 
@@ -1880,7 +1881,8 @@ function pickCat(el) {
 // Sport tabs are already in the HTML (instant). This only (a) appends any extra
 // tab the server may add later and (b) fills every sport's list in the
 // background so tapping Basketball/Tennis/etc. paints with zero wait.
-const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball'];
+const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball','tabletennis'];
+const TWO_WAY_CLIENT = new Set(['tennis','tabletennis','basketball','volleyball','cricket']);
 
 function storeSportList(sport, list) {
   if (!Array.isArray(list) || !list.length) return false;
@@ -2088,7 +2090,7 @@ async function loadCat(cat) {
         try { localStorage.setItem('sb_sport_cache_' + cat, JSON.stringify({data:merged, ts:Date.now()})); } catch(e) {}
         if (currentCat === cat) renderNonFootball(merged);
       } else if (!cachedSport && currentCat === cat) {
-        const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾'};
+        const icons = {basketball:'🏀',tennis:'🎾',cricket:'🏏',rugby:'🏉',hockey:'🏒',volleyball:'🏐',handball:'🤾',tabletennis:'🏓'};
         showComingSoon(cat.charAt(0).toUpperCase()+cat.slice(1), icons[cat]||'🏆');
       }
     } catch(e) {
@@ -2142,7 +2144,7 @@ function renderNonFootball(matches) {
         </div>
         ${m.hasOdds
           ? oddBtn(m.matchId,'home','1',m.odds?.home,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)
-            + (m.odds?.draw ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m) : '')
+            + (m.odds?.draw && !TWO_WAY_CLIENT.has(m.sport) ? oddBtn(m.matchId,'draw','X',m.odds?.draw,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m) : '')
             + oddBtn(m.matchId,'away','2',m.odds?.away,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m)
           : '<div style="padding:12px 8px;font-size:11px;color:var(--mt)">Odds unavailable</div>'
         }
@@ -2572,7 +2574,7 @@ function sportBadgeForMatch(m){
   const map = {
     football:['⚽','Football'], soccer:['⚽','Football'], basketball:['🏀','Basketball'],
     tennis:['🎾','Tennis'], cricket:['🏏','Cricket'], rugby:['🏉','Rugby'],
-    hockey:['🏒','Ice Hockey'], volleyball:['🏐','Volleyball'], handball:['🤾','Handball']
+    hockey:['🏒','Ice Hockey'], volleyball:['🏐','Volleyball'], handball:['🤾','Handball'], tabletennis:['🏓','Table Tennis']
   };
   if(map[key]) return map[key];
   if(m?.sportIcon || m?.sportLabel) return [m.sportIcon || '🏆', m.sportLabel || 'Sport'];
@@ -2814,7 +2816,24 @@ function livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport){
   if (el <= 60) return el >= 50 ? 'Half Time' : '1st Half';
   return '2nd Half';
 }
-function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport){
+// Non-football live label from the provider's own text: "4th set", "2nd quarter", "Second break"...
+function nonFootballLiveLabel(periodLabel){
+  const t = String(periodLabel || '').trim();
+  if (!t || /^(in[_\s-]?play|live|inprogress|started|1|2)$/i.test(t)) return '';
+  const ord = {1:'1st',2:'2nd',3:'3rd',4:'4th',5:'5th',6:'6th',7:'7th'};
+  let x = t.replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+  x = x.replace(/\b(set|quarter|period|half|inning|game|round)\s*(\d)\b/i,(a,w,n)=>`${ord[n]||n+'th'} ${w.toLowerCase()}`);
+  x = x.replace(/\b(\d)(st|nd|rd|th)?\s*(set|quarter|period|half)\b/i,(a,n,sfx,w)=>`${ord[n]||n+'th'} ${w.toLowerCase()}`);
+  x = x.replace(/\bq(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} quarter`).replace(/\bset(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} set`);
+  return x.charAt(0).toUpperCase()+x.slice(1);
+}
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport, periodLabel){
+  if (sport && String(sport).toLowerCase() !== 'football') {
+    const lbl = nonFootballLiveLabel(periodLabel) || nonFootballLiveLabel(period);
+    if (lbl) return lbl;
+    if (minute != null && !minuteIsEstimated) return `${minute}'`;
+    return 'Live';
+  }
   const p = (period || '').toUpperCase();
   const half = livePeriodLabel(minute, minuteIsEstimated, commenceTime, sport);
   if (half === 'Half Time' && !(p === 'ET' || p === 'PEN' || p === 'P')) return 'HT';
@@ -2895,7 +2914,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport, liveScore.periodLabel || m.statusRaw)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">
@@ -2927,9 +2946,11 @@ function renderMatch(m){
     const h = m.odds?.home ?? ao.homeWin ?? m.providerOdds?.homeWin;
     const d = m.odds?.draw ?? ao.draw ?? m.providerOdds?.draw;
     const a = m.odds?.away ?? ao.awayWin ?? m.providerOdds?.awayWin;
+    const twoWay = m.twoWay || TWO_WAY_CLIENT.has(String(m.sport||'').toLowerCase());
+    if (twoWay) rowClass='mc-row-dc';
     oddsHtml=
       oddBtn(m.matchId,'home','1',h,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.homeTeam,m)+
-      oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m)+
+      (twoWay ? '' : oddBtn(m.matchId,'draw','X',d,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,'Draw',m))+
       oddBtn(m.matchId,'away','2',a,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m);
   }
 
