@@ -564,7 +564,11 @@ router.get('/search', async (req, res) => {
       buildSearchIndex().catch(() => {});
     }
 
-    const terms = q.split(' ');
+    // Full names like "MC Oran vs USM Alger": drop filler words so they don't block matches.
+    const FILLER = new Set(['vs', 'v', 'x', 'versus', 'and', 'the']);
+    let terms = q.split(' ').filter(t => t && !FILLER.has(t));
+    if (!terms.length) terms = q.split(' ');
+    const need = terms.length;
     const seenId = new Set();
     const seenPair = new Set();
     const out = [];
@@ -572,11 +576,14 @@ router.get('/search', async (req, res) => {
       for (const m of list) {
         if (!m || !m.matchId || m.status === 'finished') continue;
         const h = hayOf(m);
-        if (!terms.every(t => h.all.includes(t))) continue;
+        let hit = 0;
+        for (const t of terms) if (h.all.includes(t)) hit++;
+        // all words must match; for 3+ word queries tolerate one miss (spelling / short names)
+        if (hit < need && !(need >= 3 && hit >= need - 1)) continue;
         const pair = normSearch(m.homeTeam) + '|' + normSearch(m.awayTeam) + '|' + (m.commenceTime ? new Date(m.commenceTime).toISOString().slice(0, 10) : '');
         if (seenId.has(m.matchId) || seenPair.has(pair)) continue;
         seenId.add(m.matchId); seenPair.add(pair);
-        out.push({ m, rank: h.teams.includes(q) ? 0 : 1, t: new Date(m.commenceTime || 0).getTime() || 0 });
+        out.push({ m, rank: (hit < need ? 2 : 0) + (h.teams.includes(terms.join(' ')) ? 0 : 1), t: new Date(m.commenceTime || 0).getTime() || 0 });
       }
     }
     out.sort((a, b) => a.rank - b.rank || a.t - b.t);

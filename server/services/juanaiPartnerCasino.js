@@ -128,7 +128,7 @@ async function listGames() {
 }
 
 // Wakes JuanAI up (and keeps the catalogue warm) without ever blocking or failing a request.
-function warm() { if (configured()) refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); }
+function warm() { if (configured()) { refreshGames().catch(e => console.warn('[juanai-casino] warm-up failed:', e.message)); refreshImages().catch(() => {}); } }
 
 async function fetchGames() {
   const c = cfg();
@@ -154,13 +154,84 @@ async function fetchGames() {
   })).filter(g => g.gameId);
 }
 
-async function getImages() {
-  const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 15000, retries: 1, backoffMs: 500 });
-  const images = data && data.images && typeof data.images === 'object' ? data.images : {};
-  return {
-    aviator: typeof images.aviator === 'string' ? images.aviator : null,
-    jetx: typeof images.jetx === 'string' ? images.jetx : null
+// ── Game artwork (Aviator / JetX) ──
+// Cached in memory: the last good copy is served instantly, and refreshed in the background,
+// so the lobby never waits on a sleeping JuanAI server.
+let imagesCache = { at: 0, data: { aviator: null, jetx: null } };
+let imagesInflight = null;
+
+function absUrl(u) {
+  if (!u || typeof u !== 'string') return null;
+  u = u.trim();
+  if (!u) return null;
+  if (/^(https?:)?\/\//i.test(u) || /^data:image\//i.test(u)) return u;
+  const base = cfg().base;
+  return base ? base + (u.startsWith('/') ? '' : '/') + u : null;
+}
+
+function pickImages(payload) {
+  const out = { aviator: null, jetx: null };
+  const grab = (key, v) => {
+    const k = String(key || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (k !== 'aviator' && k !== 'jetx') return;
+    const url = absUrl(typeof v === 'string' ? v : (v && (v.image || v.thumbnail || v.url || v.src)));
+    if (url && !out[k]) out[k] = url;
   };
+  const walk = (node, depth) => {
+    if (!node || depth > 3) return;
+    if (Array.isArray(node)) {
+      node.forEach(g => { if (g && typeof g === 'object') grab(g.id || g.gameId || g.name, g); });
+      return;
+    }
+    if (typeof node === 'object') {
+      Object.keys(node).forEach(k => {
+        if (k === 'images' || k === 'data' || k === 'games') walk(node[k], depth + 1);
+        else grab(k, node[k]);
+      });
+    }
+  };
+  walk(payload, 0);
+  return out;
+}
+
+async function fetchImagesFresh() {
+  let got = { aviator: null, jetx: null };
+  try {
+    const data = await request('get', '/api/developer/casino/images', null, null, { timeout: 20000, retries: 1, backoffMs: 800 });
+    got = pickImages(data);
+  } catch (e) { console.warn('[juanai-casino] images endpoint failed:', e.message); }
+  if (!got.aviator || !got.jetx) {
+    // Fall back to the artwork attached to each game in the catalogue.
+    try {
+      const list = await fetchGames();
+      list.forEach(g => {
+        const k = String(g.gameId).toLowerCase();
+        if ((k === 'aviator' || k === 'jetx') && !got[k]) got[k] = absUrl(g.image || g.thumbnail);
+      });
+    } catch (e) { console.warn('[juanai-casino] catalogue artwork fallback failed:', e.message); }
+  }
+  const merged = { aviator: got.aviator || imagesCache.data.aviator, jetx: got.jetx || imagesCache.data.jetx };
+  if (merged.aviator || merged.jetx) imagesCache = { at: Date.now(), data: merged };
+  return merged;
+}
+
+function refreshImages() {
+  if (!imagesInflight) imagesInflight = fetchImagesFresh().finally(() => { imagesInflight = null; });
+  return imagesInflight;
+}
+
+async function getImages() {
+  const c = imagesCache;
+  const fresh = c.at && Date.now() - c.at < 10 * 60 * 1000;
+  if (c.data.aviator || c.data.jetx) {
+    if (!fresh) refreshImages().catch(() => {});
+    return c.data;                      // instant: last good artwork
+  }
+  // Nothing cached yet: wait, but never longer than 8s (the page retries by itself).
+  return Promise.race([
+    refreshImages(),
+    new Promise(r => setTimeout(() => r(imagesCache.data), 8000))
+  ]);
 }
 
 async function state(gameId) {
