@@ -378,6 +378,107 @@ router.post('/user/:id/message', async (req, res) => {
   }
 });
 
+// ── SMS BROADCAST (CommsGrid / "SMS Grid") ──
+// Admin picks: everyone (all / active bettors / inactive), or one or more specific
+// numbers. Sends run in the background in batches of 100; the panel polls the job.
+const smsJobs = new Map();            // id -> { id, status, total, done, accepted, failed, error }
+let smsRunning = false;
+const maskPhone = p => String(p).replace(/^(\d{5})\d{4}(\d+)$/, '$1****$2');
+
+async function smsAudiencePhones(audience) {
+  let filter = { isActive: { $ne: false } };
+  if (audience === 'active') {
+    const ids = await Bet.distinct('userId', { createdAt: { $gte: new Date(Date.now() - 30 * 86400000) } });
+    filter._id = { $in: ids };
+  } else if (audience === 'inactive') {
+    const ids = await Bet.distinct('userId', { createdAt: { $gte: new Date(Date.now() - 30 * 86400000) } });
+    filter._id = { $nin: ids };
+  }
+  const users = await User.find(filter).select('phone').lean();
+  const { normalizeKePhone } = require('../services/smsService');
+  const set = new Set();
+  let invalid = 0;
+  for (const u of users) { const n = normalizeKePhone(u.phone); if (n) set.add(n); else invalid++; }
+  return { phones: [...set], invalid };
+}
+
+router.get('/sms/audience', async (req, res) => {
+  try {
+    const aud = ['all', 'active', 'inactive'].includes(req.query.audience) ? req.query.audience : 'all';
+    const { phones, invalid } = await smsAudiencePhones(aud);
+    res.json({ success: true, count: phones.length, invalid });
+  } catch (e) { return safeError(res, e, 'admin/sms-audience'); }
+});
+
+router.post('/sms/send', async (req, res) => {
+  try {
+    const { mode, audience, numbers } = req.body || {};
+    const message = String(req.body?.message || '').trim();
+    if (!message) return res.status(400).json({ success: false, message: 'Message text is required.' });
+    if (message.length > 459) return res.status(400).json({ success: false, message: 'Message too long (max 459 characters).' });
+    if (!['all', 'numbers'].includes(mode)) return res.status(400).json({ success: false, message: 'Choose who to send to.' });
+    if (smsRunning) return res.status(409).json({ success: false, message: 'Another SMS broadcast is still sending. Wait for it to finish.' });
+
+    const { normalizeKePhone, sendBulkSms } = require('../services/smsService');
+    let phones = [], skipped = [];
+    if (mode === 'numbers') {
+      const raw = Array.isArray(numbers) ? numbers : String(numbers || '').split(/[\s,;]+/);
+      const seen = new Set();
+      for (const r of raw.map(x => String(x).trim()).filter(Boolean)) {
+        const n = normalizeKePhone(r);
+        if (!n) { skipped.push(r); continue; }
+        if (!seen.has(n)) { seen.add(n); phones.push(n); }
+      }
+      if (phones.length > 1000) return res.status(400).json({ success: false, message: 'Max 1000 numbers at a time.' });
+      if (!phones.length) return res.status(400).json({ success: false, message: 'No valid Kenyan numbers found (use 07XXXXXXXX or 2547XXXXXXXX).' });
+    } else {
+      const aud = ['all', 'active', 'inactive'].includes(audience) ? audience : 'all';
+      phones = (await smsAudiencePhones(aud)).phones;
+      if (!phones.length) return res.status(400).json({ success: false, message: 'No users with valid phone numbers in that group.' });
+    }
+
+    const SmsLog = require('../models/SmsLog');
+    const log = await SmsLog.create({
+      admin: req.admin?.username || '', mode, audience: mode === 'all' ? (audience || 'all') : '',
+      message, total: phones.length, sample: phones.slice(0, 5).map(maskPhone), status: 'sending'
+    });
+    const job = { id: String(log._id), status: 'sending', total: phones.length, done: 0, accepted: 0, failed: 0, error: '' };
+    smsJobs.set(job.id, job);
+    smsRunning = true;
+    audit('BULK_SMS_START', { mode, audience, total: phones.length, by: req.admin?.username });
+
+    // run in the background; the request returns immediately
+    sendBulkSms(phones, message, done => { job.done = done; })
+      .then(async r => {
+        job.status = 'done'; job.done = r.total; job.accepted = r.accepted; job.failed = r.failed; job.error = r.error || '';
+        await SmsLog.updateOne({ _id: log._id }, { $set: { status: 'done', accepted: r.accepted, failed: r.failed, error: r.error || '', failedNumbers: r.failedNumbers.slice(0, 50), finishedAt: new Date() } }).catch(() => {});
+        audit('BULK_SMS_DONE', { total: r.total, accepted: r.accepted, failed: r.failed });
+        require('../services/auditService').log('admin.sms.broadcast', { meta: { mode, total: r.total, accepted: r.accepted, failed: r.failed } }).catch(() => {});
+      })
+      .catch(async e => {
+        job.status = 'error'; job.error = e.message;
+        await SmsLog.updateOne({ _id: log._id }, { $set: { status: 'error', error: e.message, finishedAt: new Date() } }).catch(() => {});
+      })
+      .finally(() => { smsRunning = false; setTimeout(() => smsJobs.delete(job.id), 30 * 60000).unref?.(); });
+
+    res.json({ success: true, jobId: job.id, total: phones.length, skipped });
+  } catch (e) { smsRunning = false; return safeError(res, e, 'admin/sms-send'); }
+});
+
+router.get('/sms/job/:id', (req, res) => {
+  const job = smsJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ success: false, message: 'Job not found (it may have finished a while ago — see History).' });
+  res.json({ success: true, job });
+});
+
+router.get('/sms/history', async (req, res) => {
+  try {
+    const SmsLog = require('../models/SmsLog');
+    const items = await SmsLog.find().sort({ createdAt: -1 }).limit(30).lean();
+    res.json({ success: true, data: items });
+  } catch (e) { return safeError(res, e, 'admin/sms-history'); }
+});
+
 // ── BALANCE ──
 router.post('/balance', async (req, res) => {
   try {

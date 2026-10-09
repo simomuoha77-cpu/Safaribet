@@ -94,10 +94,82 @@ async function sendSms(phoneE164, message) {
   }
 }
 /**
+ * Kenyan phone -> "2547XXXXXXXX" / "2541XXXXXXXX", or null if it isn't a valid mobile number.
+ * Accepts 07.., 01.., 7.., +254.., 254.. with spaces/dashes.
+ */
+function normalizeKePhone(raw) {
+  let p = String(raw || '').replace(/[^\d]/g, '');
+  if (p.startsWith('254')) { /* ok */ }
+  else if (p.startsWith('0')) p = '254' + p.slice(1);
+  else if (p.length === 9) p = '254' + p;
+  return /^254[17]\d{8}$/.test(p) ? p : null;
+}
+
+/**
+ * Sends one message to many numbers. CommsGrid takes an array of recipients, so
+ * numbers go in batches of 100 (not one request per number). Never throws.
+ * Returns { total, accepted, failed, failedNumbers:[{phone,reason}], error }.
+ * onProgress(doneCount) is called after each batch.
+ */
+async function sendBulkSms(phones, message, onProgress) {
+  const key = COMMSGRID_KEY();
+  const list = Array.from(new Set((phones || []).map(String)));
+  const out = { total: list.length, accepted: 0, failed: 0, failedNumbers: [], error: null };
+  if (!key) { out.failed = list.length; out.error = 'SMS service not configured (COMMSGRID_API_KEY missing)'; return out; }
+
+  const BATCH = 100;
+  for (let i = 0; i < list.length; i += BATCH) {
+    const chunk = list.slice(i, i + BATCH);
+    const recipients = chunk.map(p => (p.startsWith('+') ? p : '+' + p));
+    try {
+      const r = await axios.post(
+        `${COMMSGRID_BASE}/sms/send`,
+        { recipient: recipients, message, sender_id: COMMSGRID_SENDER },
+        { headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'Content-Type': 'application/json' }, timeout: 30000 }
+      );
+      const data = r.data;
+      const details = data?.data?.details;
+      if (data?.status === 'success' && Array.isArray(details) && details.length) {
+        for (const d of details) {
+          const st = String(d.status || '').toUpperCase();
+          if (st === 'SENT' || st === 'QUEUED' || st === 'DELIVERED') out.accepted++;
+          else { out.failed++; out.failedNumbers.push({ phone: String(d.to || '').replace('+', ''), reason: d.reason || st || 'failed' }); }
+        }
+        // anything the API did not itemise counts as accepted only if the API said so
+        const itemised = details.length;
+        if (itemised < chunk.length) {
+          const extraOk = Math.max(0, (Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0)) - details.filter(d => ['SENT','QUEUED','DELIVERED'].includes(String(d.status || '').toUpperCase())).length);
+          out.accepted += Math.min(extraOk, chunk.length - itemised);
+          out.failed += (chunk.length - itemised) - Math.min(extraOk, chunk.length - itemised);
+        }
+      } else if (data?.status === 'success') {
+        const ok = Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0);
+        out.accepted += Math.min(ok, chunk.length);
+        out.failed += chunk.length - Math.min(ok, chunk.length);
+      } else {
+        out.failed += chunk.length;
+        out.error = data?.message || 'CommsGrid rejected the batch';
+        chunk.forEach(p => out.failedNumbers.push({ phone: p, reason: out.error }));
+      }
+    } catch (e) {
+      const reason = e.response?.data?.message || e.message;
+      console.error('[sms/bulk] batch failed:', e.response?.data || e.message);
+      out.failed += chunk.length;
+      out.error = reason;
+      chunk.forEach(p => out.failedNumbers.push({ phone: p, reason }));
+    }
+    if (typeof onProgress === 'function') { try { onProgress(Math.min(i + BATCH, list.length)); } catch (_) {} }
+    if (i + BATCH < list.length) await new Promise(r => setTimeout(r, 300));   // gentle pacing between batches
+  }
+  console.log(`[sms/bulk] done: ${out.accepted} accepted, ${out.failed} failed of ${out.total}`);
+  return out;
+}
+
+/**
  * Generates a random 6-digit OTP code as a string, e.g. "042837".
  */
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-module.exports = { sendSms, generateOtp };
+module.exports = { sendSms, sendBulkSms, normalizeKePhone, generateOtp };
