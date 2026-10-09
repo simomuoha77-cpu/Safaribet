@@ -2156,12 +2156,45 @@ function onSearch(val) {
   srchTimer = setTimeout(() => doSearch(val.trim()), 200);
 }
 
+function renderSearchRows(overlay, rows) {
+  overlay.innerHTML = rows.map(m => {
+    const icon = m.sportIcon || '⚽';
+    const time = m.commenceTime ? fmtTime(m.commenceTime) : 'TBD';
+    const oddsStr = m.hasOdds ? `${m.odds?.home||'-'} / ${m.odds?.draw||'-'} / ${m.odds?.away||'-'}` : 'Odds TBD';
+    return `<div class="srch-result-item" onclick="pickMatchFromSearch('${esc(m.matchId)}','${esc(m.sport || m.leagueKey || '')}')">
+      <span class="srch-sport-badge">${icon}</span>
+      <div class="srch-teams">
+        <div class="srch-match">${escapeHtml(m.homeTeam)} vs ${escapeHtml(m.awayTeam)}</div>
+        <div class="srch-meta">${escapeHtml(m.league)} · ${time}</div>
+      </div>
+      <div class="srch-odds">${oddsStr}</div>
+    </div>`;
+  }).join('');
+}
+
+function localSearch(q) {
+  const norm = v => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const terms = norm(q).split(' ').filter(t => t && !['vs','v','x','versus'].includes(t));
+  if (!terms.length) return [];
+  const pool = [];
+  try { (allMatches || []).forEach(m => pool.push(m)); } catch(e) {}
+  try { sportTabCache.forEach(list => (list || []).forEach(m => pool.push(m))); } catch(e) {}
+  const seen = new Set(), out = [];
+  for (const m of pool) {
+    if (!m || !m.matchId || seen.has(m.matchId)) continue;
+    const h = norm(`${m.homeTeam} ${m.awayTeam} ${m.league}`);
+    if (terms.every(t => h.includes(t))) { seen.add(m.matchId); out.push(m); }
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 let srchSeq = 0;
 async function doSearch(q, attempt = 0) {
   const overlay = document.getElementById('srchResults');
   const seq = ++srchSeq;
   const ctl = new AbortController();
-  const killer = setTimeout(() => ctl.abort(), 6000);
+  const killer = setTimeout(() => ctl.abort(), 5000);
   try {
     const r = await fetch(`/api/sports/search?q=${encodeURIComponent(q)}`, { signal: ctl.signal, cache: 'no-store' });
     const d = await r.json();
@@ -2179,23 +2212,14 @@ async function doSearch(q, attempt = 0) {
       overlay.innerHTML = `<div class="no-results">No matches found for "<strong>${escapeHtml(q)}</strong>"</div>`;
       return;
     }
-    overlay.innerHTML = d.data.map(m => {
-      const icon = m.sportIcon || '⚽';
-      const time = m.commenceTime ? fmtTime(m.commenceTime) : 'TBD';
-      const oddsStr = m.hasOdds ? `${m.odds?.home||'-'} / ${m.odds?.draw||'-'} / ${m.odds?.away||'-'}` : 'Odds TBD';
-      return `<div class="srch-result-item" onclick="pickMatchFromSearch('${esc(m.matchId)}','${esc(m.sport || m.leagueKey || '')}')">
-        <span class="srch-sport-badge">${icon}</span>
-        <div class="srch-teams">
-          <div class="srch-match">${escapeHtml(m.homeTeam)} vs ${escapeHtml(m.awayTeam)}</div>
-          <div class="srch-meta">${escapeHtml(m.league)} · ${time}</div>
-        </div>
-        <div class="srch-odds">${oddsStr}</div>
-      </div>`;
-    }).join('');
+    renderSearchRows(overlay, d.data);
   } catch(e) {
     clearTimeout(killer);
     if (seq !== srchSeq) return;
-    if (attempt < 2) { setTimeout(() => { if (document.getElementById('srchInp').value.trim() === q) doSearch(q, attempt + 1); }, 800); return; }
+    if (attempt < 1) { setTimeout(() => { if (document.getElementById('srchInp').value.trim() === q) doSearch(q, attempt + 1); }, 500); return; }
+    // Server unreachable: search the games already on this phone instead of giving up.
+    const local = localSearch(q);
+    if (local.length) { renderSearchRows(overlay, local); return; }
     overlay.innerHTML = '<div class="no-results">Search failed — check connection</div>';
   }
 }

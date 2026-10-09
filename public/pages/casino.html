@@ -82,17 +82,32 @@ function applyCasinoImages(images){
     }
     img.onload=()=>art.classList.remove('noimg');
     img.onerror=()=>art.classList.add('noimg');
+    img.referrerPolicy='no-referrer';
     img.src=src;
   }
 }
 
-async function loadCasinoImages(){
-  // Artwork is optional: cards are already visible. If JuanAI is sleeping,
-  // this background request can fail without hiding or delaying the games.
+const IMG_KEY='sb_casino_images_v1';
+async function loadCasinoImages(attempt=0){
+  // Artwork is optional: cards are already visible. Show last saved artwork instantly,
+  // then fetch fresh ones, retrying while JuanAI wakes up.
+  if(attempt===0){
+    try{ const c=JSON.parse(localStorage.getItem(IMG_KEY)||'null'); if(c) applyCasinoImages(c); }catch(_){}
+  }
+  let got=false;
   try{
-    const d=await api('/api/casino/juanai/images');
-    if(d && d.success) applyCasinoImages(d.images);
+    const r=await fetch('/api/casino/juanai/images',{cache:'no-store'});
+    const d=await r.json();
+    if(d && d.success && d.images){
+      applyCasinoImages(d.images);
+      if(d.images.aviator||d.images.jetx){
+        got=true;
+        try{ localStorage.setItem(IMG_KEY,JSON.stringify(d.images)); }catch(_){}
+      }
+      if(d.images.aviator && d.images.jetx) return;
+    }
   }catch(_){ /* keep fallback artwork visible */ }
+  if(attempt<6) setTimeout(()=>loadCasinoImages(attempt+1), got?5000:3000*(attempt+1));
 }
 
 let launching=false, launchTimer=null;
