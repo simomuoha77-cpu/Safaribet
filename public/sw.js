@@ -1,13 +1,15 @@
 // SafariBet service worker: the site opens from the phone's own cache, then updates itself.
 //
-//   * App pages + scripts + styles + images: STALE-WHILE-REVALIDATE. The cached copy is shown
+//   * (v11) App pages, scripts and styles are NETWORK-FIRST (3s), cache only as a fallback, so a
+//     deploy shows up on the very next load instead of one visit later. Images stay SWR.
+//   * (old note) App pages + scripts + styles + images: STALE-WHILE-REVALIDATE. The cached copy is shown
 //     immediately (no network wait, works even while the server is waking up or the line is slow);
 //     a fresh copy is fetched in the background and used the next time.
 //   * Google Fonts: cache-first (they never change).
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v10-markets-retry';
+const VERSION = 'sb-v11-fresh';
 const SHELL = ['/', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
@@ -44,6 +46,24 @@ async function swr(req, url) {
   return refresh;                                         // first visit: network
 }
 
+const isCode = u => isPage(u) || /\.(?:js|css|html|json)$/i.test(u.pathname);
+async function networkFirst(req, url) {
+  const cache = await caches.open(VERSION);
+  const key = cacheKey(url);
+  const net = fetch(key.url, { cache: 'no-cache', credentials: 'same-origin' }).then(res => {
+    const ct = res.headers.get('content-type') || '';
+    const okType = isPage(url) ? ct.includes('text/html') : true;
+    if (res.ok && !res.redirected && okType) cache.put(key, res.clone());
+    return res;
+  });
+  const hit = await cache.match(key);
+  if (!hit) return net;
+  // cached copy only wins if the network is slow (cold server) or offline
+  return Promise.race([net.catch(() => hit), new Promise(r => setTimeout(() => r(hit), 3000))]);
+}
+
+self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || req.headers.has('range')) return;
@@ -61,5 +81,5 @@ self.addEventListener('fetch', e => {
   }
   if (url.origin !== self.location.origin) return;
   if (NEVER.some(re => re.test(url.pathname))) return;
-  e.respondWith(swr(req, url).catch(() => fetch(req)));
+  e.respondWith((isCode(url) ? networkFirst(req, url) : swr(req, url)).catch(() => fetch(req)));
 });

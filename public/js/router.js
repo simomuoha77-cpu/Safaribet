@@ -588,7 +588,20 @@
   // ── Service worker (app opens from the phone's cache, then updates itself) ──
   try {
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      _winAdd.call(window, 'load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+      _winAdd.call(window, 'load', function () {
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(function (reg) {
+          // look for a new version now and whenever the tab comes back to the front
+          try { reg.update(); } catch (e) {}
+          _docAdd.call(document, 'visibilitychange', function () { if (!document.hidden) { try { reg.update(); } catch (e) {} } });
+        }).catch(function () {});
+        // When a new version takes over, reload once so the page runs the new code.
+        var hadController = !!navigator.serviceWorker.controller;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (!hadController) return;   // very first install: nothing stale to replace
+          try { if (sessionStorage.getItem('sb_sw_reloaded') === '1') return; sessionStorage.setItem('sb_sw_reloaded', '1'); } catch (e) {}
+          location.reload();
+        });
+      });
     }
   } catch (e) {}
 
