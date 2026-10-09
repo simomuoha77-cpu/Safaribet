@@ -412,10 +412,18 @@ const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
   Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
 
 router.get('/match/:matchId', async (req, res) => {
+  // Stage timings (ms) so a slow open can be blamed on the right layer:
+  // db = Mongo lookup, resolve = finding the fixture, provider = SofaBets markets
+  // (src says whether it came from memory cache or a live provider call),
+  // live = live-score lookup, build = turning markets into the response.
+  const T0 = process.hrtime.bigint();
+  const lap = () => Number((process.hrtime.bigint() - T0) / 1000000n);
+  const timings = { db: 0, resolve: 0, provider: 0, live: 0, build: 0, total: 0, src: 'db' };
   try {
     let marketsTimedOut = false;
     let resolveTimedOut = false;
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
+    timings.db = lap();
 
     // SofaBets live IDs are authoritative provider identities. Resolve the
     // exact fixture via the shared resolver, which checks both the live feed
@@ -535,6 +543,7 @@ router.get('/match/:matchId', async (req, res) => {
     // many pages across several hosts, so repeating it on every click/bet is
     // what made this feel slow — most of the time the data hasn't changed
     // since the last click seconds ago anyway.
+    timings.resolve = lap() - timings.db;
     const MARKETS_FRESH_MS = 20000;
     const marketsAlreadyFresh = m && m.marketsRefreshedAt &&
       (Date.now() - new Date(m.marketsRefreshedAt).getTime()) < MARKETS_FRESH_MS &&
@@ -550,14 +559,24 @@ router.get('/match/:matchId', async (req, res) => {
           // Ask for just this exact fixture's markets (every candidate payload
           // is checked against the exact provider id inside getMatchMarkets)
           // and, in parallel, whether it is live right now (cached live feed).
-          const richP = Promise.all([
-            sofaBets.getMatchMarkets(providerId, sport).catch(() => null),
-            sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null)
+          const memAge = sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(providerId, sport) : Infinity;
+          timings.src = memAge < Infinity ? 'memory' : 'provider';
+          const tP = lap();
+          const marketsP = sofaBets.getMatchMarkets(providerId, sport).catch(() => null);
+          const liveP = sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null);
+          // The live-score lookup only matters for games already live, and never
+          // delays the markets by more than 350ms.
+          const wantLive = isLiveId || m.status === 'live';
+          if (!wantLive) liveP.catch(() => {});
+          const [racedMarkets, racedLive] = await Promise.all([
+            raceDeadline(marketsP),
+            wantLive ? raceDeadline(liveP, 350) : Promise.resolve(null)
           ]);
-          const raced = await raceDeadline(richP);
+          timings.provider = lap() - tP;
           let details = null, liveNow = null;
-          if (raced === DEADLINE) { marketsTimedOut = true; richP.catch(() => {}); }
-          else { details = raced[0]; liveNow = raced[1]; }
+          if (racedMarkets === DEADLINE) { marketsTimedOut = true; timings.src = 'timeout'; marketsP.catch(() => {}); }
+          else details = racedMarkets;
+          liveNow = racedLive === DEADLINE ? null : racedLive;
           const liveIsExact = liveNow && String(liveNow.providerMatchId) === String(providerId);
           const haveRich = details && Array.isArray(details.markets) && details.markets.length > 0;
 
@@ -700,8 +719,12 @@ router.get('/match/:matchId', async (req, res) => {
     }
 
     const marketsPending = (marketsTimedOut || resolveTimedOut) && richMarkets.length <= 1;
+    timings.total = lap();
+    timings.build = Math.max(0, timings.total - timings.db - timings.resolve - timings.provider);
     res.set('Cache-Control', 'no-store');
-    res.json({ success: true, data: { ...m, markets, marketsPending } });
+    res.set('Server-Timing', `db;dur=${timings.db}, resolve;dur=${timings.resolve}, provider;dur=${timings.provider};desc="${timings.src}", build;dur=${timings.build}, total;dur=${timings.total}`);
+    if (timings.total > 1500) console.warn(`[odds/match] slow ${req.params.matchId} total=${timings.total}ms db=${timings.db} resolve=${timings.resolve} provider=${timings.provider}(${timings.src}) build=${timings.build}`);
+    res.json({ success: true, data: { ...m, markets, marketsPending, fetchedAt: Date.now(), timings } });
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }
 });
 
