@@ -408,6 +408,10 @@ router.post('/warm', warmLimiter, express.json({ limit: '4kb' }), (req, res) => 
 // full catalogue instantly.
 const MATCH_DEADLINE_MS = 1800;
 const DEADLINE = Symbol('deadline');
+// Full market list for an already-known fixture: the page paints instantly from
+// the summary it already has, so it is better to wait a little longer here than
+// to bounce the customer into slow 'pending' polling. Stays under the page's 7s cap.
+const MARKETS_DEADLINE_MS = 4500;
 const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
   Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
 
@@ -569,7 +573,7 @@ router.get('/match/:matchId', async (req, res) => {
           const wantLive = isLiveId || m.status === 'live';
           if (!wantLive) liveP.catch(() => {});
           const [racedMarkets, racedLive] = await Promise.all([
-            raceDeadline(marketsP),
+            raceDeadline(marketsP, MARKETS_DEADLINE_MS),
             wantLive ? raceDeadline(liveP, 350) : Promise.resolve(null)
           ]);
           timings.provider = lap() - tP;

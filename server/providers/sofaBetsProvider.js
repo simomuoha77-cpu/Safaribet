@@ -513,7 +513,11 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
       return cached.data;
     }
   }
-  return refreshMatchMarkets(id, name, cacheKey);
+  userMarketsActive++;
+  return refreshMatchMarkets(id, name, cacheKey).finally(() => {
+    userMarketsActive = Math.max(0, userMarketsActive - 1);
+    if (userMarketsActive === 0) setTimeout(pumpWarm, 1500).unref();   // let the crawler resume shortly after
+  });
 }
 
 // Age (ms) of the cached market list for a fixture, Infinity when none/thin.
@@ -553,8 +557,13 @@ function queueWarmMarkets(providerMatchId, sportName, onDone, maxAgeMs) {
   pumpWarm();
   return true;
 }
+// A customer opening a match always outranks the background crawler: while any
+// customer-facing markets lookup is in flight the crawler starts no new jobs
+// (each job fans out ~14 upstream requests, which starved real users).
+let userMarketsActive = 0;
+const WARM_CONCURRENCY = Number(process.env.SOFABETS_WARM_CONCURRENCY || 3);
 function pumpWarm() {
-  while (warmActive < 6 && warmQueue.length && Date.now() >= warmPausedUntil) {
+  while (warmActive < WARM_CONCURRENCY && warmQueue.length && Date.now() >= warmPausedUntil && userMarketsActive === 0) {
     const job = warmQueue.shift();
     warmActive++;
     refreshMatchMarkets(job.id, job.name, job.key)
