@@ -314,6 +314,21 @@ async function launchDirect(gameId, userId, username) {
     throw Object.assign(new Error('JUANAI_URL is not configured.'), { status: 503, code: 'NOT_CONFIGURED' });
   }
 
+  // FASTEST PATH: if SafariBet holds the shared JUANAI_USER_TOKEN_SECRET, sign the player's token
+  // right here (same format JuanAI's /api/casino/session issues) - no call to JuanAI, so the
+  // launch URL is ready in a few milliseconds even while JuanAI is asleep.
+  const secret = String(process.env.JUANAI_USER_TOKEN_SECRET || '').trim();
+  if (secret) {
+    const crypto = require('crypto');
+    const payload = `${String(userId)}.${Date.now() + 6 * 60 * 60 * 1000}`;
+    const utoken = `${payload}.${crypto.createHmac('sha256', secret).update(payload).digest('hex')}`;
+    return {
+      success: true, mode: 'real-money', realMoney: true, currency: 'KES', gameId: id,
+      username: String(username || userId), balance: null,
+      launchUrl: `${c.base}/casino/${id}.html?key=${encodeURIComponent(c.legacyKey)}&utoken=${encodeURIComponent(utoken)}`
+    };
+  }
+
   // Do NOT fetch the catalogue here. The player already selected one of the
   // two JuanAI games. Create the signed user session in one server-to-server
   // call, then open the actual JuanAI game immediately.
