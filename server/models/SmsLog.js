@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 // One row per admin SMS broadcast / single send (history shown in the admin panel).
 const smsLogSchema = new mongoose.Schema({
   admin:        { type: String, default: '' },
-  mode:         { type: String, enum: ['all', 'numbers'], required: true },
+  mode:         { type: String, enum: ['all', 'numbers', 'users', 'filter'], required: true },
   audience:     { type: String, default: '' },          // for mode "all": all | active | inactive
   message:      { type: String, required: true },
   total:        { type: Number, default: 0 },

@@ -402,6 +402,56 @@ async function smsAudiencePhones(audience) {
   return { phones: [...set], invalid };
 }
 
+const escapeRe = x => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Shared by the picker list and by "send to everyone matching": search by
+// username/phone + a segment (all | active | inactive | balance).
+async function smsUserFilter(search, segment, excludeIds) {
+  const and = [{ isActive: { $ne: false } }];
+  const q = String(search || '').trim();
+  if (q) {
+    const digits = q.replace(/\D/g, '');
+    const or = [{ username: { $regex: escapeRe(q), $options: 'i' } }];
+    if (digits.length >= 3) or.push({ phone: { $regex: escapeRe(digits.startsWith('0') ? digits.slice(1) : digits) } });
+    and.push({ $or: or });
+  }
+  if (segment === 'active' || segment === 'inactive') {
+    const ids = await Bet.distinct('userId', { createdAt: { $gte: new Date(Date.now() - 30 * 86400000) } });
+    and.push({ _id: segment === 'active' ? { $in: ids } : { $nin: ids } });
+  } else if (segment === 'balance') {
+    const Wallet = require('../models/Wallet');
+    const ids = await Wallet.find({ $expr: { $gt: [{ $add: ['$main', '$bonus'] }, 0] } }).distinct('userId');
+    and.push({ _id: { $in: ids } });
+  }
+  if (Array.isArray(excludeIds) && excludeIds.length) {
+    const mongoose = require('mongoose');
+    const oids = excludeIds.filter(i => mongoose.Types.ObjectId.isValid(i)).map(i => new mongoose.Types.ObjectId(i));
+    if (oids.length) and.push({ _id: { $nin: oids } });
+  }
+  return and.length === 1 ? and[0] : { $and: and };
+}
+
+router.get('/sms/users', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(10, parseInt(req.query.limit) || 50));
+    const filter = await smsUserFilter(req.query.search, req.query.segment);
+    const [total, rows] = await Promise.all([
+      User.countDocuments(filter),
+      User.aggregate([
+        { $match: filter },
+        { $sort: { createdAt: -1 } },
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+        { $lookup: { from: 'wallets', localField: '_id', foreignField: 'userId', as: 'wallet' } },
+        { $addFields: { balance: { $add: [ { $ifNull: [ { $arrayElemAt: ['$wallet.main', 0] }, 0 ] }, { $ifNull: [ { $arrayElemAt: ['$wallet.bonus', 0] }, 0 ] } ] } } },
+        { $project: { username: 1, phone: 1, balance: 1, createdAt: 1 } }
+      ])
+    ]);
+    res.json({ success: true, data: rows, total, page, pages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (e) { return safeError(res, e, 'admin/sms-users'); }
+});
+
 router.get('/sms/audience', async (req, res) => {
   try {
     const aud = ['all', 'active', 'inactive'].includes(req.query.audience) ? req.query.audience : 'all';
@@ -416,7 +466,7 @@ router.post('/sms/send', async (req, res) => {
     const message = String(req.body?.message || '').trim();
     if (!message) return res.status(400).json({ success: false, message: 'Message text is required.' });
     if (message.length > 459) return res.status(400).json({ success: false, message: 'Message too long (max 459 characters).' });
-    if (!['all', 'numbers'].includes(mode)) return res.status(400).json({ success: false, message: 'Choose who to send to.' });
+    if (!['all', 'numbers', 'users', 'filter'].includes(mode)) return res.status(400).json({ success: false, message: 'Choose who to send to.' });
     if (smsRunning) return res.status(409).json({ success: false, message: 'Another SMS broadcast is still sending. Wait for it to finish.' });
 
     const { normalizeKePhone, sendBulkSms } = require('../services/smsService');
@@ -431,6 +481,23 @@ router.post('/sms/send', async (req, res) => {
       }
       if (phones.length > 1000) return res.status(400).json({ success: false, message: 'Max 1000 numbers at a time.' });
       if (!phones.length) return res.status(400).json({ success: false, message: 'No valid Kenyan numbers found (use 07XXXXXXXX or 2547XXXXXXXX).' });
+    } else if (mode === 'users' || mode === 'filter') {
+      // Picked from the user list: either specific users, or everyone matching the
+      // current search/segment minus any the admin un-ticked.
+      let filter;
+      if (mode === 'users') {
+        const mongoose = require('mongoose');
+        const ids = (Array.isArray(req.body.userIds) ? req.body.userIds : []).filter(i => mongoose.Types.ObjectId.isValid(i));
+        if (!ids.length) return res.status(400).json({ success: false, message: 'Select at least one user.' });
+        if (ids.length > 20000) return res.status(400).json({ success: false, message: 'Too many users selected.' });
+        filter = { _id: { $in: ids }, isActive: { $ne: false } };
+      } else {
+        filter = await smsUserFilter(req.body.search, req.body.segment, req.body.excludeIds);
+      }
+      const users = await User.find(filter).select('phone').lean();
+      const seen = new Set();
+      for (const u of users) { const n = normalizeKePhone(u.phone); if (n && !seen.has(n)) { seen.add(n); phones.push(n); } else if (!n) skipped.push(u.phone); }
+      if (!phones.length) return res.status(400).json({ success: false, message: 'None of the selected users have a valid phone number.' });
     } else {
       const aud = ['all', 'active', 'inactive'].includes(audience) ? audience : 'all';
       phones = (await smsAudiencePhones(aud)).phones;
@@ -439,7 +506,7 @@ router.post('/sms/send', async (req, res) => {
 
     const SmsLog = require('../models/SmsLog');
     const log = await SmsLog.create({
-      admin: req.admin?.username || '', mode, audience: mode === 'all' ? (audience || 'all') : '',
+      admin: req.admin?.username || '', mode, audience: mode === 'all' ? (audience || 'all') : (mode === 'filter' ? String(req.body.segment || 'all') : ''),
       message, total: phones.length, sample: phones.slice(0, 5).map(maskPhone), status: 'sending'
     });
     const job = { id: String(log._id), status: 'sending', total: phones.length, done: 0, accepted: 0, failed: 0, error: '' };
