@@ -7,7 +7,7 @@
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v6-seo-brand';
+const VERSION = 'sb-v7-seo-brand';
 const SHELL = ['/', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
