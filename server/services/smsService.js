@@ -58,8 +58,7 @@ async function sendSms(phoneE164, message) {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        timeout: 15000,
-        family: 4            // IPv4 only: a broken IPv6 route makes calls hang until they time out
+        timeout: 15000
       }
     );
 
@@ -95,95 +94,10 @@ async function sendSms(phoneE164, message) {
   }
 }
 /**
- * Kenyan phone -> "2547XXXXXXXX" / "2541XXXXXXXX", or null if it isn't a valid mobile number.
- * Accepts 07.., 01.., 7.., +254.., 254.. with spaces/dashes.
- */
-function normalizeKePhone(raw) {
-  let p = String(raw || '').replace(/[^\d]/g, '');
-  if (p.startsWith('254')) { /* ok */ }
-  else if (p.startsWith('0')) p = '254' + p.slice(1);
-  else if (p.length === 9) p = '254' + p;
-  return /^254[17]\d{8}$/.test(p) ? p : null;
-}
-
-/**
- * Sends one message to many numbers. CommsGrid takes an array of recipients, so
- * numbers go in batches of 100 (not one request per number). Never throws.
- * Returns { total, accepted, failed, failedNumbers:[{phone,reason}], error }.
- * onProgress(doneCount) is called after each batch.
- */
-async function sendBulkSms(phones, message, onProgress) {
-  const key = COMMSGRID_KEY();
-  const list = Array.from(new Set((phones || []).map(String)));
-  const out = { total: list.length, accepted: 0, failed: 0, unconfirmed: 0, failedNumbers: [], error: null, ms: 0 };
-  if (!key) { out.failed = list.length; out.error = 'SMS service not configured (COMMSGRID_API_KEY missing)'; return out; }
-
-  const BATCH = 100;
-  const t0 = Date.now();
-  for (let i = 0; i < list.length; i += BATCH) {
-    const chunk = list.slice(i, i + BATCH);
-    const recipients = chunk.map(p => (p.startsWith('+') ? p : '+' + p));
-    const tb = Date.now();
-    try {
-      const r = await axios.post(
-        `${COMMSGRID_BASE}/sms/send`,
-        { recipient: recipients, message, sender_id: COMMSGRID_SENDER },
-        { headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'Content-Type': 'application/json' }, timeout: 60000, family: 4 }
-      );
-      const data = r.data;
-      console.log(`[sms/bulk] batch of ${chunk.length} answered in ${Date.now() - tb}ms:`, JSON.stringify(data).slice(0, 300));
-      const details = data?.data?.details;
-      if (data?.status === 'success' && Array.isArray(details) && details.length) {
-        for (const d of details) {
-          const st = String(d.status || '').toUpperCase();
-          if (st === 'SENT' || st === 'QUEUED' || st === 'DELIVERED') out.accepted++;
-          else { out.failed++; out.failedNumbers.push({ phone: String(d.to || '').replace('+', ''), reason: d.reason || st || 'failed' }); }
-        }
-        const itemised = details.length;
-        if (itemised < chunk.length) {
-          const okSoFar = details.filter(d => ['SENT','QUEUED','DELIVERED'].includes(String(d.status || '').toUpperCase())).length;
-          const extraOk = Math.max(0, (Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0)) - okSoFar);
-          const add = Math.min(extraOk, chunk.length - itemised);
-          out.accepted += add;
-          out.failed += (chunk.length - itemised) - add;
-        }
-      } else if (data?.status === 'success') {
-        const ok = Number(data?.data?.sent || 0) + Number(data?.data?.queued || 0);
-        out.accepted += Math.min(ok, chunk.length);
-        out.failed += chunk.length - Math.min(ok, chunk.length);
-      } else {
-        out.failed += chunk.length;
-        out.error = data?.message || 'SMS Grid rejected the batch';
-        chunk.forEach(p => out.failedNumbers.push({ phone: p, reason: out.error }));
-      }
-    } catch (e) {
-      const isTimeout = e.code === 'ECONNABORTED' || /timeout/i.test(e.message || '');
-      const apiMsg = e.response?.data?.message || (typeof e.response?.data === 'string' ? e.response.data.slice(0, 120) : '');
-      console.error(`[sms/bulk] batch of ${chunk.length} failed after ${Date.now() - tb}ms:`, e.code || '', e.response?.status || '', e.response?.data || e.message);
-      if (isTimeout) {
-        // No answer is NOT proof of failure - the provider may have queued it. Never retry
-        // automatically (that could text people twice); tell the admin to check first.
-        out.unconfirmed += chunk.length;
-        out.error = 'SMS Grid did not answer in time — the message may still have been sent. Check the phone / SMS Grid dashboard before sending again.';
-      } else {
-        out.failed += chunk.length;
-        out.error = apiMsg || (e.response?.status ? `SMS Grid returned HTTP ${e.response.status}` : (e.code ? `${e.code}: ${e.message}` : e.message));
-        chunk.forEach(p => out.failedNumbers.push({ phone: p, reason: out.error }));
-      }
-    }
-    if (typeof onProgress === 'function') { try { onProgress(Math.min(i + BATCH, list.length)); } catch (_) {} }
-    if (i + BATCH < list.length) await new Promise(r => setTimeout(r, 300));   // gentle pacing between batches
-  }
-  out.ms = Date.now() - t0;
-  console.log(`[sms/bulk] done in ${out.ms}ms: ${out.accepted} accepted, ${out.failed} failed, ${out.unconfirmed} unconfirmed of ${out.total}`);
-  return out;
-}
-
-/**
  * Generates a random 6-digit OTP code as a string, e.g. "042837".
  */
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-module.exports = { sendSms, sendBulkSms, normalizeKePhone, generateOtp };
+module.exports = { sendSms, generateOtp };

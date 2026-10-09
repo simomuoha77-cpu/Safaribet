@@ -4,18 +4,6 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
 <title>Casino – SafariBet</title>
-<link rel="icon" type="image/png" href="/favicon.png"/>
-<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
-<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"/>
-<link rel="shortcut icon" href="/favicon.ico"/>
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
-<link rel="manifest" href="/manifest.json"/>
-<meta name="theme-color" content="#00c853"/>
-<meta name="description" content="Play Aviator and JetX on the SafariBet casino with real-money KES balance." data-sb-page-head/>
-<link rel="canonical" href="https://safaribet.top/casino" data-sb-page-head/>
-<meta property="og:site_name" content="SafariBet" data-sb-page-head/>
-<meta property="og:image" content="https://safaribet.top/logo.png" data-sb-page-head/>
-
 <script src="/js/theme.js"></script>
 <script src="/js/router.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -55,11 +43,6 @@ let games=[
 function esc(v){return String(v??'').replace(/[&<>\'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 async function api(url,opt={}){const r=await fetch(url,Object.assign({headers:headers(),cache:'no-store'},opt));let d={};try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d.message||'Request failed');e.retryable=!!d.retryable||r.status===503;throw e;}return d;}
 async function loadBalance(){try{const d=await api('/api/casino/juanai/balance');if(d.success)document.getElementById('balance').textContent='KES '+Number(d.balance).toFixed(2)}catch(_){} }
-function artRetry(img,id){
-  img.parentNode.classList.add('noimg');
-  const n=(+img.dataset.try||0)+1; img.dataset.try=n;
-  if(n<=8) setTimeout(()=>{ img.src='/casino-art/'+id+'.png?r='+n; },2500*n);
-}
 function renderGames(){
   // JuanAI owns the games. SafariBet already knows the two real-money games,
   // so the lobby must never wait for a remote catalogue request.
@@ -71,7 +54,7 @@ function renderGames(){
   grid.innerHTML=games.map(g=>{
     const id=g.gameId;
     const fallback=id==='aviator'?'✈️':'🚀';
-    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art noimg"><span class="fallback">${fallback}</span><img alt="${g.name}" src="/casino-art/${id}.png" onload="this.parentNode.classList.remove('noimg')" onerror="artRetry(this,'${id}')"></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
+    return `<div class="card" role="button" tabindex="0" data-id="${id}"><div class="art"><span class="fallback">${fallback}</span></div><div class="body"><div class="name">${g.name}</div><div class="meta">JuanAI · crash</div><span class="tag">REAL MONEY</span></div></div>`;
   }).join('');
   document.getElementById('message').style.display='none';
 }
@@ -99,32 +82,17 @@ function applyCasinoImages(images){
     }
     img.onload=()=>art.classList.remove('noimg');
     img.onerror=()=>art.classList.add('noimg');
-    img.referrerPolicy='no-referrer';
     img.src=src;
   }
 }
 
-const IMG_KEY='sb_casino_images_v1';
-async function loadCasinoImages(attempt=0){
-  // Artwork is optional: cards are already visible. Show last saved artwork instantly,
-  // then fetch fresh ones, retrying while JuanAI wakes up.
-  if(attempt===0){
-    try{ const c=JSON.parse(localStorage.getItem(IMG_KEY)||'null'); if(c) applyCasinoImages(c); }catch(_){}
-  }
-  let got=false;
+async function loadCasinoImages(){
+  // Artwork is optional: cards are already visible. If JuanAI is sleeping,
+  // this background request can fail without hiding or delaying the games.
   try{
-    const r=await fetch('/api/casino/juanai/images',{cache:'no-store'});
-    const d=await r.json();
-    if(d && d.success && d.images){
-      applyCasinoImages(d.images);
-      if(d.images.aviator||d.images.jetx){
-        got=true;
-        try{ localStorage.setItem(IMG_KEY,JSON.stringify(d.images)); }catch(_){}
-      }
-      if(d.images.aviator && d.images.jetx) return;
-    }
+    const d=await api('/api/casino/juanai/images');
+    if(d && d.success) applyCasinoImages(d.images);
   }catch(_){ /* keep fallback artwork visible */ }
-  if(attempt<6) setTimeout(()=>loadCasinoImages(attempt+1), got?5000:3000*(attempt+1));
 }
 
 let launching=false, launchTimer=null;
@@ -144,6 +112,7 @@ async function openGame(id){
   const g=games.find(x=>x.gameId===id); if(!g)return;
   lastGameId=id; launching=true;
   let secs=0;
+  showLaunch('Opening '+g.name+'...','',false);
   const ctl=new AbortController(); const abort=setTimeout(()=>ctl.abort(),130000);
   try{
     // The SafariBet game wrapper is the only launch entry point. It requests
@@ -160,17 +129,6 @@ async function openGame(id){
 document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
 document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openGame(e.target.dataset.id)}});
 renderGames(); // paint both cards before any network request
-// Wake JuanAI and prepare the player's game sessions NOW, so a tap opens the game instantly.
-try{ fetch('/api/casino/juanai/prelaunch',{method:'POST',headers:headers(),cache:'no-store'}).catch(()=>{}); }catch(_){}
-// Keep each game's launch link ready on this phone so the game page opens with no waiting.
-['aviator','jetx'].forEach(id=>{
-  try{
-    const c=JSON.parse(localStorage.getItem('sb_launch_'+id)||'null');
-    if(c && Date.now()-c.at<20*60*1000) return;
-  }catch(_){}
-  fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:headers(),body:JSON.stringify({gameId:id})})
-    .then(r=>r.json()).then(d=>{ if(d&&d.success&&d.launchUrl){ try{localStorage.setItem('sb_launch_'+id,JSON.stringify({at:Date.now(),url:d.launchUrl}));}catch(_){} } }).catch(()=>{});
-});
 loadCasinoImages(); // artwork sync is background-only and never blocks the lobby
 loadBalance();
 setInterval(loadBalance,5000);

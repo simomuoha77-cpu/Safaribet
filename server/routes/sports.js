@@ -9,14 +9,12 @@ const C = {
   set:(k,d)=>{cache[k]={data:d,ts:Date.now()};}
 };
 
-const TWO_WAY = new Set(['tennis','tabletennis','basketball','volleyball','cricket','hockeyus']);
 const SPORT_CONFIG = {
   basketball: { label:'Basketball', icon:'🏀' },
   tennis:     { label:'Tennis',     icon:'🎾' },
   cricket:    { label:'Cricket',    icon:'🏏' },
   rugby:      { label:'Rugby',      icon:'🏉' },
   hockey:     { label:'Ice Hockey', icon:'🏒' },
-  tabletennis:{ label:'Table Tennis', icon:'🏓' },
   volleyball: { label:'Volleyball', icon:'🏐' },
   handball:   { label:'Handball',   icon:'🤾' }
 };
@@ -67,11 +65,10 @@ function normalizeSofaSportMatch(m, sport) {
     hasOdds,
     odds: {
       home: hasOdds ? +home.toFixed(2) : null,
-      draw: !TWO_WAY.has(sport) && Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+      draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
       away: hasOdds ? +away.toFixed(2) : null,
       updatedAt: new Date()
     },
-    twoWay: TWO_WAY.has(sport),
     providerOdds: o,
     markets: m.markets || [],
     score: m.score || null,
@@ -129,11 +126,10 @@ function buildLiveMatches(sport, matches) {
       hasOdds,
       odds: {
         home: hasOdds ? +home.toFixed(2) : null,
-        draw: !TWO_WAY.has(sport) && Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
+        draw: Number.isFinite(draw) && draw > 1 ? +draw.toFixed(2) : null,
         away: hasOdds ? +away.toFixed(2) : null,
         updatedAt: new Date()
       },
-      twoWay: TWO_WAY.has(sport),
       providerOdds: o,
       markets: m.markets || [],
       score: {
@@ -141,8 +137,7 @@ function buildLiveMatches(sport, matches) {
         away: s.away ?? null,
         minute: m.minute ?? m.score?.minute ?? null,
         minuteIsEstimated: !!m.minuteIsEstimated,
-        period: m.status || null,
-        periodLabel: m.periodText || m.statusRaw || null
+        period: m.status || null
       },
       source: 'sofabets',
       oddsSource: m.oddsSource || 'SofaBets',
@@ -569,11 +564,7 @@ router.get('/search', async (req, res) => {
       buildSearchIndex().catch(() => {});
     }
 
-    // Full names like "MC Oran vs USM Alger": drop filler words so they don't block matches.
-    const FILLER = new Set(['vs', 'v', 'x', 'versus', 'and', 'the']);
-    let terms = q.split(' ').filter(t => t && !FILLER.has(t));
-    if (!terms.length) terms = q.split(' ');
-    const need = terms.length;
+    const terms = q.split(' ');
     const seenId = new Set();
     const seenPair = new Set();
     const out = [];
@@ -581,14 +572,11 @@ router.get('/search', async (req, res) => {
       for (const m of list) {
         if (!m || !m.matchId || m.status === 'finished') continue;
         const h = hayOf(m);
-        let hit = 0;
-        for (const t of terms) if (h.all.includes(t)) hit++;
-        // all words must match; for 3+ word queries tolerate one miss (spelling / short names)
-        if (hit < need && !(need >= 3 && hit >= need - 1)) continue;
+        if (!terms.every(t => h.all.includes(t))) continue;
         const pair = normSearch(m.homeTeam) + '|' + normSearch(m.awayTeam) + '|' + (m.commenceTime ? new Date(m.commenceTime).toISOString().slice(0, 10) : '');
         if (seenId.has(m.matchId) || seenPair.has(pair)) continue;
         seenId.add(m.matchId); seenPair.add(pair);
-        out.push({ m, rank: (hit < need ? 2 : 0) + (h.teams.includes(terms.join(' ')) ? 0 : 1), t: new Date(m.commenceTime || 0).getTime() || 0 });
+        out.push({ m, rank: h.teams.includes(q) ? 0 : 1, t: new Date(m.commenceTime || 0).getTime() || 0 });
       }
     }
     out.sort((a, b) => a.rank - b.rank || a.t - b.t);

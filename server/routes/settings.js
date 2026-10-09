@@ -6,7 +6,7 @@ const router   = express.Router();
 const SITE_DEFAULTS = {
   site_name:        'SafariBet',
   site_tagline:     "Kenya's Premier Sports Betting Platform",
-  site_email:       '',
+  site_email:       'support@safaribet.co.ke',
   site_phone:       '',
   site_whatsapp:    '',
   site_license:     '',

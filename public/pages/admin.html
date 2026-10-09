@@ -283,7 +283,6 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
       <div class="sb-label">Promotions</div>
       <div class="sb-item" onclick="nav('bonus',this)"><span class="ic">🎁</span>Bonus & Promos</div>
       <div class="sb-item" onclick="nav('notifications',this)"><span class="ic">📢</span>Notifications</div>
-      <div class="sb-item" onclick="nav('sms',this)"><span class="ic">📲</span>SMS Messages</div>
       <div class="sb-item" onclick="nav('content',this)"><span class="ic">🖼️</span>Content / Banners</div>
     </div>
     <div class="sb-section">
@@ -923,49 +922,6 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
   </div>
 </div>
 
-<!-- 17b. SMS (CommsGrid / SMS Grid) -->
-<div class="panel" id="panel-sms">
-  <div class="sec">
-    <div class="sec-hdr"><h3>📲 Send SMS — pick users</h3></div>
-    <div class="inp-row">
-      <input class="inp" id="smsSearch" placeholder="Search username or phone…" oninput="smsSearchChanged()"/>
-      <select class="inp" id="smsSegment" style="max-width:190px" onchange="smsSegmentChanged()">
-        <option value="all">All users</option>
-        <option value="active">Active bettors (30d)</option>
-        <option value="inactive">Inactive (30d)</option>
-        <option value="balance">With balance</option>
-      </select>
-    </div>
-
-    <div id="smsSelBar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 10px">
-      <span id="smsSelCount" style="font-weight:700;color:var(--g)">0 selected</span>
-      <button class="btn" style="padding:6px 10px;font-size:12px" onclick="smsSelectPage()">Select this page</button>
-      <button class="btn" id="smsSelAllBtn" style="padding:6px 10px;font-size:12px" onclick="smsSelectAllMatching()">Select all</button>
-      <button class="btn" style="padding:6px 10px;font-size:12px" onclick="smsClearSel()">Clear</button>
-    </div>
-
-    <div class="tbl-wrap" id="smsUsers"><div class="empty">Loading users…</div></div>
-    <div id="smsPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12px;color:var(--mt)"></div>
-  </div>
-
-  <div class="sec">
-    <div class="sec-hdr"><h3>✉️ Message</h3></div>
-    <textarea class="inp" id="smsText" rows="4" maxlength="459" placeholder="Type your SMS..." oninput="smsCount()"></textarea>
-    <div class="mt" id="smsCounter" style="font-size:12px;margin:-4px 0 10px;color:var(--mt)">0 / 459 characters</div>
-    <button class="btn btn-g btn-full" id="smsSendBtn" onclick="smsSend()">📲 Send SMS</button>
-    <div class="res" id="smsRes"></div>
-    <div id="smsProgress" style="display:none;margin-top:10px">
-      <div style="height:8px;background:#0a100a;border-radius:6px;overflow:hidden"><div id="smsBar" style="height:100%;width:0;background:var(--g);transition:width .3s"></div></div>
-      <div class="mt" id="smsProgressTxt" style="font-size:12px;margin-top:6px;color:var(--mt)"></div>
-    </div>
-  </div>
-
-  <div class="sec">
-    <div class="sec-hdr"><h3>🕘 SMS History</h3><button class="hdr-btn" onclick="smsLoadHistory()">Refresh</button></div>
-    <div id="smsHistory"><div class="empty">Loading…</div></div>
-  </div>
-</div>
-
 <!-- 18. CONTENT -->
 <div class="panel" id="panel-content">
   <div class="sec">
@@ -1149,7 +1105,7 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     <label class="lbl">Site Name</label>
     <input class="inp" id="siteName" value="SafariBet"/>
     <label class="lbl">Support Email</label>
-    <input class="inp" id="cfg_site_email" type="email" placeholder="your official support email"/>
+    <input class="inp" id="cfg_site_email" type="email" placeholder="support@safaribet.co.ke"/>
     <label class="lbl">Support Phone (with country code e.g. +254712345678)</label>
     <input class="inp" id="cfg_site_phone" placeholder="+254712345678"/>
     <label class="lbl">WhatsApp Number</label>
@@ -1492,7 +1448,6 @@ function nav(name,el){
   else if(name==='backup') loadStorageStats();
   else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
-  else if(name==='sms') { smsLoadUsers(1); smsLoadHistory(); }
 }
 
 function toggleSidebar(){
@@ -2407,134 +2362,6 @@ async function sendNotif(){
   el.style.display='block';
   if(d.success){el.className='res ok';el.textContent=`✅ Broadcast sent to ${d.sent||0} users`;}
   else{el.className='res er';el.textContent='❌ '+(d.message||'Failed');}
-}
-
-// ══ SMS (SMS Grid) ══
-let smsPoll = null, smsSearchTimer = null;
-const smsState = { page:1, pages:1, total:0, rows:[], sel:new Set(), allMatching:false, excluded:new Set(), search:'', segment:'all' };
-
-function smsEsc(t){ return String(t==null?'':t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function smsIsSel(id){ return smsState.allMatching ? !smsState.excluded.has(id) : smsState.sel.has(id); }
-function smsSelCount(){ return smsState.allMatching ? Math.max(0, smsState.total - smsState.excluded.size) : smsState.sel.size; }
-
-async function smsLoadUsers(page){
-  smsState.page = page || 1;
-  const box = document.getElementById('smsUsers');
-  box.innerHTML = '<div class="empty">Loading users…</div>';
-  try {
-    const q = new URLSearchParams({ page:smsState.page, search:smsState.search, segment:smsState.segment });
-    const d = await api('/api/admin/sms/users?'+q.toString());
-    if (!d.success) { box.innerHTML = '<div class="empty">'+smsEsc(d.message||'Failed to load users')+'</div>'; return; }
-    smsState.rows = d.data; smsState.total = d.total; smsState.pages = d.pages;
-    smsRender();
-  } catch(e){ box.innerHTML = '<div class="empty">'+smsEsc(e.message)+'</div>'; }
-}
-function smsRender(){
-  const box = document.getElementById('smsUsers');
-  if (!smsState.rows.length) box.innerHTML = '<div class="empty">No users found</div>';
-  else {
-    const allOnPage = smsState.rows.every(r=>smsIsSel(r._id));
-    box.innerHTML = '<table class="tbl"><thead><tr><th style="width:32px"><input type="checkbox" '+(allOnPage?'checked':'')+' onchange="smsTogglePage(this.checked)"/></th><th>User</th><th>Phone</th><th>Balance</th><th>Joined</th></tr></thead><tbody>' +
-      smsState.rows.map(r=>`<tr style="cursor:pointer" onclick="smsToggle('${r._id}')"><td><input type="checkbox" ${smsIsSel(r._id)?'checked':''} onclick="event.stopPropagation();smsToggle('${r._id}')"/></td><td>${smsEsc(r.username)}</td><td>${smsEsc(fmtPhone(r.phone))}</td><td>KES ${Number(r.balance||0).toLocaleString('en-KE',{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td>${new Date(r.createdAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</td></tr>`).join('') +
-      '</tbody></table>';
-  }
-  document.getElementById('smsPager').innerHTML =
-    `<button class="btn" style="padding:6px 12px;font-size:12px" ${smsState.page<=1?'disabled':''} onclick="smsLoadUsers(${smsState.page-1})">← Prev</button>` +
-    `<span>Page ${smsState.page} of ${smsState.pages} · ${smsState.total} user${smsState.total===1?'':'s'}</span>` +
-    `<button class="btn" style="padding:6px 12px;font-size:12px" ${smsState.page>=smsState.pages?'disabled':''} onclick="smsLoadUsers(${smsState.page+1})">Next →</button>`;
-  smsUpdateSel();
-}
-function smsUpdateSel(){
-  const n = smsSelCount();
-  document.getElementById('smsSelCount').textContent = n + ' selected';
-  document.getElementById('smsSelAllBtn').textContent = `Select all ${smsState.total}`;
-  document.getElementById('smsSendBtn').textContent = n ? `📲 Send SMS to ${n} user${n===1?'':'s'}` : '📲 Send SMS';
-}
-function smsToggle(id){
-  if (smsState.allMatching) { smsState.excluded.has(id) ? smsState.excluded.delete(id) : smsState.excluded.add(id); }
-  else { smsState.sel.has(id) ? smsState.sel.delete(id) : smsState.sel.add(id); }
-  smsRender();
-}
-function smsTogglePage(on){
-  smsState.rows.forEach(r=>{
-    if (smsState.allMatching) { on ? smsState.excluded.delete(r._id) : smsState.excluded.add(r._id); }
-    else { on ? smsState.sel.add(r._id) : smsState.sel.delete(r._id); }
-  });
-  smsRender();
-}
-function smsSelectPage(){ smsTogglePage(true); }
-function smsSelectAllMatching(){ smsState.allMatching = true; smsState.excluded.clear(); smsState.sel.clear(); smsRender(); }
-function smsClearSel(){ smsState.allMatching = false; smsState.excluded.clear(); smsState.sel.clear(); smsRender(); }
-function smsSearchChanged(){
-  clearTimeout(smsSearchTimer);
-  smsSearchTimer = setTimeout(()=>{ smsState.search = document.getElementById('smsSearch').value.trim(); if (smsState.allMatching) smsClearSel(); smsLoadUsers(1); }, 350);
-}
-function smsSegmentChanged(){ smsState.segment = document.getElementById('smsSegment').value; if (smsState.allMatching) smsClearSel(); smsLoadUsers(1); }
-
-function smsCount(){
-  const t = document.getElementById('smsText').value;
-  const uni = /[^\u0000-\u007F]/.test(t);                 // emoji / non-GSM chars use shorter segments
-  const per = uni ? (t.length>70?67:70) : (t.length>160?153:160);
-  const seg = Math.max(1, Math.ceil(t.length/per));
-  document.getElementById('smsCounter').textContent = `${t.length} / 459 characters · ${t.length?seg:0} SMS segment${seg===1?'':'s'}${uni?' (special characters/emoji — shorter segments)':''}`;
-}
-async function smsSend(){
-  const message = document.getElementById('smsText').value.trim();
-  const res = document.getElementById('smsRes');
-  const btn = document.getElementById('smsSendBtn');
-  const show = (cls,txt)=>{ res.style.display='block'; res.className='res '+cls; res.textContent=txt; };
-  const n = smsSelCount();
-  if (!n) return show('er','Select at least one user from the list.');
-  if (!message) return show('er','Type a message first.');
-  const body = smsState.allMatching
-    ? { mode:'filter', message, search:smsState.search, segment:smsState.segment, excludeIds:[...smsState.excluded] }
-    : { mode:'users', message, userIds:[...smsState.sel] };
-  if (!confirm(`Send this SMS to ${n} user${n===1?'':'s'}?` + (n>1?'\nThis cannot be undone.':''))) return;
-  btn.disabled = true; btn.textContent = 'Sending…';
-  try {
-    const d = await api('/api/admin/sms/send',{method:'POST',body:JSON.stringify(body)});
-    if (!d.success) { show('er','❌ '+(d.message||'Failed')); btn.disabled=false; smsUpdateSel(); return; }
-    show('ok',`Sending to ${d.total} number${d.total===1?'':'s'}…` + (d.skipped&&d.skipped.length?` (${d.skipped.length} skipped — invalid phone)`:''));
-    smsWatch(d.jobId, d.total);
-  } catch(e){ show('er','❌ '+e.message); btn.disabled=false; smsUpdateSel(); }
-}
-function smsWatch(jobId, total){
-  const box = document.getElementById('smsProgress'), bar = document.getElementById('smsBar'), txt = document.getElementById('smsProgressTxt');
-  const btn = document.getElementById('smsSendBtn'), res = document.getElementById('smsRes');
-  box.style.display = 'block'; clearInterval(smsPoll);
-  const tick = async ()=>{
-    try {
-      const d = await api('/api/admin/sms/job/'+jobId);
-      if (!d.success) { clearInterval(smsPoll); btn.disabled=false; smsUpdateSel(); smsLoadHistory(); return; }
-      const j = d.job, pct = total ? Math.round(j.done/total*100) : 0;
-      bar.style.width = pct+'%'; txt.textContent = `${j.done} / ${total} processed`;
-      if (j.status !== 'sending') {
-        clearInterval(smsPoll); bar.style.width='100%';
-        const bad = j.failed || j.unconfirmed;
-        res.style.display='block'; res.className = 'res '+(bad? 'er':'ok');
-        res.textContent = j.status==='error' ? '❌ '+j.error :
-          (j.accepted ? `✅ ${j.accepted} accepted by SMS Grid` : 'Nothing accepted') +
-          (j.failed ? ` · ❌ ${j.failed} failed` : '') + (j.unconfirmed ? ` · ⚠️ ${j.unconfirmed} unconfirmed` : '') +
-          (j.error ? ` — ${j.error}` : '') + (j.ms ? ` (${(j.ms/1000).toFixed(1)}s)` : '');
-        txt.textContent = 'Finished'; btn.disabled=false;
-        document.getElementById('smsText').value=''; smsCount(); smsClearSel(); smsLoadHistory();
-      }
-    } catch(e){ /* keep polling */ }
-  };
-  smsPoll = setInterval(tick, 1500); tick();
-}
-async function smsLoadHistory(){
-  const el = document.getElementById('smsHistory');
-  try {
-    const d = await api('/api/admin/sms/history');
-    if (!d.success || !d.data.length) { el.innerHTML = '<div class="empty">No SMS sent yet</div>'; return; }
-    el.innerHTML = '<table class="tbl"><thead><tr><th>When</th><th>To</th><th>Message</th><th>Result</th></tr></thead><tbody>' + d.data.map(x=>{
-      const to = (x.mode==='all'||x.mode==='filter') ? `${x.total} users${x.audience&&x.audience!=='all'?' ('+x.audience+')':''}` : x.mode==='users' ? `${x.total} selected user${x.total===1?'':'s'}` : `${x.total} number${x.total===1?'':'s'}` + (x.sample&&x.sample.length?`<br><span style="color:var(--mt);font-size:11px">${x.sample.join(', ')}${x.total>x.sample.length?'…':''}</span>`:'');
-      const st = x.status==='sending' ? '⏳ sending' : x.status==='error' ? '❌ error' : `✅ ${x.accepted}` + (x.failed?` · ❌ ${x.failed}`:'') + (x.unconfirmed?` · ⚠️ ${x.unconfirmed}`:'') + (x.error?`<br><span style="color:var(--mt);font-size:11px">${smsEsc(String(x.error).slice(0,110))}</span>`:'');
-      const msg = String(x.message).replace(/</g,'&lt;');
-      return `<tr><td>${new Date(x.createdAt).toLocaleString()}</td><td>${to}</td><td style="max-width:260px;white-space:normal">${msg.length>90?msg.slice(0,90)+'…':msg}</td><td>${st}</td></tr>`;
-    }).join('') + '</tbody></table>';
-  } catch(e){ el.innerHTML = '<div class="empty">'+e.message+'</div>'; }
 }
 
 // ══ BANNER CAROUSEL (multi-banner) ══
