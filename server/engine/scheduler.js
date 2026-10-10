@@ -31,12 +31,32 @@ function start() {
   const { runWeeklyCashback } = require('./loyaltyCashback');
   cron.schedule('0 0 * * 0', () => { runWeeklyCashback().catch(console.error); });
 
-  // Self-ping (Render free tier keep-alive)
-  if (process.env.APP_URL) {
+  // Keep-alive. A free Render server goes to sleep after ~15 minutes without visitors, and a sleeping server
+  // cannot watch games finish: a game that kicks off and ends while it sleeps is never seen live, so its bets
+  // stay "awaiting result" forever (SofaBets has no results list to read afterwards).
+  //  - APP_URL set (your explicit choice): ping every 10 minutes, always, exactly as before.
+  //  - APP_URL not set: use the URL Render itself provides, but ONLY while a SofaBets bet is waiting on a game that
+  //    is about to start, is playing, or is not confirmed finished yet (started in the last 12 hours). The rest of the
+  //    time the server may sleep, so free instance hours are not burnt for nothing.
+  const selfUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl) {
     const axios = require('axios');
-    cron.schedule('*/10 * * * *', async () => {
-      try { await axios.get(`${process.env.APP_URL}/api/health`, { timeout: 5000 }); } catch {}
+    const alwaysOn = !!process.env.APP_URL || String(process.env.KEEP_AWAKE || '').toLowerCase() === 'always';
+    cron.schedule(alwaysOn ? '*/10 * * * *' : '*/4 * * * *', async () => {
+      try {
+        if (!alwaysOn) {
+          const Bet = require('../models/Bet');
+          const now = Date.now();
+          const needed = await Bet.exists({ status: 'pending', selections: { $elemMatch: {
+            result: 'pending', matchId: /^sofabets_/,
+            commenceTime: { $lte: new Date(now + 45 * 60000), $gte: new Date(now - 12 * 3600000) }
+          } } });
+          if (!needed) return;
+        }
+        await axios.get(`${selfUrl}/api/health`, { timeout: alwaysOn ? 5000 : 8000 });
+      } catch {}
     });
+    console.log(`✅ Keep-awake: ${alwaysOn ? 'always (every 10 min)' : 'only while bets wait on started/imminent games'} via ${selfUrl}`);
   }
 
   console.log(`✅ Scheduler started (fixtures 5m, live every ${liveMs/1000}s, settlement 15m)`);
