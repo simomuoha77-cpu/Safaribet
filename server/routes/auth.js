@@ -37,6 +37,15 @@ function makeToken(user) {
   return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '30d' });
 }
 
+// Tiny public endpoint the register page calls on load: it tells the page which networks can get a code
+// (so a blocked number is rejected instantly, with no server round trip) and it wakes a sleeping server
+// while the player is still filling in the form.
+router.get('/otp-config', (req, res) => {
+  const list = String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ success: true, allowed: list, message: require('../services/smsService').CARRIER_BLOCK_MESSAGE });
+});
+
 // ── REGISTER: STEP 1 — validate + send OTP (no account created yet) ──
 router.post('/register', registerLimiter, async (req, res) => {
   try {
