@@ -109,9 +109,19 @@ async function move(userId, fromBucket, toBucket, amount, reason, reference, met
  * Deduct a bet stake: prefers bonus balance first (use-bonus-before-cash is standard practice),
  * falls back to main. Returns { wallet, fromBonus, fromMain } or null if insufficient.
  */
-async function deductStake(userId, amount, reference) {
+async function deductStake(userId, amount, reference, walletHint) {
   amount = parseFloat(amount.toFixed(2));
-  const wallet = await getOrCreateWallet(userId);
+  // walletHint = a wallet the caller already read (in parallel with its other checks), which saves
+  // one database round trip. The debits below are atomic and guarded ($gte), so a stale hint can never
+  // overdraw: if it does not work out, the wallet is read afresh and the stake is tried once more.
+  if (walletHint) {
+    const quick = await deductStakeFrom(userId, amount, reference, walletHint);
+    if (quick) return quick;
+  }
+  return deductStakeFrom(userId, amount, reference, await getOrCreateWallet(userId));
+}
+
+async function deductStakeFrom(userId, amount, reference, wallet) {
   const totalAvailable = wallet.main + wallet.bonus;
   if (totalAvailable < amount) return null;
 

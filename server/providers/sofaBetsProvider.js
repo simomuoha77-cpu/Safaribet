@@ -517,6 +517,12 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
   return refreshMatchMarkets(id, name, cacheKey).finally(releaseCrawler);
 }
 
+// A bet is being placed right now: heavy background refreshes elsewhere (fixture feed warmer)
+// skip a beat so the server's single CPU is free to answer the bet immediately.
+let betBusyUntil = 0;
+function noteBetPlacing(ms) { betBusyUntil = Math.max(betBusyUntil, Date.now() + (ms || 4000)); }
+function betIsPlacing() { return Date.now() < betBusyUntil; }
+
 // Pauses the background crawler while a customer is waiting (auto-released after
 // maxMs at the latest, so a stuck lookup can never freeze the crawler).
 function holdCrawler(maxMs) {
@@ -1499,4 +1505,4 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { holdCrawler, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

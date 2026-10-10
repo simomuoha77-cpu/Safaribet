@@ -41,13 +41,13 @@ function pickLabelFor(market, pick, match) {
 // Fresh copy of a game from the server's own in-memory feed (the same data the
 // site lists), used so placing a bet never has to crawl SofaBets when the match
 // is missing from / stale in MongoDB. Live games must be <=45s old, prematch <=10min.
-function indexedFresh(matchId) {
+function indexedFresh(matchId, prematchMs) {
   try {
     const idx = require('./sports').lookupIndexedMatch(matchId);
     if (!idx || !idx.homeTeam || !idx.awayTeam) return null;
     if (idx.status === 'finished' || idx.status === 'cancelled') return null;
     const age = Date.now() - new Date(idx.fetchedAt || 0).getTime();
-    return age <= (idx.status === 'live' ? 45000 : 10 * 60000) ? idx : null;
+    return age <= (idx.status === 'live' ? 45000 : (prematchMs || 10 * 60000)) ? idx : null;
   } catch (_) { return null; }
 }
 function matchFromIndexed(idx, matchId, sport, providerId, base) {
@@ -161,9 +161,11 @@ async function placedBody(bet) {
 async function placeBetHandler(req, res) {
   const t0 = Date.now(), marks = {};
   const mark = k => { marks[k] = Date.now() - t0; };
-  try { sofaBets.holdCrawler(3500); } catch (_) {}   // a customer placing a bet outranks the background crawler
+  try { sofaBets.holdCrawler(3500); sofaBets.noteBetPlacing(4000); } catch (_) {}   // a customer placing a bet outranks all background refreshing
   try {
     const { selections, stake } = req.body;
+    // The player's wallet is read now, in parallel with everything else, so the debit later needs no extra round trip.
+    const walletP = walletService.getOrCreateWallet(req.user._id).catch(() => null);
     // A repeat of a press that already produced a bet: answer with that bet. Nothing is charged twice.
     // (started now, awaited together with the fixture lookup below - one round trip instead of two)
     const priorP = req.idemKey ? Bet.findOne({ userId: req.user._id, idempotencyKey: req.idemKey }).exec() : Promise.resolve(null);
@@ -191,6 +193,10 @@ async function placeBetHandler(req, res) {
     //   provider selections - the exact market confirmation (bounded, cache-first,
     //   see services/placementResolver.js).
     const matchIds = selections.map(s => s.matchId);
+    // Odds boost lookup (single legacy selection only) also runs in parallel instead of in the middle of the loop.
+    const boostP = (selections.length === 1 && !isSofaProviderSelection(selections[0]))
+      ? Promise.resolve().then(() => require('../services/marketResolver').getBoostedOdds(selections[0].matchId, selections[0].market || '1x2', selections[0].pick, parseFloat(stake))).catch(() => null)
+      : null;
     const rgPromise = (async () => {
       try {
         const rg = require('../services/responsibleGamingService');
@@ -215,6 +221,35 @@ async function placeBetHandler(req, res) {
 
     const verifiedSelections = [];
     let totalOdds = 1;
+
+    // Provider fallback lookups (only for legs missing from MongoDB AND from the in-memory feed) are started for ALL
+    // legs at once; before, each leg waited for the previous one (a 5-leg slip could wait 5 x 2.5s).
+    const fallbacks = new Map();
+    const fallbackFor = (matchId, providerId, sport, isLiveId) => {
+      let f = fallbacks.get(matchId);
+      if (!f) {
+        const budget = 2500;
+        f = {
+          liveP: placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget),
+          preP: !isLiveId ? placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget) : null
+        };
+        fallbacks.set(matchId, f);
+      }
+      return f;
+    };
+    for (const s of selections) {
+      const rawId0 = String(s.matchId || '');
+      if (isSofaProviderSelection(s) || matchMap[s.matchId] || !rawId0.startsWith('sofabets_') || indexedFresh(s.matchId, ODDS_STALE_MS)) continue;
+      const p0 = rawId0.slice('sofabets_'.length).split('_');
+      const live0 = p0[0] === 'live';
+      const pid0 = live0
+        ? (p0.length >= 3 && Number.isNaN(Number(p0[1])) ? p0.slice(2).join('_') : p0.slice(1).join('_'))
+        : (p0.length >= 2 && Number.isNaN(Number(p0[0])) ? p0.slice(1).join('_') : p0.join('_'));
+      const sp0 = live0
+        ? (p0.length >= 3 && Number.isNaN(Number(p0[1])) ? p0[1] : 'football')
+        : (p0.length >= 2 && Number.isNaN(Number(p0[0])) ? p0[0] : 'football');
+      if (pid0) fallbackFor(s.matchId, pid0, sp0, live0);
+    }
 
     for (const s of selections) {
       const providerSelection = isSofaProviderSelection(s);
@@ -278,7 +313,7 @@ async function placeBetHandler(req, res) {
         if (rawId.startsWith('sofabets_') && providerId && (!match || !['finished', 'cancelled'].includes(match.status))) {
           const stored = match && match.odds && match.odds.updatedAt ? Date.now() - new Date(match.odds.updatedAt).getTime() : Infinity;
           if (!match || stored > 120000) {
-            const idx = indexedFresh(s.matchId);
+            const idx = indexedFresh(s.matchId, !match ? ODDS_STALE_MS : undefined);   // not in MongoDB at all: same 90-min price policy stored matches already get, instead of crawling SofaBets
             if (idx) {
               const base = match ? (typeof match.toObject === 'function' ? match.toObject() : match) : null;
               const built = matchFromIndexed(idx, s.matchId, sport, providerId, base);
@@ -297,8 +332,8 @@ async function placeBetHandler(req, res) {
           // the background); a prematch fixture missing from MongoDB gets one capped
           // lookup. A slow provider fails fast instead of holding the request.
           const budget = 2500;
-          const liveP = placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget);
-          const preP = !isLiveId ? placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget) : null;   // started together with the live lookup (was: one after the other, up to 5s)
+          const fl = fallbackFor(s.matchId, providerId, sport, isLiveId);   // already running (started for all legs together)
+          const liveP = fl.liveP, preP = fl.preP;
           const liveR = await liveP;
           let direct = liveR.ok ? liveR.v : null;
           if (!direct && !isLiveId) {
@@ -363,8 +398,7 @@ async function placeBetHandler(req, res) {
       // Odds boost — legacy SafariBet markets only. Provider-native prices are
       // authoritative SofaBets prices and must not be rewritten client-side.
       if (!providerSelection && selections.length === 1) {
-        const { getBoostedOdds } = require('../services/marketResolver');
-        const boost = await getBoostedOdds(s.matchId, s.market || '1x2', s.pick, stakeAmt);
+        const boost = boostP ? await boostP : null;
         if (boost) serverOdds = boost.odds;
       }
 
@@ -408,7 +442,7 @@ async function placeBetHandler(req, res) {
     }
 
     // Deduct stake atomically — bonus balance used first, then main (anti-race-condition)
-    const deduction = await walletService.deductStake(req.user._id, stakeAmt, null);
+    const deduction = await walletService.deductStake(req.user._id, stakeAmt, null, await walletP);
     mark('wallet');
     if (!deduction) return res.status(400).json({ success: false, message: 'Insufficient balance' });
 

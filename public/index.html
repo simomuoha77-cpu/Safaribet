@@ -3259,10 +3259,13 @@ async function placeBet(){
       if(d.success&&d.state==='placed') return success(d.bet);
       if(d.success&&d.state==='failed') return failure(d.message);
     }catch(e){}
-    if(!done&&polls<30) pollTimer=setTimeout(poll,2000);
+    if(!done&&polls<60) pollTimer=setTimeout(poll,1000);
   };
   const t1=setTimeout(()=>{ if(!done) btn.textContent='Still working - please wait...'; },6000);
-  const t2=setTimeout(()=>{ if(!done){ btn.textContent='Confirming your bet...'; poll(); } },9000);
+  // Start asking the server "is my bet placed?" after 2.5s (was 9s) so a bet that is already saved shows up at once,
+  // even if the answer to the original request is slow to arrive. The button text only changes later.
+  const t2=setTimeout(()=>{ if(!done) poll(); },2500);
+  const t3=setTimeout(()=>{ if(!done) btn.textContent='Confirming your bet...'; },8000);
 
   const flow=async()=>{
     let d;
@@ -3288,7 +3291,7 @@ async function placeBet(){
     // could not reach the server at all, even after retries
     if(!done) failure('No connection. Your bet was not confirmed - check My Bets before trying again.');
   }finally{
-    clearTimeout(t1); clearTimeout(t2); if(pollTimer) clearTimeout(pollTimer);
+    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); if(pollTimer) clearTimeout(pollTimer);
   }
   done=true;
   btn.disabled=false; btn.textContent='PLACE BET';

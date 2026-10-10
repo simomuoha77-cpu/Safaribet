@@ -143,6 +143,7 @@ function startCacheWarmer() {
   if (warmerStarted) return;
   warmerStarted = true;
   const warm = async () => {
+    if (sofaBets.betIsPlacing && sofaBets.betIsPlacing()) return;   // a bet is being placed: leave the CPU to it, next tick catches up
     try { await fixturesWithFallback(); } catch (e) { console.warn('  [odds] warmer: fixtures refresh failed:', e.message); }
     try { await liveWithFallback(); } catch (e) { console.warn('  [odds] warmer: live refresh failed:', e.message); }
   };
@@ -271,7 +272,8 @@ router.get('/featured', async (req, res) => {
 
     const sorted = smartSort(merged).map(applyOddsPipeline);
     const payload = { success: true, data: sorted, count: sorted.length };
-    const etag = 'W/"' + crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex') + '"';
+    const payloadJson = JSON.stringify(payload);   // serialised once: used for the ETag AND as the response body
+    const etag = 'W/"' + crypto.createHash('sha1').update(payloadJson).digest('hex') + '"';
 
     res.set('ETag', etag);
     // Always revalidate with the server rather than letting the browser's own
@@ -281,7 +283,7 @@ router.get('/featured', async (req, res) => {
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
     }
-    res.json(payload);
+    res.type('application/json').send(payloadJson);
   } catch (e) {
     res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
   }
