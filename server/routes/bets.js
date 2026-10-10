@@ -980,32 +980,43 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
     const err = validateSelections(selections, limits.maxSelections ?? 20);
     if (err) return res.status(400).json({ success: false, message: err });
 
-    let code, exists = true;
-    for (let i = 0; i < 5 && exists; i++) {
-      code = genSlipCode();
-      exists = await SlipCode.exists({ code });
-    }
-    if (exists) return res.status(500).json({ success: false, message: 'Could not generate a unique code, try again' });
-
     // Store the COMPLETE selection (fixture + market + selection + odds + period/line),
     // never a Home/Draw/Away reduction. A More Markets selection whose market label
     // was not sent is completed from the exact market record on the fixture.
-    const rows = await Match.find({ matchId: { $in: selections.map(x => x.matchId) } }, { matchId: 1, markets: 1 }).lean();
-    const rowBy = {}; rows.forEach(r => { rowBy[r.matchId] = r; });
-    const stored = selections.map(raw => {
-      const n = slipSelection.normalizeSelection(raw);
+    const normalized = selections.map(raw => slipSelection.normalizeSelection(raw));
+    // Match records are big (they carry every market of the fixture), so they are only read - and only for the
+    // fixtures that really need completing. Ordinary Home/Draw/Away picks need no lookup at all (this used to
+    // pull every market of every selected match from the database before a code could be made).
+    const needIds = Array.from(new Set(normalized.filter(n => n.provider === 'sofabets' && !n.marketLabel).map(n => n.matchId)));
+    const rowBy = {};
+    if (needIds.length) {
+      const rows = await Match.find({ matchId: { $in: needIds } }, { matchId: 1, markets: 1 }).lean();
+      rows.forEach(r => { rowBy[r.matchId] = r; });
+    }
+    const stored = normalized.map(n => {
       if (n.provider === 'sofabets' && !n.marketLabel) {
         const f = placementResolver.findMarketAndOutcome((rowBy[n.matchId] || {}).markets || [], n);
         if (f) { n.marketLabel = String(f.mk.name || f.mk.label || ''); Object.assign(n, slipSelection.normalizeSelection(n)); }
       }
       return n;
     });
-    const doc = await SlipCode.create({
-      code,
-      createdBy: req.user._id,
-      selections: stored,
-      expiresAt: new Date(Date.now() + 7*24*60*60*1000)
-    });
+    // One database write. Uniqueness is guaranteed by the unique index on `code`: in the (practically impossible)
+    // case of a clash, just draw another code - no separate "does this exist?" round trip first.
+    let doc = null;
+    for (let i = 0; i < 5 && !doc; i++) {
+      try {
+        doc = await SlipCode.create({
+          code: genSlipCode(),
+          createdBy: req.user._id,
+          selections: stored,
+          expiresAt: new Date(Date.now() + 7*24*60*60*1000)
+        });
+      } catch (e) {
+        if (e && e.code === 11000) continue;   // duplicate code: try a new one
+        throw e;
+      }
+    }
+    if (!doc) return res.status(500).json({ success: false, message: 'Could not generate a unique code, try again' });
 
     res.json({ success: true, code: doc.code, selections: doc.selections.length, expiresAt: doc.expiresAt });
   } catch (e) {

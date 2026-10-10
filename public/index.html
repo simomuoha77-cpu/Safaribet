@@ -114,8 +114,6 @@ header{
   padding:2px 6px;border-radius:10px;font-weight:800;
 }
 .hbtn{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all 0.2s}
-.hbtn:active{transform:scale(.94);filter:brightness(1.25);transition:none}
-.hbtn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .hbtn.o{background:transparent;border:1.5px solid rgba(0,200,83,0.5);color:var(--g)}
 .hbtn.o:hover{background:rgba(0,200,83,0.1)}
 .hbtn.g{background:linear-gradient(135deg,#00e65c,#00c853);color:#000;box-shadow:0 2px 12px rgba(0,200,83,0.3)}
@@ -548,8 +546,8 @@ header{
     <div class="balpill" id="balpill" onclick="SB.go('/deposit')">
       KES <span id="balv">0.00</span> <span class="dep">+Deposit</span>
     </div>
-    <button class="hbtn o" id="loginBtn" onclick="this.style.opacity='.7';SB.go('/login')">Login</button>
-    <button class="hbtn g" id="joinBtn"  onclick="this.style.opacity='.7';SB.go('/register')">Join</button>
+    <button class="hbtn o" id="loginBtn" onclick="SB.go('/login')">Login</button>
+    <button class="hbtn g" id="joinBtn"  onclick="SB.go('/register')">Join</button>
     <button class="hbtn o" id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
   </div>
 </header>
@@ -610,7 +608,7 @@ header{
 <!-- Sport Category Tabs — loaded dynamically from Juan API -->
 <div class="sport-tabs" id="sportTabs" style="top:96px">
   <div class="sp-tab on" data-cat="featured" onclick="pickCat(this)"><span class="sp-tab-icon">⭐</span><span class="sp-tab-lbl">Highlights</span></div>
-  <div class="sp-tab" data-cat="live" onclick="pickCat(this)"><span class="sp-tab-icon" style="position:relative">🔴<span id="liveCountBadge" style="display:none;position:absolute;top:-6px;left:60%;min-width:16px;padding:0 4px;height:16px;line-height:16px;border-radius:9px;background:#ff3b3b;color:#fff;font-size:10px;font-weight:800;text-align:center">0</span></span><span class="sp-tab-lbl">Live</span></div>
+  <div class="sp-tab" data-cat="live" onclick="pickCat(this)"><span class="sp-tab-icon">🔴</span><span class="sp-tab-lbl">Live</span></div>
   <div class="sp-tab" data-cat="football" onclick="pickCat(this)"><span class="sp-tab-icon">⚽</span><span class="sp-tab-lbl">Football</span></div>
   <div class="sp-tab" data-cat="basketball" onclick="pickCat(this)"><span class="sp-tab-icon">🏀</span><span class="sp-tab-lbl">Basketball</span></div>
   <div class="sp-tab" data-cat="tennis" onclick="pickCat(this)"><span class="sp-tab-icon">🎾</span><span class="sp-tab-lbl">Tennis</span></div>
@@ -699,7 +697,7 @@ header{
     </div>
     <div onclick="pickSportByKey('live')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.2);border-radius:10px;padding:8px 12px;cursor:pointer">
       <span style="font-size:18px">🔴</span>
-      <div style="font-size:11px;font-weight:700;color:#fff">Live Now <span id="liveNowCount" style="display:none;background:#ff3b3b;color:#fff;border-radius:8px;padding:0 6px;font-size:10px;margin-left:2px">0</span></div>
+      <div style="font-size:11px;font-weight:700;color:#fff">Live Now</div>
     </div>
     <div onclick="SB.go('/casino')" style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:rgba(0,200,83,0.06);border:1px solid rgba(0,200,83,0.15);border-radius:10px;padding:8px 12px;cursor:pointer">
       <span style="font-size:18px">🎰</span>
@@ -1890,25 +1888,6 @@ function pickCat(el) {
 // Sport tabs are already in the HTML (instant). This only (a) appends any extra
 // tab the server may add later and (b) fills every sport's list in the
 // background so tapping Basketball/Tennis/etc. paints with zero wait.
-// ── LIVE COUNT badge (Live tab + Live Now chip) ──
-function setLiveCount(n){
-  const b = document.getElementById('liveCountBadge'), c = document.getElementById('liveNowCount');
-  const show = Number.isFinite(n) && n > 0;
-  [b, c].forEach(el => { if (!el) return; el.style.display = show ? (el === b ? 'block' : 'inline-block') : 'none'; el.textContent = n > 99 ? '99+' : String(n); });
-  try { sessionStorage.setItem('sb_live_count', String(n)); } catch (e) {}
-}
-(function liveCountPoller(){
-  try { const c = Number(sessionStorage.getItem('sb_live_count')); if (Number.isFinite(c) && c > 0) setLiveCount(c); } catch (e) {}
-  if (window.__sbLiveCountTimer) { setTimeout(() => fetch('/api/sports/live-count', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d && d.success && d.count != null) setLiveCount(d.count); }).catch(() => {}), 300); return; }   // one timer only, even if the page script re-runs
-  const tick = () => {
-    if (document.hidden) return;
-    fetch('/api/sports/live-count', { cache: 'no-store' }).then(r => r.json()).then(d => { if (d && d.success && d.count != null) setLiveCount(d.count); }).catch(() => {});
-  };
-  window.__sbLiveCountTimer = setInterval(tick, 20000);
-  setTimeout(tick, 600);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
-})();
-
 const SPORT_KEYS = ['basketball','tennis','cricket','rugby','hockey','volleyball','handball','tabletennis'];
 const TWO_WAY_CLIENT = new Set(['tennis','tabletennis','basketball','volleyball','cricket']);
 
@@ -2429,7 +2408,6 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
-    if (sport==='live' && d && d.success) setLiveCount(Array.isArray(d.data) ? d.data.length : null);
 
     if(!d.success||!d.data||!d.data.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
@@ -3151,6 +3129,12 @@ async function shareSlipCode(){
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating...';
+  // The code window opens at once (the tap reacts immediately); the code fills in the moment the server has it.
+  const ttl = document.querySelector('#shareCodeModal .modal-ttl');
+  lastShareCode = null;
+  document.getElementById('shareCodeVal').textContent = '• • • • • • •';
+  if(ttl) ttl.textContent = 'Generating your code…';
+  openModal('shareCodeModal');
   try{
     const r=await fetch('/api/bets/slip/share',{
       method:'POST',
@@ -3161,15 +3145,16 @@ async function shareSlipCode(){
     if(d.success){
       lastShareCode=d.code;
       document.getElementById('shareCodeVal').textContent=d.code;
-      openModal('shareCodeModal');
+      if(ttl) ttl.textContent = 'Slip Shared!';
     } else {
+      closeModal('shareCodeModal');
       showT(d.message||'Could not create slip code','err');
     }
-  }catch(e){ showT('Network error — try again','err'); }
+  }catch(e){ closeModal('shareCodeModal'); showT('Network error — try again','err'); }
   finally{ btn.disabled = false; btn.textContent = originalText; }
 }
 function copyShareCode(){
-  if(!lastShareCode) return;
+  if(!lastShareCode){ showT('Almost ready…'); return; }
   navigator.clipboard?.writeText(lastShareCode).then(()=>showT('Code copied!','ok')).catch(()=>{});
 }
 
