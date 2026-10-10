@@ -109,7 +109,11 @@ router.post('/register', registerLimiter, async (req, res) => {
         expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes to verify
       });
     })();
-    const [smsResult, saveErr] = await Promise.all([smsP, saveP.then(() => null, e => e)]);
+    // Answer within ~2.5s no matter how slow the SMS provider is. If the provider has not answered by then the
+    // text is still on its way (it keeps running below); only a quick, definite failure is reported as an error.
+    const smsQuick = Promise.race([smsP, new Promise(r => setTimeout(() => r({ success: true, pending: true }), 2200))]);
+    smsP.then(r => { if (!r.success) console.error('[otp] background SMS failed after response:', r.error); }, () => {});
+    const [smsResult, saveErr] = await Promise.all([smsQuick, saveP.then(() => null, e => e)]);
     if (saveErr) throw saveErr;
     if (!smsResult.success) {
       console.error('[register] Failed to send OTP SMS:', smsResult.error);
@@ -158,7 +162,11 @@ router.post('/register/resend-otp', otpResendLimiter, async (req, res) => {
       pending.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
       await pending.save();
     })();
-    const [smsResult, saveErr] = await Promise.all([smsP, saveP.then(() => null, e => e)]);
+    // Answer within ~2.5s no matter how slow the SMS provider is. If the provider has not answered by then the
+    // text is still on its way (it keeps running below); only a quick, definite failure is reported as an error.
+    const smsQuick = Promise.race([smsP, new Promise(r => setTimeout(() => r({ success: true, pending: true }), 2200))]);
+    smsP.then(r => { if (!r.success) console.error('[otp] background SMS failed after response:', r.error); }, () => {});
+    const [smsResult, saveErr] = await Promise.all([smsQuick, saveP.then(() => null, e => e)]);
     if (saveErr) throw saveErr;
     if (!smsResult.success) {
       return res.status(502).json({ success: false, message: 'Could not resend SMS. Please try again shortly.' });
