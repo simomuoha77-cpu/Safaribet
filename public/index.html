@@ -636,7 +636,7 @@ header{
   <div class="ftab" data-filter="popular" onclick="pickFilter(this)">🔥 Popular</div>
   <div class="ftab" data-filter="upcoming" onclick="pickFilter(this)">Upcoming</div>
   <div class="ftab today-pill" data-filter="today" onclick="pickFilter(this)">
-    Today <span id="todayCount" style="background:var(--g);color:#000;border-radius:8px;padding:1px 6px;font-size:10px;min-width:18px;text-align:center">0</span>
+    Today <span id="todayCount" style="background:var(--g);color:#000;border-radius:8px;padding:1px 6px;font-size:10px;min-width:18px;text-align:center">…</span>
   </div>
   <div class="ftab" data-filter="favorites" onclick="pickFilter(this)">⭐ Favorites</div>
   <div class="league-sel" id="leagueSel">
@@ -1611,21 +1611,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       }
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
-      // Count today's matches using the same UTC feed date as the Today filter.
-      const feedDate = d => {
-        if(!d) return '';
-        const x = new Date(d);
-        if(Number.isNaN(x.getTime())) return '';
-        return x.toISOString().slice(0,10);
-      };
-      const todayStr = new Intl.DateTimeFormat('en-CA',{
-        timeZone:'Africa/Nairobi',
-        year:'numeric',
-        month:'2-digit',
-        day:'2-digit'
-      }).format(new Date());
-      const todayCount=allMatches.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr).length;
-      document.getElementById('todayCount').textContent=todayCount;
+      updateTodayCount();
       applyFilters(silent);
     } else if(!hasExistingData) {
       el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
@@ -1704,7 +1690,28 @@ function isPopularMatch(m){
   return isPopularTeam(m.homeTeam, m.awayTeam) || isPopularLeague(m.league);
 }
 
+// Count today's matches using the same UTC feed date as the Today filter. Runs every time the list is drawn,
+// so the number appears together with the cached list instead of waiting for the network to answer.
+function updateTodayCount(){
+  const el = document.getElementById('todayCount');
+  if(!el || !allMatches || !allMatches.length) return;
+  const feedDate = d => {
+    if(!d) return '';
+    const x = new Date(d);
+    if(Number.isNaN(x.getTime())) return '';
+    return x.toISOString().slice(0,10);
+  };
+  const todayStr = new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Africa/Nairobi',
+    year:'numeric',
+    month:'2-digit',
+    day:'2-digit'
+  }).format(new Date());
+  el.textContent = allMatches.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr).length;
+}
+
 function applyFilters(silent=false){
+  updateTodayCount();
   // Live tab is independent of Highlights filters. Never let a background
   // Highlights refresh repaint the Live tab with upcoming-only filters.
   if(currentCat === 'live'){
