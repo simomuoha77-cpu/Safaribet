@@ -538,6 +538,18 @@ function marketsCacheAge(providerMatchId, sportName = 'football') {
 }
 
 const endpointStats = new Map();   // endpoint -> { tries, useful, last }
+// Safety net for the learner below: it judges an endpoint over ALL fixtures together, so an
+// endpoint that only serves one kind of game (e.g. not-yet-started ones) can be written off
+// while the crawler is busy with live games - and then every game of that kind fails. A fixture
+// that comes back with no markets therefore gets ONE more round that asks every endpoint
+// (at most once per 45s per fixture); any endpoint that answers is un-skipped for good.
+const lastFullRound = new Map();
+function fullRoundDue(key) {
+  const now = Date.now();
+  if (now - (lastFullRound.get(key) || 0) < 45000) return false;
+  lastFullRound.set(key, now);
+  return true;
+}
 function shouldSkipEndpoint(st) {
   if (st.tries < 8 || st.useful > 0) return false;
   if (Date.now() - st.last > 20 * 60000) return false;           // time to probe again
@@ -597,6 +609,7 @@ setInterval(() => {
   const cutoff = Date.now() - 3 * 3600000;
   for (const [k, v] of matchMarketsCache) if (!v || v.ts < cutoff) matchMarketsCache.delete(k);
   for (const [k, t] of lastWarmTry) if (t < cutoff) lastWarmTry.delete(k);
+  for (const [k, t] of lastFullRound) if (t < cutoff) lastFullRound.delete(k);
 }, 10 * 60000).unref();
 
 function refreshMatchMarkets(id, name, cacheKey) {
@@ -619,10 +632,12 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
   // min) so each lookup only asks the endpoints that actually work - far fewer
   // requests, no 429s, quicker answers. The dedicated live endpoint is never skipped.
   const epKey = (base, path) => base + String(path).split(encodeURIComponent(id)).join(':id');
+  let ignoreSkip = false, skipped = 0;
+  const errs = [];
   const get = async (base, path, query) => {
     const k = epKey(base, path);
     const st = endpointStats.get(k) || { tries: 0, useful: 0, last: 0 };
-    if (!String(path).startsWith('/api/live-games/') && shouldSkipEndpoint(st)) throw new Error('skipped endpoint (no markets so far)');
+    if (!ignoreSkip && !String(path).startsWith('/api/live-games/') && shouldSkipEndpoint(st)) { skipped++; throw new Error('skipped endpoint (no markets so far)'); }
     st.tries++; st.last = Date.now(); endpointStats.set(k, st);
     return sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
   };
@@ -645,6 +660,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
     }
   };
 
+  const runRound = () => {
   const tasks = [];
   // Dedicated live endpoint first in the list (path carries the exact fixture id)
   for (const base of hosts) {
@@ -688,14 +704,22 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
       if (done) return; done = true; if (graceTimer) clearTimeout(graceTimer);
       matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });
       console.log(`[sofaBetsProvider] final rich markets ${id}: ${result.markets.length}`);
+      if (result.markets.length <= 1) console.warn(`[sofaBetsProvider] NO rich markets ${id} (${name}${ignoreSkip ? ', all endpoints asked' : ''}): ${tasks.length} requests, ${skipped} skipped; errors: ${Array.from(new Set(errs)).slice(0, 5).join(' | ') || 'none (endpoints answered but nothing matched this fixture)'}`);
       resolve(result);
     };
     const check = () => {
       if (result.markets.length > 1 && !graceTimer && !done) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
       if (pending === 0) finish();
     };
-    tasks.forEach(t => t.then(() => {}, () => {}).then(() => { pending--; check(); }));
+    tasks.forEach(t => t.then(() => {}, e => { if (errs.length < 40) errs.push(String(e && e.message || e).replace(/https?:\/\/[^ ]+/g, '').slice(0, 70)); }).then(() => { pending--; check(); }));
     if (!tasks.length) finish();
+  });
+  };   // end runRound
+
+  return runRound().then(r => {
+    if (r.markets.length > 1 || !skipped || !fullRoundDue(cacheKey)) return r;
+    ignoreSkip = true;   // second chance: ask every endpoint, including the ones the learner wrote off
+    return runRound();
   });
 }
 
@@ -710,7 +734,15 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
 // getLiveMatchById already enforce exact-id identity on their own, so
 // whichever one confirms the fixture is trusted as-is; this function only
 // decides which order to try them in.
-async function resolveExactFixture(providerId, sportName, options = {}) {
+const resolveInflight = new Map();
+function resolveExactFixture(providerId, sportName, options = {}) {
+  const key = [providerId, sportName, !!(options && options.rich), !!(options && options.preferLive)].join(':');
+  if (resolveInflight.has(key)) return resolveInflight.get(key);
+  const p = resolveExactFixtureUncached(providerId, sportName, options).finally(() => resolveInflight.delete(key));
+  resolveInflight.set(key, p);
+  return p;
+}
+async function resolveExactFixtureUncached(providerId, sportName, options = {}) {
   const rich = !!(options && options.rich);
   const preferLive = !!(options && options.preferLive);
 
