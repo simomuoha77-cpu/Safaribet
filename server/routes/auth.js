@@ -1,9 +1,3 @@
-    // device check, last-login update and token creation all at once (they used to run one after another)
-    const [isNewDevice, , tokens] = await Promise.all([
-      deviceId ? authService.isNewDevice(user._id, deviceId).catch(() => false) : false,
-      user.updateOne({ $set: { loginAttempts: 0, lastLogin: new Date() }, $unset: { lockUntil: 1 } }),
-      authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId })
-    ]);
 const express = require('express');
 const safeError = require('../utils/safeError');
 const bcrypt   = require('bcryptjs');
@@ -310,6 +304,7 @@ router.post('/register/verify-otp', otpVerifyLimiter, async (req, res) => {
 
 // ── LOGIN ──
 router.post('/login', loginLimiter, async (req, res) => {
+  const tl0 = Date.now(), tl = {};
   try {
     let { username, phone, password, twoFactorToken, deviceId } = req.body;
     const raw = String(phone || username || '').trim();
@@ -322,18 +317,15 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Find user by phone or username
     const digits = raw.replace(/\D/g, '');
     let user;
-    const sel = '+twoFactorSecret +twoFactorBackupCodes';
     if (digits.length >= 9) {
-      // phone and username lookups at the same time; the phone match wins
-      const [byPhone, byName] = await Promise.all([
-        User.findOne({ phone: normalizePhone(raw) }).select(sel),
-        User.findOne({ username: raw.toLowerCase() }).select(sel)
-      ]);
-      user = byPhone || byName;
-    } else {
-      user = await User.findOne({ username: raw.toLowerCase() }).select(sel);
+      const normalPhone = normalizePhone(raw);
+      user = await User.findOne({ phone: normalPhone }).select('+twoFactorSecret +twoFactorBackupCodes');
+    }
+    if (!user) {
+      user = await User.findOne({ username: raw.toLowerCase() }).select('+twoFactorSecret +twoFactorBackupCodes');
     }
 
+    tl.find = Date.now() - tl0;
     if (!user) {
       return res.status(401).json({ success: false, message: 'Account not found — check phone/username' });
     }
@@ -345,6 +337,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     const ok = await user.comparePassword(password);
+    tl.compare = Date.now() - tl0;
     if (!ok) {
       await user.incLoginAttempts();
       return res.status(401).json({ success: false, message: 'Wrong password' });
@@ -371,11 +364,14 @@ router.post('/login', loginLimiter, async (req, res) => {
       }
     }
 
-    const isNewDevice = deviceId ? await authService.isNewDevice(user._id, deviceId) : false;
-
-    await user.updateOne({ $set: { loginAttempts: 0, lastLogin: new Date() }, $unset: { lockUntil: 1 } });
-
-    const tokens = await authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId });
+    // The three database steps do not depend on each other, so they run side by side (was: one after the other).
+    const [isNewDevice, , tokens] = await Promise.all([
+      deviceId ? authService.isNewDevice(user._id, deviceId) : false,
+      user.updateOne({ $set: { loginAttempts: 0, lastLogin: new Date() }, $unset: { lockUntil: 1 } }),
+      authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId })
+    ]);
+    tl.done = Date.now() - tl0;
+    if (tl.done > 1500) console.warn('[login] SLOW ms: find', tl.find, '| password check finished at', tl.compare, '| all done at', tl.done);
     if (deviceId) authService.trackDevice(user._id, { deviceId, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(()=>{});
 
     try { require('./admin').logLogin(user._id, user.username, req.ip, true); } catch (_) {}

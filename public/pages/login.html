@@ -75,9 +75,6 @@ h2{font-size:22px;font-weight:800;color:var(--tx);margin-bottom:4px}
 </div>
 
 <script type="text/sb-page">
-// Wake a sleeping server while the player types their details.
-try { fetch('/api/auth/otp-config').catch(() => {}); } catch (e) {}
-
 async function doLogin(){
   const btn        = document.getElementById('btn');
   const errEl      = document.getElementById('err');
@@ -110,7 +107,7 @@ async function doLogin(){
       localStorage.setItem('user', JSON.stringify(data.user));
       okEl.textContent = '✅ Welcome back! Redirecting...';
       okEl.style.display = 'block';
-      SB.go('/');   // straight in, no artificial wait
+      SB.go('/');   // straight away (was: an extra 1 second pause)
     } else {
       showErr(data.message || 'Wrong credentials');
       btn.disabled = false;

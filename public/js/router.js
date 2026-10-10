@@ -432,9 +432,31 @@
     });
   }
 
+  // Thin progress line at the top: shown only when the page has to come from the network (not prefetched yet),
+  // so a tap on Join / Login / a menu item always reacts at once instead of looking frozen.
+  var navBarEl = null, navBarT = null;
+  function navBar(on) {
+    try {
+      if (on) {
+        if (navBarEl) return;
+        navBarEl = document.createElement('div');
+        navBarEl.setAttribute('style', 'position:fixed;top:0;left:0;height:3px;width:8%;background:#00c853;z-index:2147483647;pointer-events:none;box-shadow:0 0 8px #00c853;transition:width 6s cubic-bezier(.1,.8,.2,1),opacity .25s');
+        document.documentElement.appendChild(navBarEl);
+        _st.call(window, function () { if (navBarEl) navBarEl.style.width = '85%'; }, 30);
+      } else if (navBarEl) {
+        var el = navBarEl; navBarEl = null;
+        el.style.transition = 'width .15s, opacity .25s'; el.style.width = '100%';
+        _st.call(window, function () { el.style.opacity = '0'; }, 120);
+        _st.call(window, function () { if (el.parentNode) el.parentNode.removeChild(el); }, 420);
+      }
+    } catch (e) {}
+  }
+
   function load(u, o) {
     var my = ++navSeq, key = normPath(u.pathname) + u.search;
+    if (!htmlCache[key]) navBar(true);
     return fetchPage(u).then(function (html) {
+      navBar(false);
       if (my !== navSeq) return;
       if (o.mode === 'push') { saveScroll(); _push(stateFor(cur, false), '', normPath(u.pathname) + u.search + u.hash); }
       else if (o.mode === 'nav-push' || o.mode === 'nav') { _rep(stateFor(cur, false), '', location.pathname + location.search + location.hash); } // browser already moved the URL
@@ -445,6 +467,7 @@
         hardNav(location.href, true);
       });
     }, function (e) {
+      navBar(false);
       if (my !== navSeq) return;
       console.warn('[SafariBet router] could not fetch ' + key + ', doing a full load instead:', e && e.message);
       hardNav(u.href, o.mode !== 'push');
@@ -608,12 +631,25 @@
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
-    var loggedIn = false; try { loggedIn = !!localStorage.getItem('token'); } catch (e) {}
-    // Logged-out visitors get Login/Join warmed first so those buttons open instantly.
-    (loggedIn ? ['/my-bets', '/account', '/casino', '/'] : ['/login', '/register', '/casino', '/']).forEach(function (p, i) {
+    var guest = true; try { guest = !localStorage.getItem('token'); } catch (e) {}
+    (guest ? ['/login', '/register'] : []).concat(['/my-bets', '/account', '/casino', '/']).forEach(function (p, i) {
       if (normPath(location.pathname) === p) return;
-      _st.call(window, function () { fetchHtml(new URL(p, location.href)).catch(function () {}); }, 300 * (i + 1));
+      _st.call(window, function () { fetchHtml(new URL(p, location.href)).catch(function () {}); }, 800 * (i + 1));
     });
   }
-  _winAdd.call(window, 'load', function () { _st.call(window, prefetch, 400); });
+  _winAdd.call(window, 'load', function () { _st.call(window, prefetch, 1500); });
+
+  // Finger down on Join / Login / Sign in links: start fetching that page right now if it is not warmed yet
+  // (the click itself only arrives ~100ms later).
+  function pageIntent(ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[onclick*="/login"], [onclick*="/register"], a[href="/login"], a[href="/register"]') : null;
+    if (!el) return;
+    var m = /\/(login|register)\b/.exec(el.getAttribute('onclick') || el.getAttribute('href') || '');
+    if (!m) return;
+    var p = '/' + m[1];
+    if (normPath(location.pathname) === p || htmlCache[p]) return;
+    fetchHtml(new URL(p, location.href)).catch(function () {});
+  }
+  _docAdd.call(document, 'touchstart', pageIntent, { passive: true });
+  _docAdd.call(document, 'mousedown', pageIntent, true);
 })();
