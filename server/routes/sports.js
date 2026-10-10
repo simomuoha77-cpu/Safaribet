@@ -207,6 +207,14 @@ async function refreshLiveCache() {
   }
 }
 
+// Just the number of games live right now (memory only - never waits on SofaBets).
+router.get('/live-count', (req, res) => {
+  const cached = C.get(LIVE_CACHE_KEY, 120000);
+  res.set('Cache-Control', 'no-store');
+  if (!Array.isArray(cached)) refreshLiveCache().catch(() => {});
+  res.json({ success: true, count: Array.isArray(cached) ? cached.length : null });
+});
+
 router.get('/live', async (req, res) => {
   try {
     // NEVER wait for SofaBets here.
