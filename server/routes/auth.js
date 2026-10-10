@@ -76,35 +76,37 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     // Check username taken
-    const byUsername = await User.findOne({ username });
+    // Both uniqueness checks at the same time (same messages, same order of priority as before)
+    const [byUsername, byPhone] = await Promise.all([User.findOne({ username }).select('_id'), User.findOne({ phone: normalPhone }).select('_id')]);
     if (byUsername) {
       return res.status(400).json({ success: false, message: 'Username already taken — try another' });
     }
-
-    // Check phone taken (already a real account)
-    const byPhone = await User.findOne({ phone: normalPhone });
     if (byPhone) {
       return res.status(400).json({ success: false, message: 'Phone already registered — please login' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-
     const { generateOtp, sendSms } = require('../services/smsService');
     const otp = generateOtp();
-    const otpHash = await bcrypt.hash(otp, 8); // lighter cost factor — this is a short-lived, low-value secret, not a password
-
     const PendingRegistration = require('../models/PendingRegistration');
-    // Replace any previous pending registration for this phone (e.g. they
-    // abandoned a prior signup attempt) rather than accumulating stale ones.
-    await PendingRegistration.deleteMany({ phone: normalPhone });
-    await PendingRegistration.create({
-      username, phone: normalPhone, passwordHash,
-      refCode: (refCode && typeof refCode === 'string') ? refCode.trim().toUpperCase() : null,
-      otpHash,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes to verify
-    });
 
-    const smsResult = await sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    // The SMS goes out FIRST and at once. Hashing the password / code and saving the pending signup happen at the
+    // same time as the SMS request instead of in front of it (on this small server the hashing alone used to hold the
+    // text back for a second or more). The player cannot verify before the SMS lands, so the save is always done by then.
+    const smsP = sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    const saveP = (async () => {
+      const [passwordHash, otpHash] = await Promise.all([bcrypt.hash(password, 10), bcrypt.hash(otp, 8)]);  // lighter cost for the short-lived code
+      // Replace any previous pending registration for this phone (e.g. they
+      // abandoned a prior signup attempt) rather than accumulating stale ones.
+      await PendingRegistration.deleteMany({ phone: normalPhone });
+      await PendingRegistration.create({
+        username, phone: normalPhone, passwordHash,
+        refCode: (refCode && typeof refCode === 'string') ? refCode.trim().toUpperCase() : null,
+        otpHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes to verify
+      });
+    })();
+    const [smsResult, saveErr] = await Promise.all([smsP, saveP.then(() => null, e => e)]);
+    if (saveErr) throw saveErr;
     if (!smsResult.success) {
       console.error('[register] Failed to send OTP SMS:', smsResult.error);
       return res.status(502).json({ success: false, message: 'Could not send verification SMS. Please try again shortly.' });
@@ -134,12 +136,19 @@ router.post('/register/resend-otp', otpResendLimiter, async (req, res) => {
 
     const { generateOtp, sendSms } = require('../services/smsService');
     const otp = generateOtp();
-    pending.otpHash = await bcrypt.hash(otp, 8);
-    pending.attempts = 0;
-    pending.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await pending.save();
-
-    const smsResult = await sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    // Text first, saving in parallel. The previous code is NOT thrown away: if the first SMS was only slow, the
+    // player can still use it (whichever text arrives first works).
+    const smsP = sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    const saveP = (async () => {
+      const newHash = await bcrypt.hash(otp, 8);
+      pending.prevOtpHashes = [pending.otpHash, ...(pending.prevOtpHashes || [])].slice(0, 3);
+      pending.otpHash = newHash;
+      pending.attempts = 0;
+      pending.expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await pending.save();
+    })();
+    const [smsResult, saveErr] = await Promise.all([smsP, saveP.then(() => null, e => e)]);
+    if (saveErr) throw saveErr;
     if (!smsResult.success) {
       return res.status(502).json({ success: false, message: 'Could not resend SMS. Please try again shortly.' });
     }
@@ -174,7 +183,8 @@ router.post('/register/verify-otp', otpVerifyLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Too many incorrect attempts — please request a new code' });
     }
 
-    const match = await bcrypt.compare(otp, pending.otpHash);
+    let match = await bcrypt.compare(otp, pending.otpHash);
+    for (const h of (pending.prevOtpHashes || [])) { if (match) break; match = await bcrypt.compare(otp, h); }
     if (!match) {
       pending.attempts += 1;
       await pending.save();

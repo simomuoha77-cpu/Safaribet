@@ -32,7 +32,7 @@ const COMMSGRID_SENDER = process.env.COMMSGRID_SENDER_ID || 'CommsGrid';
 /**
  * Sends an SMS via CommsGrid. Returns { success, messageId, error }.
  */
-async function sendSms(phoneE164, message) {
+async function sendSmsOnce(phoneE164, message) {
   const key = COMMSGRID_KEY();
   if (!key) {
     console.error('[sms] COMMSGRID_API_KEY not set — cannot send SMS');
@@ -91,8 +91,26 @@ async function sendSms(phoneE164, message) {
     return { success: true, messageId: detail?.message_id || null, raw: data };
   } catch (e) {
     console.error('[sms] CommsGrid send failed:', e.response?.data || e.message);
-    return { success: false, error: e.response?.data?.message || e.message };
+    // Failures that are quick and clearly not a slow answer (no connection, or the provider's gateway
+    // saying "busy") are worth one more try. A TIMEOUT is not retried - waiting again would only add delay.
+    const status = e.response && e.response.status;
+    const retryable = (!e.response && /^(ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EPIPE)$/.test(e.code || '')) || [429, 502, 503, 504].includes(status);
+    return { success: false, error: e.response?.data?.message || e.message, retryable };
   }
+}
+
+// What every caller uses: one send, plus ONE immediate retry for quick, retryable failures. The retry sends the
+// identical text (same code), so if the first try did get through the player simply gets the same code twice.
+async function sendSms(phoneE164, message) {
+  const t0 = Date.now();
+  let r = await sendSmsOnce(phoneE164, message);
+  if (!r.success && r.retryable) {
+    await new Promise(res => setTimeout(res, 400));
+    console.warn('[sms] retrying once after quick failure:', r.error);
+    r = await sendSmsOnce(phoneE164, message);
+  }
+  console.log(`[sms] provider round trip ${Date.now() - t0}ms (${r.success ? 'accepted' : 'FAILED'})`);
+  return r;
 }
 /**
  * Kenyan phone -> "2547XXXXXXXX" / "2541XXXXXXXX", or null if it isn't a valid mobile number.

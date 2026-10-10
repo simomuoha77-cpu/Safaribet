@@ -11,6 +11,7 @@ const pendingRegistrationSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   refCode:      { type: String },
   otpHash:      { type: String, required: true },
+  prevOtpHashes: { type: [String], default: [] }, // earlier codes from this same signup stay valid until expiry (a slow first SMS must not be wasted by a resend)
   attempts:     { type: Number, default: 0 }, // wrong-code attempts against THIS otp — capped to stop brute force
   expiresAt:    { type: Date, required: true, index: { expires: 0 } } // Mongo TTL index — auto-deletes once expired
 }, { timestamps: true });
