@@ -50,6 +50,17 @@ function senderFor(phone, opts) {
   if (c === 'telkom' && SENDER_TELKOM()) return SENDER_TELKOM();
   return COMMSGRID_SENDER;
 }
+/**
+ * Which networks may receive a verification code. Default: Safaricom only (the networks we cannot
+ * reliably deliver to are blocked up front instead of silently "sending" a code that never arrives).
+ * Reopen later without a redeploy:  SMS_ALLOWED_CARRIERS=safaricom,airtel,telkom
+ */
+function carrierAllowed(phone) {
+  const list = String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  return list.includes('all') || list.includes(carrierOf(phone));
+}
+const CARRIER_BLOCK_MESSAGE = 'Only Safaricom numbers can register right now. Please use a Safaricom number (e.g. 0712 345 678).';
+
 /** The verification text. Override without a redeploy with SMS_OTP_TEMPLATE, e.g. "{code} is your SafariBet code." */
 function otpMessage(code) {
   const t = process.env.SMS_OTP_TEMPLATE;
@@ -232,4 +243,4 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-module.exports = { otpMessage, carrierOf, sendSms, sendBulkSms, normalizeKePhone, generateOtp };
+module.exports = { otpMessage, carrierOf, carrierAllowed, CARRIER_BLOCK_MESSAGE, sendSms, sendBulkSms, normalizeKePhone, generateOtp };

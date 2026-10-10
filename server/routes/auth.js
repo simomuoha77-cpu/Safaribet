@@ -75,6 +75,10 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Enter a valid Kenyan number e.g. 0712345678' });
     }
 
+    // Verification codes only reach the networks we can deliver to (default: Safaricom).
+    { const { carrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
+      if (!carrierAllowed(normalPhone)) return res.status(400).json({ success: false, code: 'CARRIER_NOT_SUPPORTED', message: CARRIER_BLOCK_MESSAGE }); }
+
     // Check username taken
     // Both uniqueness checks at the same time (same messages, same order of priority as before)
     const [byUsername, byPhone] = await Promise.all([User.findOne({ username }).select('_id'), User.findOne({ phone: normalPhone }).select('_id')]);
@@ -127,6 +131,9 @@ router.post('/register/resend-otp', otpResendLimiter, async (req, res) => {
     if (!/^254[0-9]{9}$/.test(normalPhone)) {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
+
+    { const { carrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
+      if (!carrierAllowed(normalPhone)) return res.status(400).json({ success: false, code: 'CARRIER_NOT_SUPPORTED', message: CARRIER_BLOCK_MESSAGE }); }
 
     const PendingRegistration = require('../models/PendingRegistration');
     const pending = await PendingRegistration.findOne({ phone: normalPhone });

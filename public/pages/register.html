@@ -257,8 +257,7 @@ async function doRegister(){
   if(cleanPhone.length < 9 || cleanPhone.length > 12){
     return showErr('Enter a valid phone number e.g. 0712345678');
   }
-
-  btn.disabled = true;
+btn.disabled = true;
   btn.textContent = 'Sending code...';
 
   try {

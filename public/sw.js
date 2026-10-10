@@ -9,7 +9,7 @@
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v11-fresh';
+const VERSION = 'sb-v12-otp-safaricom';
 const SHELL = ['/', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
