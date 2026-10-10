@@ -85,14 +85,14 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone already registered — please login' });
     }
 
-    const { generateOtp, sendSms } = require('../services/smsService');
+    const { generateOtp, sendSms, otpMessage } = require('../services/smsService');
     const otp = generateOtp();
     const PendingRegistration = require('../models/PendingRegistration');
 
     // The SMS goes out FIRST and at once. Hashing the password / code and saving the pending signup happen at the
     // same time as the SMS request instead of in front of it (on this small server the hashing alone used to hold the
     // text back for a second or more). The player cannot verify before the SMS lands, so the save is always done by then.
-    const smsP = sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    const smsP = sendSms(normalPhone, otpMessage(otp));
     const saveP = (async () => {
       const [passwordHash, otpHash] = await Promise.all([bcrypt.hash(password, 10), bcrypt.hash(otp, 8)]);  // lighter cost for the short-lived code
       // Replace any previous pending registration for this phone (e.g. they
@@ -134,11 +134,15 @@ router.post('/register/resend-otp', otpResendLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'No pending registration for this number — please start again' });
     }
 
-    const { generateOtp, sendSms } = require('../services/smsService');
+    const { generateOtp, sendSms, otpMessage } = require('../services/smsService');
     const otp = generateOtp();
+    // Every second "Resend" uses the alternate sender ID (if COMMSGRID_SENDER_ID_ALT is set), so a number whose
+    // network rejects the main sender ID can still get a code.
+    pending.resendCount = (pending.resendCount || 0) + 1;
+    const altSender = (pending.resendCount % 2 === 0 && process.env.COMMSGRID_SENDER_ID_ALT) ? process.env.COMMSGRID_SENDER_ID_ALT : undefined;
     // Text first, saving in parallel. The previous code is NOT thrown away: if the first SMS was only slow, the
     // player can still use it (whichever text arrives first works).
-    const smsP = sendSms(normalPhone, `Your SafariBet verification code is ${otp}. Valid for 10 minutes. Do not share this code.`);
+    const smsP = sendSms(normalPhone, otpMessage(otp), altSender ? { sender: altSender } : undefined);
     const saveP = (async () => {
       const newHash = await bcrypt.hash(otp, 8);
       pending.prevOtpHashes = [pending.otpHash, ...(pending.prevOtpHashes || [])].slice(0, 3);

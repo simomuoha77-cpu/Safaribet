@@ -28,11 +28,39 @@ const COMMSGRID_KEY  = () => process.env.COMMSGRID_API_KEY;
 // it as "CommsGrid" until you've confirmed your own ID is actually approved,
 // or every send will fail with an unapproved-sender error.
 const COMMSGRID_SENDER = process.env.COMMSGRID_SENDER_ID || 'CommsGrid';
+// Optional per-network sender IDs. A sender ID can be approved on Safaricom but not on
+// Airtel/Telkom - the provider then reports "sent" while the phone never gets the text.
+//   COMMSGRID_SENDER_ID_AIRTEL, COMMSGRID_SENDER_ID_TELKOM  - used for that network's numbers
+//   COMMSGRID_SENDER_ID_ALT   - a second sender ID tried on the next "Resend code" press
+const SENDER_AIRTEL = () => process.env.COMMSGRID_SENDER_ID_AIRTEL || '';
+const SENDER_TELKOM = () => process.env.COMMSGRID_SENDER_ID_TELKOM || '';
+const SENDER_ALT    = () => process.env.COMMSGRID_SENDER_ID_ALT || '';
+
+/** 'safaricom' | 'airtel' | 'telkom' from a 2547XXXXXXXX / 2541XXXXXXXX number. */
+function carrierOf(phone) {
+  const p = String(phone || '').replace(/[^\d]/g, '');
+  if (/^254(73\d|78\d|75[0-6]|10[0-2])/.test(p)) return 'airtel';
+  if (/^254(77\d)/.test(p)) return 'telkom';
+  return 'safaricom';
+}
+function senderFor(phone, opts) {
+  if (opts && opts.sender) return opts.sender;
+  const c = carrierOf(phone);
+  if (c === 'airtel' && SENDER_AIRTEL()) return SENDER_AIRTEL();
+  if (c === 'telkom' && SENDER_TELKOM()) return SENDER_TELKOM();
+  return COMMSGRID_SENDER;
+}
+/** The verification text. Override without a redeploy with SMS_OTP_TEMPLATE, e.g. "{code} is your SafariBet code." */
+function otpMessage(code) {
+  const t = process.env.SMS_OTP_TEMPLATE;
+  if (t && t.includes('{code}')) return t.split('{code}').join(code);
+  return `Your SafariBet verification code is ${code}. Valid for 10 minutes. Do not share this code.`;
+}
 
 /**
  * Sends an SMS via CommsGrid. Returns { success, messageId, error }.
  */
-async function sendSmsOnce(phoneE164, message) {
+async function sendSmsOnce(phoneE164, message, opts) {
   const key = COMMSGRID_KEY();
   if (!key) {
     console.error('[sms] COMMSGRID_API_KEY not set — cannot send SMS');
@@ -50,7 +78,7 @@ async function sendSmsOnce(phoneE164, message) {
       {
         recipient: [e164], // MUST be an array, even for a single number
         message,
-        sender_id: COMMSGRID_SENDER
+        sender_id: senderFor(phoneE164, opts)
       },
       {
         headers: {
@@ -87,7 +115,7 @@ async function sendSmsOnce(phoneE164, message) {
       return { success: false, error: reason, raw: data };
     }
 
-    console.log(`[sms] Sent successfully to ${e164} — status: ${detail?.status || 'unknown'}, messageId: ${detail?.message_id || 'n/a'}`);
+    console.log(`[sms] Sent successfully to ${e164} (${carrierOf(phoneE164)}, sender ${senderFor(phoneE164, opts)}) — status: ${detail?.status || 'unknown'}, messageId: ${detail?.message_id || 'n/a'}`);
     return { success: true, messageId: detail?.message_id || null, raw: data };
   } catch (e) {
     console.error('[sms] CommsGrid send failed:', e.response?.data || e.message);
@@ -101,13 +129,13 @@ async function sendSmsOnce(phoneE164, message) {
 
 // What every caller uses: one send, plus ONE immediate retry for quick, retryable failures. The retry sends the
 // identical text (same code), so if the first try did get through the player simply gets the same code twice.
-async function sendSms(phoneE164, message) {
+async function sendSms(phoneE164, message, opts) {
   const t0 = Date.now();
-  let r = await sendSmsOnce(phoneE164, message);
+  let r = await sendSmsOnce(phoneE164, message, opts);
   if (!r.success && r.retryable) {
     await new Promise(res => setTimeout(res, 400));
     console.warn('[sms] retrying once after quick failure:', r.error);
-    r = await sendSmsOnce(phoneE164, message);
+    r = await sendSmsOnce(phoneE164, message, opts);
   }
   console.log(`[sms] provider round trip ${Date.now() - t0}ms (${r.success ? 'accepted' : 'FAILED'})`);
   return r;
@@ -204,4 +232,4 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-module.exports = { sendSms, sendBulkSms, normalizeKePhone, generateOtp };
+module.exports = { otpMessage, carrierOf, sendSms, sendBulkSms, normalizeKePhone, generateOtp };
