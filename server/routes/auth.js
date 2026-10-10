@@ -1,3 +1,9 @@
+    // device check, last-login update and token creation all at once (they used to run one after another)
+    const [isNewDevice, , tokens] = await Promise.all([
+      deviceId ? authService.isNewDevice(user._id, deviceId).catch(() => false) : false,
+      user.updateOne({ $set: { loginAttempts: 0, lastLogin: new Date() }, $unset: { lockUntil: 1 } }),
+      authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId })
+    ]);
 const express = require('express');
 const safeError = require('../utils/safeError');
 const bcrypt   = require('bcryptjs');
@@ -316,12 +322,16 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Find user by phone or username
     const digits = raw.replace(/\D/g, '');
     let user;
+    const sel = '+twoFactorSecret +twoFactorBackupCodes';
     if (digits.length >= 9) {
-      const normalPhone = normalizePhone(raw);
-      user = await User.findOne({ phone: normalPhone }).select('+twoFactorSecret +twoFactorBackupCodes');
-    }
-    if (!user) {
-      user = await User.findOne({ username: raw.toLowerCase() }).select('+twoFactorSecret +twoFactorBackupCodes');
+      // phone and username lookups at the same time; the phone match wins
+      const [byPhone, byName] = await Promise.all([
+        User.findOne({ phone: normalizePhone(raw) }).select(sel),
+        User.findOne({ username: raw.toLowerCase() }).select(sel)
+      ]);
+      user = byPhone || byName;
+    } else {
+      user = await User.findOne({ username: raw.toLowerCase() }).select(sel);
     }
 
     if (!user) {

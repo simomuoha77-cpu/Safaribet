@@ -608,10 +608,12 @@
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
-    ['/my-bets', '/account', '/casino', '/'].forEach(function (p, i) {
+    var loggedIn = false; try { loggedIn = !!localStorage.getItem('token'); } catch (e) {}
+    // Logged-out visitors get Login/Join warmed first so those buttons open instantly.
+    (loggedIn ? ['/my-bets', '/account', '/casino', '/'] : ['/login', '/register', '/casino', '/']).forEach(function (p, i) {
       if (normPath(location.pathname) === p) return;
-      _st.call(window, function () { fetchHtml(new URL(p, location.href)).catch(function () {}); }, 800 * (i + 1));
+      _st.call(window, function () { fetchHtml(new URL(p, location.href)).catch(function () {}); }, 300 * (i + 1));
     });
   }
-  _winAdd.call(window, 'load', function () { _st.call(window, prefetch, 1500); });
+  _winAdd.call(window, 'load', function () { _st.call(window, prefetch, 400); });
 })();

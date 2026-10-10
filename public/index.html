@@ -114,6 +114,8 @@ header{
   padding:2px 6px;border-radius:10px;font-weight:800;
 }
 .hbtn{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all 0.2s}
+.hbtn:active{transform:scale(.94);filter:brightness(1.25);transition:none}
+.hbtn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .hbtn.o{background:transparent;border:1.5px solid rgba(0,200,83,0.5);color:var(--g)}
 .hbtn.o:hover{background:rgba(0,200,83,0.1)}
 .hbtn.g{background:linear-gradient(135deg,#00e65c,#00c853);color:#000;box-shadow:0 2px 12px rgba(0,200,83,0.3)}
@@ -546,8 +548,8 @@ header{
     <div class="balpill" id="balpill" onclick="SB.go('/deposit')">
       KES <span id="balv">0.00</span> <span class="dep">+Deposit</span>
     </div>
-    <button class="hbtn o" id="loginBtn" onclick="SB.go('/login')">Login</button>
-    <button class="hbtn g" id="joinBtn"  onclick="SB.go('/register')">Join</button>
+    <button class="hbtn o" id="loginBtn" onclick="this.style.opacity='.7';SB.go('/login')">Login</button>
+    <button class="hbtn g" id="joinBtn"  onclick="this.style.opacity='.7';SB.go('/register')">Join</button>
     <button class="hbtn o" id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
   </div>
 </header>
