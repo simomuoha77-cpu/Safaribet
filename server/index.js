@@ -28,6 +28,10 @@ const scheduler     = require('./engine/scheduler');
 
 const app    = express();
 const server = http.createServer(app);
+// Behind Render's proxy every request otherwise looks like it comes from the proxy's own address, so ALL players
+// shared one rate-limit bucket (e.g. 15 logins per 15 minutes for everybody together). With this, req.ip is the
+// real player's address. 1 = one proxy in front (Render). If Cloudflare is also in front, set TRUST_PROXY_HOPS=2.
+app.set('trust proxy', Math.max(0, Number(process.env.TRUST_PROXY_HOPS || 1)));
 
 // ── WEBSOCKET (Live Notifications) ──
 try {
@@ -373,6 +377,14 @@ mongoose.connection.on('disconnected', () => console.warn('⚠️ MongoDB discon
 mongoose.connection.on('reconnected', () => console.log('✅ MongoDB reconnected'));
 mongoose.connection.on('error', (err) => console.error('❌ MongoDB connection error:', err.message));
 
+// Open the port FIRST. Before, the server only started listening after MongoDB had connected, so while it was
+// starting (after a sleep, a restart or a deploy) every request got the proxy's error page - which the app showed
+// as "Network error". Now requests are accepted at once and wait briefly (mongoose queues them) for the database.
+{
+  const EARLY_PORT = process.env.PORT || 3000;
+  server.listen(EARLY_PORT, () => console.log(`🚀 SafariBet server listening on port ${EARLY_PORT} (database connecting...)`));
+}
+
 mongoose.connect(process.env.MONGO_URI, {
   serverSelectionTimeoutMS: 10000
 })
@@ -390,11 +402,8 @@ mongoose.connect(process.env.MONGO_URI, {
       } catch(e) { console.error('[startup cleanup]', e.message); }
     })();
 
-    const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () => {
-      console.log(`🚀 SafariBet server running on port ${PORT}`);
-      scheduler.start();
-    });
+    console.log('🚀 SafariBet ready (database connected)');
+    scheduler.start();
   })
   .catch(err => {
     console.error('❌ MongoDB connection failed:', err.message);

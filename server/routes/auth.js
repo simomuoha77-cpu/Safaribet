@@ -305,6 +305,8 @@ router.post('/register/verify-otp', otpVerifyLimiter, async (req, res) => {
 // ── LOGIN ──
 router.post('/login', loginLimiter, async (req, res) => {
   const tl0 = Date.now(), tl = {};
+  // Password checking is heavy for this small server: pause the background feed refreshing while it runs.
+  try { const sb = require('../providers/sofaBetsProvider'); sb.holdCrawler(4000); sb.noteBetPlacing(4000); } catch (_) {}
   try {
     let { username, phone, password, twoFactorToken, deviceId } = req.body;
     const raw = String(phone || username || '').trim();

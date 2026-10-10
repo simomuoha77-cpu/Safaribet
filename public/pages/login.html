@@ -75,8 +75,42 @@ h2{font-size:22px;font-weight:800;color:var(--tx);margin-bottom:4px}
 </div>
 
 <script type="text/sb-page">
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+// One try, with its own time limit. Gives { data, status }, or null if the connection failed / timed out.
+async function loginAttempt(body, timeoutMs){
+  const ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = ac ? setTimeout(() => { try{ ac.abort(); }catch(e){} }, timeoutMs) : null;
+  try {
+    const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ac ? ac.signal : undefined });
+    let data = null; try { data = await res.json(); } catch(e) {}
+    return { data, status: res.status };
+  } catch(e) { return null; }
+  finally { if(timer) clearTimeout(timer); }
+}
+
+// A server that is waking up or restarting answers with a gateway error page or not at all. Instead of showing
+// "Network error" straight away, keep trying quietly for up to 30 seconds. Any real answer from the server
+// (welcome, wrong password, locked...) is final and is never repeated.
+async function loginWithRetry(body, onSlow){
+  const t0 = Date.now();
+  let last = null, appErrors = 0;
+  for(let attempt = 1; Date.now() - t0 < 30000; attempt++){
+    const r = await loginAttempt(body, attempt === 1 ? 15000 : 12000);
+    if(r && r.data){
+      if(r.status < 500) return r.data;
+      last = r.data;                       // the app itself answered with an error: try again, but only twice more
+      if(++appErrors >= 3) return last;    // (every try that reaches the app counts toward the login rate limit)
+    }
+    if(attempt === 2) onSlow();
+    await sleep(Math.min(2000, 500 * attempt));
+  }
+  return last;
+}
+
 async function doLogin(){
   const btn        = document.getElementById('btn');
+  if(btn.disabled) return;                 // already signing in (e.g. Enter pressed while waiting)
   const errEl      = document.getElementById('err');
   const okEl       = document.getElementById('ok');
   const identifier = document.getElementById('identifier').value.trim();
@@ -94,13 +128,17 @@ async function doLogin(){
 
   try {
     // Send as both phone and username — server handles either
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: identifier, username: identifier, password })
-    });
-
-    const data = await res.json();
+    const data = await loginWithRetry(
+      JSON.stringify({ phone: identifier, username: identifier, password }),
+      () => { okEl.textContent = 'Connecting… the server is waking up, please wait'; okEl.style.display = 'block'; }
+    );
+    okEl.style.display = 'none';
+    if(!data){
+      showErr('Network error. Check connection and try again.');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+      return;
+    }
 
     if(data.success){
       localStorage.setItem('token', data.token);
@@ -129,6 +167,9 @@ function showErr(msg){
 document.addEventListener('keydown', e => {
   if(e.key === 'Enter') doLogin();
 });
+
+// Wake the server (and its database link) while the player is still typing their details.
+try { fetch('/api/health', { cache: 'no-store' }).catch(() => {}); } catch(e) {}
 </script>
 <script>SB.run()</script>
 </body>
