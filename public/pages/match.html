@@ -336,7 +336,24 @@ function liveClockSeconds(sc, now){
   return Math.floor(s);
 }
 function fmtClock(sec){ const mm = Math.floor(sec / 60), ss = sec % 60; return String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); }
+// Whatever the latest server answer contains, a live game keeps the last clock / goals it had: a refresh that
+// arrives without them (e.g. a slow or partial answer) must never make the panel disappear. The clock itself
+// stops moving after 150 seconds without a fresh reading (see liveClockSeconds), so nothing stale is invented.
+let _lastLive = null;
+function liveView(m){
+  if (!m || m.status !== 'live') return m;
+  const sc = m.score || {};
+  if (sc.clockSec != null) {
+    _lastLive = { id: m.matchId, clockSec: sc.clockSec, clockRunning: sc.clockRunning, clockAt: sc.clockAt, goalEvents: Array.isArray(m.goalEvents) && m.goalEvents.length ? m.goalEvents : (_lastLive && _lastLive.id === m.matchId ? _lastLive.goalEvents : null) };
+    return m;
+  }
+  if (_lastLive && _lastLive.id === m.matchId) {
+    return Object.assign({}, m, { score: Object.assign({}, sc, { clockSec: _lastLive.clockSec, clockRunning: _lastLive.clockRunning, clockAt: _lastLive.clockAt }), goalEvents: (Array.isArray(m.goalEvents) && m.goalEvents.length) ? m.goalEvents : (_lastLive.goalEvents || []) });
+  }
+  return m;
+}
 function livePanelHtml(m, now){
+  m = liveView(m);
   if (!m || m.status !== 'live') return '';
   const sec = liveClockSeconds(m.score, now);
   if (sec == null) return '';
@@ -357,9 +374,10 @@ let _ltTimer = null;
 function tickLivePanel(){
   const clock = document.getElementById('ltClock');
   if (!clock || !clock.isConnected || !matchData || matchData.status !== 'live') { if (_ltTimer) { clearInterval(_ltTimer); _ltTimer = null; } return; }
-  const sec = liveClockSeconds(matchData.score, Date.now());
+  const lv = liveView(matchData);
+  const sec = liveClockSeconds(lv.score, Date.now());
   if (sec == null) return;
-  const brk = String(matchData.score && matchData.score.period || '').toUpperCase() === 'PAUSED';
+  const brk = String(lv.score && lv.score.period || '').toUpperCase() === 'PAUSED';
   clock.textContent = fmtClock(sec);
   const fill = document.getElementById('ltFill');
   if (fill) fill.style.width = Math.min(100, (brk ? 45 * 60 : sec) / (90 * 60) * 100).toFixed(1) + '%';

@@ -468,7 +468,10 @@ router.get('/match/:matchId', async (req, res) => {
               home: idx.score?.home ?? null,
               away: idx.score?.away ?? null,
               minute: idx.score?.minute ?? null,
-              period: idx.score?.period || null
+              period: idx.score?.period || null,
+              clockSec: idx.score?.clockSec ?? null,
+              clockRunning: idx.score?.clockRunning ?? null,
+              clockAt: idx.score?.clockAt ?? null
             },
             markets: mk,
             bookmakers: idx.bookmakers || [],
@@ -516,7 +519,10 @@ router.get('/match/:matchId', async (req, res) => {
               home: direct.score?.fullTime?.home ?? null,
               away: direct.score?.fullTime?.away ?? null,
               minute: direct.minute ?? null,
-              period: direct.status || null
+              period: direct.status || null,
+              clockSec: direct.liveClockSec ?? null,
+              clockRunning: direct.clockRunning ?? null,
+              clockAt: direct.liveClockAt ?? null
             },
             markets: direct.markets || [],
             bookmakers: direct.bookmakers || [],
@@ -601,7 +607,11 @@ router.get('/match/:matchId', async (req, res) => {
               home: liveNow.score?.fullTime?.home ?? m.score?.home ?? null,
               away: liveNow.score?.fullTime?.away ?? m.score?.away ?? null,
               minute: liveNow.minute ?? m.score?.minute ?? null,
-              period: liveNow.status || m.score?.period || null
+              period: liveNow.status || m.score?.period || null,
+              // This rebuild used to drop the clock, which made the live panel vanish as soon as the markets arrived
+              clockSec: liveNow.liveClockSec ?? null,
+              clockRunning: liveNow.clockRunning ?? null,
+              clockAt: liveNow.liveClockAt ?? null
             };
             if (liveNow.odds) m.providerOdds = liveNow.odds;
           }
