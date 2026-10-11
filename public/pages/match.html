@@ -35,6 +35,22 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .mh-status.live{color:var(--rd);font-weight:700}
 .mh-league{text-align:center;font-size:11px;color:var(--mt);margin-top:8px;text-transform:uppercase;letter-spacing:0.5px}
 
+/* LIVE PANEL (football): ticking clock, phase, progress bar with half time, goals as seen by our live polling */
+.lt{margin-top:12px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#101810}
+.lt-pitch{position:relative;height:92px;background:repeating-linear-gradient(90deg,#2b8038 0 34px,#257232 34px 68px)}
+.lt-pitch::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(255,255,255,.55);transform:translateX(-50%)}
+.lt-pitch::after{content:'';position:absolute;left:50%;top:50%;width:62px;height:62px;border:2px solid rgba(255,255,255,.55);border-radius:50%;transform:translate(-50%,-50%)}
+.lt-clock{position:absolute;left:50%;top:9px;transform:translateX(-50%);z-index:2;background:rgba(0,0,0,.8);color:#fff;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:22px;line-height:1.2;padding:1px 12px;border-radius:6px;letter-spacing:1px;min-width:74px;text-align:center}
+.lt-phase{position:absolute;left:50%;bottom:9px;transform:translateX(-50%);z-index:2;background:rgba(0,0,0,.62);color:#b9ffc4;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;white-space:nowrap}
+.lt-tl{position:relative;height:64px;margin:0 14px}
+.lt-bar{position:absolute;left:0;right:0;top:30px;height:4px;border-radius:2px;background:rgba(255,255,255,.14)}
+.lt-fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:#ff9800;transition:width .9s linear}
+.lt-ht{position:absolute;left:50%;top:23px;transform:translateX(-50%);font-size:9px;font-weight:700;background:#2b8038;color:#fff;border-radius:4px;padding:1px 5px;z-index:1}
+.lt-g{position:absolute;transform:translateX(-50%);text-align:center;font-size:14px;line-height:1;z-index:2}
+.lt-g small{display:block;font-size:9px;color:var(--mt);font-weight:700;margin-top:1px}
+.lt-g.h{top:2px}.lt-g.a{top:38px}
+.lt-lg{position:absolute;right:0;top:0;font-size:9px;color:var(--mt);letter-spacing:.3px}
+.lt-lg.b{top:auto;bottom:0}
 .main{padding:12px}
 .market-card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;margin-bottom:12px;overflow:hidden}
 .market-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s2)}
@@ -307,6 +323,51 @@ function matchLivePeriod(m){
   if (el<=60) return el>=50 ? 'HT' : '1H 45+';
   return '2H ~'+Math.min(90,Math.max(46,Math.round(el-15)))+"'";
 }
+// ---- live panel -------------------------------------------------------------
+// The server sends the football clock as it last read it (clockSec) and the time it read it (clockAt). Between
+// refreshes the clock simply keeps counting here, once a second. It never runs more than 150s past the last
+// reading, so a lost connection freezes the clock instead of making up a time.
+function liveClockSeconds(sc, now){
+  if (!sc || sc.clockSec == null) return null;
+  let s = Number(sc.clockSec);
+  if (!Number.isFinite(s)) return null;
+  const at = sc.clockAt ? Date.parse(sc.clockAt) : NaN;
+  if (sc.clockRunning && Number.isFinite(at)) s += Math.max(0, Math.min(150, (now - at) / 1000));
+  return Math.floor(s);
+}
+function fmtClock(sec){ const mm = Math.floor(sec / 60), ss = sec % 60; return String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); }
+function livePanelHtml(m, now){
+  if (!m || m.status !== 'live') return '';
+  const sec = liveClockSeconds(m.score, now);
+  if (sec == null) return '';
+  const brk = String(m.score && m.score.period || '').toUpperCase() === 'PAUSED';
+  const phase = brk ? 'Half time' : (sec < 45 * 60 ? '1st half' : '2nd half');
+  const pct = Math.min(100, (brk ? 45 * 60 : sec) / (90 * 60) * 100);
+  const goals = (Array.isArray(m.goalEvents) ? m.goalEvents : []).filter(g => g && (g.team === 'home' || g.team === 'away') && g.minute != null && Number.isFinite(Number(g.minute)));
+  const marks = goals.map(g => {
+    const left = Math.min(98, Math.max(2, Number(g.minute) / 90 * 100));
+    return `<span class="lt-g ${g.team === 'home' ? 'h' : 'a'}" style="left:${left.toFixed(1)}%" title="${g.team === 'home' ? 'Home' : 'Away'} goal ${Number(g.minute)}'">⚽<small>${Number(g.minute)}'</small></span>`;
+  }).join('');
+  return `<div class="lt" id="livePanel">
+    <div class="lt-pitch"><div class="lt-clock" id="ltClock">${fmtClock(sec)}</div><div class="lt-phase" id="ltPhase">${phase}</div></div>
+    <div class="lt-tl"><span class="lt-lg">HOME ▲</span><span class="lt-lg b">AWAY ▼</span><div class="lt-bar"><div class="lt-fill" id="ltFill" style="width:${pct.toFixed(1)}%"></div></div><span class="lt-ht">HT</span>${marks}</div>
+  </div>`;
+}
+let _ltTimer = null;
+function tickLivePanel(){
+  const clock = document.getElementById('ltClock');
+  if (!clock || !clock.isConnected || !matchData || matchData.status !== 'live') { if (_ltTimer) { clearInterval(_ltTimer); _ltTimer = null; } return; }
+  const sec = liveClockSeconds(matchData.score, Date.now());
+  if (sec == null) return;
+  const brk = String(matchData.score && matchData.score.period || '').toUpperCase() === 'PAUSED';
+  clock.textContent = fmtClock(sec);
+  const fill = document.getElementById('ltFill');
+  if (fill) fill.style.width = Math.min(100, (brk ? 45 * 60 : sec) / (90 * 60) * 100).toFixed(1) + '%';
+  const ph = document.getElementById('ltPhase');
+  if (ph) ph.textContent = brk ? 'Half time' : (sec < 45 * 60 ? '1st half' : '2nd half');
+}
+function startLivePanelTick(){ if (!_ltTimer && document.getElementById('ltClock')) _ltTimer = setInterval(tickLivePanel, 1000); }
+
 function renderHeader(){
   const m = matchData;
   document.getElementById('topLeague').textContent = m.league || 'Football';
@@ -327,7 +388,9 @@ function renderHeader(){
     </div>
     ${statusText}
     <div class="mh-league">${m.league || ''}</div>
+    ${livePanelHtml(m, Date.now())}
   `;
+  startLivePanelTick();
 }
 
 function renderMarkets(isPreliminary){

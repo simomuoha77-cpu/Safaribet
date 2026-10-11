@@ -242,7 +242,10 @@ function normalizeDirectSofaMatch(m) {
       away: score.away ?? null,
       minute: m.minute ?? null,
       minuteIsEstimated: !!m.minuteIsEstimated,
-      period: m.status || null
+      period: m.status || null,
+      clockSec: m.liveClockSec ?? null,
+      clockRunning: m.clockRunning ?? null,
+      clockAt: m.liveClockAt ?? null
     },
     result: status === 'finished'
       ? ((score.home != null && score.away != null) ? (score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw') : null)
@@ -390,12 +393,13 @@ async function updateLive() {
       // every ~10s regardless of whether anything changed, which would otherwise
       // silently wipe out a previously-recorded lastGoalAt on every non-scoring poll.
       try {
-        const existing = await Match.findOne({ matchId: m.matchId }, { score: 1 }).lean();
+        const existing = await Match.findOne({ matchId: m.matchId }, { score: 1, goalEvents: 1 }).lean();
         const prevH = existing?.score?.home, prevA = existing?.score?.away;
         const knownBefore = existing && prevH != null && prevA != null; // false on the very first sync — not a real "goal event"
         const scoreChanged = knownBefore && (prevH !== m.score?.home || prevA !== m.score?.away);
         if (scoreChanged) {
           m.score = { ...m.score, lastGoalAt: new Date() };
+          try { m.goalEvents = require('../services/liveEvents').applyScoreChange(existing.goalEvents, prevH, prevA, m.score.home, m.score.away, m.score.minute, new Date()); } catch (e) {}
           console.log(`  ⚽ Goal detected: ${m.homeTeam} ${prevH}-${prevA} → ${m.score.home}-${m.score.away} ${m.awayTeam} — live markets briefly suspended`);
         } else if (existing?.score?.lastGoalAt) {
           m.score = { ...m.score, lastGoalAt: existing.score.lastGoalAt };

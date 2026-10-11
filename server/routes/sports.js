@@ -142,7 +142,10 @@ function buildLiveMatches(sport, matches) {
         minute: m.minute ?? m.score?.minute ?? null,
         minuteIsEstimated: !!m.minuteIsEstimated,
         period: m.status || null,
-        periodLabel: m.periodText || m.statusRaw || null
+        periodLabel: m.periodText || m.statusRaw || null,
+        clockSec: m.liveClockSec ?? null,
+        clockRunning: m.clockRunning ?? null,
+        clockAt: m.liveClockAt ?? null
       },
       source: 'sofabets',
       oddsSource: m.oddsSource || 'SofaBets',
@@ -206,14 +209,6 @@ async function refreshLiveCache() {
     liveRefreshInFlight = false;
   }
 }
-
-// Just the number of games live right now (memory only - never waits on SofaBets).
-router.get('/live-count', (req, res) => {
-  const cached = C.get(LIVE_CACHE_KEY, 120000);
-  res.set('Cache-Control', 'no-store');
-  if (!Array.isArray(cached)) refreshLiveCache().catch(() => {});
-  res.json({ success: true, count: Array.isArray(cached) ? cached.length : null });
-});
 
 router.get('/live', async (req, res) => {
   try {

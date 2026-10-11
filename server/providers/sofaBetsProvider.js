@@ -1146,11 +1146,13 @@ function normalizeMatch(raw) {
   const sportRaw = teamName(pick(source, ['sport', 'sportName', 'sport_name', 'sportSlug', 'sport_slug', 'sportType'])) || teamName(source.sport) || null;
   // SofaBets sends the real football clock as live_clock "60:23" (counting UP). Without reading it the app only had an
   // estimate ("1H ~28"). Football only: basketball and others count DOWN inside each period, which is not "the minute".
-  if (minute == null && (status === 'IN_PLAY' || status === 'PAUSED') &&
+  let liveClockSec = null;
+  if ((status === 'IN_PLAY' || status === 'PAUSED') &&
       (/soccer|football/i.test(String(sportRaw || '')) || Number(pick(source, ['sport_id', 'sportId'])) === 1)) {
-    const lc = /^\s*(\d{1,3})\s*:\s*\d{2}/.exec(String(pick(source, ['live_clock', 'liveClock']) || ''));
-    if (lc) minute = Number(lc[1]);
+    const lc = /^\s*(\d{1,3})\s*:\s*(\d{2})/.exec(String(pick(source, ['live_clock', 'liveClock']) || ''));
+    if (lc) { liveClockSec = Number(lc[1]) * 60 + Number(lc[2]); if (minute == null) minute = Number(lc[1]); }
   }
+  const clockRunRaw = pick(source, ['is_clock_running', 'isClockRunning']);
   const livePeriod = pick(source, ['current_phase', 'currentPhase', 'periodName', 'period_name', 'currentPeriod', 'current_period', 'matchPeriod', 'period', 'phase', 'statusText', 'status_text', 'statusDescription', 'matchStatus', 'status']);
 
   return {
@@ -1169,6 +1171,10 @@ function normalizeMatch(raw) {
     venue: teamName(pick(source, ['venue', 'stadium'])),
     minute: minute != null && Number.isFinite(Number(minute)) ? Number(minute) : null,
     minuteIsEstimated: minute == null,
+    // Exact football clock for the match page's live panel (it ticks every second between refreshes)
+    liveClockSec,
+    liveClockAt: liveClockSec != null ? new Date() : null,
+    clockRunning: clockRunRaw == null ? null : (clockRunRaw === true || String(clockRunRaw).toLowerCase() === 'true' || Number(clockRunRaw) === 1),
     // SofaBets is the authoritative odds source when odds are present.
     // Expose them directly as well as under the provider-specific field so
     // the canonical merge layer can carry them through without AI odds

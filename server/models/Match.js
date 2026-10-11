@@ -33,8 +33,14 @@ const matchSchema = new mongoose.Schema({
     // lets the live-risk engine detect "a goal was just scored" and briefly
     // suspend markets while odds catch up, separate from the ongoing minute/
     // score-margin based suspension rules. See server/services/marketResolver.js.
-    lastGoalAt: { type: Date, default: null }
+    lastGoalAt: { type: Date, default: null },
+    // Exact live football clock (seconds) as last read from SofaBets, whether it was running, and when we read it.
+    clockSec:     { type: Number,  default: null },
+    clockRunning: { type: Boolean, default: null },
+    clockAt:      { type: Date,    default: null }
   },
+  // Goals seen by our own live polling (team, minute, running score) - drives the live panel's timeline.
+  goalEvents: { type: mongoose.Schema.Types.Mixed, default: [] },
   // Provider-native SofaBets markets. Stored as Mixed because market
   // names/options differ by sport (football, tennis, basketball, etc.).
   // This preserves the real bookmaker markets instead of reducing every
