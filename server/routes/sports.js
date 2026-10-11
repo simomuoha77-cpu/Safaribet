@@ -210,6 +210,22 @@ async function refreshLiveCache() {
   }
 }
 
+// Only the NUMBER of live games, for the badge on the Live tab: a few bytes instead of the whole list.
+// count is null while the live snapshot is still warming up, so the app never shows a false "0".
+router.get('/live/count', (req, res) => {
+  try {
+    const cached = C.get(LIVE_CACHE_KEY, 120000);
+    if (Array.isArray(cached)) {
+      res.json({ success: true, count: cached.length });
+    } else {
+      res.json({ success: true, count: null, warming: true });
+    }
+    refreshLiveCache().catch(() => {});
+  } catch (e) {
+    res.json({ success: true, count: null });
+  }
+});
+
 router.get('/live', async (req, res) => {
   try {
     // NEVER wait for SofaBets here.

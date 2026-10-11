@@ -494,6 +494,9 @@ header{
 .live-bar b{font-size:13px;letter-spacing:.4px}
 .live-bar small{color:var(--mt);font-size:11px}
 .live-bar .ln{margin-left:auto;background:#ff3b3b;color:#fff;font-weight:800;font-size:12px;border-radius:999px;padding:2px 10px}
+/* live-tab-badge */
+.sp-tab{position:relative}
+.sp-tab .live-n{position:absolute;top:-3px;left:calc(50% + 3px);min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:#ff3b3b;color:#fff;font-size:10px;font-weight:800;line-height:18px;text-align:center;box-shadow:0 0 0 2px var(--bg,#0a120a);pointer-events:none}
 </style>
 </head>
 <body>
@@ -3346,5 +3349,30 @@ function showT(msg,type=''){
 }
 </script>
 <script>SB.run()</script>
+<script>/* live-tab-badge */
+(function(){
+  var timer = null;
+  function tab(){ return document.querySelector('.sp-tab[data-cat="live"]'); }
+  function paint(n){
+    var t = tab(); if(!t) return;
+    var b = t.querySelector('.live-n');
+    if(!b){ b = document.createElement('span'); b.className = 'live-n'; b.id = 'liveTabBadge'; t.appendChild(b); }
+    b.textContent = n > 999 ? '999+' : String(n);
+    b.style.display = n > 0 ? '' : 'none';
+    try{ localStorage.setItem('sb_live_count', String(n)); }catch(e){}
+  }
+  function pull(){
+    if(!tab()){ if(timer){ clearInterval(timer); timer = null; } return; }   // left the home page: stop
+    if(document.hidden) return;
+    fetch('/api/sports/live/count', { cache: 'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.success && typeof d.count === 'number') paint(d.count); })
+      .catch(function(){});
+  }
+  try{ var c = parseInt(localStorage.getItem('sb_live_count'), 10); if(c >= 0) paint(c); }catch(e){}   // instant: last known number
+  pull();
+  timer = setInterval(pull, 30000);
+})();
+</script>
 </body>
 </html>
