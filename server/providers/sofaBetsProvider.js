@@ -343,6 +343,10 @@ function parseOdds(raw, homeTeamName, awayTeamName) {
 }
 
 function parseStatus(raw, utcDate) {
+  // SofaBets sends the phase of a football game in current_phase ("1st half", "Halftime", "2nd half"...) and keeps
+  // is_live = true during the break, so check for the break FIRST, otherwise half time never shows as HT.
+  const phaseText = String(pick(raw, ['current_phase', 'currentPhase']) || '').toLowerCase();
+  if (/half[\s_-]*time|^ht$|\bpaus|\binterval\b|^break$/.test(phaseText)) return 'PAUSED';
   const liveFlag = pick(raw, ['is_live', 'isLive', 'live', 'inPlay', 'in_play']);
   if (liveFlag === true || String(liveFlag).toLowerCase() === 'true' || Number(liveFlag) === 1) return 'IN_PLAY';
   const value = String(pick(raw, ['status', 'matchStatus', 'match_status', 'gameStatus', 'eventStatus', 'state']) || '').toLowerCase();
@@ -1138,9 +1142,16 @@ function normalizeMatch(raw) {
     marketOdds.markets = markets;
     marketOdds.bookmakers = bookmakers;
   }
-  const minute = pick(source, ['minute', 'liveMinute', 'matchMinute', 'elapsed', 'elapsedMinutes']);
+  let minute = pick(source, ['minute', 'liveMinute', 'matchMinute', 'elapsed', 'elapsedMinutes']);
   const sportRaw = teamName(pick(source, ['sport', 'sportName', 'sport_name', 'sportSlug', 'sport_slug', 'sportType'])) || teamName(source.sport) || null;
-  const livePeriod = pick(source, ['periodName', 'period_name', 'currentPeriod', 'current_period', 'matchPeriod', 'period', 'phase', 'statusText', 'status_text', 'statusDescription', 'matchStatus', 'status']);
+  // SofaBets sends the real football clock as live_clock "60:23" (counting UP). Without reading it the app only had an
+  // estimate ("1H ~28"). Football only: basketball and others count DOWN inside each period, which is not "the minute".
+  if (minute == null && (status === 'IN_PLAY' || status === 'PAUSED') &&
+      (/soccer|football/i.test(String(sportRaw || '')) || Number(pick(source, ['sport_id', 'sportId'])) === 1)) {
+    const lc = /^\s*(\d{1,3})\s*:\s*\d{2}/.exec(String(pick(source, ['live_clock', 'liveClock']) || ''));
+    if (lc) minute = Number(lc[1]);
+  }
+  const livePeriod = pick(source, ['current_phase', 'currentPhase', 'periodName', 'period_name', 'currentPeriod', 'current_period', 'matchPeriod', 'period', 'phase', 'statusText', 'status_text', 'statusDescription', 'matchStatus', 'status']);
 
   return {
     provider: 'sofabets',
