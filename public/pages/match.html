@@ -35,6 +35,15 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .mh-status.live{color:var(--rd);font-weight:700}
 .mh-league{text-align:center;font-size:11px;color:var(--mt);margin-top:8px;text-transform:uppercase;letter-spacing:0.5px}
 
+/* MARKET GROUPS (All Markets / Main / Over-Under / ...) - shown at once, with placeholders while markets load */
+.mg{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid var(--bd);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.mg::-webkit-scrollbar{display:none}
+.mg-chip{flex:0 0 auto;display:flex;align-items:center;gap:6px;background:var(--s2);border:1px solid var(--bd);color:var(--mt);border-radius:10px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+.mg-chip.on{background:var(--g);border-color:var(--g);color:#04140a}
+.mg-n{font-size:10px;font-weight:700;background:rgba(0,0,0,.28);color:inherit;border-radius:6px;padding:1px 6px;opacity:.85}
+.mg-chip.on .mg-n{background:rgba(0,0,0,.18)}
+.mg-sk{flex:0 0 auto;width:84px;height:31px;border-radius:10px;border:1px solid var(--bd);background:linear-gradient(90deg,var(--s2) 25%,var(--s3,#243024) 37%,var(--s2) 63%);background-size:400% 100%;animation:mgsh 1.3s ease infinite}
+@keyframes mgsh{0%{background-position:100% 50%}100%{background-position:0 50%}}
 /* LIVE PANEL (football): ticking clock, phase, progress bar with half time, goals as seen by our live polling */
 .lt{margin-top:12px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#101810}
 .lt-pitch{position:relative;height:92px;background:repeating-linear-gradient(90deg,#2b8038 0 34px,#257232 34px 68px)}
@@ -106,6 +115,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 <div class="mh" id="matchHeader">
   <div class="loading">Loading match…</div>
 </div>
+
+<div class="mg" id="marketGroups"><span class="mg-chip on">All Markets</span><span class="mg-sk"></span><span class="mg-sk"></span><span class="mg-sk"></span><span class="mg-sk"></span></div>
 
 <div class="mode-toggle" id="modeToggle" style="display:none">
   <button class="mode-btn active" id="modeBtnSlip" onclick="setMode('slip')">Quick Pick</button>
@@ -192,11 +203,13 @@ function fetchJsonTimeout(url, ms){
 function showMarketsStuck(){
   const c = document.getElementById('marketsContainer');
   if (!c || (matchData && (matchData.markets || []).some(mk => mk.options && mk.options.length > 1))) return;
+  renderGroups('empty');
   c.innerHTML = '<div class="market-card" style="text-align:center;padding:24px 16px"><div class="loading" style="margin:0 0 12px">Markets are taking longer than usual.</div><button onclick="retryMarkets()" style="background:var(--g);color:#000;border:0;border-radius:10px;padding:10px 20px;font-weight:700">Retry now</button></div>';
 }
 function retryMarkets(){
   const c = document.getElementById('marketsContainer');
   if (c) c.innerHTML = '<div class="market-card" style="text-align:center;padding:28px 16px"><div class="loading" style="margin:0">Loading markets…</div></div>';
+  renderGroups('loading');
   if (window.SB && SB.prefetchMatch) { try { SB.prefetchMatch(matchId); } catch(e) {} }
   _pollingMarkets = false;
   pollFullMarkets();
@@ -411,6 +424,52 @@ function renderHeader(){
   startLivePanelTick();
 }
 
+// ---- market groups ------------------------------------------------------------
+const GROUP_ORDER = [
+  { id: 'main', label: 'Main' }, { id: 'ou', label: 'Over/Under' }, { id: 'hc', label: 'Handicap' },
+  { id: 'sc', label: 'Goals & Scores' }, { id: 'h1', label: '1st Half' }, { id: 'h2', label: '2nd Half' },
+  { id: 'co', label: 'Corners' }, { id: 'cd', label: 'Cards' }, { id: 'ot', label: 'Other' }
+];
+const MAIN_LABELS = /^(match result|1x2( \/ winner)?|double chance|draw no bet|both teams( to score)?|over\/under 2\.5|handicap|winner|to win|moneyline)$/;
+function marketGroupOf(mk){
+  const t = String((mk && (mk.label || '')) || '').toLowerCase().trim();
+  const key = String((mk && mk.market) || '').toLowerCase();
+  if (/corner/.test(t)) return 'co';
+  if (/booking|card/.test(t)) return 'cd';
+  if (/\b(1st|first|2nd|second)\s*half\b|\b[12]h\b|half\s*time|halftime|\bht\b/.test(t)) return /\b(2nd|second)\s*half\b|\b2h\b/.test(t) ? 'h2' : 'h1';
+  if (MAIN_LABELS.test(t) || ['1x2', 'dc', 'dnb', 'btts', 'ou25', 'handicap'].includes(key)) return 'main';
+  if (/over\/?under|total|o\/u/.test(t)) return 'ou';
+  if (/handicap/.test(t)) return 'hc';
+  if (/goal|score|scorer|clean sheet|to nil|margin|odd\/?even/.test(t)) return 'sc';
+  return 'ot';
+}
+let activeGroup = 'all';
+function renderGroups(state){
+  const el = document.getElementById('marketGroups');
+  if (!el) return;
+  if (state === 'empty') { el.style.display = 'none'; return; }
+  const markets = ((matchData && matchData.markets) || []).filter(mk => Array.isArray(mk.options) && mk.options.length > 0);
+  if (state === 'loading' || !markets.length) {
+    el.style.display = '';
+    el.innerHTML = '<span class="mg-chip on">All Markets</span><span class="mg-sk"></span><span class="mg-sk"></span><span class="mg-sk"></span><span class="mg-sk"></span>';
+    return;
+  }
+  const counts = {};
+  markets.forEach(mk => { const g = marketGroupOf(mk); counts[g] = (counts[g] || 0) + 1; });
+  const groups = GROUP_ORDER.filter(g => counts[g.id]);
+  if (groups.length < 2) { activeGroup = 'all'; el.style.display = 'none'; return; }   // one group only: tabs would add nothing
+  if (activeGroup !== 'all' && !counts[activeGroup]) activeGroup = 'all';
+  const chips = [{ id: 'all', label: 'All Markets', n: markets.length }].concat(groups.map(g => ({ id: g.id, label: g.label, n: counts[g.id] })));
+  el.style.display = '';
+  el.innerHTML = chips.map(c => `<button class="mg-chip${c.id === activeGroup ? ' on' : ''}" onclick="setMarketGroup('${c.id}')">${c.label}<span class="mg-n">${c.n}</span></button>`).join('');
+}
+function applyGroupFilter(){
+  document.querySelectorAll('#marketsContainer .market-card[data-grp]').forEach(c => {
+    c.style.display = (activeGroup === 'all' || c.getAttribute('data-grp') === activeGroup) ? '' : 'none';
+  });
+}
+function setMarketGroup(id){ activeGroup = id; renderGroups('ready'); applyGroupFilter(); }
+
 function renderMarkets(isPreliminary){
   // Never render a market card with zero options — that's exactly what
   // produced an empty-looking, broken card. A market only earns a spot on
@@ -428,6 +487,7 @@ function renderMarkets(isPreliminary){
          </div>`
       : '<div class="loading">No odds available for this match right now.</div>';
     document.getElementById('modeToggle').style.display = 'none';
+    renderGroups(isPreliminary ? 'loading' : 'empty');
     return;
   }
   document.getElementById('modeToggle').style.display = markets.length >= 2 ? 'flex' : 'none';
@@ -453,6 +513,7 @@ function renderMarkets(isPreliminary){
       if (el) el.classList.add('sel');
     }
   });
+  renderGroups('ready'); applyGroupFilter();
 }
 
 // Each card carries its market key so a refresh can swap only the cards whose
@@ -461,7 +522,7 @@ function renderCard(mk){
   const html = renderOneMarket(mk);
   const cls = mk.__closed ? 'market-card mkt-closed' : 'market-card';
   const note = mk.__closed ? '<div class="suspended-note">Market closed or unavailable right now.</div>' : '';
-  return html.replace('class="market-card"', 'class="' + cls + '" data-mk="' + escapeHtml(mk.market) + '"').replace(/<\/div>\s*$/, note + '</div>');
+  return html.replace('class="market-card"', 'class="' + cls + '" data-mk="' + escapeHtml(mk.market) + '" data-grp="' + marketGroupOf(mk) + '"').replace(/<\/div>\s*$/, note + '</div>');
 }
 function cardSig(mk){
   return JSON.stringify([mk.label, mk.wholeMarketSuspended, mk.hasSuspendedPick,
@@ -505,6 +566,7 @@ function patchMarkets(newData){
   slip.forEach(sl => {
     if (sl.matchId === matchId) { const el = document.getElementById('mkt_' + sl.market + '_' + sl.pick); if (el) el.classList.add('sel'); }
   });
+  renderGroups('ready'); applyGroupFilter();
   return true;
 }
 

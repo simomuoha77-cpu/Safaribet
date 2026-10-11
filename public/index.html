@@ -487,6 +487,13 @@ header{
 .toast.ok{border-color:var(--g);color:var(--g)}
 .toast.err{border-color:var(--rd);color:var(--rd)}
 .toast.info{border-color:var(--yl);color:var(--yl)}
+/* live-count-bar */
+.live-bar{display:none;align-items:center;gap:10px;margin:10px 12px 0;padding:10px 14px;border-radius:12px;background:rgba(255,59,59,.08);border:1px solid rgba(255,59,59,.22)}
+.live-bar .ld{width:9px;height:9px;border-radius:50%;background:#ff3b3b;animation:ldp 1.4s ease-in-out infinite}
+@keyframes ldp{0%,100%{box-shadow:0 0 0 0 rgba(255,59,59,.55)}50%{box-shadow:0 0 0 6px rgba(255,59,59,0)}}
+.live-bar b{font-size:13px;letter-spacing:.4px}
+.live-bar small{color:var(--mt);font-size:11px}
+.live-bar .ln{margin-left:auto;background:#ff3b3b;color:#fff;font-weight:800;font-size:12px;border-radius:999px;padding:2px 10px}
 </style>
 </head>
 <body>
@@ -2646,7 +2653,23 @@ function renderMatchesProgressively(matches){
   appendProgressiveBatch();
 }
 
+/* live-count-bar */
+function updateLiveCountBar(list){
+  try{
+    const host = document.getElementById('matchList');
+    if(!host || !host.parentNode) return;
+    let bar = document.getElementById('liveCountBar');
+    const isLive = (typeof currentCat !== 'undefined') && currentCat === 'live';
+    if(!isLive){ if(bar) bar.style.display = 'none'; return; }
+    if(!bar){ bar = document.createElement('div'); bar.id = 'liveCountBar'; bar.className = 'live-bar'; host.parentNode.insertBefore(bar, host); }
+    const n = Array.isArray(list) ? list.length : 0;
+    bar.innerHTML = '<span class="ld"></span><b>LIVE NOW</b><small>' + (n === 1 ? 'game in play' : 'games in play') + '</small><span class="ln">' + n + '</span>';
+    bar.style.display = 'flex';
+  }catch(e){}
+}
+
 function renderMatches(matches, silent=false){
+  try{ updateLiveCountBar(matches); }catch(e){}
   const el=document.getElementById('matchList');
 
   if(!matches.length){
