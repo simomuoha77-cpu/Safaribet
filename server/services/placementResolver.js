@@ -98,6 +98,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
       (Date.now() - new Date(matchRow.marketsRefreshedAt).getTime()) <= maxAge &&
       (!isLiveId || matchRow.status === 'live')) {
     const f = findMarketAndOutcome(matchRow.markets, ref);
+    if (f && !require('./marketRules').canSettle(String(f.mk.name || f.mk.label || ref.marketLabel || ''))) return { ok: false, code: 'market_gone', reason: 'This market is not available for betting' };
     if (f) return { ok: true, fixture: fixtureFromRow(matchRow), mk: f.mk, out: f.out, source: 'mongo' };
   }
 
@@ -159,6 +160,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
   }
   const f = findMarketAndOutcome(markets, ref);
   if (!f) return { ok: false, code: 'market_gone', reason: 'This market is no longer offered' };
+  if (!require('./marketRules').canSettle(String(f.mk.name || f.mk.label || ref.marketLabel || ''))) return { ok: false, code: 'market_gone', reason: 'This market is not available for betting' };
   if (!Number.isFinite(Number(f.out.odds)) || Number(f.out.odds) < 1.01) return { ok: false, code: 'market_gone', reason: 'This selection is currently suspended' };
   return { ok: true, fixture, mk: f.mk, out: f.out, source };
 }

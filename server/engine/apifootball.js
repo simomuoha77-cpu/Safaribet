@@ -399,7 +399,7 @@ async function updateLive() {
         const scoreChanged = knownBefore && (prevH !== m.score?.home || prevA !== m.score?.away);
         if (scoreChanged) {
           m.score = { ...m.score, lastGoalAt: new Date() };
-          try { m.goalEvents = require('../services/liveEvents').applyScoreChange(existing.goalEvents, prevH, prevA, m.score.home, m.score.away, m.score.minute, new Date()); } catch (e) {}
+          try { m.goalEvents = require('../services/liveEvents').applyScoreChange(existing.goalEvents, prevH, prevA, m.score.home, m.score.away, m.score.minute, new Date(), m.score.clockSec); } catch (e) {}
           console.log(`  ⚽ Goal detected: ${m.homeTeam} ${prevH}-${prevA} → ${m.score.home}-${m.score.away} ${m.awayTeam} — live markets briefly suspended`);
         } else if (existing?.score?.lastGoalAt) {
           m.score = { ...m.score, lastGoalAt: existing.score.lastGoalAt };

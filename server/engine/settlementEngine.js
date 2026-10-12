@@ -196,6 +196,24 @@ async function payWinner(bet, netPayout) {
   }
 }
 
+// Every game on the bet was voided: give the stake back (recorded as a refund, not as winnings).
+async function payRefund(bet) {
+  try {
+    const wallet = await walletService.payoutWin(bet.userId, bet.stake, bet.betCode, { betId: bet._id });
+    await User.findByIdAndUpdate(bet.userId, { $inc: { balance: bet.stake } }).catch(() => {});
+    await Transaction.create({
+      userId: bet.userId, type: 'refund', amount: bet.stake,
+      balance: wallet ? wallet.main : undefined,
+      reference: bet.betCode,
+      description: `Refund: ${bet.betCode} — all games voided, stake returned`
+    });
+    console.log(`  ↩ Refunded KES ${bet.stake} [${bet.betCode}]`);
+    require('../services/notificationService').notify(bet.userId, 'bet_void', { betCode: bet.betCode }).catch(() => {});
+  } catch (e) {
+    console.error(`  [payRefund] failed for ${bet.betCode}:`, e.message);
+  }
+}
+
 // Instantly finalize a bet as LOST the moment any single selection loses —
 // mirrors how real sportsbooks (Betika, SportPesa) settle accumulators: one
 // loss kills the whole slip immediately, without waiting for the rest of the
@@ -228,8 +246,8 @@ async function finalizeBet(bet) {
   let status, payout, netPayout;
 
   if (nonVoid.length === 0) {
-    // All voided — full refund
-    status = 'won'; payout = bet.stake; netPayout = bet.stake;
+    // All voided — full refund. Recorded as VOID (refunded), not as a win: it must not count as a won bet.
+    status = 'void'; payout = bet.stake; netPayout = bet.stake;
   } else if (anyLost) {
     status = 'lost'; payout = 0; netPayout = 0;
   } else {
@@ -249,6 +267,8 @@ async function finalizeBet(bet) {
 
   if (status === 'won' && netPayout > 0) {
     await payWinner(bet, netPayout);
+  } else if (status === 'void' && netPayout > 0) {
+    await payRefund(bet);
   } else if (status === 'lost') {
     require('../services/notificationService')
       .notify(bet.userId, 'bet_lost', { betCode: bet.betCode }).catch(()=>{});
@@ -311,6 +331,9 @@ function mergeFixtureRows(rows) {
     if (!scorers.last && ps.lastScorer && fin && ps.lastObs && ps.lastObs.home === Number(fin.score.home) && ps.lastObs.away === Number(fin.score.away)) scorers.last = ps.lastScorer;
   }
   out.periodScores = { ht: bestHt ? bestHt.ht : undefined, htSource: bestHt ? bestHt.src : undefined, scorers };
+  let goalEvents = null;
+  for (const r of rows) if (Array.isArray(r.goalEvents) && (!goalEvents || r.goalEvents.length > goalEvents.length)) goalEvents = r.goalEvents;
+  out.goalEvents = goalEvents || [];
   return out;
 }
 
@@ -382,7 +405,7 @@ async function gradeProviderSel(s, matchRows) {
     ? { home: Number(row.score.home), away: Number(row.score.away) } : null;
   const htRaw = row.periodScores && row.periodScores.ht;
   const ht = htRaw && htRaw.home != null && htRaw.away != null ? { home: Number(htRaw.home), away: Number(htRaw.away) } : null;
-  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht, scorers: (row.periodScores && row.periodScores.scorers) || null };
+  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht, scorers: (row.periodScores && row.periodScores.scorers) || null, goalEvents: row.goalEvents || null };
 
   const r = marketRules.evaluate({
     marketLabel: s.marketLabel || s.providerMarketKey || s.market,
@@ -391,7 +414,7 @@ async function gradeProviderSel(s, matchRows) {
   }, ps);
   if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft, trackerNote: row.trackerNote || null };
   const period = r.market && r.market.period;
-  return { status: r.status, score: r.score || null, periodLabel: period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT', source: 'market-rules' };
+  return { status: r.status, score: r.score || null, periodLabel: r.periodLabel || (period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT'), source: 'market-rules', reason: r.reason || null };
 }
 
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
@@ -546,6 +569,7 @@ async function _runSettlementInner(includeApiFetch) {
             s.periodLabel = g.periodLabel || undefined;
             s.pendingReason = undefined;
             s.settledSource = g.source;
+            if (g.status === 'void' && g.reason) s.voidReason = g.reason;
             if (g.score) s.score = { home: g.score.home, away: g.score.away };
             changed = true;
             console.log(`   Graded (${g.source}): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel} = ${g.status}${g.score ? ` (${g.periodLabel} ${g.score.home}-${g.score.away})` : ''}`);

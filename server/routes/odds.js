@@ -668,7 +668,11 @@ router.get('/match/:matchId', async (req, res) => {
     // Provider-native markets are the source of truth for the More markets
     // page. They are intentionally kept separate from SafariBet's legacy
     // synthetic market resolver so we never invent bookmaker prices.
+    const marketRules = require('../services/marketRules');
     const richMarkets = providerMarkets.map((mk, index) => {
+      // Only markets the server can actually settle are offered (no corners / cards / scoring types ...): a market
+      // that can never be graded would end in a refund instead of a win or a loss.
+      if (!marketRules.canSettle(String(mk.name || mk.label || ''))) return null;
       const options = (mk.selections || [])
         .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
         .map(o => ({

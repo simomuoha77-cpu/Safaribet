@@ -317,11 +317,82 @@ function scoreForPeriod(period, ps) {
   return { missing: 'period results for this market are not recorded' };
 }
 
+// ── Markets settled from the goals our live polling recorded (team, order, exact clock second) ──────────────────
+// "5 minutes - 1x2 from 31 to 35"  and  "2nd goal" / "6th goal"  need to know WHEN / in WHAT ORDER goals happened.
+// They are only graded when the recorded goals add up exactly to the verified final score (nothing was missed);
+// otherwise nothing is guessed and the leg is refunded.
+function parseWindow1x2(label) {
+  const m = /(\d+)\s*minutes?\s*[-\u2013:]?\s*(?:1\s*[x\u00d7]\s*2|match\s*result|result)\s*from\s*(\d+)\s*to\s*(\d+)/i.exec(String(label || ''));
+  if (!m) return null;
+  const from = Number(m[2]), to = Number(m[3]);
+  return (from >= 1 && to > from && to <= 130) ? { from, to } : null;
+}
+function parseNthGoal(label) {
+  const m = /^\s*(\d+)\s*(?:st|nd|rd|th)\s*goal\s*$/i.exec(String(label || ''));
+  return m ? Number(m[1]) : null;
+}
+function completeGoals(ps) {
+  const ev = ps && Array.isArray(ps.goalEvents) ? ps.goalEvents.filter(g => g && (g.team === 'home' || g.team === 'away')) : null;
+  if (!ev || !ps.ftFinal || !ps.ft) return null;
+  const h = ev.filter(g => g.team === 'home').length, a = ev.filter(g => g.team === 'away').length;
+  return (h === ps.ft.home && a === ps.ft.away) ? ev : null;
+}
+function evalWindow1x2(sel, win, ps, ctx) {
+  const market = { type: 'WINDOW_1X2', period: 'FULL_MATCH' };
+  if (!ps || !ps.ftFinal || !ps.ft) return { status: null, need: 'FT', reason: 'full-time result not verified yet', market };
+  const goals = completeGoals(ps);
+  if (!goals || goals.some(g => !Number.isFinite(Number(g.sec)))) return { status: null, need: 'FT', reason: 'goal times were not fully captured for this match', market, noData: true };
+  const startSec = (win.from - 1) * 60, endSec = win.to * 60;      // "from 31 to 35" = minutes 31..35 = clock 30:00 to 35:00
+  const GAP = 15;                                                 // seconds: a goal is seen up to one polling gap after it happened
+  const edge = goals.some(g => { const s = Number(g.sec); return (s >= startSec && s < startSec + GAP) || (s >= endSec && s < endSec + GAP); });
+  if (edge) return { status: 'void', need: 'FT', reason: 'A goal came within seconds of the window edge, so the exact side cannot be proven - stake refunded', market, periodLabel: `${win.from}-${win.to}'` };
+  let h = 0, a = 0;
+  goals.forEach(g => { const s = Number(g.sec); if (s >= startSec && s < endSec) { if (g.team === 'home') h++; else a++; } });
+  const r = evalSimple('MATCH_RESULT', sel.selectionName || sel.pickLabel, { home: h, away: a }, ctx);
+  if (r == null) return { status: null, need: 'FT', reason: 'cannot read the pick for this market', market };
+  return { status: r, need: 'FT', market, score: { home: h, away: a }, periodLabel: `${win.from}-${win.to}'` };
+}
+function evalNthGoal(sel, n, ps, ctx) {
+  const market = { type: 'NTH_GOAL', period: 'FULL_MATCH' };
+  if (!ps || !ps.ftFinal || !ps.ft) return { status: null, need: 'FT', reason: 'full-time result not verified yet', market };
+  const total = ps.ft.home + ps.ft.away;
+  const p = norm(sel.selectionName || sel.pickLabel);
+  const none = /^(none|no\s*goal|no\s*goals|nobody|no\s*team)$/.test(p);
+  if (total < n) return { status: none ? 'won' : (teamOf(sel.selectionName || sel.pickLabel, ctx.home, ctx.away) ? 'lost' : null), need: 'FT', market };
+  const goals = completeGoals(ps);
+  if (!goals) return { status: null, need: 'FT', reason: 'goal order was not fully captured for this match', market, noData: true };
+  const g = goals[n - 1];
+  if (goals.some(x => x.batch != null && x.batch === g.batch && x.team !== g.team)) return { status: 'void', need: 'FT', reason: 'Both teams scored between two live updates, so the goal order cannot be proven - stake refunded', market };
+  if (none) return { status: 'lost', need: 'FT', market };
+  const who = teamOf(sel.selectionName || sel.pickLabel, ctx.home, ctx.away);
+  if (!who || who === 'draw') return { status: null, need: 'FT', reason: 'cannot read the pick for this market', market };
+  return { status: W(who === g.team), need: 'FT', market };
+}
+
+// Can the server settle this market with the data it has? Markets it cannot settle are not offered at all.
+function canSettle(label) {
+  const t = String(label || '');
+  if (parseWindow1x2(t)) return true;
+  const n = parseNthGoal(t);
+  if (n && n >= 2) return true;
+  const pm = parseMarket(t);
+  if (!pm.type || pm.type === 'NO_DATA') return false;
+  if (requirementFor(pm.period) === 'UNSUPPORTED') return false;
+  if (pm.type === 'COMBINED' && pm.components.some(c => c.type === 'NO_DATA')) return false;
+  if ((pm.type === 'FIRST_SCORER' && pm.period !== 'FULL_MATCH' && pm.period !== 'FIRST_HALF') || (pm.type === 'LAST_SCORER' && pm.period !== 'FULL_MATCH')) return false;
+  if (pm.type === 'HANDICAP' && pm.line != null) { const frac = Math.abs(pm.line * 4) % 4; if (frac === 1 || frac === 3) return false; }   // quarter lines split the stake
+  return true;
+}
+
 // sel: { marketLabel|marketName, pickLabel|selectionName, homeTeam, awayTeam, sport }
 function evaluate(sel, periodScores) {
   const marketText = sel.marketLabel || sel.marketName || '';
   const pm = parseMarket(marketText);
   const ctx = { home: sel.homeTeam, away: sel.awayTeam, marketText, sport: sel.sport };
+  const win = parseWindow1x2(marketText);
+  if (win) return evalWindow1x2(sel, win, periodScores, ctx);
+  const nth = parseNthGoal(marketText);
+  if (nth && nth >= 2) return evalNthGoal(sel, nth, periodScores, ctx);
   const need = requirementFor(pm.period);
   if (!pm.type) return { status: null, need, reason: `unrecognised market "${marketText}"`, market: pm };
   if (need === 'UNSUPPORTED') return { status: null, need, reason: `period ${pm.period} not supported`, market: pm };
@@ -369,4 +440,4 @@ function evaluate(sel, periodScores) {
   return { status: r, need, market: pm, score: sc.score };
 }
 
-module.exports = { parseMarket, detectPeriod, requirementFor, evaluate, scoreForPeriod, outcomeSet };
+module.exports = { parseMarket, detectPeriod, requirementFor, evaluate, scoreForPeriod, outcomeSet, canSettle, parseWindow1x2, parseNthGoal };

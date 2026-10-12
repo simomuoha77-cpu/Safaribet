@@ -290,7 +290,7 @@ function renderBets(bets){
     return `<div class="bcard">
       <div class="bcard-head">
         <div><div class="bcard-code">${bet.betCode}</div><div class="bcard-date">${date} · ${time}</div></div>
-        <span class="pill ${pClass}">${bet.status.charAt(0).toUpperCase()+bet.status.slice(1)}</span>
+        <span class="pill ${pClass}">${bet.status==='void'?'Refunded':bet.status.charAt(0).toUpperCase()+bet.status.slice(1)}</span>
       </div>
       <div class="sels">${sels}</div>
       ${bet.status==='pending' && bet.selections.some(s=>(s.result||'pending')==='pending') ? `<div style="font-size:11px;color:var(--yl);padding:6px 12px;background:rgba(255,214,0,0.06);border-top:1px solid var(--bd)">⏳ Pending — awaiting final result. Bets are settled only after the game has officially finished.</div>` : ''}
@@ -299,8 +299,8 @@ function renderBets(bets){
         <div class="bf"><div class="bf-lbl">Picks</div><div class="bf-val">${bet.selections.length}</div></div>
         <div class="bf"><div class="bf-lbl">Odds</div><div class="bf-val" style="color:var(--yl)">${bet.totalOdds.toFixed(2)}</div></div>
         <div class="bf"><div class="bf-lbl">Stake</div><div class="bf-val">KES ${bet.stake}</div></div>
-        <div class="bf"><div class="bf-lbl">${bet.status==='won'?'Won':'Pot.Win'}</div>
-          <div class="bf-val" style="color:var(--g)">KES ${bet.status==='won'?(bet.netPayout||0).toFixed(0):(bet.potentialWin||0).toFixed(0)}</div></div>
+        <div class="bf"><div class="bf-lbl">${bet.status==='won'?'Won':bet.status==='void'?'Refunded':'Pot.Win'}</div>
+          <div class="bf-val" style="color:var(--g)">KES ${bet.status==='won'?(bet.netPayout||0).toFixed(0):bet.status==='void'?(bet.netPayout||bet.stake||0).toFixed(0):(bet.potentialWin||0).toFixed(0)}</div></div>
       </div>
       ${bet.status==='pending' && !bet.selections.some(s=>s.result==='lost') ? `
       <div class="cashout-row" id="co_${bet.betCode}">
