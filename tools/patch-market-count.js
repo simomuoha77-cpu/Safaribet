@@ -13,7 +13,7 @@ if (s.includes('/* market-count */')) { console.log('Already applied - nothing t
 const body = s.lastIndexOf('</body>');
 if (body < 0 || !s.includes('id="matchList"') || !s.includes('More markets')) { console.log('Could not find the right place in public/index.html (</body>, the match list or the "More markets" link). NOTHING was changed.'); process.exit(2); }
 
-const JS = `<script>/* market-count */
+const JS = `<script type="text/sb-page">/* market-count */
 (function(){
   var counts = {}, asked = {}, timer = null, inflight = false, obs = null, host = null;
   try{ counts = JSON.parse(sessionStorage.getItem('sb_mkt_counts') || '{}') || {}; }catch(e){}
@@ -67,6 +67,7 @@ const JS = `<script>/* market-count */
   setInterval(scan, 20000);      // picks up games whose market list became available a little later
 })();
 </script>
+<script>SB.run()</script>
 `;
 fs.writeFileSync(file + '.bak-marketcount', s);
 s = s.slice(0, body) + JS + s.slice(body);

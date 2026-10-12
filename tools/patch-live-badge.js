@@ -18,7 +18,7 @@ const CSS = `/* live-tab-badge */
 .sp-tab{position:relative}
 .sp-tab .live-n{position:absolute;top:-3px;left:calc(50% + 3px);min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:#ff3b3b;color:#fff;font-size:10px;font-weight:800;line-height:18px;text-align:center;box-shadow:0 0 0 2px var(--bg,#0a120a);pointer-events:none}
 `;
-const JS = `<script>/* live-tab-badge */
+const JS = `<script type="text/sb-page">/* live-tab-badge */
 (function(){
   var timer = null;
   function tab(){ return document.querySelector('.sp-tab[data-cat="live"]'); }
@@ -43,6 +43,7 @@ const JS = `<script>/* live-tab-badge */
   timer = setInterval(pull, 30000);
 })();
 </script>
+<script>SB.run()</script>
 `;
 fs.writeFileSync(file + '.bak-livebadge', s);
 // insert from the bottom up so the earlier positions stay valid

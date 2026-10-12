@@ -3349,7 +3349,7 @@ function showT(msg,type=''){
 }
 </script>
 <script>SB.run()</script>
-<script>/* live-tab-badge */
+<script type="text/sb-page">/* live-tab-badge */
 (function(){
   var timer = null;
   function tab(){ return document.querySelector('.sp-tab[data-cat="live"]'); }
@@ -3374,7 +3374,8 @@ function showT(msg,type=''){
   timer = setInterval(pull, 30000);
 })();
 </script>
-<script>/* market-count */
+<script>SB.run()</script>
+<script type="text/sb-page">/* market-count */
 (function(){
   var counts = {}, asked = {}, timer = null, inflight = false, obs = null, host = null;
   try{ counts = JSON.parse(sessionStorage.getItem('sb_mkt_counts') || '{}') || {}; }catch(e){}
@@ -3428,5 +3429,6 @@ function showT(msg,type=''){
   setInterval(scan, 20000);      // picks up games whose market list became available a little later
 })();
 </script>
+<script>SB.run()</script>
 </body>
 </html>
