@@ -242,6 +242,27 @@ router.get('/available', async (req, res) => {
 // changed, instead of re-downloading the entire match list every time. The
 // ETag is a hash of the exact payload being sent, so it only changes when a
 // score, live minute, odds price, or match status actually moves.
+// How many markets each game on the list has ("76 markets →"). Memory only: it never calls SofaBets, and games
+// whose full market list is not in memory yet are simply left out of the answer (the app keeps "More markets").
+router.post('/market-counts', (req, res) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 80) : [];
+    const finalResults = require('../services/finalResultService');
+    const counts = {};
+    for (const raw of ids) {
+      const id = String(raw || '');
+      if (!id || id.length > 100) continue;
+      const p = finalResults.parseSofaMatchId(id);
+      if (!p || !p.providerId) continue;
+      const n = sofaBets.cachedMarketCount(p.providerId, p.sport);
+      if (Number.isFinite(n) && n >= 2) counts[id] = n;
+    }
+    res.json({ success: true, counts });
+  } catch (e) {
+    res.json({ success: true, counts: {} });
+  }
+});
+
 router.get('/featured', async (req, res) => {
   try {
     const matches = await fixturesWithFallback();

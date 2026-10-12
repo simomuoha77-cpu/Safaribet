@@ -542,6 +542,16 @@ function holdCrawler(maxMs) {
 }
 
 // Age (ms) of the cached market list for a fixture, Infinity when none/thin.
+// How many markets the match page will show for this game (settleable ones with a price), straight from memory.
+// null = the full market list for this game is not in memory (yet): nothing is guessed.
+function cachedMarketCount(providerMatchId, sportName = 'football') {
+  const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
+  if (!c || !c.data || !Array.isArray(c.data.markets) || c.data.markets.length < 2) return null;
+  const rules = require('../services/marketRules');
+  return c.data.markets.filter(mk => rules.canSettle(String(mk.name || mk.label || '')) &&
+    (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)).length;
+}
+
 function marketsCacheAge(providerMatchId, sportName = 'football') {
   const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
   return (c && c.data && c.data.markets.length > 1) ? Date.now() - c.ts : Infinity;
@@ -1522,4 +1532,4 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+module.exports = { cachedMarketCount, holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
