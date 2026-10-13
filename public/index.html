@@ -1090,14 +1090,38 @@ window.addEventListener('pagehide', saveHomeScroll);
 function restoreHomeScrollOnce(){
   if (homeScrollRestored) return;
   homeScrollRestored = true;
-  let y = 0;
-  try { y = parseInt(sessionStorage.getItem('homeScrollY') || '0', 10) || 0; } catch(e){}
-  if (y > 0) {
-    // Wait a frame so the just-painted match cards have real layout height —
-    // scrolling before that would clamp to whatever the (still-short) page
-    // height was a moment ago.
-    requestAnimationFrame(() => window.scrollTo(0, y));
-  }
+  let y = 0, fromMatch = false;
+  try {
+    // Set by openMatchDetail(): where the list was scrolled to when the user opened a match / More markets.
+    const o = JSON.parse(sessionStorage.getItem('sb_home_scroll') || 'null');
+    if (o && o.y > 0 && (Date.now() - o.ts) < 30 * 60000) { y = o.y; fromMatch = true; }
+  } catch(e) {}
+  if (!y) { try { y = parseInt(sessionStorage.getItem('homeScrollY') || '0', 10) || 0; } catch(e){} }
+  if (!(y > 0)) return;
+
+  // The match list streams in 12 cards at a time, so right after coming back the page is still too short
+  // to scroll to y (the browser clamps it to the top = "first game"). Keep filling the list and re-applying
+  // the position until it is reached, and stop the moment the user touches the screen.
+  let done = false, tries = 0, iv = null;
+  const evs = ['touchstart', 'wheel', 'mousedown', 'keydown'];
+  const finish = () => { done = true; if (iv) clearInterval(iv); evs.forEach(ev => window.removeEventListener(ev, finish)); };
+  evs.forEach(ev => window.addEventListener(ev, finish, { passive: true }));
+  const step = () => {
+    if (done) return;
+    const room = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    let guard = 0;
+    try {
+      while (guard++ < 80 && room() < y && progressiveRendered < progressiveMatches.length) {
+        appendProgressiveBatch();    // render the next cards right now instead of waiting for the 70ms stream
+      }
+    } catch(e) {}
+    const target = Math.min(y, room());
+    if (Math.abs((window.scrollY || 0) - target) > 2) window.scrollTo(0, target);
+    if (++tries > 125) finish();     // ~10s max
+  };
+  iv = setInterval(step, 80);
+  requestAnimationFrame(step);
+  if (fromMatch) { try { sessionStorage.removeItem('sb_home_scroll'); } catch(e) {} }
 }
 
 // ── INIT ──
@@ -1399,6 +1423,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // takes 10s or fails outright, the header above is completely unaffected.
   // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
   restoreHomeCat();
+  try { if (sessionStorage.getItem('sb_home_scroll')) restoreHomeScrollOnce(); } catch(e) {}
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
@@ -3093,7 +3118,7 @@ function findKnownMatch(matchId){
 }
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
-  try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); } catch(e) {}
+  try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); sessionStorage.setItem('sb_home_scroll', JSON.stringify({ y: window.scrollY||0, ts: Date.now() })); } catch(e) {}
   saveHomeState();
   const known = findKnownMatch(matchId);
   if (known){
