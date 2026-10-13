@@ -1,5 +1,8 @@
 // SafariBet service worker: the site opens from the phone's own cache, then updates itself.
 //
+//   * (v18) Pages/scripts/styles ALWAYS come from the network when the server answers (a cold Render server can
+//     take 10-30s to wake, so the old 3s cut-off served the OLD copy after a deploy). The cached copy is used
+//     only when the network fails/is offline, or after a long 15s wait.
 //   * (v11) App pages, scripts and styles are NETWORK-FIRST (3s), cache only as a fallback, so a
 //     deploy shows up on the very next load instead of one visit later. Images stay SWR.
 //   * (old note) App pages + scripts + styles + images: STALE-WHILE-REVALIDATE. The cached copy is shown
@@ -9,7 +12,7 @@
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v17-virtual-games';
+const VERSION = 'sb-v18-always-fresh';
 const SHELL = ['/', '/login', '/register', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
@@ -58,8 +61,8 @@ async function networkFirst(req, url) {
   });
   const hit = await cache.match(key);
   if (!hit) return net;
-  // cached copy only wins if the network is slow (cold server) or offline
-  return Promise.race([net.catch(() => hit), new Promise(r => setTimeout(() => r(hit), 3000))]);
+  // cached copy is ONLY a safety net: network error / offline, or a server that does not answer for 15s
+  return Promise.race([net.catch(() => hit), new Promise(r => setTimeout(() => r(hit), 15000))]);
 }
 
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });

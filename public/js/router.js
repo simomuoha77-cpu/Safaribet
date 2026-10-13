@@ -608,25 +608,51 @@
   _winAdd.call(window, 'sb:navigated', function () { _st.call(window, SB.prefetchBets, 1500); });
 
 
-  // ── Service worker (app opens from the phone's cache, then updates itself) ──
+  // ── Service worker + auto-update (a deploy shows up on the next load / refresh / page change) ──
+  var SB_NO_RELOAD = /^\/(deposit|withdraw|login|register)\b/;      // never yank a form out from under the user
+  function sbReloadOnce() {
+    // loop guard: at most one auto-reload per 15s
+    try { var last = +sessionStorage.getItem('sb_auto_reload_ts') || 0; if (Date.now() - last < 15000) return; sessionStorage.setItem('sb_auto_reload_ts', String(Date.now())); } catch (e) {}
+    location.reload();
+  }
+  var lastVerCheck = 0, hiddenAt = 0;
+  function checkBuild(force) {
+    if (!force && Date.now() - lastVerCheck < 20000) return;
+    lastVerCheck = Date.now();
+    _fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.build) return;
+      var seen = null; try { seen = localStorage.getItem('sb_build'); } catch (e) {}
+      try { localStorage.setItem('sb_build', d.build); } catch (e) {}
+      if (seen && seen !== d.build) {
+        // new deploy: refresh the worker, then reload so this page runs the new code
+        var go = function () { if (!SB_NO_RELOAD.test(location.pathname)) sbReloadOnce(); };
+        if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(function (reg) { return reg ? reg.update() : null; }).then(go, go); else go();
+      }
+    }).catch(function () {});
+  }
   try {
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       _winAdd.call(window, 'load', function () {
         navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(function (reg) {
-          // look for a new version now and whenever the tab comes back to the front
           try { reg.update(); } catch (e) {}
-          _docAdd.call(document, 'visibilitychange', function () { if (!document.hidden) { try { reg.update(); } catch (e) {} } });
         }).catch(function () {});
-        // When a new version takes over, reload once so the page runs the new code.
+        // When a new worker takes over, reload so the page runs the new code (loop-guarded, not once-per-session).
         var hadController = !!navigator.serviceWorker.controller;
         navigator.serviceWorker.addEventListener('controllerchange', function () {
           if (!hadController) return;   // very first install: nothing stale to replace
-          try { if (sessionStorage.getItem('sb_sw_reloaded') === '1') return; sessionStorage.setItem('sb_sw_reloaded', '1'); } catch (e) {}
-          location.reload();
+          if (!SB_NO_RELOAD.test(location.pathname)) sbReloadOnce();
         });
       });
     }
   } catch (e) {}
+  // version check: on every open / refresh, on each in-app page change, and when the app comes back after a while
+  _winAdd.call(window, 'load', function () { checkBuild(true); });
+  _winAdd.call(window, 'sb:navigated', function () { checkBuild(false); });
+  _winAdd.call(window, 'pageshow', function (e) { if (e.persisted) checkBuild(true); });     // back/forward cache restore
+  _docAdd.call(document, 'visibilitychange', function () {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    checkBuild(Date.now() - hiddenAt > 120000);   // away 2+ min: check right now, otherwise throttled
+  });
 
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {

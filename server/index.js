@@ -118,12 +118,27 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   ]);
 });
 
+// ── BUILD ID: changes on every deploy. The browser asks /api/version and reloads itself when it differs. ──
+const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || process.env.SOURCE_VERSION || String(Date.now());
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ build: BUILD_ID });
+});
+
+// Every non-API GET is revalidated (ETag -> cheap 304 when unchanged, fresh file right after a deploy).
+// Images/fonts below override this with their own longer cache.
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,
+  etag: true,
   setHeaders: (res, filePath) => {
-    // No caching for HTML (the service worker serves the cached copy instantly and refreshes it)
-    if (filePath.endsWith('.html')) {
+    // HTML / JS / CSS / JSON: always revalidate so a deploy shows on the very next load
+    if (/\.(html|js|css|json|webmanifest|txt|xml)$/i.test(filePath) && !filePath.endsWith('sw.js')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     } else if (filePath.endsWith('sw.js')) {
       res.setHeader('Cache-Control', 'no-cache');            // the worker itself must always be re-checked
