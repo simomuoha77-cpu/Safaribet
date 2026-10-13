@@ -454,6 +454,8 @@
 
   function load(u, o) {
     var my = ++navSeq, key = normPath(u.pathname) + u.search;
+    // Home snapshot (used so Back from a match repaints the list instantly) is only valid for Back/Forward
+    if (o.mode === 'push' && normPath(u.pathname) !== '/match') { try { window.__sbHomeSnap = null; sessionStorage.removeItem('sb_home_scroll'); } catch (e) {} }
     if (!htmlCache[key]) navBar(true);
     return fetchPage(u).then(function (html) {
       navBar(false);

@@ -768,8 +768,18 @@ header{
   // header or auth state at all.
   (function(){
     try {
+      var snap = window.__sbHomeSnap, ml = document.getElementById('matchList');
+      if (snap && snap.html && (Date.now() - snap.ts) < 30 * 60000 && sessionStorage.getItem('sb_home_scroll')) {
+        // Back from a match: put back exactly the list the user left (same tab/filter/cards), instantly.
+        ml.innerHTML = snap.html;
+        if (snap.bar) { var tmp = document.createElement('div'); tmp.innerHTML = snap.bar; if (tmp.firstChild) ml.parentNode.insertBefore(tmp.firstChild, ml); }
+        var tt = document.getElementById('secTtl'); if (tt && snap.ttl) tt.textContent = snap.ttl;
+        var mh = document.getElementById('mthHeader'); if (mh && snap.mth) mh.innerHTML = snap.mth;
+        window.__sbSnapActive = true;
+        return;
+      }
       var html = localStorage.getItem('matchListHTML');
-      if (html) document.getElementById('matchList').innerHTML = html;
+      if (html) ml.innerHTML = html;
     } catch(e) {}
   })();
   </script>
@@ -1095,6 +1105,7 @@ function restoreHomeScrollOnce(){
     // Set by openMatchDetail(): where the list was scrolled to when the user opened a match / More markets.
     const o = JSON.parse(sessionStorage.getItem('sb_home_scroll') || 'null');
     if (o && o.y > 0 && (Date.now() - o.ts) < 30 * 60000) { y = o.y; fromMatch = true; }
+    if (o) sessionStorage.removeItem('sb_home_scroll');
   } catch(e) {}
   if (!y) { try { y = parseInt(sessionStorage.getItem('homeScrollY') || '0', 10) || 0; } catch(e){} }
   if (!(y > 0)) return;
@@ -1375,7 +1386,18 @@ function restoreHomeCat(){
       if (cl?.data?.length && (Date.now() - cl.ts) < 600000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
     } catch(e) {}
   }
-  if (o.cat !== currentCat) pickCat(tab);
+  if (window.__sbSnapActive && window.__sbHomeSnap) {
+    // list is already on screen from the snapshot: only sync the tab state (no loadCat => no blank/flash)
+    currentCat = o.cat; currentSport = o.cat;
+    document.querySelectorAll('.sp-tab').forEach(t => t.classList.toggle('on', t === tab));
+    const showF = footballish;
+    const fb = document.getElementById('fbar'), mk = document.getElementById('mkts');
+    if (fb) fb.style.display = showF ? 'flex' : 'none';
+    if (mk) mk.style.display = showF ? 'flex' : 'none';
+    lastRenderedMatchIds = window.__sbHomeSnap.ids || null;
+    try { progressiveRendered = document.querySelectorAll('#matchList [id^="mc_"]').length; } catch(e) {}
+    saveHomeState();
+  } else if (o.cat !== currentCat) pickCat(tab);
 
   // keep the selected sport tab visible in the horizontally scrolling tab row
   requestAnimationFrame(() => { try { const c = tab.parentElement; c.scrollLeft = tab.offsetLeft - (c.clientWidth - tab.offsetWidth) / 2; } catch(e) {} });
@@ -2795,7 +2817,8 @@ function renderMatches(matches, silent=false){
   }
 
   const newIds = matches.map(m=>m.matchId).join(',');
-  const sameMatchSet = silent && lastRenderedMatchIds === newIds;
+  const snapMode = !!window.__sbSnapActive; window.__sbSnapActive = false;   // only the first render after a snapshot paint
+  const sameMatchSet = (silent || snapMode) && lastRenderedMatchIds === newIds;
 
   if(silent && !sameMatchSet && lastRenderedMatchIds){
     // Background refreshes must NEVER destroy the list the user is currently
@@ -2839,6 +2862,7 @@ function renderMatches(matches, silent=false){
     // Same match set — update the backing progressive list too, so matches
     // that have not been scrolled into view yet receive the freshest odds.
     progressiveMatches = matches.slice();
+    if (progressiveRendered < progressiveMatches.length) { try { appendProgressiveBatch(); } catch(e) {} }   // finish streaming any cards the snapshot did not have
     // Same matches still on screen — patch odds/scores in place instead of
     // destroying and recreating every DOM node. This is the fix: no more
     // rebuilding the whole list (and losing whatever button the user's
@@ -3120,6 +3144,14 @@ function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
   try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); sessionStorage.setItem('sb_home_scroll', JSON.stringify({ y: window.scrollY||0, ts: Date.now() })); } catch(e) {}
   saveHomeState();
+  // Snapshot of exactly what is on screen, so Back can paint it again instantly (no flash / blank / reload).
+  try {
+    const ml = document.getElementById('matchList');
+    if (ml && ml.querySelector('[id^="mc_"]')) {
+      const bar = document.getElementById('liveCountBar'), st = document.getElementById('secTtl'), mh = document.getElementById('mthHeader');
+      window.__sbHomeSnap = { html: ml.innerHTML, bar: bar ? bar.outerHTML : '', ttl: st ? st.textContent : '', mth: mh ? mh.innerHTML : '', ids: lastRenderedMatchIds, ts: Date.now() };
+    } else { window.__sbHomeSnap = null; }
+  } catch(e) { window.__sbHomeSnap = null; }
   const known = findKnownMatch(matchId);
   if (known){
     try { sessionStorage.setItem('currentMatchSummary', JSON.stringify(known)); }
