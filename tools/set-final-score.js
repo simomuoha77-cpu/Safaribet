@@ -32,8 +32,15 @@ function siblingIds(group) {
   if (group.parsed) { const { providerId: id, sport } = group.parsed; [`sofabets_${id}`, `sofabets_${sport}_${id}`, `sofabets_live_${id}`, `sofabets_live_${sport}_${id}`].forEach(x => ids.add(x)); }
   return Array.from(ids);
 }
+// Is this game ALREADY confirmed final by the system? 'none' | 'same' (same score as entered) | 'different'
+function finalConflict(rows, score) {
+  const fr = (rows || []).filter(r => r.finalVerified && r.score && r.score.home != null && r.score.away != null);
+  if (!fr.length) return { state: 'none' };
+  const same = fr.every(r => Number(r.score.home) === score.home && Number(r.score.away) === score.away);
+  return { state: same ? 'same' : 'different', existing: fr[0].score };
+}
 function tooRecent(kickoffMs, nowMs, minMinutes = 100) { return !kickoffMs || (nowMs - kickoffMs) < minMinutes * 60000; }
-module.exports = { parseScoreArg, groupRows, siblingIds, tooRecent };
+module.exports = { parseScoreArg, groupRows, siblingIds, tooRecent, finalConflict };
 
 if (require.main === module) {
   try { require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); } catch (e) {}
@@ -68,10 +75,13 @@ if (require.main === module) {
       const pending = await Bet.countDocuments({ status: 'pending', selections: { $elemMatch: { matchId: { $in: sib }, result: 'pending' } } });
       info.push({ g, sib, r0, kick, pending });
     }
-    info.forEach((x, i) => console.log(`#${i + 1}  ${x.r0.homeTeam} vs ${x.r0.awayTeam} | ${x.r0.league || '-'} | kickoff ${x.kick ? new Date(x.kick).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }) : '?'}\n    ids: ${x.g.rows.map(r => r.matchId + (r.finalVerified ? ' (final)' : ' (' + (r.status || '?') + ')')).join(', ')}\n    waiting bets on it: ${x.pending}`));
+    info.forEach((x, i) => console.log(`#${i + 1}  ${x.r0.homeTeam} vs ${x.r0.awayTeam} | ${x.r0.league || '-'} | kickoff ${x.kick ? new Date(x.kick).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short' }) : '?'}\n    ids: ${x.g.rows.map(r => r.matchId + (r.finalVerified ? ' (final ' + (r.score ? r.score.home + '-' + r.score.away : '?') + ')' : ' (' + (r.status || '?') + ')')).join(', ')}\n    waiting bets on it: ${x.pending}`));
     console.log(`\nScore you entered: ${score.home}-${score.away} (first team = home, as listed above)`);
     if (info.length !== 1) { console.log('More than one game matches. Add more of the name, add --date, or use --id <matchId>.'); await mongoose.disconnect(); return; }
     const x = info[0];
+    const fc = finalConflict(x.g.rows, score);
+    if (fc.state === 'same' && !force) { console.log('This game is already confirmed final with exactly this score. Nothing to do.'); await mongoose.disconnect(); return; }
+    if (fc.state === 'different' && !force) { console.log(`This game is already confirmed final by the system as ${fc.existing.home}-${fc.existing.away}, which is different from the ${score.home}-${score.away} you entered. NOTHING changed. Check the real result first; use --force only if the system's score is wrong.`); await mongoose.disconnect(); return; }
     if (tooRecent(x.kick, now) && !force) { console.log('This game kicked off less than 100 minutes ago (or has no kickoff time), so it may still be playing. Nothing changed. (--force overrides.)'); await mongoose.disconnect(); return; }
     if (!apply) { console.log('Dry run only. If this is the right game and score, run it again with --apply.'); await mongoose.disconnect(); return; }
     const set = { status: 'finished', result: fin.resultFromScore(score.home, score.away), 'score.home': score.home, 'score.away': score.away, 'score.period': 'FT', finalVerified: true, finalVerifiedAt: new Date(), finalSource: 'admin', settled: false, trackerNote: null };
