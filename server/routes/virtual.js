@@ -1,112 +1,60 @@
-// Virtual games (Kiron / Pascal). The catalogue is the one SofaBets shows on its Virtual page; the artwork
-// is fetched from SofaBets once and kept in memory, and SofaBets' own provider on/off flags decide which
-// providers are listed. The page never waits on SofaBets.
+// Virtual games are sourced from JuanAI only. Never use SofaBets catalogue,
+// play pages, flags, or launch URLs here. Sports/odds routes are untouched.
 const express = require('express');
-const axios = require('axios');
+const auth = require('../middleware/auth');
+const juanai = require('../services/juanaiPartnerCasino');
 const router = express.Router();
-const CATALOG = require('../data/virtualGames');
 
-const ART_BASE = process.env.SOFABETS_SITE_URL || 'https://sofabets.com';
-const FLAGS_URL = (process.env.SOFABETS_API_BASE || 'https://backendapi.sofabets.com') + '/api/casino/providers';
+const virtualWords = /\b(virtual|football|soccer|horse|racing|kiron|pascal|league|cup|penalty|instant football)\b/i;
+const idOf = g => String(g.gameId || g.id || '').trim();
 
-const games = CATALOG.map(g => ({
-  id: g.provider + '-' + g.ref,
-  provider: g.provider,
-  providerLabel: g.provider.charAt(0).toUpperCase() + g.provider.slice(1),
-  ref: g.ref,
-  name: g.name,
-  img: g.img,
-  hot: !!g.hot
-}));
-const byId = new Map(games.map(g => [g.id, g]));
-
-// ── provider flags from SofaBets (a provider is hidden only when SofaBets explicitly switches it off) ──
-let flags = { ts: 0, off: new Set() };
-function parseOff(p) {
-  const off = new Set();
-  const mark = (name, v) => {
-    const k = String(name || '').toLowerCase();
-    if (!k) return;
-    if (v === false || v === 0 || v === 'off' || v === 'false' || v === 'disabled' || v === 'inactive') off.add(k);
-  };
-  if (Array.isArray(p)) p.forEach(x => {
-    if (!x || typeof x !== 'object') return;
-    const name = x.provider || x.name || x.id || x.key || x.slug;
-    const v = ['enabled', 'active', 'on', 'isActive', 'isEnabled', 'status'].map(k => x[k]).find(y => y !== undefined);
-    mark(name, v);
-  });
-  else if (p && typeof p === 'object') Object.keys(p).forEach(k => {
-    const v = p[k];
-    if (v && typeof v === 'object') { const e = ['enabled', 'active', 'on', 'isActive', 'isEnabled', 'status'].map(x => v[x]).find(y => y !== undefined); mark(k, e); }
-    else mark(k, v);
-  });
-  return off;
-}
-async function refreshFlags() {
+router.get('/games', async (req, res) => {
   try {
-    const r = await axios.get(FLAGS_URL, { timeout: 8000, family: 4, headers: { 'User-Agent': 'Mozilla/5.0', Origin: ART_BASE, Referer: ART_BASE + '/' } });
-    flags = { ts: Date.now(), off: parseOff(r.data && r.data.providers) };
-  } catch (e) { /* keep the last known flags */ }
-}
-setTimeout(() => refreshFlags(), 3000).unref?.();
-setInterval(() => refreshFlags(), 10 * 60 * 1000).unref?.();
-
-// ── artwork cache ──
-const art = new Map();          // id -> { type, buf }
-const artInflight = new Map();
-async function getArt(g) {
-  const hit = art.get(g.id);
-  if (hit) return hit;
-  if (artInflight.has(g.id)) return artInflight.get(g.id);
-  const p = (async () => {
-    const r = await axios.get(ART_BASE + g.img, { responseType: 'arraybuffer', timeout: 12000, family: 4, maxContentLength: 3 * 1024 * 1024, headers: { 'User-Agent': 'Mozilla/5.0', Referer: ART_BASE + '/virtual' } });
-    const type = String(r.headers['content-type'] || '').split(';')[0] || 'image/png';
-    if (!/^image\//.test(type)) throw new Error('not an image');
-    const v = { type, buf: Buffer.from(r.data) };
-    art.set(g.id, v);
-    return v;
-  })().finally(() => artInflight.delete(g.id));
-  artInflight.set(g.id, p);
-  return p;
-}
-// warm all artwork shortly after boot (4 at a time)
-setTimeout(async () => {
-  const q = games.slice();
-  await Promise.all(new Array(4).fill(0).map(async () => { while (q.length) { const g = q.shift(); try { await getArt(g); } catch (_) {} } }));
-  console.log(`[virtual] artwork cached: ${art.size}/${games.length}`);
-}, 5000).unref?.();
-
-router.get('/games', (req, res) => {
-  const list = games.filter(g => !flags.off.has(g.provider)).map(g => ({
-    id: g.id, name: g.name, provider: g.providerLabel, image: '/api/virtual/art/' + encodeURIComponent(g.id), hot: g.hot
-  }));
-  res.set('Cache-Control', 'public, max-age=60');
-  res.json({ success: true, data: list, count: list.length, source: 'SofaBets' });
+    const catalogue = await juanai.listGames();
+    const list = (Array.isArray(catalogue) ? catalogue : [])
+      .filter(g => idOf(g) && virtualWords.test([g.name, g.category, g.providerCode].filter(Boolean).join(' ')))
+      .map(g => ({
+        id: idOf(g),
+        name: String(g.name || idOf(g)),
+        provider: String(g.providerCode || g.source || 'JuanAI'),
+        image: g.thumbnail || g.image || null,
+        hot: /virtual league/i.test(String(g.name || ''))
+      }));
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: list, count: list.length, source: 'JuanAI' });
+  } catch (e) {
+    console.error('[virtual/juanai games]', e.message);
+    res.status(503).json({ success: false, data: [], source: 'JuanAI', message: 'JuanAI virtual games are temporarily unavailable.' });
+  }
 });
 
-router.get('/art/:id', async (req, res) => {
-  const g = byId.get(String(req.params.id));
-  if (!g) return res.status(404).end();
+router.get('/launch/:id', auth, async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id || id.length > 160) return res.status(400).json({ success: false, message: 'Invalid game.' });
   try {
-    const a = await getArt(g);
-    res.set({ 'Content-Type': a.type, 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' });
-    res.send(a.buf);
-  } catch (e) { res.status(404).end(); }
-});
-
-// Launching a game needs a game session linked to SafariBet's wallet, which the game provider (Kiron / Pascal)
-// has to give SafariBet. SofaBets' own play pages use SofaBets accounts and balances, so they are not used.
-//   VIRTUAL_LAUNCH_URL_TEMPLATE e.g. "https://provider.example/launch?provider={provider}&game={ref}&token={token}"
-router.get('/launch/:id', (req, res) => {
-  const g = byId.get(String(req.params.id));
-  if (!g) return res.status(404).json({ success: false, message: 'Game not found' });
-  const tpl = process.env.VIRTUAL_LAUNCH_URL_TEMPLATE;
-  if (!tpl) return res.status(501).json({ success: false, code: 'LAUNCH_NOT_CONFIGURED', message: 'This game is coming soon on SafariBet.' });
-  const auth = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (!auth) return res.status(401).json({ success: false, message: 'Please log in to play' });
-  const url = tpl.split('{provider}').join(encodeURIComponent(g.provider)).split('{ref}').join(encodeURIComponent(g.ref))
-    .split('{gameId}').join(encodeURIComponent(g.ref)).split('{token}').join(encodeURIComponent(auth));
-  res.json({ success: true, url });
+    // JuanAI's generic partner launcher creates the player's session. SafariBet
+    // never sends the player to SofaBets or uses SofaBets play pages.
+    const result = await juanai.launch(id, req.user._id, req.user.username || req.user.name || String(req.user._id));
+    const data = result && (result.data && typeof result.data === 'object' ? result.data : result);
+    const url = data && (data.launchUrl || data.launch_url || data.gameUrl || data.game_url || data.url);
+    if (!url || !/^https?:\/\//i.test(String(url))) {
+      return res.status(502).json({ success: false, message: 'JuanAI did not return a playable session for this virtual game.' });
+    }
+    const base = juanai.cfg().base;
+    let target;
+    try { target = new URL(String(url)); } catch (_) { target = null; }
+    let provider;
+    try { provider = new URL(base); } catch (_) { provider = null; }
+    if (!target || !provider || target.protocol !== 'https:' && target.protocol !== 'http:' || target.hostname === 'sofabets.com' || target.hostname.endsWith('.sofabets.com')) {
+      return res.status(502).json({ success: false, message: 'JuanAI returned an invalid game session.' });
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, url: target.toString(), launchUrl: target.toString(), source: 'JuanAI' });
+  } catch (e) {
+    console.error('[virtual/juanai launch]', e.message);
+    const status = e.status === 404 ? 404 : (e.status === 400 ? 400 : 503);
+    res.status(status).json({ success: false, message: e.message || 'JuanAI could not open this game right now.' });
+  }
 });
 
 module.exports = router;

@@ -47,18 +47,24 @@ main{padding:54px 0 74px}
 .sk{aspect-ratio:1/1;border-radius:14px;background:linear-gradient(90deg,var(--s2),var(--s3),var(--s2));background-size:200% 100%;animation:sh 1.2s infinite}@keyframes sh{to{background-position:-200% 0}}
 .toast{position:fixed;left:16px;right:16px;bottom:78px;z-index:60;background:var(--s3);border:1px solid var(--bd);border-radius:12px;padding:13px 14px;font-size:13px;text-align:center;display:none}
 .bnav{position:fixed;bottom:0;left:0;right:0;height:56px;z-index:20;background:var(--hdr);border-top:1px solid var(--bd);display:flex}.bni{flex:1;text-align:center;padding-top:18px;font-size:9px;font-weight:800;color:var(--mt);text-transform:uppercase;cursor:pointer}.bni.on{color:var(--g)}
+
+.game-overlay{display:none;position:fixed;inset:0;z-index:100;background:var(--bg);flex-direction:column}
+.game-overlay.on{display:flex}.game-overlay .game-top{height:54px;flex-shrink:0;display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--hdr);border-bottom:1px solid var(--bd)}
+.game-overlay .game-back{border:0;background:transparent;color:var(--g);font-size:24px;padding:4px 8px;cursor:pointer}
+.game-overlay .game-label{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.game-overlay iframe{display:block;width:100%;height:100%;flex:1;border:0;background:#050805}
 </style>
 </head>
 <body>
 <header><a class="back" href="/" onclick="SB.go('/');return false">←</a><div class="logo">Safari<span>Bet</span> Virtual</div></header>
 <main>
-  <section class="hero"><h1>Virtual</h1><p>Virtual sports and games — always on, results in minutes.</p></section>
+  <section class="hero"><h1>Virtual</h1><p>Virtual sports and games powered by JuanAI.</p></section>
   <div class="chips" id="chips"></div>
   <div class="count" id="count"></div>
   <div class="grid" id="grid"></div>
   <div class="msg" id="msg" style="display:none"></div>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"></div><div class="game-overlay" id="gameOverlay"><div class="game-top"><button class="game-back" type="button" id="gameBack">←</button><div class="game-label" id="gameLabel">Virtual Game</div></div><iframe id="gameFrame" title="SafariBet virtual game" allow="fullscreen; autoplay; payment" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
 <nav class="bnav"><div class="bni" onclick="SB.go('/')">Home</div><div class="bni" onclick="SB.go('/my-bets')">My Bets</div><div class="bni" onclick="SB.go('/casino')">Casino</div><div class="bni" onclick="SB.go('/account')">Account</div></nav>
 <script type="text/sb-page">
 (function(){
@@ -91,13 +97,23 @@ main{padding:54px 0 74px}
 
   var toastT;
   function toast(t){ var el = document.getElementById('toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(function(){ el.style.display='none'; }, 3200); }
+  function closeGame(){
+    document.getElementById('gameFrame').src = 'about:blank';
+    document.getElementById('gameOverlay').classList.remove('on');
+  }
+  document.getElementById('gameBack').addEventListener('click', closeGame);
   function openGame(id){
     var tok = localStorage.getItem('token');
     if (!tok) { SB.go('/login'); return; }
     fetch('/api/virtual/launch/'+encodeURIComponent(id), { headers: { Authorization: 'Bearer '+tok }, cache:'no-store' })
       .then(function(r){ return r.json(); })
-      .then(function(d){ if (d && d.success && d.url) location.href = d.url; else toast((d && d.message) || 'This game is coming soon.'); })
-      .catch(function(){ toast('Could not open the game. Try again.'); });
+      .then(function(d){ if (d && d.success && (d.launchUrl || d.url)) {
+        var game = all.find(function(g){return String(g.id)===String(id);});
+        document.getElementById('gameLabel').textContent = game ? game.name : 'Virtual Game';
+        document.getElementById('gameFrame').src = d.launchUrl || d.url;
+        document.getElementById('gameOverlay').classList.add('on');
+      } else toast((d && d.message) || 'JuanAI could not open this game.'); })
+      .catch(function(){ toast('Could not open the JuanAI game. Try again.'); });
   }
 
   function load(force){
