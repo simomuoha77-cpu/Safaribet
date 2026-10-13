@@ -1317,22 +1317,59 @@ function closePopupAd(){
   document.getElementById('popupAdOverlay').style.display = 'none';
 }
 
+// Remember where the user is on Home (sport tab, Highlights/Popular/Today/... filter, league, market tab) so
+// that Back from a match page returns to exactly that view instead of resetting to Highlights.
+function saveHomeState(){
+  try { sessionStorage.setItem('sb_home_state', JSON.stringify({ cat: currentCat, filter: currentFilter, league: currentLeague, market: currentMarket, ts: Date.now() })); } catch(e) {}
+}
 function restoreHomeCat(){
-  let saved = null;
+  let o = null;
   try {
-    const o = JSON.parse(sessionStorage.getItem('sb_home_cat') || 'null');
-    if (o && o.cat && (Date.now() - o.ts) < 30 * 60000) saved = o.cat;   // same visit only (30 min)
-  } catch(e) {}
-  if (!saved || saved === currentCat) return;
-  const tab = document.querySelector('.sp-tab[data-cat="' + saved + '"]');
+    o = JSON.parse(sessionStorage.getItem('sb_home_state') || 'null');
+    if (!o || !o.cat || (Date.now() - o.ts) > 30 * 60000) o = null;   // same visit only (30 min)
+  } catch(e) { o = null; }
+  if (!o) return;
+  const tab = document.querySelector('.sp-tab[data-cat="' + o.cat + '"]');
   if (!tab) return;
-  if (saved === 'live' && !liveTabCache.data) {      // paint LIVE instantly from the last snapshot
+  const footballish = (o.cat === 'featured' || o.cat === 'football');
+
+  if (footballish) {
+    // market tab (1x2 / Double Chance / BTTS / O/U)
+    if (o.market && o.market !== currentMarket) {
+      const m = document.querySelector('.mkt[data-mkt="' + o.market + '"]');
+      if (m) { document.querySelectorAll('.mkt').forEach(t => t.classList.remove('on')); m.classList.add('on'); currentMarket = o.market; try { updateMarketHeader(); } catch(e) {} }
+    }
+    // filter pill (Highlights / Popular / Upcoming / Today / Favorites)
+    if (o.filter && o.filter !== currentFilter) {
+      const f = document.querySelector('.ftab[data-filter="' + o.filter + '"]');
+      if (f) { document.querySelectorAll('.ftab').forEach(t => t.classList.remove('on')); f.classList.add('on'); currentFilter = o.filter; }
+    }
+  }
+  if (o.cat === 'live' && !liveTabCache.data) {      // paint LIVE instantly from the last snapshot
     try {
       const cl = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
       if (cl?.data?.length && (Date.now() - cl.ts) < 600000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
     } catch(e) {}
   }
-  pickCat(tab);
+  if (o.cat !== currentCat) pickCat(tab);
+
+  // keep the selected sport tab visible in the horizontally scrolling tab row
+  requestAnimationFrame(() => { try { const c = tab.parentElement; c.scrollLeft = tab.offsetLeft - (c.clientWidth - tab.offsetWidth) / 2; } catch(e) {} });
+
+  // league chosen from the Leagues dropdown: its options load a moment later, so wait for them
+  if (footballish && o.league) {
+    let tries = 0;
+    const iv = setInterval(() => {
+      const sel = document.getElementById('leagueSelect');
+      const has = sel && Array.prototype.some.call(sel.options, op => op.value === o.league);
+      if (has) {
+        clearInterval(iv);
+        sel.value = o.league; currentLeague = o.league; currentFilter = '';
+        document.querySelectorAll('.ftab').forEach(t => t.classList.remove('on'));
+        try { applyFilters(); } catch(e) {}
+      } else if (++tries > 20) clearInterval(iv);
+    }, 250);
+  }
 }
 
 window.addEventListener('DOMContentLoaded', ()=>{
@@ -1505,6 +1542,7 @@ function pickFilter(el){
   currentFilter=el.dataset.filter;
   currentLeague='';
   document.getElementById('leagueSelect').value='';
+  saveHomeState();
   // Defer the actual filter/sort/render to the next animation frame instead
   // of running it synchronously in this same click handler. With hundreds of
   // matches loaded (a week of fixtures across every league), building and
@@ -1521,10 +1559,12 @@ function pickFilter(el){
 function pickLeagueFilter(){
   const val=document.getElementById('leagueSelect').value;
   currentLeague=val;
+  saveHomeState();
   if(val){
     // Deselect all filter tabs when a specific league is chosen
     document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
     currentFilter='';
+    saveHomeState();
   }
   applyFilters();
 }
@@ -1533,6 +1573,7 @@ function pickMarket(el){
   document.querySelectorAll('.mkt').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');
   currentMarket=el.dataset.mkt;
+  saveHomeState();
   updateMarketHeader();
   applyFilters();
 }
@@ -1896,7 +1937,7 @@ function pickCat(el) {
   el.classList.add('on');
   currentCat = el.dataset.cat;
   currentSport = currentCat; // keep legacy var in sync
-  try { sessionStorage.setItem('sb_home_cat', JSON.stringify({ cat: currentCat, ts: Date.now() })); } catch(e) {}
+  saveHomeState();
 
   // When returning from Live, restore the normal Featured filter state.
   // Do not otherwise disturb the user's selected filter.
@@ -3052,7 +3093,8 @@ function findKnownMatch(matchId){
 }
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
-  try { sessionStorage.setItem('sb_home_cat', JSON.stringify({ cat: currentCat, ts: Date.now() })); } catch(e) {}
+  try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); } catch(e) {}
+  saveHomeState();
   const known = findKnownMatch(matchId);
   if (known){
     try { sessionStorage.setItem('currentMatchSummary', JSON.stringify(known)); }
