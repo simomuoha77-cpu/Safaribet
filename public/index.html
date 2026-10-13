@@ -1317,6 +1317,24 @@ function closePopupAd(){
   document.getElementById('popupAdOverlay').style.display = 'none';
 }
 
+function restoreHomeCat(){
+  let saved = null;
+  try {
+    const o = JSON.parse(sessionStorage.getItem('sb_home_cat') || 'null');
+    if (o && o.cat && (Date.now() - o.ts) < 30 * 60000) saved = o.cat;   // same visit only (30 min)
+  } catch(e) {}
+  if (!saved || saved === currentCat) return;
+  const tab = document.querySelector('.sp-tab[data-cat="' + saved + '"]');
+  if (!tab) return;
+  if (saved === 'live' && !liveTabCache.data) {      // paint LIVE instantly from the last snapshot
+    try {
+      const cl = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
+      if (cl?.data?.length && (Date.now() - cl.ts) < 600000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
+    } catch(e) {}
+  }
+  pickCat(tab);
+}
+
 window.addEventListener('DOMContentLoaded', ()=>{
   loadAdminBanner();
   loadDownloadAppBanner();
@@ -1342,6 +1360,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // Match loading is fully independent of auth state — runs regardless of
   // whether the user is logged in, and never touches the header. If this
   // takes 10s or fails outright, the header above is completely unaffected.
+  // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
+  restoreHomeCat();
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
@@ -1876,6 +1896,7 @@ function pickCat(el) {
   el.classList.add('on');
   currentCat = el.dataset.cat;
   currentSport = currentCat; // keep legacy var in sync
+  try { sessionStorage.setItem('sb_home_cat', JSON.stringify({ cat: currentCat, ts: Date.now() })); } catch(e) {}
 
   // When returning from Live, restore the normal Featured filter state.
   // Do not otherwise disturb the user's selected filter.
@@ -3031,6 +3052,7 @@ function findKnownMatch(matchId){
 }
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
+  try { sessionStorage.setItem('sb_home_cat', JSON.stringify({ cat: currentCat, ts: Date.now() })); } catch(e) {}
   const known = findKnownMatch(matchId);
   if (known){
     try { sessionStorage.setItem('currentMatchSummary', JSON.stringify(known)); }
