@@ -409,6 +409,7 @@ async function updateLive() {
       m.lastLiveSeenAt = new Date();
       m.liveAbsentSince = null;
       if (m.score && m.score.minute != null) m.lastLiveMinute = m.score.minute;
+      if (m.score && m.score.clockSec != null) m.lastLiveClockSec = m.score.clockSec;
       let prevRow = null;
       try { prevRow = await Match.findOne({ matchId: m.matchId }, { finalVerified: 1, periodScores: 1 }).lean(); } catch (e) {}
       if (prevRow && prevRow.finalVerified) continue;
@@ -430,6 +431,16 @@ async function updateLive() {
     // a final result, so we never infer "finished" from disappearance.
     // Instead each dropped match is checked against the provider by its EXACT
     // id and is only marked finished when the provider itself says FINISHED.
+    // Games that were live a moment ago and are gone from a feed that is otherwise alive: note the time they left, right
+    // away (not up to a minute later), so a finished game can be recognised and settled within minutes.
+    if (live.length > 0) {
+      try {
+        await Match.updateMany(
+          { status: 'live', finalVerified: { $ne: true }, liveAbsentSince: null, lastLiveSeenAt: { $lt: new Date(Date.now() - 45 * 1000) }, matchId: { $nin: Array.from(liveIds) } },
+          { $set: { liveAbsentSince: new Date() } }
+        );
+      } catch (e) { /* non-fatal */ }
+    }
     const { verifyFinalResult } = require('../services/finalResultService');
     const wasLive = await Match.find({ status: 'live', source: 'juanai', matchId: { $not: /^sofabets_live_/ } }, { matchId: 1, lastFinalCheckAt: 1 }).lean();
     const CHECK_GAP_MS = 2 * 60 * 1000;

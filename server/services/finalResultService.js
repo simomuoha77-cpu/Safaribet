@@ -79,6 +79,9 @@ async function verifyFinalResult(matchId) {
 // ══════════════════════════════════════════════════════════════════════════════
 const MIN_DURATION_MIN = { football: 110, basketball: 125, tennis: 90, hockey: 150, cricket: 480, volleyball: 90, rugby: 110, handball: 100 };
 const ABSENT_MS = 15 * 60 * 1000;
+// A football game last seen at 90:00 or later was in its closing stage: once it has left the live feed for this long
+// it is over (the usual wait is 15 minutes). Together with the settlement run every minute: about 2-3 minutes.
+const FAST_ABSENT_MS = 100 * 1000;
 const FOOTBALL_LAST_MIN = 80;
 const memo = new Map(); // key -> { ts, data }
 async function memoized(key, ttlMs, fn) {
@@ -104,13 +107,15 @@ function inferEnded(row, sport, now) {
   const kickoff = row.commenceTime ? new Date(row.commenceTime).getTime() : 0;
   if (!kickoff) return { ok: false, why: 'no kickoff time' };
   const minDur = (MIN_DURATION_MIN[sport] || 180) * 60000;
-  if (now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
+  const clock = row.lastLiveClockSec != null ? Number(row.lastLiveClockSec) : null;
+  const fast = sport === 'football' && Number.isFinite(clock) && clock >= 90 * 60;   // the feed's own clock had reached full time
+  if (!fast && now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
   const h = row.score && row.score.home, a = row.score && row.score.away;
   if (h == null || a == null) return { ok: false, why: 'no score was ever recorded from the live feed' };
   const lastSeen = row.lastLiveSeenAt || (row.status === 'finished' || row.status === 'live' ? row.fetchedAt : null);
   if (!lastSeen) return { ok: false, why: 'match was never seen live' };
   const absent = row.liveAbsentSince || (row.status === 'finished' ? row.fetchedAt : null);
-  if (!absent || now - new Date(absent).getTime() < ABSENT_MS) return { ok: false, why: 'not absent from live feed long enough' };
+  if (!absent || now - new Date(absent).getTime() < (fast ? FAST_ABSENT_MS : ABSENT_MS)) return { ok: false, why: 'not absent from live feed long enough' };
   const minute = row.lastLiveMinute != null ? row.lastLiveMinute : (row.score && row.score.minute);
   if (sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
   // The feed usually sends no minute. Then use the clock instead: a game last seen LIVE 97+ minutes
@@ -271,7 +276,7 @@ async function trackFixtures(fixtures, Match) {
         .sort((a, b) => new Date(b.lastLiveSeenAt) - new Date(a.lastLiveSeenAt));
       const best = seenRows[0] || null;
       const eff = Object.assign({}, row, best ? {
-        score: best.score, lastLiveSeenAt: best.lastLiveSeenAt, lastLiveMinute: best.lastLiveMinute,
+        score: best.score, lastLiveSeenAt: best.lastLiveSeenAt, lastLiveMinute: best.lastLiveMinute, lastLiveClockSec: best.lastLiveClockSec,
         liveAbsentSince: best.liveAbsentSince || row.liveAbsentSince
       } : {});
 
@@ -298,6 +303,7 @@ async function trackFixtures(fixtures, Match) {
           const set = { status: 'live', lastLiveSeenAt: new Date(), liveAbsentSince: null, lastFinalCheckAt: new Date() };
           if (sc) { set['score.home'] = sc.home; set['score.away'] = sc.away; }
           if (item.minute != null && Number.isFinite(Number(item.minute))) { set.lastLiveMinute = Number(item.minute); set['score.minute'] = Number(item.minute); }
+          if (item.liveClockSec != null && Number.isFinite(Number(item.liveClockSec))) set.lastLiveClockSec = Number(item.liveClockSec);
           const newPs = observePeriods(row.periodScores, item, p.sport, new Date(), kickoff);
           if (newPs) set.periodScores = newPs;
           await Match.updateOne({ matchId: fx.matchId }, { $set: set });
@@ -320,4 +326,4 @@ async function trackFixtures(fixtures, Match) {
 
 function _resetCache() { memo.clear(); }
 
-module.exports = { observePeriods, classifyPeriod, _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };
+module.exports = { inferEnded, observePeriods, classifyPeriod, _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };

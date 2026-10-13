@@ -635,10 +635,10 @@ router.get('/my', auth, async (req, res) => {
           let state;
           if (rs.some(r => r.finalVerified)) state = 'finished';
           else if (kick && kick > now) state = 'not_started';
-          else if (seen && now - seen < 3 * 60 * 1000) state = 'live';
-          else if (rs.some(r => r.status === 'live') && (!seen || now - seen < 3 * 60 * 1000)) state = 'live';
-          else if (kick && now - kick < lenMin * 60000) state = 'live';
-          else state = 'awaiting';          // past its normal length, result not confirmed yet
+          else if (seen && now - seen < 3 * 60 * 1000) state = 'live';        // in the live feed right now
+          else if (seen) state = 'awaiting';                                   // it WAS in the live feed and has left it: the game is over
+          else if (kick && now - kick < lenMin * 60000) state = 'live';        // never in our feed (not every competition is): the clock decides
+          else state = 'awaiting';                                             // past its normal length, result not confirmed yet
           s.fixtureState = state;
           s.kickoffAt = kick || null;
         });

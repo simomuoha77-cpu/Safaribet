@@ -92,6 +92,7 @@ const matchSchema = new mongoose.Schema({
   trackerNote:     { type: String, default: null },   // why the tracker has not confirmed this game's end yet   // 'provider' | 'feed-ended' (see finalResultService)
   // Live-feed observations used to confirm that a game really ended
   lastLiveSeenAt:  { type: Date, default: null },
+  lastLiveClockSec: { type: Number, default: null },   // football clock (seconds) when the game was last seen in the live feed
   liveAbsentSince: { type: Date, default: null },
   lastLiveMinute:  { type: Number, default: null },
   lastFinalCheckAt:{ type: Date, default: null },
