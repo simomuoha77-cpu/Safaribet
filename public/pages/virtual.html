@@ -58,7 +58,7 @@ main{padding:54px 0 74px}
 <body>
 <header><a class="back" href="/" onclick="SB.go('/');return false">←</a><div class="logo">Safari<span>Bet</span> Virtual</div></header>
 <main>
-  <section class="hero"><h1>Virtual</h1><p>Virtual sports and games powered by JuanAI.</p></section>
+  <section class="hero"><h1>Virtual</h1><p>Virtual sports and games powered by SofaBets.</p></section>
   <div class="chips" id="chips"></div>
   <div class="count" id="count"></div>
   <div class="grid" id="grid"></div>
@@ -69,7 +69,7 @@ main{padding:54px 0 74px}
 <script type="text/sb-page">
 (function(){
   var all = [], filter = 'All';
-  var KEY = 'sb_virtual_games';
+  var KEY = 'sb_virtual_games_sofabets_v1';
   var gridEl = document.getElementById('grid'), chipsEl = document.getElementById('chips'), countEl = document.getElementById('count'), msgEl = document.getElementById('msg');
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]});}
   function skeleton(){ gridEl.innerHTML = new Array(9).fill('<div><div class="sk"></div></div>').join(''); }
@@ -112,8 +112,8 @@ main{padding:54px 0 74px}
         document.getElementById('gameLabel').textContent = game ? game.name : 'Virtual Game';
         document.getElementById('gameFrame').src = d.launchUrl || d.url;
         document.getElementById('gameOverlay').classList.add('on');
-      } else toast((d && d.message) || 'JuanAI could not open this game.'); })
-      .catch(function(){ toast('Could not open the JuanAI game. Try again.'); });
+      } else toast((d && d.message) || 'SofaBets could not open this game.'); })
+      .catch(function(){ toast('Could not open the SofaBets game. Try again.'); });
   }
 
   function load(force){
