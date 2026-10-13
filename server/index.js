@@ -158,6 +158,7 @@ app.get('/casino-art/:file', async (req, res) => {
 { const juanaiCasinoRoutes = require('./routes/juanaiCasino'); // JuanAI Casino API (casino only)
   app.use('/api/casino/juanai', juanaiCasinoRoutes);
   app.use('/api/v1/casino', juanaiCasinoRoutes); }  // same callbacks under JuanAI's own /api/v1/casino/wallet/* paths
+app.use('/api/virtual',  require('./routes/virtual'));
 app.use('/api/casino',   casinoRoutes);
 app.use('/api/mpesa',    mpesaRoutes);
 app.use('/api/bets',     betsRoutes);
@@ -319,6 +320,7 @@ app.get('/x9panel', panelAccessLimiter, (req, res) => {
 const PAGE_MAP = {
   '/my-bets':  'my-bets.html',
   '/casino':   'casino.html',
+  '/virtual':  'virtual.html',
   '/account':  'account.html',
   '/deposit':  'deposit.html',
   '/withdraw': 'withdraw.html',

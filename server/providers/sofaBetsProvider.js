@@ -1532,4 +1532,53 @@ async function getMatchesForDates(dates, options) {
   return all.filter(m => (dates || []).some(d => sameRequestedDate(m.utcDate, d)));
 }
 
-module.exports = { cachedMarketCount, holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+// ── Virtual games feed ─────────────────────────────────────────────────────
+// SofaBets lists its virtual games (Kiron, Pascal ...) on its own site. The exact API path is not
+// documented, so the likely ones are tried and the first that returns a list of games wins.
+// Override/extend with SOFABETS_VIRTUAL_PATHS="/api/xyz,/api/abc" (tried first).
+const VIRTUAL_PATHS = Array.from(new Set([
+  ...String(process.env.SOFABETS_VIRTUAL_PATHS || '').split(',').map(x => x.trim()).filter(Boolean),
+  '/api/virtual-games', '/api/virtual/games', '/api/virtuals', '/api/virtual', '/api/virtual-sports',
+  '/api/games/virtual', '/api/games?category=virtual', '/api/casino/virtual', '/api/virtual-games/list', '/api/games/virtuals'
+]));
+function findGameArray(node, depth) {
+  depth = depth || 0;
+  if (!node || depth > 4) return null;
+  if (Array.isArray(node)) {
+    const objs = node.filter(x => x && typeof x === 'object');
+    if (objs.length && objs.some(o => pick(o, ['name', 'title', 'gameName', 'game_name', 'displayName']) != null)) return objs;
+    for (const x of node) { const r = findGameArray(x, depth + 1); if (r) return r; }
+    return null;
+  }
+  if (typeof node === 'object') {
+    for (const k of ['games', 'data', 'items', 'results', 'virtuals', 'list', 'rows']) {
+      if (node[k] != null) { const r = findGameArray(node[k], depth + 1); if (r) return r; }
+    }
+    for (const k of Object.keys(node)) { const r = findGameArray(node[k], depth + 1); if (r) return r; }
+  }
+  return null;
+}
+async function fetchVirtualRaw(opts) {
+  opts = opts || {};
+  const tried = [];
+  for (const path of VIRTUAL_PATHS) {
+    for (const base of BASES) {
+      const qIdx = path.indexOf('?');
+      const purePath = qIdx >= 0 ? path.slice(0, qIdx) : path;
+      const query = {};
+      if (qIdx >= 0) new URLSearchParams(path.slice(qIdx + 1)).forEach((v, k) => { query[k] = v; });
+      const t = { base, path };
+      try {
+        const payload = await sofaFetch(base, purePath, Object.assign({ page: '1', limit: '200' }, query), 1, 8000);
+        const items = findGameArray(payload);
+        t.status = 'ok'; t.items = items ? items.length : 0;
+        if (opts.probe) t.sampleKeys = items && items[0] ? Object.keys(items[0]).slice(0, 25) : (payload && typeof payload === 'object' ? Object.keys(payload).slice(0, 15) : typeof payload);
+        tried.push(t);
+        if (items && items.length && !opts.probe) return { base, path, items, tried };
+      } catch (e) { t.status = String(e.message || e).slice(0, 60); tried.push(t); }
+    }
+  }
+  return { base: null, path: null, items: [], tried };
+}
+
+module.exports = { fetchVirtualRaw, VIRTUAL_BASES: BASES, cachedMarketCount, holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };

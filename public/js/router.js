@@ -29,7 +29,7 @@
   var ROUTES = {
     '/': 1, '/my-bets': 1, '/casino': 1, '/account': 1, '/deposit': 1, '/withdraw': 1,
     '/login': 1, '/register': 1, '/referral': 1, '/terms': 1, '/privacy': 1,
-    '/responsible': 1, '/contact': 1, '/match': 1, '/jackpot': 1
+    '/responsible': 1, '/contact': 1, '/match': 1, '/jackpot': 1, '/virtual': 1
   };
   function normPath(p) { p = String(p || '/'); return (p.length > 1 && p.charAt(p.length - 1) === '/') ? p.slice(0, -1) : p; }
   function isRoute(p) { return ROUTES[normPath(p)] === 1; }
