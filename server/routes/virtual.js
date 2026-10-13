@@ -1,86 +1,112 @@
-// Virtual games are sourced from SofaBets (Kiron + Pascal) only.
-// This route is deliberately isolated from sports/odds and casino routes.
+// Virtual games (Kiron / Pascal). The catalogue is the one SofaBets shows on its Virtual page; the artwork
+// is fetched from SofaBets once and kept in memory, and SofaBets' own provider on/off flags decide which
+// providers are listed. The page never waits on SofaBets.
 const express = require('express');
-const auth = require('../middleware/auth');
-const virtualGames = require('../data/virtualGames');
+const axios = require('axios');
 const router = express.Router();
+const CATALOG = require('../data/virtualGames');
 
-const SOFA_API = 'https://backendapi.sofabets.com';
-const PROVIDER_CONFIG = {
-  kiron: { endpoint: `${SOFA_API}/kiron_launch`, provider: 'Kiron' },
-  pascal: { endpoint: `${SOFA_API}/pascal_launch`, provider: 'Pascal Gaming' }
-};
-const gamesById = new Map(virtualGames.map(g => [`${g.provider}:${g.ref}`, g]));
+const ART_BASE = process.env.SOFABETS_SITE_URL || 'https://sofabets.com';
+const FLAGS_URL = (process.env.SOFABETS_API_BASE || 'https://backendapi.sofabets.com') + '/api/casino/providers';
+
+const games = CATALOG.map(g => ({
+  id: g.provider + '-' + g.ref,
+  provider: g.provider,
+  providerLabel: g.provider.charAt(0).toUpperCase() + g.provider.slice(1),
+  ref: g.ref,
+  name: g.name,
+  img: g.img,
+  hot: !!g.hot
+}));
+const byId = new Map(games.map(g => [g.id, g]));
+
+// ── provider flags from SofaBets (a provider is hidden only when SofaBets explicitly switches it off) ──
+let flags = { ts: 0, off: new Set() };
+function parseOff(p) {
+  const off = new Set();
+  const mark = (name, v) => {
+    const k = String(name || '').toLowerCase();
+    if (!k) return;
+    if (v === false || v === 0 || v === 'off' || v === 'false' || v === 'disabled' || v === 'inactive') off.add(k);
+  };
+  if (Array.isArray(p)) p.forEach(x => {
+    if (!x || typeof x !== 'object') return;
+    const name = x.provider || x.name || x.id || x.key || x.slug;
+    const v = ['enabled', 'active', 'on', 'isActive', 'isEnabled', 'status'].map(k => x[k]).find(y => y !== undefined);
+    mark(name, v);
+  });
+  else if (p && typeof p === 'object') Object.keys(p).forEach(k => {
+    const v = p[k];
+    if (v && typeof v === 'object') { const e = ['enabled', 'active', 'on', 'isActive', 'isEnabled', 'status'].map(x => v[x]).find(y => y !== undefined); mark(k, e); }
+    else mark(k, v);
+  });
+  return off;
+}
+async function refreshFlags() {
+  try {
+    const r = await axios.get(FLAGS_URL, { timeout: 8000, family: 4, headers: { 'User-Agent': 'Mozilla/5.0', Origin: ART_BASE, Referer: ART_BASE + '/' } });
+    flags = { ts: Date.now(), off: parseOff(r.data && r.data.providers) };
+  } catch (e) { /* keep the last known flags */ }
+}
+setTimeout(() => refreshFlags(), 3000).unref?.();
+setInterval(() => refreshFlags(), 10 * 60 * 1000).unref?.();
+
+// ── artwork cache ──
+const art = new Map();          // id -> { type, buf }
+const artInflight = new Map();
+async function getArt(g) {
+  const hit = art.get(g.id);
+  if (hit) return hit;
+  if (artInflight.has(g.id)) return artInflight.get(g.id);
+  const p = (async () => {
+    const r = await axios.get(ART_BASE + g.img, { responseType: 'arraybuffer', timeout: 12000, family: 4, maxContentLength: 3 * 1024 * 1024, headers: { 'User-Agent': 'Mozilla/5.0', Referer: ART_BASE + '/virtual' } });
+    const type = String(r.headers['content-type'] || '').split(';')[0] || 'image/png';
+    if (!/^image\//.test(type)) throw new Error('not an image');
+    const v = { type, buf: Buffer.from(r.data) };
+    art.set(g.id, v);
+    return v;
+  })().finally(() => artInflight.delete(g.id));
+  artInflight.set(g.id, p);
+  return p;
+}
+// warm all artwork shortly after boot (4 at a time)
+setTimeout(async () => {
+  const q = games.slice();
+  await Promise.all(new Array(4).fill(0).map(async () => { while (q.length) { const g = q.shift(); try { await getArt(g); } catch (_) {} } }));
+  console.log(`[virtual] artwork cached: ${art.size}/${games.length}`);
+}, 5000).unref?.();
 
 router.get('/games', (req, res) => {
-  const data = virtualGames.map(g => ({
-    id: `${g.provider}:${g.ref}`,
-    ref: g.ref,
-    name: g.name,
-    provider: g.provider === 'kiron' ? 'Kiron' : 'Pascal',
-    image: `${SOFA_API}${g.img}`,
-    hot: !!g.hot
+  const list = games.filter(g => !flags.off.has(g.provider)).map(g => ({
+    id: g.id, name: g.name, provider: g.providerLabel, image: '/api/virtual/art/' + encodeURIComponent(g.id), hot: g.hot
   }));
-  res.set('Cache-Control', 'no-store');
-  res.json({ success: true, data, count: data.length, source: 'SofaBets' });
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ success: true, data: list, count: list.length, source: 'SofaBets' });
 });
 
-router.get('/launch/:id', auth, async (req, res) => {
-  const id = String(req.params.id || '').trim();
-  const game = gamesById.get(id);
-  if (!game) return res.status(404).json({ success: false, message: 'Virtual game not found.' });
-
-  // SofaBets requires its own authenticated session token. Never send the
-  // SafariBet JWT to SofaBets; it is not a SofaBets credential.
-  const token = String(process.env.SOFABETS_TOKEN || '').trim();
-  if (!token) {
-    return res.status(503).json({ success: false, message: 'SofaBets virtual-game launch is not configured. Set SOFABETS_TOKEN on the server.' });
-  }
-
-  const cfg = PROVIDER_CONFIG[game.provider];
-  if (!cfg) return res.status(400).json({ success: false, message: 'Unsupported virtual-game provider.' });
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+router.get('/art/:id', async (req, res) => {
+  const g = byId.get(String(req.params.id));
+  if (!g) return res.status(404).end();
   try {
-    const response = await fetch(cfg.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        ref: game.ref,
-        provider: cfg.provider,
-        client: /Mobi|Android/i.test(String(req.headers['user-agent'] || '')) ? 'mobile' : 'desktop'
-      }),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      const err = new Error(`SofaBets launch request failed (${response.status}).`);
-      err.status = response.status;
-      throw err;
-    }
-    const payload = await response.json();
-    const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : payload;
-    const launchUrl = data && (data.iframeSrc || data.launchUrl || data.url);
-    if (!launchUrl || !/^https?:\/\//i.test(String(launchUrl))) {
-      return res.status(502).json({ success: false, message: 'SofaBets did not return a playable game URL.' });
-    }
-    let target;
-    try { target = new URL(String(launchUrl)); } catch (_) { target = null; }
-    if (!target || !['http:', 'https:'].includes(target.protocol)) {
-      return res.status(502).json({ success: false, message: 'SofaBets returned an invalid game URL.' });
-    }
-    res.set('Cache-Control', 'no-store');
-    return res.json({ success: true, url: target.toString(), launchUrl: target.toString(), source: 'SofaBets' });
-  } catch (e) {
-    console.error('[virtual/sofabets launch]', e.message);
-    const status = e.name === 'AbortError' ? 504 : (e.status === 400 ? 400 : 502);
-    return res.status(status).json({ success: false, message: e.name === 'AbortError' ? 'SofaBets took too long to launch this game. Try again.' : 'SofaBets could not launch this game right now.' });
-  } finally {
-    clearTimeout(timeout);
-  }
+    const a = await getArt(g);
+    res.set({ 'Content-Type': a.type, 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' });
+    res.send(a.buf);
+  } catch (e) { res.status(404).end(); }
+});
+
+// Launching a game needs a game session linked to SafariBet's wallet, which the game provider (Kiron / Pascal)
+// has to give SafariBet. SofaBets' own play pages use SofaBets accounts and balances, so they are not used.
+//   VIRTUAL_LAUNCH_URL_TEMPLATE e.g. "https://provider.example/launch?provider={provider}&game={ref}&token={token}"
+router.get('/launch/:id', (req, res) => {
+  const g = byId.get(String(req.params.id));
+  if (!g) return res.status(404).json({ success: false, message: 'Game not found' });
+  const tpl = process.env.VIRTUAL_LAUNCH_URL_TEMPLATE;
+  if (!tpl) return res.status(501).json({ success: false, code: 'LAUNCH_NOT_CONFIGURED', message: 'This game is coming soon on SafariBet.' });
+  const auth = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!auth) return res.status(401).json({ success: false, message: 'Please log in to play' });
+  const url = tpl.split('{provider}').join(encodeURIComponent(g.provider)).split('{ref}').join(encodeURIComponent(g.ref))
+    .split('{gameId}').join(encodeURIComponent(g.ref)).split('{token}').join(encodeURIComponent(auth));
+  res.json({ success: true, url });
 });
 
 module.exports = router;
