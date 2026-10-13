@@ -2418,7 +2418,7 @@ function pickMatchFromSearch(matchId, sport) {
       batch.push(id);
       if (!timer) timer = setTimeout(flush, 350);
     });
-  }, { rootMargin: '300px 0px' });
+  }, { rootMargin: '700px 0px' });     // warm about one screen AHEAD of the scroll, so games are ready before they are reached
   const scan = () => document.querySelectorAll('#matchList .mc[id^="mc_"]').forEach(el => { if (!el.__warm) { el.__warm = 1; io.observe(el); } });
   const attach = () => {
     const list = document.getElementById('matchList');

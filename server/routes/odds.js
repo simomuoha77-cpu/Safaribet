@@ -408,7 +408,9 @@ router.post('/warm', warmLimiter, express.json({ limit: '4kb' }), (req, res) => 
   try {
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 12) : [];
     let queued = 0;
-    for (const matchId of ids) {
+    // ids arrive in on-screen order; each one goes to the FRONT of the queue, so iterate backwards to keep the
+    // first (topmost visible) game first in line. Jobs not started within 30s are dropped (customer scrolled on).
+    for (const matchId of ids.slice().reverse()) {
       const parsed = parseSofaMatchId(matchId);
       if (!parsed || !parsed.providerId) continue;
       const ok = sofaBets.queueWarmMarkets(parsed.providerId, parsed.sport, d => {
@@ -417,7 +419,7 @@ router.post('/warm', warmLimiter, express.json({ limit: '4kb' }), (req, res) => 
           { matchId: String(matchId), finalVerified: { $ne: true } },
           { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(parsed.providerId), marketsRefreshedAt: new Date() } }
         ).catch(() => {});
-      });
+      }, parsed.isLive ? 60000 : undefined, { front: true, expireMs: 30000 });
       if (ok) queued++;
     }
     res.json({ success: true, queued });
@@ -434,7 +436,7 @@ const DEADLINE = Symbol('deadline');
 // Full market list for an already-known fixture: the page paints instantly from
 // the summary it already has, so it is better to wait a little longer here than
 // to bounce the customer into slow 'pending' polling. Stays under the page's 7s cap.
-const MARKETS_DEADLINE_MS = 4500;
+const MARKETS_DEADLINE_MS = 2500;
 const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
   Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
 

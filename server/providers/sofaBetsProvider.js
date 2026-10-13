@@ -586,17 +586,26 @@ const lastWarmTry = new Map();      // key -> time of last attempt (also for gam
 const recentWarm = [];              // last results: true when a rich list came back
 let warmActive = 0;
 let warmPausedUntil = 0;
-function queueWarmMarkets(providerMatchId, sportName, onDone, maxAgeMs) {
+// opts.front: this game is on a customer's screen RIGHT NOW -> it jumps the queue (newest request first) and is
+// dropped if it has not started within opts.expireMs (the customer has scrolled on by then).
+function queueWarmMarkets(providerMatchId, sportName, onDone, maxAgeMs, opts) {
   const id = String(providerMatchId || '').trim();
   const name = String(sportName || 'football').toLowerCase();
   if (!id || Date.now() < warmPausedUntil) return false;
   const key = name + ':' + id;
   const maxAge = Number.isFinite(maxAgeMs) ? maxAgeMs : 9 * 60000;
-  if (marketsCacheAge(id, name) < maxAge || warmKeys.has(key) || warmQueue.length >= 60) return false;
+  const front = !!(opts && opts.front);
+  if (marketsCacheAge(id, name) < maxAge || warmKeys.has(key)) return false;
+  if (warmQueue.length >= 60) {
+    if (!front) return false;
+    const dropped = warmQueue.pop();                       // make room: the oldest waiting job is the least useful
+    if (dropped) warmKeys.delete(dropped.key);
+  }
   if (Date.now() - (lastWarmTry.get(key) || 0) < maxAge) return false;
   warmKeys.add(key);
   lastWarmTry.set(key, Date.now());
-  warmQueue.push({ id, name, key, onDone });
+  const job = { id, name, key, onDone, expires: front && opts.expireMs ? Date.now() + opts.expireMs : 0 };
+  if (front) warmQueue.unshift(job); else warmQueue.push(job);
   pumpWarm();
   return true;
 }
@@ -608,6 +617,8 @@ const WARM_CONCURRENCY = Number(process.env.SOFABETS_WARM_CONCURRENCY || 3);
 function pumpWarm() {
   while (warmActive < WARM_CONCURRENCY && warmQueue.length && Date.now() >= warmPausedUntil && userMarketsActive === 0) {
     const job = warmQueue.shift();
+    // skip jobs the customer has already scrolled past, or whose markets arrived meanwhile (e.g. they tapped the game)
+    if ((job.expires && Date.now() > job.expires) || marketsCacheAge(job.id, job.name) < 45000) { warmKeys.delete(job.key); continue; }
     warmActive++;
     refreshMatchMarkets(job.id, job.name, job.key)
       .then(d => {
