@@ -21,7 +21,9 @@ function start() {
   // polled every 10s by updateLive above, so this alone delivers near-instant
   // win/loss settlement) plus a slower full pass with the external API
   // fallback every 5 minutes as a safety net for anything the DB path missed.
-  cron.schedule('* * * * *', () => { runSettlement(false).catch(console.error); });
+  // every 20s (was 60s): the pass is cheap - it exits at once when no bet is waiting
+  const settleMs = Math.max(5000, parseInt(process.env.SETTLE_POLL_MS) || 20000);
+  setInterval(() => { runSettlement(false).catch(console.error); }, settleMs);
   cron.schedule('*/5 * * * *', () => { runSettlement(true).catch(console.error); });
 
   // Jackpot settlement — same cadence, checks if all fixtures in any open round finished
@@ -59,7 +61,7 @@ function start() {
     console.log(`✅ Keep-awake: ${alwaysOn ? 'always (every 10 min)' : 'only while bets wait on started/imminent games'} via ${selfUrl}`);
   }
 
-  console.log(`✅ Scheduler started (fixtures 5m, live every ${liveMs/1000}s, settlement 15m)`);
+  console.log(`✅ Scheduler started (fixtures 5m, live every ${liveMs/1000}s, settlement ${settleMs/1000}s)`);
 
   // Startup: clean any legacy non-Juan matches, then sync
   setTimeout(() => cleanFakeMatches().catch(console.error), 3000);

@@ -78,10 +78,10 @@ async function verifyFinalResult(matchId) {
 //      hiccup can never satisfy this.
 // ══════════════════════════════════════════════════════════════════════════════
 const MIN_DURATION_MIN = { football: 110, basketball: 125, tennis: 90, hockey: 150, cricket: 480, volleyball: 90, rugby: 110, handball: 100 };
-const ABSENT_MS = 15 * 60 * 1000;
+const ABSENT_MS = Number(process.env.SETTLE_ABSENT_MS) || 15 * 60 * 1000;          // tunable: only used when the feed never says FINISHED
 // A football game last seen at 90:00 or later was in its closing stage: once it has left the live feed for this long
 // it is over (the usual wait is 15 minutes). Together with the settlement run every minute: about 2-3 minutes.
-const FAST_ABSENT_MS = 100 * 1000;
+const FAST_ABSENT_MS = Number(process.env.SETTLE_FAST_ABSENT_MS) || 100 * 1000;
 const FOOTBALL_LAST_MIN = 80;
 const memo = new Map(); // key -> { ts, data }
 async function memoized(key, ttlMs, fn) {
@@ -94,8 +94,8 @@ async function memoized(key, ttlMs, fn) {
 }
 const nairobiDate = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const toMap = list => { const m = new Map(); (list || []).forEach(x => { const k = String(x && x.providerMatchId || '').trim(); if (k) m.set(k, x); }); return m; };
-const liveFeed = sport => memoized('live:' + sport, 40 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
-const catalogue = (sport, date) => memoized('cat:' + sport + ':' + date, 3 * 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));
+const liveFeed = sport => memoized('live:' + sport, 15 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
+const catalogue = (sport, date) => memoized('cat:' + sport + ':' + date, 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));
 
 function finalScoreOf(fx) {
   const ft = fx && fx.score && fx.score.fullTime;
@@ -290,6 +290,7 @@ async function trackFixtures(fixtures, Match) {
           finalVerified: true, finalVerifiedAt: new Date(), finalSource: source, lastFinalCheckAt: new Date(), trackerNote: null
         } });
         out.finalized++;
+        try { require('../engine/settlementEngine').settleSoon(); } catch (_) {}      // settle these bets right away
         console.log(`  [Tracker] FINAL (${source}): ${row.homeTeam} ${sc.home}-${sc.away} ${row.awayTeam} [${fx.matchId}]`);
       };
 

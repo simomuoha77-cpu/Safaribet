@@ -423,6 +423,7 @@ async function updateLive() {
         { $set: m },
         { upsert: true }
       ).catch(() => {});
+      if (m.finalVerified === true) { try { require('./settlementEngine').settleSoon(); } catch (e) {} }
     }
 
     // A match that is no longer in the live response is NOT necessarily over:

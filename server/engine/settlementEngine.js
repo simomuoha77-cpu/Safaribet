@@ -718,4 +718,20 @@ async function _runSettlementInner(includeApiFetch) {
   return { settled: totalSettled, paid: totalPaid };
 }
 
-module.exports = { runSettlement, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost } };
+// Event-driven trigger: called the moment a fixture is confirmed final, so its bets settle within seconds instead of
+// waiting for the next scheduled pass. Calls arriving close together share ONE run; if a run is already in progress
+// it tries again shortly (so the new final is never left waiting for the next timer tick).
+let settleSoonTimer = null;
+function settleSoon(delayMs = 1500) {
+  if (settleSoonTimer) return;
+  settleSoonTimer = setTimeout(async () => {
+    settleSoonTimer = null;
+    try {
+      const r = await runSettlement(false);
+      if (r && r.skipped) settleSoon(3000);
+    } catch (e) { console.error('[Settlement] settleSoon failed:', e.message); }
+  }, delayMs);
+  if (settleSoonTimer.unref) settleSoonTimer.unref();
+}
+
+module.exports = { runSettlement, settleSoon, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost } };
