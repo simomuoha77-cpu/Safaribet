@@ -658,19 +658,24 @@
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
     var guest = true; try { guest = !localStorage.getItem('token'); } catch (e) {}
-    (guest ? ['/login', '/register'] : []).concat(['/my-bets', '/account', '/casino', '/']).forEach(function (p, i) {
-      if (normPath(location.pathname) === p) return;
-      _st.call(window, function () { fetchHtml(new URL(p, location.href)).catch(function () {}); }, 800 * (i + 1));
+    // Logged-in users: Deposit and Withdraw are warmed FIRST so tapping them opens instantly.
+    (guest ? ['/login', '/register'] : ['/deposit', '/withdraw']).concat(['/my-bets', '/account', '/casino', '/']).forEach(function (p, i) {
+      if (normPath(location.pathname) === p || htmlCache[p]) return;
+      _st.call(window, function () { if (!htmlCache[p]) fetchHtml(new URL(p, location.href)).catch(function () {}); }, 400 * (i + 1));
     });
   }
   _winAdd.call(window, 'load', function () { _st.call(window, prefetch, 1500); });
+  _winAdd.call(window, 'sb:navigated', function () {
+    var p = normPath(location.pathname);
+    if (p === '/account' || p === '/my-bets') _st.call(window, prefetch, 300);
+  });
 
   // Finger down on Join / Login / Sign in links: start fetching that page right now if it is not warmed yet
   // (the click itself only arrives ~100ms later).
   function pageIntent(ev) {
-    var el = ev.target && ev.target.closest ? ev.target.closest('[onclick*="/login"], [onclick*="/register"], a[href="/login"], a[href="/register"]') : null;
+    var el = ev.target && ev.target.closest ? ev.target.closest('[onclick*="/login"], [onclick*="/register"], [onclick*="/deposit"], [onclick*="/withdraw"], a[href="/login"], a[href="/register"], a[href="/deposit"], a[href="/withdraw"]') : null;
     if (!el) return;
-    var m = /\/(login|register)\b/.exec(el.getAttribute('onclick') || el.getAttribute('href') || '');
+    var m = /\/(login|register|deposit|withdraw)\b/.exec(el.getAttribute('onclick') || el.getAttribute('href') || '');
     if (!m) return;
     var p = '/' + m[1];
     if (normPath(location.pathname) === p || htmlCache[p]) return;
