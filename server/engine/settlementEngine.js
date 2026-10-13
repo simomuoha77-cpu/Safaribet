@@ -9,6 +9,7 @@ const Bet         = require('../models/Bet');
 const Match       = require('../models/Match');
 const User        = require('../models/User');
 const Transaction = require('../models/Transaction');
+const WalletHistory = require('../models/WalletHistory');
 const { getFixtures } = require('./apifootball');
 const walletService = require('../services/walletService');
 const finalResults = require('../services/finalResultService');
@@ -174,10 +175,25 @@ function gradeSelection(pick, result, homeScore, awayScore) {
   }
 }
 
-// Pay out a won bet
+// A payout is recorded in the wallet history under (reference = bet code, reason = 'bet_payout').
+// If that record already exists the bet has been paid: never pay it a second time.
+async function alreadyPaid(bet) {
+  try { return !!(await WalletHistory.exists({ userId: bet.userId, reference: bet.betCode, reason: 'bet_payout' })); }
+  catch (e) { return false; }
+}
+
+// Atomically take ownership of a pending bet. Only ONE caller can ever move a bet out of 'pending',
+// so overlapping runs / a second instance / a repeated provider update can never pay it twice.
+async function claimBet(bet, fields) {
+  const r = await Bet.findOneAndUpdate({ _id: bet._id, status: 'pending' }, { $set: fields });
+  return !!r;
+}
+
+// Pay out a won bet. THROWS if the wallet credit fails (the caller reopens the bet so the next run retries).
 async function payWinner(bet, netPayout) {
+  if (await alreadyPaid(bet)) { console.log(`  [payWinner] ${bet.betCode} already paid - duplicate settlement ignored`); return; }
+  const wallet = await walletService.payoutWin(bet.userId, netPayout, bet.betCode, { betId: bet._id });
   try {
-    const wallet = await walletService.payoutWin(bet.userId, netPayout, bet.betCode, { betId: bet._id });
     // Keep legacy User.balance in sync for any UI still reading it directly
     await User.findByIdAndUpdate(bet.userId, { $inc: { balance: netPayout } }).catch(() => {});
     await Transaction.create({
@@ -191,15 +207,16 @@ async function payWinner(bet, netPayout) {
     require('../services/notificationService')
       .notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: netPayout })
       .catch(()=>{});
-  } catch(e) {
-    console.error(`  [payWinner] failed for ${bet.betCode}:`, e.message);
+  } catch (e) {
+    console.error(`  [payWinner] paid, but bookkeeping failed for ${bet.betCode}:`, e.message);   // money is already in the wallet
   }
 }
 
-// Every game on the bet was voided: give the stake back (recorded as a refund, not as winnings).
+// Every game on the bet was voided: give the stake back (recorded as a refund, not as winnings). Throws like payWinner.
 async function payRefund(bet) {
+  if (await alreadyPaid(bet)) { console.log(`  [payRefund] ${bet.betCode} already refunded - duplicate settlement ignored`); return; }
+  const wallet = await walletService.payoutWin(bet.userId, bet.stake, bet.betCode, { betId: bet._id });
   try {
-    const wallet = await walletService.payoutWin(bet.userId, bet.stake, bet.betCode, { betId: bet._id });
     await User.findByIdAndUpdate(bet.userId, { $inc: { balance: bet.stake } }).catch(() => {});
     await Transaction.create({
       userId: bet.userId, type: 'refund', amount: bet.stake,
@@ -210,7 +227,7 @@ async function payRefund(bet) {
     console.log(`  ↩ Refunded KES ${bet.stake} [${bet.betCode}]`);
     require('../services/notificationService').notify(bet.userId, 'bet_void', { betCode: bet.betCode }).catch(() => {});
   } catch (e) {
-    console.error(`  [payRefund] failed for ${bet.betCode}:`, e.message);
+    console.error(`  [payRefund] refunded, but bookkeeping failed for ${bet.betCode}:`, e.message);
   }
 }
 
@@ -221,10 +238,15 @@ async function payRefund(bet) {
 // later settlement runs purely for display (see runSettlement's query below),
 // but never re-trigger finalization once a bet is already lost.
 async function finalizeBetAsLost(bet) {
+  const settledAt = new Date();
+  if (!(await claimBet(bet, { status: 'lost', payout: 0, netPayout: 0, settledAt }))) {
+    console.log(`  [Settlement] ${bet.betCode} was already settled elsewhere - skipped`);
+    return { status: 'skipped', netPayout: 0 };
+  }
   bet.status    = 'lost';
   bet.payout    = 0;
   bet.netPayout = 0;
-  bet.settledAt = new Date();
+  bet.settledAt = settledAt;
   await bet.save();
 
   require('../services/notificationService')
@@ -259,17 +281,28 @@ async function finalizeBet(bet) {
     status = 'won';
   }
 
+  const settledAt = new Date();
+  if (!(await claimBet(bet, { status, payout, netPayout, settledAt }))) {
+    console.log(`  [Settlement] ${bet.betCode} was already settled elsewhere - skipped`);
+    return { status: 'skipped', netPayout: 0 };
+  }
   bet.status    = status;
   bet.payout    = payout;
   bet.netPayout = netPayout;
-  bet.settledAt = new Date();
+  bet.settledAt = settledAt;
   await bet.save();
 
-  if (status === 'won' && netPayout > 0) {
-    await payWinner(bet, netPayout);
-  } else if (status === 'void' && netPayout > 0) {
-    await payRefund(bet);
-  } else if (status === 'lost') {
+  try {
+    if (status === 'won' && netPayout > 0) await payWinner(bet, netPayout);
+    else if (status === 'void' && netPayout > 0) await payRefund(bet);
+  } catch (e) {
+    // The wallet credit failed: reopen the bet so the next settlement run pays it (payout is idempotent).
+    console.error(`  [Settlement] payout failed for ${bet.betCode}, will retry next run:`, e.message);
+    await Bet.updateOne({ _id: bet._id, status }, { $set: { status: 'pending' }, $unset: { settledAt: 1 } }).catch(() => {});
+    return { status: 'retry', netPayout: 0 };
+  }
+
+  if (status === 'lost') {
     require('../services/notificationService')
       .notify(bet.userId, 'bet_lost', { betCode: bet.betCode }).catch(()=>{});
   }
@@ -685,4 +718,4 @@ async function _runSettlementInner(includeApiFetch) {
   return { settled: totalSettled, paid: totalPaid };
 }
 
-module.exports = { runSettlement, mergeFixtureRows };
+module.exports = { runSettlement, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost } };

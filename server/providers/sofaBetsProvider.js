@@ -421,6 +421,15 @@ function marketSettledFlag(m) {
   return /^(settled|resulted|closed|finished|completed)$/.test(st);
 }
 
+// A selection/market the provider has locked, suspended or closed must show as unavailable and never accept a bet.
+function isSuspendedObj(o) {
+  if (!o || typeof o !== 'object') return false;
+  for (const k of ['suspended', 'isSuspended', 'is_suspended', 'locked', 'isLocked', 'is_locked', 'disabled', 'isDisabled', 'closed']) if (o[k] === true) return true;
+  for (const k of ['active', 'isActive', 'is_active', 'enabled', 'isEnabled', 'available', 'isAvailable', 'open', 'isOpen', 'is_open']) if (o[k] === false) return true;
+  const st = String(pick(o, ['status', 'state', 'marketStatus', 'market_status', 'selectionStatus', 'selection_status']) || '').toLowerCase().trim();
+  return /^(suspend(ed)?|locked?|disabled|inactive|unavailable|blocked|hidden|off|closed|not[_ ]?available)$/.test(st);
+}
+
 function normalizeMarketList(payload) {
   const raw = extractMarketArrays(payload);
   return raw.map((market, index) => {
@@ -437,6 +446,7 @@ function normalizeMarketList(payload) {
         name: String(pick(selection, ['name','label','selectionName','selection_name','outcomeName','choiceName','title']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(n) ? n : null,
         providerResult: officialResultOf(selection, marketSettledFlag(market)),
+        suspended: isSuspendedObj(selection) || isSuspendedObj(market),
         bookmaker: pick(selection, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
       };
     }).filter(Boolean) : [];
@@ -445,6 +455,7 @@ function normalizeMarketList(payload) {
       name: String(pick(market, ['label','name','marketType','marketName','market_name','type','title']) || 'Market'),
       selections: normalizedSelections,
       providerSettled: marketSettledFlag(market),
+      suspended: isSuspendedObj(market),
       bookmaker: pick(market, ['bookmaker','bookmakerName','bookmaker_name','provider']) || null
     };
   }).filter(m => m.selections.some(s => Number.isFinite(s.odds)));
@@ -1143,6 +1154,7 @@ function normalizeMatch(raw) {
         name: String(pick(selection, ['name', 'label', 'selectionName', 'selection_name', 'outcomeName']) || ('Selection ' + (si + 1))),
         odds: Number.isFinite(Number(price)) ? Number(price) : null,
         providerResult: officialResultOf(selection, marketSettledFlag(market)),
+        suspended: isSuspendedObj(selection) || isSuspendedObj(market),
         bookmaker: pick(selection, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
       };
     }).filter(Boolean) : [];
@@ -1154,6 +1166,7 @@ function normalizeMatch(raw) {
       name: String(pick(market, ['label', 'name', 'marketType', 'marketName', 'market_name', 'type']) || 'Market'),
       selections: normalizedSelections,
       providerSettled: marketSettledFlag(market),
+      suspended: isSuspendedObj(market),
       bookmaker: pick(market, ['bookmaker', 'bookmakerName', 'bookmaker_name', 'provider']) || null
     };
   }).filter(Boolean);

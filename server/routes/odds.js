@@ -704,7 +704,7 @@ router.get('/match/:matchId', async (req, res) => {
           pickLabel: String(o.name || o.key),
           providerSelectionId: o.id != null ? String(o.id) : null,
           providerSelectionKey: o.key != null ? String(o.key) : null,
-          bettable: true,
+          bettable: !(o.suspended || mk.suspended),     // locked/suspended by the provider: shown, but not bettable
           providerMarket: true
         }));
       if (!options.length) return null;
@@ -716,8 +716,8 @@ router.get('/match/:matchId', async (req, res) => {
         isSynthetic: false,
         providerMarket: true,
         bookmaker: mk.bookmaker || 'SofaBets',
-        hasSuspendedPick: false,
-        wholeMarketSuspended: false,
+        hasSuspendedPick: options.some(o => !o.bettable),
+        wholeMarketSuspended: options.every(o => !o.bettable),
         options
       };
     }).filter(Boolean);

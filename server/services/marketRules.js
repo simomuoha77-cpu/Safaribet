@@ -66,6 +66,8 @@ function detectSimpleType(bare) {
   if (/(home|away)\s*(team\s*)?(to\s*)?score\b|^[a-z0-9 .'-]+\s+to\s+score$/.test(n) && !/both|first|last/.test(n)) return 'TEAM_TO_SCORE';
   if (/odd\s*\/?\s*(or\s*)?even|goals?\s*odd|total\s*goals?\s*odd/.test(n)) return 'ODD_EVEN';
   if (/correct\s*score|exact\s*score/.test(n)) return 'CORRECT_SCORE';
+  if (/winning\s*margin|margin\s*of\s*victory|win(ning)?\s*by\b/.test(n)) return 'WINNING_MARGIN';
+  if (/goal\s*range|range\s*of\s*goals|goals?\s*range/.test(n)) return 'OVER_UNDER';      // OVER_UNDER grades range picks ("2-3", "4+")
   if (/handicap/.test(n)) return 'HANDICAP';
   if (/exact\s*(total\s*)?goals|total\s*goals\s*exact|number\s*of\s*goals/.test(n)) return 'EXACT_GOALS';
   if (/over\s*\/?\s*under|total\s*goals?|goals?\s*over|\btotal\b|\bou\b/.test(n)) return 'OVER_UNDER';
@@ -196,25 +198,39 @@ function evalSimple(type, pickLabel, sc, ctx) {
       if (!pickTeam || pickTeam === 'draw') return null;
       return W(pickTeam === who);
     }
-    case 'CLEAN_SHEET': {
+    case 'CLEAN_SHEET': case 'WIN_TO_NIL': {
       const mt = clean(ctx.marketText || '');
       const hc = clean(ctx.home), ac = clean(ctx.away);
       let side = /home/.test(mt) ? 'home' : /away/.test(mt) ? 'away' : (hc && mt.includes(hc) ? 'home' : (ac && mt.includes(ac) ? 'away' : null));
-      if (!side) return null;
-      const kept = side === 'home' ? a === 0 : h === 0;
-      if (/^yes$/.test(p)) return W(kept);
-      if (/^no$/.test(p)) return W(!kept);
-      return null;
+      let yes = /^yes$/.test(p) ? true : /^no$/.test(p) ? false : null;
+      if (!side || yes === null) {
+        // The market name may not name the team; then the pick does: "Mito Yes", "Yes - Mito", or just "Mito" (= yes).
+        const m2 = p.match(/^(.*?)\s*\b(yes|no)\b\s*(.*)$/);
+        const rest = (m2 ? (m2[1] + ' ' + m2[3]) : p).replace(/[-:()]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!side) { const who = teamOf(rest, ctx.home, ctx.away); if (who === 'home' || who === 'away') side = who; }
+        if (yes === null) yes = m2 ? m2[2] === 'yes' : (rest ? true : null);
+      }
+      if (!side || yes === null) return null;
+      const ok = type === 'CLEAN_SHEET'
+        ? (side === 'home' ? a === 0 : h === 0)
+        : (side === 'home' ? (h > a && a === 0) : (a > h && h === 0));
+      return W(yes ? ok : !ok);
     }
-    case 'WIN_TO_NIL': {
-      const mt = clean(ctx.marketText || '');
-      const hc = clean(ctx.home), ac = clean(ctx.away);
-      let side = /home/.test(mt) ? 'home' : /away/.test(mt) ? 'away' : (hc && mt.includes(hc) ? 'home' : (ac && mt.includes(ac) ? 'away' : null));
-      if (!side) return null;
-      const win = side === 'home' ? (h > a && a === 0) : (a > h && h === 0);
-      if (/^yes$/.test(p)) return W(win);
-      if (/^no$/.test(p)) return W(!win);
-      return null;
+    case 'WINNING_MARGIN': {
+      // "Mito by 1", "Mito by 2", "Mito by 3+", "Tokyo by 2 or more", "Draw", "Score draw", "No goal"
+      const diff = h - a, abs = Math.abs(diff);
+      if (/\bno\s*goal\b|goalless/.test(p)) return W(h === 0 && a === 0);
+      if (/score\s*draw/.test(p)) return W(h === a && total > 0);
+      if (/^(draw|tie)$/.test(p)) return W(h === a);
+      const m = p.match(/^(.*?)\s*by\s*(\d+)\s*(\+|or\s*more)?(?:\s*[-\u2013]\s*(\d+))?\s*(?:goals?)?$/);
+      if (!m) return null;
+      const who = teamOf(m[1].replace(/\b(to\s*win|wins?)\b/g, ' ').replace(/\s+/g, ' ').trim(), ctx.home, ctx.away);
+      if (who !== 'home' && who !== 'away') return null;
+      if (!(who === 'home' ? diff > 0 : diff < 0)) return 'lost';
+      const lo = Number(m[2]);
+      if (m[3]) return W(abs >= lo);
+      if (m[4] != null) return W(abs >= lo && abs <= Number(m[4]));
+      return W(abs === lo);
     }
     case 'TEAM_TO_SCORE': {
       const mt = clean(ctx.marketText || '');
@@ -253,7 +269,7 @@ function evalSimple(type, pickLabel, sc, ctx) {
       return W(m[1] === 'over' ? rel > line : rel < line);
     }
     case 'HANDICAP': {
-      const twoWay = /asian/.test(String(ctx.marketText || '').toLowerCase()) || !isFootballLike(ctx.sport);
+      const twoWay = /asian/.test(String(ctx.marketText || '').toLowerCase()) || !isFootballLike(ctx.sport) || /[+-]?\d+\.5\b/.test(String(pickLabel) + ' ' + String(ctx.marketText || ''));
       if (twoWay) {
         // 2-way handicap: the picked side gets the line added to its score. Whole line + tie = push (void);
         // half lines never push. Quarter lines (x.25 / x.75) split the stake and are not graded here.
