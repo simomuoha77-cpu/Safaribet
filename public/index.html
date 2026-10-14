@@ -1053,6 +1053,9 @@ function toggleFaq(i){
 let USER=window.USER||null, slip=JSON.parse(localStorage.getItem('betslip')||'[]'), currentSport='featured';
 let oddsRefresh=null;
 let allMatches=[], currentFilter='highlights', currentMarket='1x2', currentLeague='';
+// The Highlights feed (ALL sports). Background refreshes store it here and draw it ONLY while the Highlights tab is open;
+// allMatches is just "the data of the tab on screen", so a refresh can never put Highlights games into Football/Basketball.
+let featuredMatches=[];
 let matchesEtag=null; // last ETag /api/odds/featured sent us — lets the next refresh be a cheap conditional request
 let homeScrollRestored=false; // guards against restoring scroll more than once per page load
 
@@ -1074,6 +1077,7 @@ try {
   const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
   if (cached && cached.data && cached.data.length) {
     allMatches = cached.data;
+    featuredMatches = cached.data;
   }
   if (cached && cached.etag) matchesEtag = cached.etag;
 } catch(e) {}
@@ -1690,16 +1694,19 @@ async function loadLeagueOptions(){
 
 async function loadAllMatches(silent=false, retryAttempt=0){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
+  // Another tab is open: keep THAT tab's own data fresh, and keep the Highlights feed warm below without drawing it.
+  if (currentCat === 'football') refreshFootballTab(true);
+  else if (currentCat !== 'featured') refreshSportTab(currentCat);
   const el=document.getElementById('matchList');
   // If we already have data from a previous load this session, render it
   // immediately instead of blanking the screen with a spinner — this is what
   // made "back" feel like a full reload every time, even though the data was
   // already sitting in memory. Only show the spinner on a genuine first load.
-  const hasExistingData = allMatches && allMatches.length > 0;
+  const hasExistingData = featuredMatches && featuredMatches.length > 0;
   if(!silent && hasExistingData){
-    applyFilters(true); // repaint instantly from memory, no spinner, no blank flash
+    if (currentCat === 'featured') { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash
     silent = true; // still fetch fresh data below, just don't block the UI for it
-  } else if(!silent && retryAttempt===0){
+  } else if(!silent && retryAttempt===0 && currentCat === 'featured'){
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
   }
   // Only the small pill shows for a background refresh — never a full-page
@@ -1731,7 +1738,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       window.__sbSyncOk = Date.now();
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
-      try { localStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      try { localStorage.setItem('matchesCache', JSON.stringify({ data: featuredMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       setUpdatingIndicator(false);
       return;
     }
@@ -1745,11 +1752,11 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // intermittently vanish, or the feed collapse to live-only, even though
     // the previous good list was still perfectly valid.
     if(d.success && d.data && (d.data.length || !hasExistingData)){
-      allMatches=d.data;
+      featuredMatches = d.data;
       // Seed Live from the already-fetched Highlights payload so switching
       // Highlights -> Live is effectively zero-wait. The dedicated live API
       // refreshes this silently afterward.
-      const instantLive = allMatches.filter(m => m && m.status === 'live');
+      const instantLive = featuredMatches.filter(m => m && m.status === 'live');
       if (instantLive.length) {
         liveTabCache.data = instantLive.slice();
         liveTabCache.ts = Date.now();
@@ -1757,9 +1764,12 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       }
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
-      updateTodayCount();
-      applyFilters(silent);
-    } else if(!hasExistingData) {
+      if (currentCat === 'featured') {          // draw it only if Highlights is the tab on screen RIGHT NOW
+        allMatches = d.data;
+        updateTodayCount();
+        applyFilters(silent);
+      }
+    } else if(!hasExistingData && currentCat === 'featured') {
       el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
     }
     // else: server returned success but an empty list while we already have a
@@ -1781,7 +1791,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       setTimeout(() => loadAllMatches(false, retryAttempt+1), delay);
       return;
     }
-    if(!silent && !hasExistingData) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    if(!silent && !hasExistingData && currentCat === 'featured') el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
 }
@@ -2125,10 +2135,12 @@ async function loadCat(cat) {
   // NEVER put a loading screen over an already-loaded tab. Paint from memory
   // first (same JS turn), then let the network update happen silently.
   if (cat === 'featured') {
-    if (allMatches && allMatches.length) {
+    if (featuredMatches && featuredMatches.length) {
+      allMatches = featuredMatches;
       applyFilters(true);
       afterTabSettles(() => loadAllMatches(true));
     } else {
+      if (el) el.innerHTML = '<div class="loading"><div class="spin"></div>Loading matches...</div>';
       loadAllMatches(false);
     }
     return;
@@ -2184,30 +2196,22 @@ async function loadCat(cat) {
       afterTabSettles(() => refreshFootballTab(true));
       return;
     }
-    if (progressiveMatches?.length) {
-      const instantFootball = progressiveMatches.filter(m => m && (String(m.sport||'').toLowerCase() === 'football' || String(m.sport||'').toLowerCase() === 'soccer'));
-      if (instantFootball.length) {
-        footballTabCache.data = instantFootball.slice();
-        footballTabCache.ts = Date.now();
-        allMatches = footballTabCache.data;
-        applyFilters(true);
-        afterTabSettles(() => refreshFootballTab(true));
-        return;
-      }
-    }
-    if (allMatches && allMatches.length) {
-      // Highlights already loaded the exact same football feed. Reuse it
-      // immediately instead of making Football wait for another request.
-      footballTabCache.data = allMatches.slice();
+    // Football is the football games of the Highlights feed (instant), refreshed from the football feed afterwards.
+    const isFb = m => m && (String(m.sport||'').toLowerCase() === 'football' || String(m.sport||'').toLowerCase() === 'soccer');
+    const fromFeed = (featuredMatches || []).filter(isFb);
+    if (fromFeed.length) {
+      footballTabCache.data = fromFeed;
       footballTabCache.ts = Date.now();
+      allMatches = fromFeed;
       applyFilters(true);
       afterTabSettles(() => refreshFootballTab(true));
       return;
     }
-    // No Football cache yet: keep the current content visible.
-    // Refresh silently; never block the tab switch with a loader.
+    // Nothing for Football yet: show a loader - NEVER the previous tab's games under the Football tab.
+    allMatches = [];
+    if (el) el.innerHTML = '<div class="loading"><div class="spin"></div>Loading football...</div>';
     setUpdatingIndicator(true);
-    refreshFootballTab(true).catch(() => {});
+    refreshFootballTab(false).catch(() => {});
     return;
   }
 
@@ -2234,6 +2238,11 @@ async function loadCat(cat) {
     setUpdatingIndicator(true);
   }
 
+  refreshSportTab(cat);
+}
+
+function refreshSportTab(cat) {
+  const cachedSport = sportTabCache.get(cat) || null;
   if (sportTabRequests.has(cat)) return;
   const request = (async () => {
     try {
@@ -2281,7 +2290,11 @@ async function refreshFootballTab(silent=false){
         allMatches = d.data;
         applyFilters(!!silent);
       }
+    } else if (currentCat === 'football' && !(allMatches && allMatches.length)) {
+      const el = document.getElementById('matchList');
+      if (el) el.innerHTML = noMatchesHTML('⚽','No football matches right now','Check back soon - new fixtures are added regularly.');
     }
+    setUpdatingIndicator(false);
   } catch(e) {
     // Never destroy an already-rendered football list because a background
     // refresh failed. The next refresh will try again.
@@ -2291,6 +2304,10 @@ async function refreshFootballTab(silent=false){
 // Render non-football matches from the direct SofaBets feed.
 function renderNonFootball(matches) {
   const el = document.getElementById('matchList');
+  // This list is not tracked by renderMatches: make sure no half-streamed Highlights/Football batch is appended to it,
+  // and that the next renderMatches() does a clean full render instead of "patching" cards that are not there.
+  try { stopProgressiveRender(); } catch(e) {}
+  progressiveMatches = []; progressiveRendered = 0; lastRenderedMatchIds = null; lastRenderedViewKey = null;
   if (!matches.length) { el.innerHTML = noMatchesHTML('🏆','No matches','Check back later'); return; }
   el.innerHTML = matches.map(m => {
     const icon = m.sportIcon || '🏆';
