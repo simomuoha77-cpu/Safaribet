@@ -1383,7 +1383,7 @@ function restoreHomeCat(){
   if (o.cat === 'live' && !liveTabCache.data) {      // paint LIVE instantly from the last snapshot
     try {
       const cl = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-      if (cl?.data?.length && (Date.now() - cl.ts) < 600000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
+      if (cl?.data?.length && (Date.now() - cl.ts) < 60000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
     } catch(e) {}
   }
   if (window.__sbSnapActive && window.__sbHomeSnap) {
@@ -1461,7 +1461,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   if (!liveTabCache.data) {
     try {
       const cachedLive = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < 600000) {
+      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < 60000) {
         liveTabCache.data = cachedLive.data;
         liveTabCache.ts = cachedLive.ts;
       }
@@ -1489,6 +1489,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   oddsRefresh=setInterval(()=>{
     loadAllMatches(true);
   }, 20000);
+  ensureFreshSync(Date.now() - 1, 0);          // the first list must really arrive, retrying quickly if the connection was not ready
 });
 
 // ── INSTANT RESYNC ON BFCACHE RESTORE ──
@@ -1503,7 +1504,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
 // this quietly checks for anything new.
 window.addEventListener('pageshow', function(e){
   if(e.persisted){
-    loadAllMatches(true);
+    freshSync(true);
   }
 });
 
@@ -1521,6 +1522,25 @@ window.addEventListener('pageshow', function(e){
 // see fresh matches" rather than relying on the user happening to still be
 // within the last 20s refresh window.
 let lastForegroundSync = Date.now();
+// Make sure a refresh really SUCCEEDS after the app opens / returns / the network comes back: a phone's connection
+// is often not ready in the first second after waking, so a single silent try can fail and leave the old list
+// (e.g. 20 live games that have since ended) on screen until the next 20s tick. Retry at 2s, 6s and 14s.
+function ensureFreshSync(since, attempt){
+  const delays = [2000, 4000, 8000];
+  if (attempt >= delays.length) return;
+  setTimeout(() => {
+    if ((window.__sbSyncOk || 0) >= since) return;
+    loadAllMatches(true);
+    ensureFreshSync(since, attempt + 1);
+  }, delays[attempt]);
+}
+function freshSync(forceFull){
+  const since = Date.now();
+  if (forceFull) matchesEtag = null;          // away for a while: take the full current list, not a "nothing changed"
+  loadAllMatches(true);
+  ensureFreshSync(since, 0);
+}
+window.addEventListener('online', () => freshSync(true));
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'visible'){
     const awayMs = Date.now() - lastForegroundSync;
@@ -1528,7 +1548,7 @@ document.addEventListener('visibilitychange', function(){
     // Skip if we already synced very recently (e.g. a quick screen tap) —
     // no need to hit the network for a sub-2-second glance.
     if(awayMs < 2000) return;
-    loadAllMatches(true);
+    freshSync(awayMs > 60000);
     // Re-apply the current filter immediately too — even before the network
     // call above resolves, this alone clears out anything that quietly
     // expired (e.g. a Highlights match whose kickoff time passed) while the
@@ -1707,6 +1727,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     if (r.status === 304) {
+      window.__sbSyncOk = Date.now();
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: allMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
@@ -1715,6 +1736,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     }
     const newEtag = r.headers.get('ETag');
     const d=await r.json();
+    if (d && d.success) window.__sbSyncOk = Date.now();
     // Only replace what's on screen if this response actually has matches, OR
     // this is a genuine first load with nothing shown yet. A background poll
     // that comes back empty (e.g. a brief upstream hiccup) must never wipe out
@@ -2123,7 +2145,7 @@ async function loadCat(cat) {
     if (!liveTabCache.data?.length) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-        if (stored?.data?.length && (Date.now() - stored.ts) < 600000) {
+        if (stored?.data?.length && (Date.now() - stored.ts) < 60000) {
           liveTabCache.data = stored.data;
           liveTabCache.ts = stored.ts;
         }
@@ -2527,11 +2549,18 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
-      r = await fetch(url, { signal: ctrl.signal });
+      r = await fetch(url, sport === 'live' ? { signal: ctrl.signal, cache: 'no-store' } : { signal: ctrl.signal });
     } finally {
       clearTimeout(timeoutId);
     }
     const d=await r.json();
+    if (d && d.success && !d.warming) window.__sbSyncOk = Date.now();
+    if (d && d.warming && !(d.data && d.data.length) && retryAttempt < 5) {
+      // The server is still preparing its live snapshot - that is NOT "no live games". Ask again shortly.
+      setUpdatingIndicator(true);
+      setTimeout(() => loadMatches(sport, true, retryAttempt + 1), 1500 + retryAttempt * 1000);
+      return;
+    }
 
     if(!d.success||!d.data||!d.data.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
@@ -3512,6 +3541,8 @@ function showT(msg,type=''){
   try{ var c = parseInt(localStorage.getItem('sb_live_count'), 10); if(c >= 0) paint(c); }catch(e){}   // instant: last known number
   pull();
   timer = setInterval(pull, 30000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) pull(); });
+  window.addEventListener('online', pull);
 })();
 </script>
 <script>SB.run()</script>

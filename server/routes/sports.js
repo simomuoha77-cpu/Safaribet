@@ -6,7 +6,8 @@ const router = express.Router();
 const cache = {};
 const C = {
   get:(k,ttl)=>{const c=cache[k];return(c&&Date.now()-c.ts<ttl)?c.data:null;},
-  set:(k,d)=>{cache[k]={data:d,ts:Date.now()};}
+  set:(k,d)=>{cache[k]={data:d,ts:Date.now()};},
+  age:(k)=>cache[k] ? Date.now()-cache[k].ts : Infinity
 };
 
 const TWO_WAY = new Set(['tennis','tabletennis','basketball','volleyball','cricket','hockeyus']);
@@ -175,7 +176,14 @@ function saveLiveCache(matches) {
   return clean;
 }
 
-async function refreshLiveCache() {
+// One shared refresh at a time; callers can await it (used when a customer opens the app and the snapshot is old).
+let liveRefreshPromise = null;
+function refreshLiveCache() {
+  if (!liveRefreshPromise) liveRefreshPromise = refreshLiveCacheInner().finally(() => { liveRefreshPromise = null; });
+  return liveRefreshPromise;
+}
+const LIVE_FRESH_MS = 30000;
+async function refreshLiveCacheInner() {
   if (liveRefreshInFlight) return;
 
   liveRefreshInFlight = true;
@@ -212,8 +220,12 @@ async function refreshLiveCache() {
 
 // Only the NUMBER of live games, for the badge on the Live tab: a few bytes instead of the whole list.
 // count is null while the live snapshot is still warming up, so the app never shows a false "0".
-router.get('/live/count', (req, res) => {
+router.get('/live/count', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
+    if (C.age(LIVE_CACHE_KEY) > LIVE_FRESH_MS) {
+      await Promise.race([refreshLiveCache().catch(() => {}), new Promise(r => setTimeout(r, 2000))]);
+    }
     const cached = C.get(LIVE_CACHE_KEY, 120000);
     if (Array.isArray(cached)) {
       res.json({ success: true, count: cached.length });
@@ -228,8 +240,13 @@ router.get('/live/count', (req, res) => {
 
 router.get('/live', async (req, res) => {
   try {
-    // NEVER wait for SofaBets here.
-    // Return the last known snapshot immediately.
+    res.set('Cache-Control', 'no-store');
+    // Normally the snapshot is <=10s old (background refresh) and is returned at once. If it is missing or older
+    // than 30s (server just woke up / a refresh was slow), wait up to 3s for the refresh already running so the
+    // customer gets the CURRENT live games instead of an empty or old list.
+    if (C.age(LIVE_CACHE_KEY) > LIVE_FRESH_MS) {
+      await Promise.race([refreshLiveCache().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+    }
     const cached = C.get(LIVE_CACHE_KEY, 120000);
 
     if (Array.isArray(cached)) {
