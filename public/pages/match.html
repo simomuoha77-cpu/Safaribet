@@ -329,13 +329,15 @@ function matchLivePeriod(m){
   if (notFb) return m.score?.minute!=null ? m.score.minute+"'" : '';
   if (per==='HT' || per==='PAUSED') return 'HT';
   const real = m.score?.minute!=null && !m.score?.minuteIsEstimated;
-  if (real) return (m.score.minute<=45?'1H ':'2H ')+m.score.minute+"'";
+  if (real) return (m.score.minute<=45?'1H ':'2H ')+fmtMinute(m.score.minute)+"'";
   const el = m.commenceTime ? (Date.now()-new Date(m.commenceTime).getTime())/60000 : null;
   if (el==null || el<=0) return '';
   if (el<=47) return '1H ~'+Math.max(1,Math.round(el))+"'";
   if (el<=60) return el>=50 ? 'HT' : '1H 45+';
-  return '2H ~'+Math.min(90,Math.max(46,Math.round(el-15)))+"'";
+  return '2H ~'+fmtMinute(Math.min(105,Math.max(46,Math.round(el-15))))+"'";
 }
+// Minutes past 90 are stoppage time: 91 -> 90+1, 94 -> 90+4 (keeps counting until the game ends)
+function fmtMinute(n){ n = Number(n); return n > 90 ? '90+' + Math.min(n - 90, 15) : String(n); }
 // ---- live panel -------------------------------------------------------------
 // The server sends the football clock as it last read it (clockSec) and the time it read it (clockAt). Between
 // refreshes the clock simply keeps counting here, once a second. It never runs more than 150s past the last

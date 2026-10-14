@@ -2648,7 +2648,7 @@ function patchMatchesInPlace(matches){
       // estimateMinute fallback, HT/ET/Pen states) instead of a simplified
       // duplicate — a divergent copy here was the cause of incorrect/frozen
       // minute displays.
-      startLiveTimer(m.matchId, m.commenceTime, liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.sport);
+      startLiveTimer(m.matchId, m.commenceTime, liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.sport, m.score);
       const hs=liveScore.home, as=liveScore.away;
       const tnames = card.querySelectorAll('.tname');
       if(tnames.length===2 && hs!=null && as!=null){
@@ -2953,7 +2953,7 @@ function estimateMinute(commenceTime, period) {
   if (elapsed <= 0) return 1;
   if (elapsed <= 45) return Math.max(1, Math.min(45, Math.round(elapsed)));
   if (elapsed <= 60) return 45; // halftime window
-  return Math.max(46, Math.min(90, Math.round(elapsed - 15)));
+  return Math.max(46, Math.min(105, Math.round(elapsed - 15)));   // keeps counting through stoppage time (shown as 90+N)
 }
 // Which half a football match is in. Uses the provider's minute when it sends one,
 // otherwise the time since kickoff (the same windows the settlement engine uses).
@@ -2978,7 +2978,7 @@ function nonFootballLiveLabel(periodLabel){
   x = x.replace(/\bq(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} quarter`).replace(/\bset(\d)\b/i,(a,n)=>`${ord[n]||n+'th'} set`);
   return x.charAt(0).toUpperCase()+x.slice(1);
 }
-function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport, periodLabel){
+function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime, sport, periodLabel, clockScore){
   if (sport && String(sport).toLowerCase() !== 'football') {
     const lbl = nonFootballLiveLabel(periodLabel) || nonFootballLiveLabel(period);
     if (lbl) return lbl;
@@ -2993,16 +2993,30 @@ function formatLiveMinuteDisplay(minute, period, minuteIsEstimated, commenceTime
   if (p === 'PEN' || p === 'P') return 'Pen';
   const usingFallback = minute == null;
   const baseMin = usingFallback ? (estimateMinute(commenceTime, period) || 1) : minute;
-  const cap = p.includes('ET') ? 120 : 90;
+  const cap = p.includes('ET') ? 120 : 90;                 // regulation length; time past it is STOPPAGE TIME
   const isEstimated = usingFallback || minuteIsEstimated;
-  return `${half ? (half === '1st Half' ? '1H ' : '2H ') : ''}${isEstimated ? '~' : ''}${Math.min(baseMin, cap)}`;
+  let shownMin = baseMin;
+  // If the provider's own minute stalls (some feeds hold it at 90 for the whole of stoppage time), the running
+  // clock it also sends keeps the minute moving. It is only trusted for 150s after its last reading.
+  try {
+    const cs = clockScore && clockScore.clockSec != null ? Number(clockScore.clockSec) : NaN;
+    if (Number.isFinite(cs)) {
+      const at = clockScore.clockAt ? Date.parse(clockScore.clockAt) : NaN;
+      const run = clockScore.clockRunning && Number.isFinite(at) ? Math.max(0, Math.min(150, (Date.now() - at) / 1000)) : 0;
+      const clockMin = Math.floor((cs + run) / 60);
+      if (clockMin > shownMin && clockMin <= cap + 20) shownMin = clockMin;
+    }
+  } catch (e) {}
+  // Past full time the minute keeps counting as 90+1', 90+2' ... (up to 90+15) until the game really ends.
+  const text = shownMin > cap ? `${cap}+${Math.min(shownMin - cap, 15)}` : String(shownMin);
+  return `${half ? (half === '1st Half' ? '1H ' : '2H ') : ''}${isEstimated ? '~' : ''}${text}`;
 }
 
-function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated, sport) {
+function startLiveTimer(matchId, commenceTime, apiMinute, period, minuteIsEstimated, sport, clockScore) {
   if (liveTimers[matchId]) { clearInterval(liveTimers[matchId]); delete liveTimers[matchId]; }
   const el = () => document.getElementById(`ltimer_${matchId}`);
   const timerEl = el();
-  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated, commenceTime, sport);
+  if (timerEl) timerEl.textContent = formatLiveMinuteDisplay(apiMinute, period, minuteIsEstimated, commenceTime, sport, undefined, clockScore);
 }
 
 function stopAllLiveTimers() {
@@ -3065,7 +3079,7 @@ function renderMatch(m){
   </div>`;
 
   const timerEl = isLive
-    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport, liveScore.periodLabel || m.statusRaw)}</span></div>`
+    ? `<div class="live-timer"><span class="live-timer-dot"></span><span id="ltimer_${m.matchId}">${formatLiveMinuteDisplay(liveScore.minute ?? m.minute, liveScore.period || m.status, liveScore.minuteIsEstimated ?? m.minuteIsEstimated, m.commenceTime, m.sport, liveScore.periodLabel || m.statusRaw, m.score)}</span></div>`
     : `<div class="mtime">${fmtTime(m.commenceTime)}</div>`;
 
   const teamsHtml=`<div class="teams">
