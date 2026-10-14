@@ -15,7 +15,7 @@
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v19-reconnect';
+const VERSION = 'sb-v20-snappy';
 const SHELL = ['/', '/login', '/register', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
@@ -63,6 +63,7 @@ async function networkFirst(req, url) {
   const cache = await caches.open(VERSION);
   const key = cacheKey(url);
   const nav = req.mode === 'navigate';
+  const spa = !nav && req.headers.get('X-SB-Nav');       // in-app page change made by the router
   const net = fetch(key.url, { cache: 'no-cache', credentials: 'same-origin' }).then(res => {
     if (res.status >= 500) throw new Error('server ' + res.status);        // a waking/overloaded server is not a page
     const ct = res.headers.get('content-type') || '';
@@ -77,7 +78,7 @@ async function networkFirst(req, url) {
     return nav ? Promise.race([net, wait(12000, (_, rej) => rej(new Error('slow')))]) : net;
   }
   // cached copy is ONLY a safety net: network error / 5xx, or a server that does not answer (8s for pages, 15s otherwise)
-  return Promise.race([net.catch(() => hit), wait(nav ? 8000 : 15000, res => res(hit))]);
+  return Promise.race([net.catch(() => hit), wait(nav ? 8000 : spa ? 3000 : 15000, res => res(hit))]);
 }
 
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });

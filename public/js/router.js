@@ -347,15 +347,45 @@
   // ── Fetching pages ──
   var htmlCache = {};
   function fetchHtml(u) {
-    var key = normPath(u.pathname) + u.search;
-    return _fetch(u.pathname + u.search, { credentials: 'same-origin', headers: { 'X-SB-Nav': '1' } }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      var finalPath = normPath(new URL(r.url, location.href).pathname);
-      if (r.redirected && finalPath !== normPath(u.pathname)) throw new Error('redirected');
-      var ct = r.headers.get('content-type') || '';
-      if (ct.indexOf('text/html') === -1) throw new Error('not html');
-      return r.text();
-    }).then(function (html) { htmlCache[key] = { html: html, ts: Date.now() }; return html; });
+    var key = normPath(u.pathname) + u.search, url = u.pathname + u.search;
+    function once(signal) {
+      return _fetch(url, { credentials: 'same-origin', headers: { 'X-SB-Nav': '1' }, signal: signal }).then(function (r) {
+        var bad = function (m) { var e = new Error(m); e.fatal = true; return e; };      // not worth retrying
+        if (!r.ok) { if (r.status < 500) throw bad('HTTP ' + r.status); throw new Error('HTTP ' + r.status); }
+        var finalPath = normPath(new URL(r.url, location.href).pathname);
+        if (r.redirected && finalPath !== normPath(u.pathname)) throw bad('redirected');
+        var ct = r.headers.get('content-type') || '';
+        if (ct.indexOf('text/html') === -1) throw bad('not html');
+        return r.text();
+      });
+    }
+    // A phone connection that stalls (or a server that is waking up) must not leave a tap hanging: if the first
+    // request has not answered after 1.5s a second one is started, the first answer wins, and after 6s we give up
+    // (the caller then does a normal full page load).
+    return new Promise(function (resolve, reject) {
+      var done = false, pending = 0, hedged = false, acs = [], t1 = null, t2 = null;
+      function finish() { clearTimeout(t1); clearTimeout(t2); acs.forEach(function (a) { try { a.abort(); } catch (e) {} }); }
+      function launch() {
+        var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        if (ac) acs.push(ac);
+        pending++;
+        once(ac ? ac.signal : undefined).then(function (html) {
+          if (done) return; done = true; finish();
+          htmlCache[key] = { html: html, ts: Date.now() }; resolve(html);
+        }, function (e) {
+          pending--;
+          if (done) return;
+          if (e && e.fatal) { done = true; finish(); reject(e); return; }
+          if (pending === 0) {
+            if (!hedged) { hedged = true; launch(); }            // quick failure: one immediate retry
+            else { done = true; finish(); reject(e); }
+          }
+        });
+      }
+      t1 = _st.call(window, function () { if (!done && !hedged) { hedged = true; launch(); } }, 1500);
+      t2 = _st.call(window, function () { if (!done) { done = true; finish(); reject(new Error('timeout')); } }, 6000);
+      launch();
+    });
   }
   function fetchPage(u) {
     var key = normPath(u.pathname) + u.search, c = htmlCache[key];
@@ -432,22 +462,23 @@
     });
   }
 
-  // Thin progress line at the top: shown only when the page has to come from the network (not prefetched yet),
-  // so a tap on Join / Login / a menu item always reacts at once instead of looking frozen.
-  var navBarEl = null, navBarT = null;
+  // Tap feedback while a page has to come from the network: NO progress line. If the page is not there after 0.4s
+  // the content dims slightly (and un-dims the moment the page arrives), so a tap never looks dead.
+  var navBarT = null, navStyleOn = false;
   function navBar(on) {
     try {
       if (on) {
-        if (navBarEl) return;
-        navBarEl = document.createElement('div');
-        navBarEl.setAttribute('style', 'position:fixed;top:0;left:0;height:3px;width:8%;background:#00c853;z-index:2147483647;pointer-events:none;box-shadow:0 0 8px #00c853;transition:width 6s cubic-bezier(.1,.8,.2,1),opacity .25s');
-        document.documentElement.appendChild(navBarEl);
-        _st.call(window, function () { if (navBarEl) navBarEl.style.width = '85%'; }, 30);
-      } else if (navBarEl) {
-        var el = navBarEl; navBarEl = null;
-        el.style.transition = 'width .15s, opacity .25s'; el.style.width = '100%';
-        _st.call(window, function () { el.style.opacity = '0'; }, 120);
-        _st.call(window, function () { if (el.parentNode) el.parentNode.removeChild(el); }, 420);
+        if (navBarT) return;
+        if (!navStyleOn) {
+          navStyleOn = true;
+          var st = document.createElement('style');
+          st.textContent = 'html.sb-nav-wait body{opacity:.82;transition:opacity .18s}';
+          document.head.appendChild(st);
+        }
+        navBarT = _st.call(window, function () { document.documentElement.classList.add('sb-nav-wait'); }, 400);
+      } else {
+        if (navBarT) { clearTimeout(navBarT); navBarT = null; }
+        document.documentElement.classList.remove('sb-nav-wait');
       }
     } catch (e) {}
   }
