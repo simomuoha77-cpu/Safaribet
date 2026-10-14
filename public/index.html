@@ -1395,6 +1395,7 @@ function restoreHomeCat(){
     if (fb) fb.style.display = showF ? 'flex' : 'none';
     if (mk) mk.style.display = showF ? 'flex' : 'none';
     lastRenderedMatchIds = window.__sbHomeSnap.ids || null;
+    lastRenderedViewKey = currentViewKey();
     try { progressiveRendered = document.querySelectorAll('#matchList [id^="mc_"]').length; } catch(e) {}
     saveHomeState();
   } else if (o.cat !== currentCat) pickCat(tab);
@@ -2109,6 +2110,15 @@ function showComingSoon(label, icon) {
   </div>`;
 }
 
+// Refresh a tab's data only once the user has stopped switching tabs (and only if the data is not already fresh),
+// so the tap paints at once instead of competing with a network request + JSON parsing of hundreds of games.
+function afterTabSettles(fn){
+  clearTimeout(window.__tabRefreshT);
+  window.__tabRefreshT = setTimeout(() => {
+    if (Date.now() - (window.__sbSyncOk || 0) < 8000) return;
+    try { const r = fn(); if (r && r.catch) r.catch(() => {}); } catch(e) {}
+  }, 700);
+}
 async function loadCat(cat) {
   const el = document.getElementById('matchList');
 
@@ -2117,7 +2127,7 @@ async function loadCat(cat) {
   if (cat === 'featured') {
     if (allMatches && allMatches.length) {
       applyFilters(true);
-      loadAllMatches(true).catch(() => {});
+      afterTabSettles(() => loadAllMatches(true));
     } else {
       loadAllMatches(false);
     }
@@ -2171,7 +2181,7 @@ async function loadCat(cat) {
     if (footballTabCache.data && footballTabCache.data.length) {
       allMatches = footballTabCache.data;
       applyFilters(true);
-      refreshFootballTab(true).catch(() => {});
+      afterTabSettles(() => refreshFootballTab(true));
       return;
     }
     if (progressiveMatches?.length) {
@@ -2181,7 +2191,7 @@ async function loadCat(cat) {
         footballTabCache.ts = Date.now();
         allMatches = footballTabCache.data;
         applyFilters(true);
-        refreshFootballTab(true).catch(() => {});
+        afterTabSettles(() => refreshFootballTab(true));
         return;
       }
     }
@@ -2191,7 +2201,7 @@ async function loadCat(cat) {
       footballTabCache.data = allMatches.slice();
       footballTabCache.ts = Date.now();
       applyFilters(true);
-      refreshFootballTab(true).catch(() => {});
+      afterTabSettles(() => refreshFootballTab(true));
       return;
     }
     // No Football cache yet: keep the current content visible.
@@ -2562,6 +2572,16 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
+    if (sport === 'live' && currentCat !== 'live') {
+      // The live poll answered while another tab is showing: keep the snapshot for later, never draw into this tab.
+      if (d && d.success && !d.warming) {
+        liveTabCache.data = (d.data || []).slice(); liveTabCache.ts = Date.now();
+        try { localStorage.setItem(cacheKey, JSON.stringify({ data: d.data || [], ts: Date.now() })); } catch(e) {}
+      }
+      setUpdatingIndicator(false);
+      return;
+    }
+
     if(!d.success||!d.data||!d.data.length){
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
@@ -2581,7 +2601,10 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     if (sport === 'live' && currentCat === 'live') {
       // Live is the active tab: replace its snapshot cleanly with the
       // authoritative live response. No Highlights merge is allowed here.
-      renderMatches(d.data, false);
+      // Same games as already on screen -> patch odds/scores in place (no flicker); games that ended or newly
+      // started change the list -> replace it so the Live tab always shows exactly what is live now.
+      const same = d.data.map(m => m.matchId).join(',') === lastRenderedMatchIds && lastRenderedViewKey === currentViewKey();
+      renderMatches(d.data, same);
     } else {
       renderMatches(d.data, usedCache || silent);
     }
@@ -2633,7 +2656,11 @@ function pickSport(el){
   }
 }
 
-let lastRenderedMatchIds = null; // tracks what's currently in the DOM, so silent refreshes can skip the expensive full rebuild when nothing structurally changed
+let lastRenderedMatchIds = null;
+// Which view (tab + filter + league + market tab) the list on screen belongs to. A background refresh may MERGE into
+// the list only while the view is the same; switching view must replace the list completely.
+let lastRenderedViewKey = null;
+function currentViewKey(){ return [currentCat, currentFilter, currentLeague, currentMarket].join('|'); } // tracks what's currently in the DOM, so silent refreshes can skip the expensive full rebuild when nothing structurally changed
 
 // ── "UPDATING…" INDICATOR ──
 // Small, non-disruptive signal that a background refresh is in flight —
@@ -2841,20 +2868,36 @@ function renderMatches(matches, silent=false){
   <div style="font-size:13px;color:var(--mt)">Check back shortly — fixtures are added regularly.</div>
 </div>`;
     lastRenderedMatchIds = null;
+    lastRenderedViewKey = null;
     restoreHomeScrollOnce();
     return;
   }
 
   const newIds = matches.map(m=>m.matchId).join(',');
   const snapMode = !!window.__sbSnapActive; window.__sbSnapActive = false;   // only the first render after a snapshot paint
-  const sameMatchSet = (silent || snapMode) && lastRenderedMatchIds === newIds;
+  const viewKey = currentViewKey();
+  const sameView = lastRenderedViewKey === viewKey;
+  const sameMatchSet = (silent || snapMode) && lastRenderedMatchIds === newIds && (sameView || snapMode);
 
-  if(silent && !sameMatchSet && lastRenderedMatchIds){
+  if(silent && !sameMatchSet && lastRenderedMatchIds && sameView){
     // Background refreshes must NEVER destroy the list the user is currently
     // scrolling. Keep every already-rendered match, update matching records with
     // fresh odds/scores, and append only genuinely new matches. A temporary feed
     // response that omits a game therefore cannot make that game disappear.
     const incoming = new Map(matches.map(m => [String(m.matchId), m]));
+    if (currentCat !== 'live') {
+      // A game that has kicked off (we KNOW it is live/finished) and is no longer in this view's list leaves it.
+      // A game that is merely missing from one response is kept (a hiccup must not make games vanish).
+      const known = new Map((allMatches || []).map(m => [String(m.matchId), m]));
+      progressiveMatches = progressiveMatches.filter(om => {
+        const id = String(om.matchId), k = known.get(id);
+        if (k && (k.status === 'live' || k.status === 'finished') && !incoming.has(id)) {
+          const node = document.getElementById('mc_' + id); if (node) node.remove();
+          return false;
+        }
+        return true;
+      });
+    }
     const merged = [];
     const seen = new Set();
     progressiveMatches.forEach(oldMatch => {
@@ -2884,6 +2927,7 @@ function renderMatches(matches, silent=false){
       progressiveRendered += newMatches.length;
     }
     lastRenderedMatchIds = merged.map(m=>m.matchId).join(',');
+    lastRenderedViewKey = viewKey;
     return;
   }
 
@@ -2897,6 +2941,7 @@ function renderMatches(matches, silent=false){
     // rebuilding the whole list (and losing whatever button the user's
     // finger is on) every single 20s background refresh.
     patchMatchesInPlace(matches);
+    lastRenderedViewKey = viewKey;
     return;
   }
 
@@ -2905,8 +2950,11 @@ function renderMatches(matches, silent=false){
     document.querySelectorAll('[data-odds]').forEach(b=>{ prevOdds[b.id]=parseFloat(b.dataset.odds); });
   }
 
+  // Switching tab / filter shows the new list from the top (the old scroll position belongs to the old list).
+  if (lastRenderedViewKey && !sameView && !snapMode) { try { window.scrollTo(0, 0); } catch(e) {} }
   renderMatchesProgressively(matches);
   lastRenderedMatchIds = newIds;
+  lastRenderedViewKey = viewKey;
 
   // Cache the actual rendered HTML for the default Highlights view. Every
   // "page" here is a full reload (not a SPA route), so on the next visit to
