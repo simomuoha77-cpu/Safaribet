@@ -149,6 +149,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 // for backward compatibility with any links already shared before this change.
 const urlMatchId = new URLSearchParams(location.search).get('id');
 const matchId = urlMatchId || sessionStorage.getItem('currentMatchId');
+// Which game this page shows. Every asynchronous step below checks it, so a slow answer for the game the user just
+// LEFT can never be drawn into the page of the game they opened next (the new page overwrites this marker).
+document.documentElement.dataset.sbMatch = String(matchId || '');
+const isCurrent = () => document.documentElement.dataset.sbMatch === String(matchId || '');
 let matchData = null;
 let slip = JSON.parse(localStorage.getItem('betslip') || '[]');
 
@@ -222,7 +226,9 @@ function mmMark(k){ if (mmTimings[k] == null) mmTimings[k] = Math.round(performa
 function mmReport(src, d){
   try {
     const st = d && d.timings ? d.timings : null;
-    console.log('[markets-timing]', JSON.stringify({ client: mmTimings, server: st, src }));
+    let ct = null; try { const t = +sessionStorage.getItem('sb_click_ts'); if (t) ct = Date.now() - t; } catch(e) {}
+    mmTimings.clickToMarketsMs = ct;
+    console.log('[markets-timing]', JSON.stringify({ client: mmTimings, server: st, src, clickToMarketsMs: ct }));
   } catch(e) {}
 }
 // Newest-wins guard: a slow older response can never overwrite newer odds.
@@ -274,6 +280,7 @@ async function loadMatch(){
       : fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 7000);
     // never wait on one slow/hung request: after 7s fall back to polling
     const d = await Promise.race([first, new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 7000))]);
+    if (!isCurrent()) return;
     mmMark('networkDone');
     if (d && d.pending) {            // server is still resolving this fixture — keep polling quietly
       pollFullMarkets();
@@ -306,10 +313,12 @@ async function pollFullMarkets(){
   _pollingMarkets = true;
   try {
     for (let i = 0; i < 30; i++) {
-      if (i === 6) showMarketsStuck();
+      if (!isCurrent()) return;
+      if (i === 4) showMarketsStuck();          // ~3s without markets: say so and offer Retry (never a blank page)
       await new Promise(r => setTimeout(r, i < 4 ? 700 : 2000));
       try {
         const d = await fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 7000);
+        if (!isCurrent()) return;
         if (d && d.success && d.data && !isStaleResponse(d)) {
           matchData = d.data; matchData.__full = true;
           renderHeader(); renderMarkets(false); updateSlipBar();
@@ -588,6 +597,7 @@ function startMarketsRefresh(){
     try {
       const r = await fetch('/api/odds/match/' + encodeURIComponent(matchId) + '?rich=1', { cache: 'no-store' });
       const d = await r.json();
+      if (!isCurrent() || !host.isConnected) return;
       if (mySeq === _refreshSeq && d && d.success && d.data && !d.data.marketsPending && !isStaleResponse(d)) {
         if (patchMarkets(d.data)) { renderHeader(); updateSlipBar(); }
         _refreshFails = 0;

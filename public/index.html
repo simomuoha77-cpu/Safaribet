@@ -3185,6 +3185,8 @@ function findKnownMatch(matchId){
 }
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
+  try { sessionStorage.setItem('sb_click_ts', String(Date.now())); } catch(e) {}                 // for the click -> markets timing
+  try { if (window.SB && SB.prefetchMatch) SB.prefetchMatch(matchId); } catch(e) {}               // start fetching the markets NOW, before the page even opens
   try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); sessionStorage.setItem('sb_home_scroll', JSON.stringify({ y: window.scrollY||0, ts: Date.now() })); } catch(e) {}
   saveHomeState();
   // Snapshot of exactly what is on screen, so Back can paint it again instantly (no flash / blank / reload).

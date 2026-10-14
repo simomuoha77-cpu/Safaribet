@@ -661,7 +661,7 @@
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
     var guest = true; try { guest = !localStorage.getItem('token'); } catch (e) {}
     // Logged-in users: Deposit and Withdraw are warmed FIRST so tapping them opens instantly.
-    (guest ? ['/login', '/register'] : ['/deposit', '/withdraw']).concat(['/my-bets', '/account', '/casino', '/']).forEach(function (p, i) {
+    (guest ? ['/login', '/register'] : ['/deposit', '/withdraw']).concat(['/match', '/my-bets', '/account', '/casino', '/']).forEach(function (p, i) {
       if (normPath(location.pathname) === p || htmlCache[p]) return;
       _st.call(window, function () { if (!htmlCache[p]) fetchHtml(new URL(p, location.href)).catch(function () {}); }, 400 * (i + 1));
     });
