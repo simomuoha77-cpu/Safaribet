@@ -464,6 +464,11 @@
 
   // Tap feedback while a page has to come from the network: NO progress line. If the page is not there after 0.4s
   // the content dims slightly (and un-dims the moment the page arrives), so a tap never looks dead.
+  try {   // belt and braces: the old green line can never show, even if a stale copy of the old code is still around
+    var ks = document.createElement('style');
+    ks.textContent = 'html > div[style*="z-index:2147483647"][style*="height:3px"]{display:none!important}';
+    document.head.appendChild(ks);
+  } catch (e) {}
   var navBarT = null, navStyleOn = false;
   function navBar(on) {
     try {

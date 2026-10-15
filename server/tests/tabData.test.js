@@ -7,10 +7,11 @@ function extract(name) {
   const n = /\n(async )?function |\n\/\/ ──|\nconst [a-zA-Z]+ *=|\nlet [a-zA-Z]+/.exec(rest);
   return html.slice(start, start + 10 + (n ? n.index : rest.length));
 }
+function extractLine(name) { const i = html.indexOf('function ' + name + '('); return html.slice(i, html.indexOf('\n', i)); }
 const log = { apply: [], nonfb: [], html: [], football: 0, sport: [] };
 const el = { set innerHTML(v) { log.html.push(v); }, get innerHTML() { return ''; } };
-const FEED = [{ matchId: 'b1', sport: 'basketball', status: 'upcoming' }, { matchId: 'f1', sport: 'football', status: 'upcoming' }, { matchId: 'f2', sport: 'football', status: 'upcoming' }];
-const FB = [{ matchId: 'f1', sport: 'football', status: 'upcoming' }, { matchId: 'f2', sport: 'football', status: 'upcoming' }, { matchId: 'f3', sport: 'football', status: 'upcoming' }];
+const FEED = [{ matchId: 'b1', sport: 'basketball', status: 'upcoming' }, { matchId: 'f1', sport: 'soccer_epl', status: 'upcoming' }, { matchId: 'f2', sport: 'soccer_ucl', status: 'upcoming' }];
+const FB = [{ matchId: 'f1', sport: 'soccer_epl', status: 'upcoming' }, { matchId: 't9', sport: 'tennis', status: 'upcoming' }, { matchId: 'f2', sport: 'soccer_ucl', status: 'upcoming' }, { matchId: 'f3', sport: 'soccer_other', status: 'upcoming' }];
 const BK = [{ matchId: 'b1', sport: 'basketball', status: 'upcoming' }, { matchId: 'b2', sport: 'basketball', status: 'upcoming' }];
 let net = {};   // url -> payload
 const ctx = {
@@ -25,6 +26,7 @@ const ctx = {
   setUpdatingIndicator() {}, updateTodayCount() {}, noMatchesHTML: () => 'NOMATCH', showComingSoon() {}, stopProgressiveRender() {}
 };
 vm.createContext(ctx);
+vm.runInContext(extractLine('isFootballItem'), ctx);
 ['afterTabSettles', 'loadCat', 'refreshSportTab', 'refreshFootballTab', 'loadAllMatches'].forEach(n => vm.runInContext(extract(n), ctx));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.log((c ? 'PASS ' : 'FAIL ') + n); };
@@ -36,12 +38,12 @@ const reset = () => { log.apply = []; log.nonfb = []; log.html = []; };
   // 1) Highlights -> Basketball -> Football: Football shows football games only
   ctx.currentCat = 'basketball'; await ctx.loadCat('basketball'); await wait(30);
   reset(); ctx.currentCat = 'football'; await ctx.loadCat('football');
-  check('Basketball -> Football draws football games only (instantly, from the feed)', log.apply[0] === 'f1,f2');
+  check('Basketball -> Football draws football games only (instantly, from the feed, real sport keys)', log.apply[0] === 'f1,f2');
 
   // 2) while Football is open, the 20s Highlights refresh must NOT replace the football list
   reset(); await ctx.loadAllMatches(true); await wait(40);
   check('background Highlights refresh does not draw Highlights into the Football tab', !log.apply.some(a => a.includes('b1')));
-  check('...and the Football tab refreshes from its own feed (f3 appears)', ctx.allMatches.map(m => m.matchId).join(',') === 'f1,f2,f3');
+  check('...and the Football tab refreshes from its own feed (f3 appears, a stray tennis row is dropped)', ctx.allMatches.map(m => m.matchId).join(',') === 'f1,f2,f3');
 
   // 3) while Basketball is open, the refresh updates basketball, never Highlights
   reset(); ctx.currentCat = 'basketball'; ctx.allMatches = BK.slice(); await ctx.loadAllMatches(true); await wait(40);

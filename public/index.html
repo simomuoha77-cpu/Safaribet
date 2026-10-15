@@ -48,6 +48,8 @@
 <script src="/js/router.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/><noscript><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/></noscript>
 <style>
+/* no navigation progress line, ever (also hides the old one if an old router.js is still cached) */
+html > div[style*="z-index:2147483647"][style*="height:3px"]{display:none!important}
 :root{
   --g:#00c853;--gg:rgba(0,200,83,0.12);
   --bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;
@@ -1056,6 +1058,9 @@ let allMatches=[], currentFilter='highlights', currentMarket='1x2', currentLeagu
 // The Highlights feed (ALL sports). Background refreshes store it here and draw it ONLY while the Highlights tab is open;
 // allMatches is just "the data of the tab on screen", so a refresh can never put Highlights games into Football/Basketball.
 let featuredMatches=[];
+// Football fixtures carry a sport key such as 'football', 'soccer_epl', 'soccer_ucl'; every other sport has its own
+// name ('tennis', 'basketball', ...). Used so the Football tab can only ever contain football.
+function isFootballItem(m){ const k = String((m && m.sport) || '').toLowerCase(); return !k || k === 'football' || k.indexOf('soccer') === 0; }
 let matchesEtag=null; // last ETag /api/odds/featured sent us — lets the next refresh be a cheap conditional request
 let homeScrollRestored=false; // guards against restoring scroll more than once per page load
 
@@ -2197,8 +2202,7 @@ async function loadCat(cat) {
       return;
     }
     // Football is the football games of the Highlights feed (instant), refreshed from the football feed afterwards.
-    const isFb = m => m && (String(m.sport||'').toLowerCase() === 'football' || String(m.sport||'').toLowerCase() === 'soccer');
-    const fromFeed = (featuredMatches || []).filter(isFb);
+    const fromFeed = (featuredMatches || []).filter(isFootballItem);
     if (fromFeed.length) {
       footballTabCache.data = fromFeed;
       footballTabCache.ts = Date.now();
@@ -2283,11 +2287,12 @@ async function refreshFootballTab(silent=false){
   try {
     const r = await fetch('/api/sports/football', { cache:'no-store' });
     const d = await r.json();
-    if (d.success && Array.isArray(d.data) && d.data.length) {
-      footballTabCache.data = d.data;
+    const rows = (d.success && Array.isArray(d.data)) ? d.data.filter(isFootballItem) : [];       // never anything but football
+    if (rows.length) {
+      footballTabCache.data = rows;
       footballTabCache.ts = Date.now();
       if (currentCat === 'football') {
-        allMatches = d.data;
+        allMatches = rows;
         applyFilters(!!silent);
       }
     } else if (currentCat === 'football' && !(allMatches && allMatches.length)) {
