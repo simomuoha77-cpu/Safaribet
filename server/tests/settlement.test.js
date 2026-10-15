@@ -3,8 +3,9 @@ const Module = require('module'); const orig = Module._load;
 const store = new Map();                    // bet _id -> doc
 const walletCalls = [], wallet = { credits: [], failNext: 0 }, history = [];
 const Bet = {
+  find: q => ({ limit: async () => [...store.values()].filter(d => d.payoutState === q.payoutState && q.status.$in.includes(d.status) && d.settledAt && d.settledAt <= q.settledAt.$lte).map(d => Object.assign(d, { save: async () => {} })) }),
   findOneAndUpdate: async (q, u) => { const d = store.get(q._id); if (!d || d.status !== q.status) return null; Object.assign(d, u.$set); return d; },
-  updateOne: async (q, u) => { const d = store.get(q._id); if (d && d.status === q.status) { Object.assign(d, u.$set || {}); for (const k in (u.$unset || {})) delete d[k]; } return {}; }
+  updateOne: async (q, u) => { const d = store.get(q._id); if (d && (q.status === undefined || d.status === q.status)) { Object.assign(d, u.$set || {}); for (const k in (u.$unset || {})) delete d[k]; } return {}; }
 };
 Module._load = function (r, p, i) {
   if (r.endsWith('models/Bet')) return Bet;
@@ -63,5 +64,23 @@ const check = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? 'PAS
   mkBet(7, [{ result: 'won', odds: 1.5 }, { result: 'lost', odds: 2.0 }]);
   const mix = await _test.finalizeBet({ _id: 7, userId: 'u1', betCode: 'BET7', stake: 100, status: 'pending', selections: [{ result: 'won', odds: 1.5 }, { result: 'lost', odds: 2.0 }], save: async () => {} });
   check('accumulator with one lost leg loses', mix.status === 'lost');
+  // 7) a win paid normally ends as payoutState 'paid'
+  check('a paid win is marked payoutState=paid', store.get(1).payoutState === 'paid' || store.get(3).payoutState === 'paid');
+  // 8) the server was stopped by a deploy right after the bet was claimed (status won, payout still owed)
+  wallet.credits.length = 0; history.length = 0;
+  store.set(20, { _id: 20, userId: 'u1', betCode: 'BET20', stake: 100, status: 'won', payoutState: 'pending', netPayout: 180, settledAt: new Date(Date.now() - 5 * 60000), selections: [] });
+  const fixed = await _test.recoverUnpaidPayouts();
+  check('recovery pays a payout interrupted by a restart', fixed === 1 && wallet.credits.length === 1 && wallet.credits[0] === 180 && store.get(20).payoutState === 'paid');
+  const fixed2 = await _test.recoverUnpaidPayouts();
+  check('running recovery again pays nothing more', fixed2 === 0 && wallet.credits.length === 1);
+  // 9) payout had actually been credited but the server died before the state update: still never paid twice
+  store.set(21, { _id: 21, userId: 'u1', betCode: 'BET21', stake: 100, status: 'won', payoutState: 'pending', netPayout: 180, settledAt: new Date(Date.now() - 5 * 60000), selections: [] });
+  history.push({ userId: 'u1', reference: 'BET21', reason: 'bet_payout' });
+  const before = wallet.credits.length; await _test.recoverUnpaidPayouts();
+  check('already-credited payout is not credited again by recovery', wallet.credits.length === before && store.get(21).payoutState === 'paid');
+  // 10) too fresh to be considered stuck (a payout is probably still running)
+  store.set(22, { _id: 22, userId: 'u1', betCode: 'BET22', stake: 100, status: 'won', payoutState: 'pending', netPayout: 180, settledAt: new Date(), selections: [] });
+  const before2 = wallet.credits.length; await _test.recoverUnpaidPayouts();
+  check('a just-claimed payout is left alone for 90s', wallet.credits.length === before2 && store.get(22).payoutState === 'pending');
   console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);
 })();

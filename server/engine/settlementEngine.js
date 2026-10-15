@@ -282,7 +282,8 @@ async function finalizeBet(bet) {
   }
 
   const settledAt = new Date();
-  if (!(await claimBet(bet, { status, payout, netPayout, settledAt }))) {
+  const owesPayout = (status === 'won' || status === 'void') && netPayout > 0;
+  if (!(await claimBet(bet, { status, payout, netPayout, settledAt, ...(owesPayout ? { payoutState: 'pending' } : {}) }))) {
     console.log(`  [Settlement] ${bet.betCode} was already settled elsewhere - skipped`);
     return { status: 'skipped', netPayout: 0 };
   }
@@ -295,10 +296,11 @@ async function finalizeBet(bet) {
   try {
     if (status === 'won' && netPayout > 0) await payWinner(bet, netPayout);
     else if (status === 'void' && netPayout > 0) await payRefund(bet);
+    if (owesPayout) await Bet.updateOne({ _id: bet._id }, { $set: { payoutState: 'paid' } }).catch(() => {});
   } catch (e) {
     // The wallet credit failed: reopen the bet so the next settlement run pays it (payout is idempotent).
     console.error(`  [Settlement] payout failed for ${bet.betCode}, will retry next run:`, e.message);
-    await Bet.updateOne({ _id: bet._id, status }, { $set: { status: 'pending' }, $unset: { settledAt: 1 } }).catch(() => {});
+    await Bet.updateOne({ _id: bet._id, status }, { $set: { status: 'pending' }, $unset: { settledAt: 1, payoutState: 1 } }).catch(() => {});
     return { status: 'retry', netPayout: 0 };
   }
 
@@ -450,15 +452,45 @@ async function gradeProviderSel(s, matchRows) {
   return { status: r.status, score: r.score || null, periodLabel: r.periodLabel || (period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT'), source: 'market-rules', reason: r.reason || null };
 }
 
+// Finishes any payout that was claimed but not confirmed (e.g. the server was stopped for a deploy in between).
+// payWinner / payRefund are idempotent, so running this twice - or racing a normal payout - can never pay twice.
+let lastRecovery = 0;
+async function recoverUnpaidPayouts() {
+  lastRecovery = Date.now();
+  let fixed = 0;
+  try {
+    const stuck = await Bet.find({ payoutState: 'pending', status: { $in: ['won', 'void'] }, settledAt: { $lte: new Date(Date.now() - 90 * 1000) } }).limit(100);
+    for (const bet of stuck) {
+      try {
+        if (bet.status === 'won' && bet.netPayout > 0) await payWinner(bet, bet.netPayout);
+        else if (bet.status === 'void' && bet.netPayout > 0) await payRefund(bet);
+        await Bet.updateOne({ _id: bet._id }, { $set: { payoutState: 'paid' } });
+        fixed++;
+        console.log(`  [Recovery] completed unpaid payout for ${bet.betCode}`);
+      } catch (e) { console.error(`  [Recovery] ${bet.betCode} still unpaid, will retry:`, e.message); }
+    }
+  } catch (e) { console.error('[Recovery] sweep failed:', e.message); }
+  return fixed;
+}
+
+// Resolves once no settlement run is in progress (used by the graceful shutdown on deploys).
+async function whenIdle(timeoutMs = 15000) {
+  const t = Date.now();
+  while (settlementRunning && Date.now() - t < timeoutMs) await new Promise(r => setTimeout(r, 200));
+  return !settlementRunning;
+}
+
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
 
 async function runSettlement(includeApiFetch = true) {
+  if (global.__sbShuttingDown) return { settled: 0, paid: 0, skipped: true };       // server is stopping: start nothing new
   if (settlementRunning) {
     console.log('[Settlement] Skipped — a settlement run is already in progress.');
     return { settled: 0, paid: 0, skipped: true };
   }
   settlementRunning = true;
   try {
+    if (Date.now() - lastRecovery > 5 * 60 * 1000) await recoverUnpaidPayouts();     // first pass after a restart, then every 5 min
     return await _runSettlementInner(includeApiFetch);
   } finally {
     settlementRunning = false;
@@ -734,4 +766,4 @@ function settleSoon(delayMs = 1500) {
   if (settleSoonTimer.unref) settleSoonTimer.unref();
 }
 
-module.exports = { runSettlement, settleSoon, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost } };
+module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts } };

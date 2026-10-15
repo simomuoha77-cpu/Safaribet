@@ -28,6 +28,8 @@ const scheduler     = require('./engine/scheduler');
 
 const app    = express();
 const server = http.createServer(app);
+// While the server is stopping (a deploy / restart) tell clients not to reuse connections.
+app.use((req, res, next) => { if (global.__sbShuttingDown) res.set('Connection', 'close'); next(); });
 // Behind Render's proxy every request otherwise looks like it comes from the proxy's own address, so ALL players
 // shared one rate-limit bucket (e.g. 15 logins per 15 minutes for everybody together). With this, req.ip is the
 // real player's address. 1 = one proxy in front (Render). If Cloudflare is also in front, set TRUST_PROXY_HOPS=2.
@@ -118,27 +120,12 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   ]);
 });
 
-// ── BUILD ID: changes on every deploy. The browser asks /api/version and reloads itself when it differs. ──
-const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || process.env.SOURCE_VERSION || String(Date.now());
-app.get('/api/version', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({ build: BUILD_ID });
-});
-
-// Every non-API GET is revalidated (ETag -> cheap 304 when unchanged, fresh file right after a deploy).
-// Images/fonts below override this with their own longer cache.
-app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  next();
-});
-
 app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,
-  etag: true,
   setHeaders: (res, filePath) => {
-    // HTML / JS / CSS / JSON: always revalidate so a deploy shows on the very next load
-    if (/\.(html|js|css|json|webmanifest|txt|xml)$/i.test(filePath) && !filePath.endsWith('sw.js')) {
+    // No caching for HTML (the service worker serves the cached copy instantly and refreshes it)
+    if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     } else if (filePath.endsWith('sw.js')) {
       res.setHeader('Cache-Control', 'no-cache');            // the worker itself must always be re-checked
@@ -426,6 +413,30 @@ mongoose.connect(process.env.MONGO_URI, {
     console.error('❌ MongoDB connection failed:', err.message);
     process.exit(1);
   });
+
+// ── Graceful shutdown ──
+// A deploy sends SIGTERM. Before, the process died at once, which could cut a bet half-way (stake taken, bet not
+// saved) or a payout half-way. Now: stop accepting NEW requests, let the running ones finish (bets being placed,
+// payouts being credited), wait for a running settlement, close the database, then exit. Hard stop after 25s.
+async function gracefulShutdown(signal) {
+  if (global.__sbShuttingDown) return;
+  global.__sbShuttingDown = true;
+  console.log(`🛑 ${signal} received - finishing requests in progress before stopping...`);
+  const force = setTimeout(() => { console.error('🛑 shutdown forced after 25s'); process.exit(1); }, 25000);
+  try {
+    await Promise.race([
+      new Promise(resolve => { try { server.close(() => resolve()); if (server.closeIdleConnections) server.closeIdleConnections(); } catch (e) { resolve(); } }),
+      new Promise(resolve => setTimeout(resolve, 15000))
+    ]);
+    await require('./engine/settlementEngine').whenIdle(8000).catch(() => {});
+    await mongoose.connection.close();
+  } catch (e) { console.error('🛑 shutdown error:', e.message); }
+  clearTimeout(force);
+  console.log('🛑 stopped cleanly');
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
 // Handle crashes gracefully
 process.on('unhandledRejection', err => { console.error('[Unhandled]', err.message); });

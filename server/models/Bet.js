@@ -86,6 +86,9 @@ const betSchema = new mongoose.Schema({
   status:      { type: String, enum: ['pending','won','lost','void','cancelled','cashed_out'], default: 'pending', index: true },
   idempotencyKey: { type: String },
   settledAt:   { type: Date },
+  // 'pending' from the moment a won/void bet is claimed for settlement until its wallet credit is confirmed ('paid').
+  // If the server restarts in between (a deploy), the recovery sweep finishes the payout instead of leaving it unpaid.
+  payoutState: { type: String, index: true },
   ipAddress:   { type: String },
   // Cash Out
   cashedOut:        { type: Boolean, default: false },
