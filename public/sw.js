@@ -74,11 +74,14 @@ async function networkFirst(req, url) {
   const hit = await cache.match(key);
   const wait = (ms, fn) => new Promise((resolve, reject) => setTimeout(() => fn(resolve, reject), ms));
   if (!hit) {
-    // nothing cached for this page: give the server 12s, then show the reconnect page instead of a dead screen
-    return nav ? Promise.race([net, wait(12000, (_, rej) => rej(new Error('slow')))]) : net;
+    // nothing cached for this page: give the server 2.5s, then show the branded reconnect page (never a black screen) instead of a dead screen
+    return nav ? Promise.race([net, wait(2500, (_, rej) => rej(new Error('slow')))]) : net;
   }
   // cached copy is ONLY a safety net: network error / 5xx, or a server that does not answer (8s for pages, 15s otherwise)
-  return Promise.race([net.catch(() => hit), wait(nav ? 8000 : spa ? 3000 : 15000, res => res(hit))]);
+  // A page the user taps open (link, app icon) must never sit on a black screen waiting for a sleeping server:
+  // when a cached copy exists, give the network only 1.2s, then show the cached page at once. The network
+  // request keeps going and refreshes the cache, so the next open is up to date.
+  return Promise.race([net.catch(() => hit), wait(nav ? 1200 : spa ? 3000 : 15000, res => res(hit))]);
 }
 
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
