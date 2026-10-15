@@ -214,6 +214,13 @@ function refreshLiveCache() {
   return liveRefreshPromise;
 }
 const LIVE_FRESH_MS = 30000;
+// Live games must not vanish because the provider hiccuped. Every game seen live is remembered per sport:
+//  - a sport whose fetch FAILED keeps its last known live games (for up to LIVE_FAIL_KEEP_MS);
+//  - a game that merely dropped out of a SUCCESSFUL answer (halftime, a provider blip) stays for LIVE_GRACE_MS.
+// Only after that does it leave the Live tab, so a finished game still disappears within about 90 seconds.
+const liveSeenBySport = new Map();            // sport -> Map(matchId -> { m, ts })
+const LIVE_GRACE_MS = 90000;
+const LIVE_FAIL_KEEP_MS = 180000;
 async function refreshLiveCacheInner() {
   if (liveRefreshInFlight) return;
 
@@ -229,15 +236,27 @@ async function refreshLiveCacheInner() {
       sports.map(async sport => {
         try {
           const raw = await sofaBets.getLiveFixtures(sport);
-          return buildLiveMatches(sport, raw);
+          return { sport, ok: true, list: buildLiveMatches(sport, raw) };
         } catch (e) {
           console.warn(`[sports/live/${sport}]`, e.message);
-          return [];
+          return { sport, ok: false, list: [] };
         }
       })
     );
 
-    const merged = saveLiveCache(parts.flat());
+    const now = Date.now();
+    const all = [];
+    for (const part of parts) {
+      let seen = liveSeenBySport.get(part.sport);
+      if (!seen) { seen = new Map(); liveSeenBySport.set(part.sport, seen); }
+      if (part.ok) for (const m of part.list) if (m && m.matchId) seen.set(m.matchId, { m, ts: now });
+      const keepMs = part.ok ? LIVE_GRACE_MS : LIVE_FAIL_KEEP_MS;
+      for (const [id, e] of seen) {
+        if (now - e.ts > keepMs) seen.delete(id);
+        else all.push(e.m);
+      }
+    }
+    const merged = saveLiveCache(all);
 
     console.log(
       `[sports/live] background live refresh: ${merged.length} mixed live matches`

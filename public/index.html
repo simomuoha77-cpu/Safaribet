@@ -1768,11 +1768,12 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       // Seed Live from the already-fetched Highlights payload so switching
       // Highlights -> Live is effectively zero-wait. The dedicated live API
       // refreshes this silently afterward.
+      // Highlights only carries FOOTBALL. It may start an empty Live list, but must never replace the full
+      // all-sports Live list (that is what made games disappear). The dedicated live feed owns that list.
       const instantLive = featuredMatches.filter(m => m && m.status === 'live');
-      if (instantLive.length) {
+      if (instantLive.length && !(liveTabCache.data && liveTabCache.data.length)) {
         liveTabCache.data = instantLive.slice();
         liveTabCache.ts = Date.now();
-        try { localStorage.setItem('sb_matches_cache_live', JSON.stringify({ data: instantLive, ts: Date.now() })); } catch(e) {}
       }
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
@@ -2648,7 +2649,13 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       return;
     }
 
+    if (sport === 'live' && d && d.success && d.data && d.data.length) window.__liveEmptyStreak = 0;
     if(!d.success||!d.data||!d.data.length){
+      // Live: one or two empty answers in a row are a provider blip, not "no live games". Keep what is showing.
+      if (sport === 'live' && liveTabCache.data && liveTabCache.data.length && (window.__liveEmptyStreak = (window.__liveEmptyStreak || 0) + 1) <= 2) {
+        setUpdatingIndicator(false);
+        return;
+      }
       if (usedCache) { setUpdatingIndicator(false); return; } // keep showing the still-reasonably-fresh cached list rather than flashing to an empty state
       const isLiveTab = sport === 'live';
       el.innerHTML=`<div class="empty" style="padding:40px 20px">
