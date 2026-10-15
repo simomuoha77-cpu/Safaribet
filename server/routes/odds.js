@@ -811,3 +811,4 @@ async function deduplicateMatches() { return 0; }
 
 module.exports = router;
 module.exports.deduplicateMatches = deduplicateMatches;
+module.exports.applyOddsPipeline = applyOddsPipeline;

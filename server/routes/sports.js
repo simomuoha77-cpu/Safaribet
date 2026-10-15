@@ -34,16 +34,47 @@ router.get('/tabs', async (req, res) => {
   res.json({ success:true, data:tabs });
 });
 
+// Football is served from memory, exactly like the other sports. The odds route's warmer already refreshes
+// the football fixtures every few seconds and stores them via getFixtures(); this endpoint reads that copy
+// (any age) instantly and refreshes in the background. Only a true cold start has to wait for the crawl, and
+// concurrent requests share ONE crawl instead of each starting their own.
+let footballInflight = null;
+function refreshFootballFeed() {
+  if (footballInflight) return footballInflight;
+  footballInflight = (async () => {
+    try { const m = await getFixtures(7); C.set('football', m); return m; }
+    finally { footballInflight = null; }
+  })();
+  return footballInflight;
+}
+function footballForClient(list) {
+  let pipe = null;
+  try { pipe = require('./odds').applyOddsPipeline; } catch (_) {}
+  // Same odds rules (margin, suspended picks) as the Highlights feed, so Football never shows a different price.
+  return pipe ? list.map(pipe) : list;
+}
 router.get('/football', async (req, res) => {
   try {
-    let m = C.get('football', 20000);
-    if (!m) { m = await getFixtures(0); C.set('football', m); }
-    res.json({ success:true, data:m, count:m.length });
+    const fresh = C.get('football', 20000);
+    if (fresh) return res.json({ success:true, data:footballForClient(fresh), count:fresh.length });
+
+    const last = getLastFixtures();
+    const stored = (cache.football && cache.football.data) || null;
+    const ready = (last.data && last.data.length) ? last.data : (stored && stored.length ? stored : null);
+    if (ready) {
+      if (Date.now() - Math.max(last.ts || 0, (cache.football && cache.football.ts) || 0) > 20000) refreshFootballFeed().catch(() => {});
+      return res.json({ success:true, data:footballForClient(ready), count:ready.length, cached:true });
+    }
+    const m = await refreshFootballFeed();
+    res.json({ success:true, data:footballForClient(m), count:m.length });
   } catch(e) {
     console.error('[sports/football]', e.message);
     res.status(502).json({ success:false, data:[], message:'Failed to load football fixtures' });
   }
 });
+// Keep football warm so even the first visitor after a quiet period gets it from memory.
+setTimeout(() => { refreshFootballFeed().catch(() => {}); }, 1500);
+setInterval(() => { refreshFootballFeed().catch(() => {}); }, 15000).unref();
 
 function normalizeSofaSportMatch(m, sport) {
   const cfg = SPORT_CONFIG[sport];

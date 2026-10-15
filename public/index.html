@@ -1465,10 +1465,15 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // request. LIVE must already be in memory before the user taps the tab; do
   // not make the click wait for a fresh network request. Nothing else in the
   // tab/loading logic is changed.
-  if (!footballTabCache.data && allMatches && allMatches.length) {
-    footballTabCache.data = allMatches.slice();
-    footballTabCache.ts = Date.now();
+  if (!footballTabCache.data) {
+    // Football paints instantly from the last visit (own cache), else from the cached Highlights list (football games only).
+    let seed = null;
+    try { const fc = JSON.parse(localStorage.getItem('sb_football_cache') || 'null'); if (fc && fc.data && fc.data.length) seed = fc.data; } catch(e) {}
+    if (!seed && allMatches && allMatches.length) seed = allMatches.filter(isFootballItem);
+    if (seed && seed.length) { footballTabCache.data = seed.slice(); footballTabCache.ts = Date.now(); }
   }
+  // Fetch Football right now, in parallel with Highlights, so the tab is already filled on the very first open.
+  refreshFootballTab(true).catch(() => {});
   if (!liveTabCache.data) {
     try {
       const cachedLive = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
@@ -1759,6 +1764,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // the previous good list was still perfectly valid.
     if(d.success && d.data && (d.data.length || !hasExistingData)){
       featuredMatches = d.data;
+      seedFootballFromFeatured(featuredMatches);
       // Seed Live from the already-fetched Highlights payload so switching
       // Highlights -> Live is effectively zero-wait. The dedicated live API
       // refreshes this silently afterward.
@@ -2284,27 +2290,64 @@ function refreshSportTab(cat) {
 // Football uses the exact same direct SofaBets-powered feed as Highlights.
 // Keep it separately cached so Football is also a zero-wait tab after the
 // first Highlights load.
-async function refreshFootballTab(silent=false){
+// As soon as the Highlights feed lands, its football games fill the Football tab if that tab has nothing yet
+// (first open): no waiting for a separate request, and a Football tab left on the loader paints right away.
+function seedFootballFromFeatured(list) {
   try {
-    const r = await fetch('/api/sports/football', { cache:'no-store' });
-    const d = await r.json();
-    const rows = (d.success && Array.isArray(d.data)) ? d.data.filter(isFootballItem) : [];       // never anything but football
-    if (rows.length) {
+    const rows = (list || []).filter(isFootballItem);
+    if (!rows.length) return;
+    if (!(footballTabCache.data && footballTabCache.data.length)) {
       footballTabCache.data = rows;
       footballTabCache.ts = Date.now();
-      if (currentCat === 'football') {
-        allMatches = rows;
-        applyFilters(!!silent);
-      }
-    } else if (currentCat === 'football' && !(allMatches && allMatches.length)) {
-      const el = document.getElementById('matchList');
-      if (el) el.innerHTML = noMatchesHTML('⚽','No football matches right now','Check back soon - new fixtures are added regularly.');
     }
-    setUpdatingIndicator(false);
-  } catch(e) {
-    // Never destroy an already-rendered football list because a background
-    // refresh failed. The next refresh will try again.
-  }
+    if (currentCat === 'football' && !(allMatches && allMatches.length)) {
+      allMatches = footballTabCache.data;
+      applyFilters(true);
+      setUpdatingIndicator(false);
+    }
+  } catch(e) {}
+}
+
+let footballRefreshing = null;
+function refreshFootballTab(silent=false, attempt=0){
+  if (footballRefreshing) return footballRefreshing;
+  footballRefreshing = (async () => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      let r;
+      try { r = await fetch('/api/sports/football', { cache:'no-store', signal: ctrl.signal }); }
+      finally { clearTimeout(timer); }
+      const d = await r.json();
+      const rows = (d.success && Array.isArray(d.data)) ? d.data.filter(isFootballItem) : [];       // never anything but football
+      if (rows.length) {
+        footballTabCache.data = rows;
+        footballTabCache.ts = Date.now();
+        try { localStorage.setItem('sb_football_cache', JSON.stringify({data:rows, ts:Date.now()})); } catch(e) {}
+        if (currentCat === 'football') {
+          allMatches = rows;
+          applyFilters(!!silent);
+        }
+      } else if (currentCat === 'football' && !(allMatches && allMatches.length)) {
+        const el = document.getElementById('matchList');
+        if (el) el.innerHTML = noMatchesHTML('⚽','No football matches right now','Check back soon - new fixtures are added regularly.');
+      }
+    } catch(e) {
+      // Never destroy an already-rendered football list because a background refresh failed.
+      // But a Football tab with NOTHING yet must not sit on the loader forever: retry quietly, then offer a Retry button.
+      const nothing = !(footballTabCache.data && footballTabCache.data.length);
+      if (nothing && attempt < 3) {
+        setTimeout(() => { refreshFootballTab(true, attempt + 1).catch(() => {}); }, 1500 * (attempt + 1));
+      } else if (nothing && currentCat === 'football' && !(allMatches && allMatches.length)) {
+        const el = document.getElementById('matchList');
+        if (el) el.innerHTML = '<div class="empty" style="padding:40px 20px;text-align:center"><div style="font-size:40px">⚽</div><div style="margin:8px 0 14px;color:var(--mt)">Could not load football right now.</div><button onclick="loadCat(\'football\')" style="background:var(--gn,#00c853);color:#000;border:0;border-radius:8px;padding:10px 22px;font-weight:700">Retry</button></div>';
+      }
+    } finally {
+      footballRefreshing = null;
+      setUpdatingIndicator(false);
+    }
+  })();
+  return footballRefreshing;
 }
 
 // Render non-football matches from the direct SofaBets feed.
