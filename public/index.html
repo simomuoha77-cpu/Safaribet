@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#00c853"/>
-<meta name="sb-ui-build" content="b64"/>
+<meta name="sb-ui-build" content="b65"/>
 
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SafariBet Kenya – Sports Betting, Live Betting &amp; Casino</title>
@@ -1244,7 +1244,7 @@ async function loadDownloadAppBanner(){
     document.getElementById('downloadAppBanner').style.display = 'flex';
     const sizeMb = (d.sizeBytes/1024/1024).toFixed(1);
     const ver = d.version ? `v${d.version} · ` : '';
-    document.getElementById('downloadAppSub').textContent = `${ver}${sizeMb} MB · Faster on slow data · b64`;
+    document.getElementById('downloadAppSub').textContent = `${ver}${sizeMb} MB · Faster on slow data · b65`;
   };
   try{
     const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');

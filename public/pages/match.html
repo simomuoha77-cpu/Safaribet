@@ -161,7 +161,10 @@ if (!matchId) {
 } else {
   // Clean up the URL if we got here via the old query-string method
   if (location.search.includes('id=')) history.replaceState(null, '', '/match');
-  loadMatch();
+  // Start only after the WHOLE script has been read: loadMatch() paints the header and markets straight away, and that
+  // code uses variables (e.g. the live-clock timer) that are declared further down. Calling it here, in the middle of
+  // the script, made the first paint crash silently and left the page blank until the server answered.
+  Promise.resolve().then(loadMatch);
 }
 
 // Turn whatever we already knew about this match on the previous page (team
@@ -260,7 +263,7 @@ async function loadMatch(){
         paintedFromCache = true;
       }
     }
-  } catch (e) { /* corrupt cache — fall through to the normal network load */ }
+  } catch (e) { console.error('[match] instant paint failed, continuing with the network load:', e); }
 
   // Full market list seen recently (prefetched on touch, or from a previous
   // visit): paint it right away instead of waiting for the network at all.
@@ -516,6 +519,10 @@ function renderMarkets(isPreliminary){
       return '';
     }
   }).join('');
+  // Only the first market(s) are known so far and the rest are on their way: say so (real odds only - nothing is faked).
+  if (isPreliminary || (matchData && matchData.marketsPending)) {
+    container.insertAdjacentHTML('beforeend', '<div class="loading" id="moreMarketsLoading" style="margin:14px 0;opacity:.85">Loading more markets…</div>');
+  }
 
   // Restore selection highlighting if this match/market/pick is already in the slip
   slip.forEach(s => {
