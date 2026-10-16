@@ -1770,7 +1770,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       // refreshes this silently afterward.
       // Highlights only carries FOOTBALL. It may start an empty Live list, but must never replace the full
       // all-sports Live list (that is what made games disappear). The dedicated live feed owns that list.
-      const instantLive = featuredMatches.filter(m => m && m.status === 'live');
+      const instantLive = featuredMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
       if (instantLive.length && !(liveTabCache.data && liveTabCache.data.length)) {
         liveTabCache.data = instantLive.slice();
         liveTabCache.ts = Date.now();
@@ -1879,14 +1879,17 @@ function updateTodayCount(){
   el.textContent = allMatches.filter(m=>m.commenceTime&&feedDate(m.commenceTime)===todayStr).length;
 }
 
+// A game still flagged live 4.5h+ after kickoff is a stuck feed entry, never a real live game.
+function isStuckLive(m){
+  try { const t = m && m.commenceTime ? new Date(m.commenceTime).getTime() : NaN; return Number.isFinite(t) && Date.now() - t > 4.5 * 3600000; } catch(e) { return false; }
+}
 function applyFilters(silent=false){
   updateTodayCount();
   // Live tab is independent of Highlights filters. Never let a background
   // Highlights refresh repaint the Live tab with upcoming-only filters.
   if(currentCat === 'live'){
-    const live = (liveTabCache.data && liveTabCache.data.length)
-      ? liveTabCache.data
-      : (allMatches || []).filter(m => m && m.status === 'live');
+    // Only the dedicated live feed decides what is live. Falling back to the Highlights list re-showed ended games.
+    const live = (liveTabCache.data && liveTabCache.data.length) ? liveTabCache.data.filter(m => !isStuckLive(m)) : [];
     if(live.length) renderMatches(live, true);
     return;
   }
@@ -2164,14 +2167,14 @@ async function loadCat(cat) {
     // loaded the same matches. Derive the live list immediately, paint it,
     // then refresh the dedicated live endpoint silently in the background.
     if (!liveTabCache.data?.length && progressiveMatches?.length) {
-      const instantLive = progressiveMatches.filter(m => m && m.status === 'live');
+      const instantLive = progressiveMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
       if (instantLive.length) {
         liveTabCache.data = instantLive.slice();
         liveTabCache.ts = Date.now();
       }
     }
     if (!liveTabCache.data?.length && allMatches?.length) {
-      const instantLive = allMatches.filter(m => m && m.status === 'live');
+      const instantLive = allMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
       if (instantLive.length) {
         liveTabCache.data = instantLive.slice();
         liveTabCache.ts = Date.now();

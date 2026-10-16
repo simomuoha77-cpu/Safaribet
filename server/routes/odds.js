@@ -265,7 +265,10 @@ router.post('/market-counts', (req, res) => {
 
 router.get('/featured', async (req, res) => {
   try {
-    const matches = await fixturesWithFallback();
+    // A football game still flagged "live" 4.5h+ after kickoff is a stuck feed entry, not a live game: leave it out of
+    // the homepage (display only - the database and settlement are untouched).
+    const nowMs = Date.now();
+    const matches = (await fixturesWithFallback()).filter(m => !(m && m.status === 'live' && m.commenceTime && nowMs - new Date(m.commenceTime).getTime() > 4.5 * 3600000));
     // getFixtures() already merges today's fresh SofaBets live feed into the
     // fixture list. Do not make a second live upstream request here: that
     // duplicate request only delays the homepage response and can make a

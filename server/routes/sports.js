@@ -218,6 +218,16 @@ const LIVE_FRESH_MS = 30000;
 //  - a sport whose fetch FAILED keeps its last known live games (for up to LIVE_FAIL_KEEP_MS);
 //  - a game that merely dropped out of a SUCCESSFUL answer (halftime, a provider blip) stays for LIVE_GRACE_MS.
 // Only after that does it leave the Live tab, so a finished game still disappears within about 90 seconds.
+// A game the feed still calls "live" many hours after its kickoff is a stuck/ghost entry (postponed, abandoned or
+// never closed by the provider), not a real live game. It is hidden from the Live tab; nothing in the database
+// or settlement is touched. Cricket is exempt (a match can run for days).
+const STUCK_LIVE_MS = { football: 4.5, basketball: 5, hockey: 5, rugby: 5, handball: 5, volleyball: 5, tabletennis: 5, tennis: 10 };
+function isStuckLive(sport, m) {
+  const hrs = STUCK_LIVE_MS[sport];
+  if (!hrs || !m || !m.commenceTime) return false;
+  const t = new Date(m.commenceTime).getTime();
+  return Number.isFinite(t) && Date.now() - t > hrs * 3600000;
+}
 const liveSeenBySport = new Map();            // sport -> Map(matchId -> { m, ts })
 const LIVE_GRACE_MS = 90000;
 const LIVE_FAIL_KEEP_MS = 180000;
@@ -249,7 +259,7 @@ async function refreshLiveCacheInner() {
     for (const part of parts) {
       let seen = liveSeenBySport.get(part.sport);
       if (!seen) { seen = new Map(); liveSeenBySport.set(part.sport, seen); }
-      if (part.ok) for (const m of part.list) if (m && m.matchId) seen.set(m.matchId, { m, ts: now });
+      if (part.ok) for (const m of part.list) if (m && m.matchId && !isStuckLive(part.sport, m)) seen.set(m.matchId, { m, ts: now });
       const keepMs = part.ok ? LIVE_GRACE_MS : LIVE_FAIL_KEEP_MS;
       for (const [id, e] of seen) {
         if (now - e.ts > keepMs) seen.delete(id);
