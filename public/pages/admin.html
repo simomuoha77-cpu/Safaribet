@@ -1537,7 +1537,7 @@ async function loadDashboard(){
   document.getElementById('ds-deposits').textContent='KES '+(d.deposits||0).toLocaleString();
   document.getElementById('ds-withdrawals').textContent='KES '+(d.withdrawals||0).toLocaleString();
   document.getElementById('ds-revenue').textContent='KES '+(d.revenue||0).toLocaleString();
-  document.getElementById('ds-live').textContent=d.liveMatches||0;
+  document.getElementById('ds-live').textContent=(d.liveMatches||0)+(d.stuckLive?' · '+d.stuckLive+' stuck':'');
   document.getElementById('ds-matches').textContent=d.upcomingMatches||0;
   // Recent activity
   const ra=document.getElementById('recentActivity');

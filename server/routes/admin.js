@@ -159,21 +159,25 @@ router.getStore = () => store;
 // ── STATS ──
 router.get('/stats', async (req, res) => {
   try {
-    const [users, bets, pending, depAgg, wdAgg, wonAgg, liveMatches, upcomingMatches, recent] = await Promise.all([
+    // "Live" = flagged live AND kicked off within the last 4.5h, the same rule the app uses. Entries the feed never
+    // closed (postponed/abandoned/stuck) are counted separately as stuckLive instead of inflating the live number.
+    const liveSince = new Date(Date.now() - 4.5 * 3600000);
+    const [users, bets, pending, depAgg, wdAgg, wonAgg, liveMatches, upcomingMatches, recent, stuckLive] = await Promise.all([
       User.countDocuments(),
       Bet.countDocuments(),
       Bet.countDocuments({ status: 'pending' }),
       Transaction.aggregate([{ $match:{ type:'deposit', status:'completed' } }, { $group:{ _id:null, t:{ $sum:'$amount' } } }]),
       Transaction.aggregate([{ $match:{ type:'withdrawal', status:'completed' } }, { $group:{ _id:null, t:{ $sum:'$amount' } } }]),
       Transaction.aggregate([{ $match:{ type:'win' } }, { $group:{ _id:null, t:{ $sum:'$amount' } } }]),
-      Match.countDocuments({ status:'live' }),
+      Match.countDocuments({ status:'live', commenceTime:{ $gte: liveSince } }),
       Match.countDocuments({ status:'upcoming', commenceTime:{ $gte: new Date() } }),
-      Transaction.find().sort({ createdAt:-1 }).limit(10).lean()
+      Transaction.find().sort({ createdAt:-1 }).limit(10).lean(),
+      Match.countDocuments({ status:'live', commenceTime:{ $lt: liveSince } })
     ]);
     const deposits    = depAgg[0]?.t  || 0;
     const withdrawals = wdAgg[0]?.t   || 0;
     const winsPaid    = wonAgg[0]?.t  || 0;
-    res.json({ success:true, users, bets, pending, deposits, withdrawals, revenue: deposits - winsPaid - withdrawals, liveMatches, upcomingMatches, recent });
+    res.json({ success:true, users, bets, pending, deposits, withdrawals, revenue: deposits - winsPaid - withdrawals, liveMatches, upcomingMatches, recent, stuckLive });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
