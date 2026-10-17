@@ -3751,12 +3751,18 @@ function showT(msg,type=''){
 <script type="text/sb-page">/* market-count-all */
 (function(){
   var counts = {}, tries = {}, nextAt = {}, running = false, timer = null, obs = null, host = null;
-  try{ counts = JSON.parse(sessionStorage.getItem('sb_mkt_all') || '{}') || {}; }catch(e){}
+  try{ counts = JSON.parse(localStorage.getItem('sb_mkt_all') || '{}') || {}; }catch(e){}
   function idOf(card){ var i = card.id || ''; return i.indexOf('mc_') === 0 ? i.slice(3) : null; }
   function moreSpan(card){
     var sp = card.querySelectorAll('span');
     for(var i = sp.length - 1; i >= 0; i--){ var t = (sp[i].textContent || '').trim(); if(/^(More markets|\d+ markets?)/.test(t)) return sp[i]; }
     return null;
+  }
+  function save(){ try{ localStorage.setItem('sb_mkt_all', JSON.stringify(counts)); }catch(e){} }
+  function pullAll(){
+    fetch('/api/odds/all-counts', { priority: 'high' }).then(function(r){ return r.status === 200 ? r.json() : null; }).then(function(d){
+      if(d && d.success && d.counts){ var any = false; for(var k in d.counts){ if(d.counts[k] >= 1 && counts[k] !== d.counts[k]){ counts[k] = d.counts[k]; any = true; } } if(any) save(); apply(); schedule(100); }
+    }).catch(function(){});
   }
   function label(n){ return n + (n === 1 ? ' market' : ' markets') + ' \u2192'; }
   function apply(){
@@ -3783,7 +3789,7 @@ function showT(msg,type=''){
       .then(function(d){
         if(d && d.success && d.counts){
           for(var k in d.counts){ if(d.counts[k] >= 1) counts[k] = d.counts[k]; }
-          try{ sessionStorage.setItem('sb_mkt_all', JSON.stringify(counts)); }catch(e){}
+          save();
         }
       })
       .catch(function(){})
@@ -3795,11 +3801,13 @@ function showT(msg,type=''){
     host = h;
     if(obs){ try{ obs.disconnect(); }catch(e){} obs = null; }
     if(!h || typeof MutationObserver === 'undefined') return;
-    obs = new MutationObserver(function(){ schedule(150); });
+    obs = new MutationObserver(function(){ apply(); schedule(150); });
     obs.observe(h, { childList: true, subtree: true });
     schedule(150);
   }
-  window.addEventListener('sb:resume', function(){ tries = {}; nextAt = {}; schedule(100); });
+  window.addEventListener('sb:resume', function(){ tries = {}; nextAt = {}; pullAll(); schedule(100); });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) pullAll(); });
+  pullAll(); setInterval(pullAll, 15000);
   attach();
   setInterval(attach, 1500);
   setInterval(function(){ schedule(100); }, 8000);

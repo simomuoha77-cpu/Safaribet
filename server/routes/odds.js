@@ -354,10 +354,26 @@ const MC_CONC = Number(process.env.MARKET_COUNT_CONCURRENCY || 2);
 let mcActive = 0; const mcWaiters = [];
 function mcAcquire() { return new Promise(r => { if (mcActive < MC_CONC) { mcActive++; r(); } else mcWaiters.push(r); }); }
 function mcRelease() { const w = mcWaiters.shift(); if (w) w(); else mcActive = Math.max(0, mcActive - 1); }
+function mcCol() { try { const m = require('mongoose'); return m.connection && m.connection.readyState === 1 ? m.connection.collection('market_counts') : null; } catch (_) { return null; } }
 function mcRemember(id, n) {
   mcDone.set(id, { n, ts: Date.now() });
   if (mcDone.size > 4000) mcDone.delete(mcDone.keys().next().value);
+  const col = mcCol();
+  if (col) col.updateOne({ _id: id }, { $set: { n, ts: new Date() } }, { upsert: true }).catch(() => {});
 }
+(function mcBoot() {          // counts survive restarts: reload the last 12h from MongoDB
+  let tries = 0;
+  const t = setInterval(async () => {
+    if (++tries > 60) return clearInterval(t);
+    const col = mcCol(); if (!col) return;
+    clearInterval(t);
+    try {
+      const docs = await col.find({ ts: { $gt: new Date(Date.now() - 12 * 3600000) } }).toArray();
+      for (const d of docs) if (d && d.n >= 1 && !mcDone.has(d._id)) mcDone.set(d._id, { n: d.n, ts: new Date(d.ts).getTime() });
+    } catch (_) {}
+  }, 1000);
+  if (t.unref) t.unref();
+})();
 function mcPlayableCount(list) {
   if (!Array.isArray(list) || !list.length) return null;
   const canOffer = require('../services/marketOffer').canOffer;
@@ -426,6 +442,65 @@ router.post('/market-counts-all', async (req, res) => {
     res.json({ success: true, counts: {}, pending: [] });
   }
 });
+
+// ── ALL KNOWN COUNTS IN ONE CHEAP CALL + BACKGROUND FILLER (added) ──
+// GET /all-counts: { matchId: totalMarkets } for every game we know (memory only, ~15KB, ETag/304). The app paints these at once.
+// The filler walks the feed's games a couple at a time (soonest first) and fetches the market list of any game without
+// a count, only while the feed is warm and nothing else is busy. Counts are kept in MongoDB, so each game is fetched once.
+const mcTried = new Map();   // matchId -> last attempt time
+function mcKnown(id, p) {
+  let n = sofaBets.cachedMarketCount(p.providerId, p.sport);
+  if (Number.isFinite(n) && n >= 1) return n;
+  const k = mcDone.get(id); if (k && Date.now() - k.ts < MC_KEEP_MS) return k.n;
+  const o = marketCountStore.get(id); if (o && Date.now() - o.ts < COUNT_KEEP_MS) return o.n;
+  return null;
+}
+let mcMapCache = { ts: 0, json: '{}', etag: '' };
+router.get('/all-counts', (req, res) => {
+  try {
+    if (Date.now() - mcMapCache.ts > 3000) {
+      const finalResults = require('../services/finalResultService');
+      const map = {};
+      const ids = new Set((lastGoodFixtures || []).map(m => m && m.matchId).filter(Boolean));
+      for (const id of mcDone.keys()) ids.add(id);
+      for (const id of ids) {
+        const p = finalResults.parseSofaMatchId(String(id));
+        if (!p || !p.providerId) continue;
+        const n = mcKnown(String(id), p);
+        if (n >= 1) map[id] = n;
+      }
+      const json = JSON.stringify({ success: true, counts: map });
+      mcMapCache = { ts: Date.now(), json, etag: 'W/"' + crypto.createHash('sha1').update(json).digest('hex') + '"' };
+    }
+    res.set('ETag', mcMapCache.etag); res.set('Cache-Control', 'no-cache');
+    if (req.headers['if-none-match'] === mcMapCache.etag) return res.status(304).end();
+    res.type('application/json').send(mcMapCache.json);
+  } catch (e) { res.json({ success: true, counts: {} }); }
+});
+(function mcFiller() {
+  const finalResults = require('../services/finalResultService');
+  const t = setInterval(() => {
+    try {
+      if (!lastGoodFixtures || !C.get('fixtures', FIXTURES_TTL)) return;                 // feed cold: leave the upstream alone
+      if (sofaBets.betIsPlacing && sofaBets.betIsPlacing()) return;
+      if (mcActive >= MC_CONC || mcWaiters.length) return;
+      const now = Date.now();
+      const cand = [];
+      for (const m of lastGoodFixtures) {
+        if (!m || !m.matchId || m.status === 'finished' || m.status === 'cancelled') continue;
+        const id = String(m.matchId);
+        const p = finalResults.parseSofaMatchId(id); if (!p || !p.providerId) continue;
+        if (mcKnown(id, p) != null) continue;
+        if (now - (mcTried.get(id) || 0) < 5 * 60000) continue;
+        cand.push({ id, p, t: m.status === 'live' ? 0 : (new Date(m.commenceTime).getTime() || now + 1e12) });
+      }
+      cand.sort((a, b) => a.t - b.t);
+      for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); mcFetchOne(x.id, x.p); }
+      if (mcTried.size > 6000) mcTried.delete(mcTried.keys().next().value);
+    } catch (_) {}
+  }, 3000);
+  if (t.unref) t.unref();
+})();
 
 router.get('/featured', async (req, res) => {
   try {
