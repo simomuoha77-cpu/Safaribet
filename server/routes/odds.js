@@ -1,156 +1,13 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// ALL football data served from this route comes from the direct SofaBets
-// feed via server/engine/apifootball.js. JuanAi is not used for football.
+// ALL football data served from this route comes exclusively from the Juan
+// Football API via server/engine/apifootball.js. No other provider is used.
 // ══════════════════════════════════════════════════════════════════════════════
 const express = require('express');
-const crypto  = require('crypto');
-const { requireAdmin } = require('../utils/adminAuth');
 const safeError = require('../utils/safeError');
 const Match   = require('../models/Match');
 const { getFixtures, getLive, competitionKey } = require('../engine/apifootball');
-const sofaBets = require('../providers/sofaBetsProvider');
 const router  = express.Router();
-
-// SafariBet's codebase has, at different times, generated THREE different
-// sofabets_ matchId shapes:
-//   1. sofabets_<id>                — server/engine/apifootball.js: the
-//                                      MAIN football/featured feed. No sport
-//                                      segment at all — this is the format
-//                                      most matches on the site actually use.
-//   2. sofabets_<sport>_<id>        — server/routes/sports.js: non-football
-//                                      sport tabs (basketball, tennis, etc).
-//   3. sofabets_live_<sport>_<id>   — server/routes/sports.js: the live tab
-//                                      for those same non-football sports.
-// This route previously only understood shapes 2/3, which silently broke
-// every shape-1 match (i.e. most football matches): sport ended up being
-// the numeric id itself and providerId ended up empty, so the provider
-// lookup always returned null and any rich-market refresh was a silent
-// no-op. Provider ids observed so far are always purely numeric, so that's
-// used to tell shape 1 apart from shape 2 (whose first segment is a sport
-// name, never a number).
-function parseSofaMatchId(rawId) {
-  const str = String(rawId || '');
-  if (!str.startsWith('sofabets_')) return null;
-  const parts = str.slice('sofabets_'.length).split('_').filter(Boolean);
-  if (!parts.length) return null;
-
-  if (parts[0] === 'live') {
-    const rest = parts.slice(1);
-    if (rest.length >= 2 && Number.isNaN(Number(rest[0]))) {
-      // sofabets_live_<sport>_<id>
-      return { isLive: true, sport: rest[0], providerId: rest.slice(1).join('_') };
-    }
-    // sofabets_live_<id> — no sport segment, default to football.
-    return { isLive: true, sport: 'football', providerId: rest.join('_') };
-  }
-
-  if (parts.length >= 2 && Number.isNaN(Number(parts[0]))) {
-    // sofabets_<sport>_<id>
-    return { isLive: false, sport: parts[0], providerId: parts.slice(1).join('_') };
-  }
-
-  // sofabets_<id> — the main football feed's own format.
-  return { isLive: false, sport: 'football', providerId: parts.join('_') };
-}
-
-
-// Short request-coalescing cache to avoid duplicate upstream calls within the
-// same few seconds. NOT a data store — expires fast enough that stale data
-// can never linger between poll cycles.
-const cache = {};
-const C = {
-  get: (k, ttl) => { const c = cache[k]; return (c && Date.now() - c.ts < ttl) ? c.data : null; },
-  set: (k, d)   => { cache[k] = { data: d, ts: Date.now() }; }
-};
-const FIXTURES_TTL = 20000; // 20 seconds
-const LIVE_TTL     = 8000;  // 8 seconds
-const { resolveOdds, isPickSuspended, isMarketSuspended } = require('../services/marketResolver');
-
-// Last-known-good snapshots, kept around indefinitely (no TTL) purely as a
-// fallback for when the upstream SofaBets feed has a transient outage. Without
-// this, a single failed poll during a brief upstream hiccup would make
-// matches disappear (or the homepage collapse to live-only, since live has
-// its own independent fallback below) for every visitor until the API
-// recovered — even though we had a perfectly good match list moments ago.
-let lastGoodFixtures = null;
-let lastGoodLive = [];
-
-// Persists the last known LIVE snapshot for each match individually — unlike
-// lastGoodLive above (an all-or-nothing fallback for when the ENTIRE live
-// fetch fails), this covers a single match briefly dropping out of Juan's
-// live list while genuinely still in progress. Most notably at halftime:
-// some providers exclude "ball not in play" matches from their live/in-play
-// endpoint, so a match at HT can vanish from `live` for a few minutes even
-// though it's obviously still a live match. Without this, the merge below
-// would fall all the way back to the general fixtures-list version of that
-// match for the gap — which can still say 'upcoming', or hold whatever
-// minute/score it had the last time it was fetched as a fixture rather than
-// live — making an in-progress match look like it stopped being live at
-// exactly the moment (halftime) it's most likely to actually still be live.
-const lastKnownLiveByMatch = new Map(); // matchId -> { data, lastSeenLiveAt }
-const LIVE_SNAPSHOT_MAX_AGE_MS = 20 * 60 * 1000; // generous enough for any realistic halftime break; short enough to never mask a genuinely finished/abandoned match forever
-
-// Fetches fixtures via the shared short-lived cache, falling back to the last
-// successful fetch if the upstream is currently down. Only throws if we have
-// never successfully fetched fixtures at all (e.g. right after server start
-// with the upstream already unreachable).
-async function fixturesWithFallback() {
-  let matches = C.get('fixtures', FIXTURES_TTL);
-  if (matches) return matches;
-  try {
-    matches = await getFixtures(7);
-    C.set('fixtures', matches);
-    lastGoodFixtures = matches;
-    return matches;
-  } catch (e) {
-    if (lastGoodFixtures) {
-      console.warn('  [odds] getFixtures failed, serving last-known-good fixtures:', e.message);
-      return lastGoodFixtures;
-    }
-    throw e;
-  }
-}
-
-// Same fallback strategy for live matches — if getLive() fails transiently,
-// keep showing whatever was last confirmed live rather than dropping to zero.
-async function liveWithFallback() {
-  let live = C.get('live', LIVE_TTL);
-  if (live) return live;
-  try {
-    live = await getLive();
-    C.set('live', live);
-    lastGoodLive = live;
-    return live;
-  } catch (e) {
-    console.warn('  [odds] getLive failed, serving last-known-good live matches:', e.message);
-    return lastGoodLive;
-  }
-}
-
-// ── BACKGROUND CACHE WARMER ──
-// Proactively refreshes the fixtures/live cache lines on a timer, slightly
-// faster than their own TTLs expire, so a real visitor's request essentially
-// never has to pay for a cold fetch from the upstream SofaBets feed. Before this,
-// whichever request happened to land right after the 20s/8s cache expired
-// had to wait out a full upstream round-trip (up to 15s for fixtures) before
-// the homepage could paint anything — that's what made "Loading matches..."
-// feel stuck on a fresh visit, especially on a slower mobile connection.
-// fixturesWithFallback()/liveWithFallback() each check their own cache TTL
-// first, so calling them here on a short interval is cheap — it only ever
-// hits the upstream API when the cache line has actually expired.
-let warmerStarted = false;
-function startCacheWarmer() {
-  if (warmerStarted) return;
-  warmerStarted = true;
-  const warm = async () => {
-    if (sofaBets.betIsPlacing && sofaBets.betIsPlacing()) return;   // a bet is being placed: leave the CPU to it, next tick catches up
-    try { await fixturesWithFallback(); } catch (e) { console.warn('  [odds] warmer: fixtures refresh failed:', e.message); }
-    try { await liveWithFallback(); } catch (e) { console.warn('  [odds] warmer: live refresh failed:', e.message); }
-  };
-  warm(); // warm immediately at boot — don't make the first real visitor wait for the first tick
-  setInterval(warm, 7000); // comfortably under both the 20s fixtures TTL and 8s live TTL
-}
-startCacheWarmer();
+const { resolveOdds } = require('../services/marketResolver');
 
 // Strips any suspended or below-floor odds directly off a match's raw odds
 // fields (both the legacy `odds` object and `aiOdds`) before it's sent to list
@@ -181,20 +38,12 @@ function applyOddsPipeline(match) {
     ['ou25','under25', ['odds','under25'],  ['aiOdds','under25']],
   ];
 
-  // Which specific picks are suspended right now (risk management), as
-  // opposed to just genuinely having no data — lets list views show a 🔒 lock
-  // icon rather than a bare "-" for a pick that's temporarily unavailable
-  // versus one this match simply never had a price for.
-  const suspendedPicks = {};
   for (const [market, pick, legacyPath, aiPath] of checks) {
-    if (isPickSuspended(match, market, pick)) suspendedPicks[`${market}:${pick}`] = true;
     const resolved = resolveOdds(match, market, pick);
     const value = resolved ? resolved.odds : null; // null if suspended or no data — same as before
     if (clone[legacyPath[0]] && legacyPath[1] in clone[legacyPath[0]]) clone[legacyPath[0]][legacyPath[1]] = value;
     if (clone[aiPath[0]] && aiPath[1] in clone[aiPath[0]]) clone[aiPath[0]][aiPath[1]] = value;
   }
-  if (Object.keys(suspendedPicks).length) clone.suspendedPicks = suspendedPicks;
-  if (match.status === 'live' && isMarketSuspended(match, '1x2')) clone.wholeMarketSuspended = true;
   return clone;
 }
 
@@ -214,7 +63,7 @@ function smartSort(matches) {
     });
 }
 
-// Derive live league list from what SofaBets feed is currently returning — never hardcoded.
+// Derive live league list from what Juan API is currently returning — never hardcoded.
 function deriveLeagues(matches) {
   const seen = new Map();
   for (const m of matches) {
@@ -226,201 +75,52 @@ function deriveLeagues(matches) {
 }
 
 // ── AVAILABLE LEAGUES ──
+// Served from MongoDB, not a live upstream call — scheduler.js already syncs
+// this DB from the Juan API every 5 minutes, so there's no reason to make the
+// user wait on a live third-party round-trip just to list leagues.
 router.get('/available', async (req, res) => {
   try {
-    const matches = await fixturesWithFallback();
+    const matches = await Match.find({}).lean();
     res.json({ success: true, data: deriveLeagues(matches) });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Failed to load leagues: ' + e.message });
   }
 });
 
 // ── FEATURED ──
-// Supports conditional GET (If-None-Match / ETag) so a client polling this on
-// an interval — exactly what the homepage does for its silent background
-// refresh — gets a cheap 304 with no body whenever nothing has actually
-// changed, instead of re-downloading the entire match list every time. The
-// ETag is a hash of the exact payload being sent, so it only changes when a
-// score, live minute, odds price, or match status actually moves.
-// How many markets each game on the list has ("76 markets →"). Memory only: it never calls SofaBets, and games
-// whose full market list is not in memory yet are simply left out of the answer (the app keeps "More markets").
-const marketCountStore = new Map();           // matchId -> { n, ts }   (counts barely change: keep them for hours)
-const COUNT_KEEP_MS = 6 * 3600000;
-function rememberCount(id, n) {
-  if (!id || !Number.isFinite(n) || n < 2) return;
-  marketCountStore.set(String(id), { n, ts: Date.now() });
-  if (marketCountStore.size > 4000) marketCountStore.delete(marketCountStore.keys().next().value);
-}
-router.post('/market-counts', async (req, res) => {
-  try {
-    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 80) : [];
-    const finalResults = require('../services/finalResultService');
-    const rules = require('../services/marketRules');
-    // Same rule the match page uses: settleable, priced, de-duplicated by name.
-    const countPlayable = (list) => {
-      if (!Array.isArray(list) || list.length < 2) return null;
-      const seen = new Set();
-      let n = 0;
-      for (const mk of list) {
-        const nm = String(mk && (mk.name || mk.label) || '').trim().toLowerCase();
-        if (nm) { const sig = nm + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/'); if (seen.has(sig)) continue; seen.add(sig); }
-        if (!require('../services/marketOffer').canOffer(String((mk && (mk.name || mk.label)) || ''))) continue;
-        if ((mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) n++;
-      }
-      return n;
-    };
-    const counts = {};
-    const missing = [];
-    for (const raw of ids) {
-      const id = String(raw || '');
-      if (!id || id.length > 100) continue;
-      const p = finalResults.parseSofaMatchId(id);
-      if (!p || !p.providerId) continue;
-      const n = sofaBets.cachedMarketCount(p.providerId, p.sport);
-      const kept = marketCountStore.get(id);
-      if (Number.isFinite(n) && n >= 2) { counts[id] = n; rememberCount(id, n); }
-      else if (kept && Date.now() - kept.ts < COUNT_KEEP_MS) counts[id] = kept.n;
-      else missing.push({ id, p });
-    }
-    // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
-    if (missing.length) {
-      try {
-        const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1, 'markets.selections.name': 1, 'markets.selections.key': 1 }).lean();
-        for (const d of docs) {
-          const n = countPlayable(d.markets);
-          if (Number.isFinite(n) && n >= 2) { counts[d.matchId] = n; rememberCount(d.matchId, n); }
-        }
-      } catch (_) {}
-    }
-    res.json({ success: true, counts });
-  } catch (e) {
-    res.json({ success: true, counts: {} });
-  }
-});
-
+// DB already has live scores merged in via updateLive() (runs every 10s), so
+// no separate live-overlay call is needed here — just read the DB directly.
 router.get('/featured', async (req, res) => {
   try {
-    // A football game still flagged "live" 4.5h+ after kickoff is a stuck feed entry, not a live game: leave it out of
-    // the homepage (display only - the database and settlement are untouched).
-    const nowMs = Date.now();
-    const matches = (await fixturesWithFallback()).filter(m => !(m && m.status === 'live' && m.commenceTime && nowMs - new Date(m.commenceTime).getTime() > 4.5 * 3600000));
-    // getFixtures() already merges today's fresh SofaBets live feed into the
-    // fixture list. Do not make a second live upstream request here: that
-    // duplicate request only delays the homepage response and can make a
-    // perfectly healthy fixture feed look empty on a cold start.
-    const live = matches.filter(m => m.status === 'live');
-    const liveMap = new Map(live.map(m => [m.matchId, m]));
-    // Remember every match we actually see live right now, so a brief
-    // disappearance from the SofaBets live list (e.g. during halftime) doesn't look
-    // like the match stopped being live — see lastKnownLiveByMatch above.
-    live.forEach(m => lastKnownLiveByMatch.set(m.matchId, { data: m, lastSeenLiveAt: Date.now() }));
-
-    const merged = matches.map(m => {
-      if (liveMap.has(m.matchId)) return liveMap.get(m.matchId);
-      // Not in the live list right now — but if the fixtures data hasn't
-      // already told us it finished/was cancelled, and we saw it live
-      // recently, keep showing that last known live state (e.g. "HT")
-      // instead of silently reverting to stale/pre-match fixture data.
-      if (m.status !== 'finished' && m.status !== 'cancelled') {
-        const snap = lastKnownLiveByMatch.get(m.matchId);
-        if (snap && (Date.now() - snap.lastSeenLiveAt) < LIVE_SNAPSHOT_MAX_AGE_MS) return snap.data;
-      }
-      return m;
-    });
-    live.forEach(m => { if (!merged.find(x => x.matchId === m.matchId)) merged.push(m); });
-
-    const sorted = smartSort(merged).map(applyOddsPipeline);
-    const payload = { success: true, data: sorted, count: sorted.length };
-    const payloadJson = JSON.stringify(payload);   // serialised once: used for the ETag AND as the response body
-    const etag = 'W/"' + crypto.createHash('sha1').update(payloadJson).digest('hex') + '"';
-
-    res.set('ETag', etag);
-    // Always revalidate with the server rather than letting the browser's own
-    // HTTP cache silently serve a stale copy — the 304 short-circuit above is
-    // the bandwidth optimization, not the browser cache.
-    res.set('Cache-Control', 'no-cache');
-    if (req.headers['if-none-match'] === etag) {
-      return res.status(304).end();
-    }
-    res.type('application/json').send(payloadJson);
+    const matches = await Match.find({}).lean();
+    const sorted = smartSort(matches).map(applyOddsPipeline);
+    res.json({ success: true, data: sorted, count: sorted.length });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Failed to load matches: ' + e.message });
   }
 });
 
 // ── BY SPORT/LEAGUE ──
 router.get('/matches/:sport', async (req, res) => {
-  const sport = String(req.params.sport || 'football').toLowerCase();
-
+  const sport = req.params.sport;
   try {
-    const sportId = sofaBets.SPORT_IDS[sport];
-
-    if (!Number.isFinite(Number(sportId))) {
-      return res.json({ success: true, data: [], count: 0 });
-    }
-
-    const date = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Africa/Nairobi',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(new Date());
-
-    const matches = await sofaBets.getMatchesForDate(date, {
-      sport,
-      sportId: Number(sportId)
-    });
-
-    const filtered = smartSort(
-      (matches || []).map(m => ({
-        ...m,
-        sport: sport
-      }))
-    ).map(applyOddsPipeline);
-
-    res.json({
-      success: true,
-      data: filtered,
-      count: filtered.length
-    });
+    const matches = await Match.find({ sport }).lean();
+    const filtered = smartSort(matches).map(applyOddsPipeline);
+    res.json({ success: true, data: filtered, count: filtered.length });
   } catch (e) {
-    console.warn('[odds/matches/' + sport + '] SofaBets failed:', e.message);
-    res.status(502).json({
-      success: false,
-      data: [],
-      message: 'Sports data is temporarily unavailable. Please try again.'
-    });
+    res.status(502).json({ success: false, data: [], message: 'Failed to load matches: ' + e.message });
   }
 });
 
 // ── LIVE ──
-// Always serves what the SofaBets feed currently says is live. If it says zero
-// live matches, we return zero — never stale or cached data beyond LIVE_TTL.
+// updateLive() (scheduler.js, every 10s) keeps status:'live' docs fresh in the
+// DB, including marking matches finished the moment they drop off the feed —
+// so this is always as current as a live upstream call, without the wait.
 router.get('/live', async (req, res) => {
   try {
-    // Use the same direct SofaBets fixture path that powers /featured.
-    // /featured is already merging today's dedicated SofaBets live feed, so
-    // the Live tab must not depend on a separate cache that can momentarily
-    // contain an empty snapshot.
-    const all = await fixturesWithFallback();
-    let live = all.filter(m => m.status === 'live');
-
-    // Keep the dedicated live fetch as a second source only when the merged
-    // fixture response contains no live matches. This avoids showing an empty
-    // Live tab during a short fixture-cache transition.
-    if (!live.length) {
-      try {
-        const directLive = await getLive();
-        if (directLive.length) live = directLive;
-      } catch (_) {}
-    }
-
-    live.forEach(m => lastKnownLiveByMatch.set(m.matchId, { data: m, lastSeenLiveAt: Date.now() }));
+    const live = await Match.find({ status: 'live' }).lean();
     res.json({ success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' });
   } catch (e) {
-    if (lastGoodLive.length) {
-      return res.json({ success: true, data: lastGoodLive.map(applyOddsPipeline), message: null });
-    }
     res.status(502).json({ success: false, data: [], message: 'Live data unavailable: ' + e.message });
   }
 });
@@ -435,425 +135,78 @@ router.get('/history/:matchId', async (req, res) => {
 });
 
 // ── MATCH DETAIL WITH ALL MARKETS ──
-// ── WARM MARKETS ──
-// The homepage tells us which games are on screen; we start fetching their full
-// markets in the background (fire-and-forget) so they are ready before a tap.
-const warmLimiter = require('express-rate-limit')({
-  windowMs: 60 * 1000, max: 90,
-  message: { success: false, message: 'Too many requests' }
-});
-router.post('/warm', warmLimiter, express.json({ limit: '4kb' }), (req, res) => {
-  try {
-    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 12) : [];
-    let queued = 0;
-    // ids arrive in on-screen order; each one goes to the FRONT of the queue, so iterate backwards to keep the
-    // first (topmost visible) game first in line. Jobs not started within 30s are dropped (customer scrolled on).
-    for (const matchId of ids.slice().reverse()) {
-      const parsed = parseSofaMatchId(matchId);
-      if (!parsed || !parsed.providerId) continue;
-      const ok = sofaBets.queueWarmMarkets(parsed.providerId, parsed.sport, d => {
-        // keep a durable copy so the next visit (even after a restart) is instant
-        Match.updateOne(
-          { matchId: String(matchId), finalVerified: { $ne: true } },
-          { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(parsed.providerId), marketsRefreshedAt: new Date() } }
-        ).catch(() => {});
-      }, parsed.isLive ? 60000 : undefined, { front: true, expireMs: 30000 });
-      if (ok) queued++;
-    }
-    res.json({ success: true, queued });
-  } catch (e) { res.json({ success: true, queued: 0 }); }
-});
-
-// A match page must open in under ~3s no matter how slow SofaBets is. Anything
-// that has to hit the provider is raced against this deadline; on timeout we
-// answer with what we already have (flagged marketsPending) while the provider
-// call keeps running and fills its cache, so the page's quiet re-poll gets the
-// full catalogue instantly.
-const MATCH_DEADLINE_MS = 1800;
-const DEADLINE = Symbol('deadline');
-// Full market list for an already-known fixture: the page paints instantly from
-// the summary it already has, so it is better to wait a little longer here than
-// to bounce the customer into slow 'pending' polling. Stays under the page's 7s cap.
-const MARKETS_DEADLINE_MS = Number(process.env.MARKETS_DEADLINE_MS || 1200);
-// Background market fetches started for games we could already answer from MongoDB (key -> { ts, done }).
-const bgMarketFetch = new Map();
-const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
-  Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
-
+// Real markets (1x2, ou25, btts, dc) come from Juan AI's aiOdds directly.
+// Everything else (handicap) is mathematically derived from those real odds,
+// NOT sent by Juan AI, and is explicitly flagged isSynthetic:true so the
+// frontend can show a clear "estimated, not live bookmaker odds" indicator.
 router.get('/match/:matchId', async (req, res) => {
-  // Stage timings (ms) so a slow open can be blamed on the right layer:
-  // db = Mongo lookup, resolve = finding the fixture, provider = SofaBets markets
-  // (src says whether it came from memory cache or a live provider call),
-  // live = live-score lookup, build = turning markets into the response.
-  const T0 = process.hrtime.bigint();
-  const lap = () => Number((process.hrtime.bigint() - T0) / 1000000n);
-  const timings = { db: 0, resolve: 0, provider: 0, live: 0, build: 0, total: 0, src: 'db' };
   try {
-    let marketsTimedOut = false;
-    let resolveTimedOut = false;
-    let bgPending = false;
-    let m = await Match.findOne({ matchId: req.params.matchId }).lean();
-    timings.db = lap();
+    const m = await Match.findOne({ matchId: req.params.matchId }).lean();
+    if (!m) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    // SofaBets live IDs are authoritative provider identities. Resolve the
-    // exact fixture via the shared resolver, which checks both the live feed
-    // and the prematch catalogue (in the right order) rather than assuming
-    // liveness from the id string — the main football pipeline's ids never
-    // carry a live/upcoming marker, so a fixture that kicked off after the
-    // page loaded must still be checked against the live feed before this
-    // gives up. Never substitute a DB fixture or a first/nearest/team-name
-    // match.
-    if (!m && String(req.params.matchId).startsWith('sofabets_')) {
-      const parsed = parseSofaMatchId(req.params.matchId);
-      if (parsed && parsed.providerId) {
-        const { isLive: isLiveId, sport, providerId } = parsed;
-
-        // 1) Instant: the server already holds every game it lists in memory.
-        let idx = null;
-        try { idx = require('./sports').lookupIndexedMatch(req.params.matchId); } catch (_) {}
-        if (idx && idx.homeTeam && idx.awayTeam) {
-          const mk = Array.isArray(idx.markets) ? idx.markets : [];
-          m = {
-            matchId: req.params.matchId,
-            sport,
-            league: idx.league || sport,
-            homeTeam: idx.homeTeam,
-            awayTeam: idx.awayTeam,
-            commenceTime: idx.commenceTime ? new Date(idx.commenceTime) : new Date(),
-            status: idx.status || 'upcoming',
-            odds: {
-              home: Number(idx.odds?.home) || null,
-              draw: Number(idx.odds?.draw) || null,
-              away: Number(idx.odds?.away) || null,
-              updatedAt: new Date()
-            },
-            hasOdds: !!idx.hasOdds,
-            score: {
-              home: idx.score?.home ?? null,
-              away: idx.score?.away ?? null,
-              minute: idx.score?.minute ?? null,
-              period: idx.score?.period || null,
-              clockSec: idx.score?.clockSec ?? null,
-              clockRunning: idx.score?.clockRunning ?? null,
-              clockAt: idx.score?.clockAt ?? null
-            },
-            markets: mk,
-            bookmakers: idx.bookmakers || [],
-            providerOdds: idx.providerOdds || null,
-            providerSource: 'sofabets',
-            realOddsSource: 'SofaBets',
-            providerMatchId: String(providerId),
-            marketsRefreshedAt: mk.length > 1 ? new Date() : null
-          };
-          Match.findOneAndUpdate({ matchId: req.params.matchId }, { $set: m }, { upsert: true })
-            .catch(err => console.warn('[odds/match] failed to persist indexed match:', err.message));
-        }
-
-        // 2) Not indexed: ask the provider, but never wait past the deadline.
-        let direct = null;
-        if (!m) {
-          const lookup = sofaBets.resolveExactFixture(providerId, sport, {
-            rich: req.query.rich === '1',
-            preferLive: isLiveId
-          }).catch(() => null);
-          const got = await raceDeadline(lookup);
-          if (got === DEADLINE) resolveTimedOut = true; else direct = got;
-        }
-
-        const directIsLive = direct && ['IN_PLAY', 'LIVE', 'PAUSED'].includes(String(direct.status || '').toUpperCase());
-
-        if (direct && String(direct.providerMatchId) === String(providerId) &&
-            direct.homeTeam && direct.awayTeam) {
-          m = {
-            matchId: req.params.matchId,
-            sport,
-            league: direct.competition || sport,
-            homeTeam: direct.homeTeam,
-            awayTeam: direct.awayTeam,
-            commenceTime: direct.utcDate ? new Date(direct.utcDate) : new Date(),
-            status: directIsLive ? 'live' : 'upcoming',
-            odds: {
-              home: Number(direct.odds?.homeWin) || null,
-              draw: Number(direct.odds?.draw) || null,
-              away: Number(direct.odds?.awayWin) || null,
-              updatedAt: new Date()
-            },
-            hasOdds: !!direct.odds,
-            score: {
-              home: direct.score?.fullTime?.home ?? null,
-              away: direct.score?.fullTime?.away ?? null,
-              minute: direct.minute ?? null,
-              period: direct.status || null,
-              clockSec: direct.liveClockSec ?? null,
-              clockRunning: direct.clockRunning ?? null,
-              clockAt: direct.liveClockAt ?? null
-            },
-            markets: direct.markets || [],
-            bookmakers: direct.bookmakers || [],
-            providerOdds: direct.odds || null,
-            providerSource: 'sofabets',
-            realOddsSource: 'SofaBets',
-            providerMatchId: String(direct.providerMatchId),
-            marketsRefreshedAt: (Array.isArray(direct.markets) && direct.markets.length > 1) ? new Date() : null
-          };
-          // Persist so this fixture can be found instantly next time (by this
-          // route, by bet placement, or by any other viewer) instead of
-          // re-running the full external SofaBets search from scratch on
-          // every single request for it.
-          Match.findOneAndUpdate(
-            { matchId: req.params.matchId },
-            { $set: m },
-            { upsert: true }
-          ).catch(err => console.warn('[odds/match] failed to persist resolved match:', err.message));
-        }
-      }
-    }
-
-    // When More Markets requests rich=1, refresh the persisted SofaBets
-    // match from the provider so MongoDB's primary-market snapshot cannot
-    // hide SofaBets' full native market catalogue.
-    //
-    // MARKETS_FRESH_MS: if this exact fixture's rich catalogue was already
-    // fetched within this window, skip the external SofaBets search
-    // entirely and serve straight from MongoDB. That search can loop through
-    // many pages across several hosts, so repeating it on every click/bet is
-    // what made this feel slow — most of the time the data hasn't changed
-    // since the last click seconds ago anyway.
-    timings.resolve = lap() - timings.db;
-    const MARKETS_FRESH_MS = 20000;
-    const marketsAlreadyFresh = m && m.marketsRefreshedAt &&
-      (Date.now() - new Date(m.marketsRefreshedAt).getTime()) < MARKETS_FRESH_MS &&
-      Array.isArray(m.markets) && m.markets.length > 1;
-
-    if (m && req.query.rich === '1' && !marketsAlreadyFresh && String(req.params.matchId).startsWith('sofabets_')) {
-      const parsed = parseSofaMatchId(req.params.matchId);
-      if (parsed && parsed.providerId) {
-        const { isLive: isLiveId, sport, providerId } = parsed;
-        try {
-          // FAST PATH: the fixture is already known (it is in MongoDB), so there
-          // is no need to re-resolve it by crawling the provider's catalogue.
-          // Ask for just this exact fixture's markets (every candidate payload
-          // is checked against the exact provider id inside getMatchMarkets)
-          // and, in parallel, whether it is live right now (cached live feed).
-          const memAge = sofaBets.marketsCacheAge ? sofaBets.marketsCacheAge(providerId, sport) : Infinity;
-          timings.src = memAge < Infinity ? 'memory' : 'provider';
-          const tP = lap();
-          const marketsP = sofaBets.getMatchMarkets(providerId, sport).catch(() => null);
-          const liveP = sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null);
-          // STORED-FIRST: not live, nothing in memory, but MongoDB already holds this game's markets ->
-          // answer with them NOW (no provider wait at all) and refresh in the background.
-          const storedCount = Array.isArray(m.markets) ? m.markets.length : 0;
-          const skipWait = memAge === Infinity && storedCount > 1 && !(isLiveId || m.status === 'live');
-          if (skipWait) {
-            const bgKey = String(sport) + ':' + String(providerId);
-            let st = bgMarketFetch.get(bgKey);
-            if (!st || (st.done && Date.now() - st.ts > 30000)) {
-              st = { ts: Date.now(), done: false };
-              bgMarketFetch.set(bgKey, st);
-              if (bgMarketFetch.size > 500) bgMarketFetch.delete(bgMarketFetch.keys().next().value);
-              marketsP.then(d => {
-                if (d && Array.isArray(d.markets) && d.markets.length >= storedCount) {
-                  return Match.findOneAndUpdate(
-                    { matchId: req.params.matchId, finalVerified: { $ne: true } },
-                    { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(providerId), marketsRefreshedAt: new Date() } }
-                  );
-                }
-              }).catch(() => {}).finally(() => { st.done = true; });
-            }
-            bgPending = !st.done;
-            timings.src = 'stored';
-          }
-          // The live-score lookup only matters for games already live, and never
-          // delays the markets by more than 350ms.
-          const wantLive = isLiveId || m.status === 'live';
-          if (!wantLive) liveP.catch(() => {});
-          const [racedMarkets, racedLive] = await Promise.all([
-            skipWait ? Promise.resolve(DEADLINE) : raceDeadline(marketsP, MARKETS_DEADLINE_MS),
-            wantLive ? raceDeadline(liveP, 350) : Promise.resolve(null)
-          ]);
-          timings.provider = lap() - tP;
-          let details = null, liveNow = null;
-          if (racedMarkets === DEADLINE) { if (!skipWait) { marketsTimedOut = true; timings.src = 'timeout'; } marketsP.catch(() => {}); }
-          else details = racedMarkets;
-          liveNow = racedLive === DEADLINE ? null : racedLive;
-          const liveIsExact = liveNow && String(liveNow.providerMatchId) === String(providerId);
-          const haveRich = details && Array.isArray(details.markets) && details.markets.length > 0;
-
-          if (haveRich) {
-            const known = Array.isArray(m.markets) ? m.markets.length : 0;
-            if (details.markets.length >= known) {
-              m.markets = details.markets;
-              m.bookmakers = details.bookmakers || m.bookmakers || [];
-            }
-            m.providerMatchId = String(providerId);
-            m.marketsRefreshedAt = new Date();
-          }
-          if (liveIsExact) {
-            m.status = 'live';
-            m.score = {
-              home: liveNow.score?.fullTime?.home ?? m.score?.home ?? null,
-              away: liveNow.score?.fullTime?.away ?? m.score?.away ?? null,
-              minute: liveNow.minute ?? m.score?.minute ?? null,
-              period: liveNow.status || m.score?.period || null,
-              // This rebuild used to drop the clock, which made the live panel vanish as soon as the markets arrived
-              clockSec: liveNow.liveClockSec ?? null,
-              clockRunning: liveNow.clockRunning ?? null,
-              clockAt: liveNow.liveClockAt ?? null
-            };
-            if (liveNow.odds) m.providerOdds = liveNow.odds;
-          }
-          if (haveRich) {
-            console.log(`[odds/match] rich SofaBets refresh ${providerId}: ${m.markets.length} markets`);
-            // Persist without blocking the response.
-            Match.findOneAndUpdate(
-              { matchId: req.params.matchId, finalVerified: { $ne: true } },
-              { $set: { markets: m.markets, bookmakers: m.bookmakers || [], providerMatchId: String(providerId), marketsRefreshedAt: m.marketsRefreshedAt } }
-            ).catch(err => console.warn('[odds/match] failed to persist rich markets:', err.message));
-          }
-        } catch (err) {
-          console.warn('[odds/match] rich SofaBets refresh failed:', err.message);
-        }
-      }
-    }
-
-    if (!m && resolveTimedOut) {
-      return res.status(202).json({ success: false, pending: true, message: 'Loading match…' });
-    }
-    if (!m) {
-      // Not found yet (index still building / provider slow). Say "pending" so the
-      // page keeps retrying instead of showing a dead end, and start fetching the
-      // markets now so they are ready on the next poll.
-      const pp = String(req.params.matchId).startsWith('sofabets_') ? parseSofaMatchId(req.params.matchId) : null;
-      if (pp && pp.providerId) { try { sofaBets.queueWarmMarkets(pp.providerId, pp.sport, null, 1000); } catch (_) {} return res.status(202).json({ success: false, pending: true, message: 'Loading match…' }); }
-      return res.status(404).json({ success: false, message: 'Market is currently unavailable. Please try again.' });
-    }
-
-    // SafariBet builds its own markets from the 1X2 odds already on the match.
-    // No extra SofaBets market request is made, so opening a match is immediate
-    // and the prices always come from data SafariBet already has.
-    //
-    // Deduped by display name as a final safety net: MongoDB may still hold a
-    // duplicate pair of same-named markets (e.g. two "Match Result" entries
-    // under different provider keys) persisted before this dedup existed
-    // upstream — this ensures the customer never sees that regardless of how
-    // old the stored record is.
-    const rawProviderMarkets =
-      Array.isArray(m.markets) && m.markets.length
-        ? m.markets
-        : (Array.isArray(m.providerOdds?.markets) ? m.providerOdds.markets : []);
-    const seenMarketNames = new Set();
-    const providerMarkets = rawProviderMarkets.filter(mk => {
-      const nameKey0 = String(mk?.name || '').trim().toLowerCase();
-      if (!nameKey0) return true; // keep unnamed entries rather than silently dropping them
-      const nameKey = nameKey0 + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/');   // same name AND same selections = a real duplicate
-      if (seenMarketNames.has(nameKey)) return false;
-      seenMarketNames.add(nameKey);
-      return true;
-    });
-
-    const { resolveOdds, isPickSuspended, isMarketSuspended, REAL_MARKETS } = require('../services/marketResolver');
-
-    // Provider-native markets are the source of truth for the More markets
-    // page. They are intentionally kept separate from SafariBet's legacy
-    // synthetic market resolver so we never invent bookmaker prices.
-    const marketRules = require('../services/marketRules');
-    const usedSbKeys = new Map();
-    const sbUniqueKey = (mk, index) => {
-      const base = 'sb:' + String(mk.key || ('market_' + index));
-      const n = usedSbKeys.get(base) || 0; usedSbKeys.set(base, n + 1);
-      return n ? base + '#' + n : base;
-    };
-    const richMarkets = providerMarkets.map((mk, index) => {
-      // Only markets the server can actually settle are offered (no corners / cards / scoring types ...): a market
-      // that can never be graded would end in a refund instead of a win or a loss.
-      if (!require('../services/marketOffer').canOffer(String(mk.name || mk.label || ''))) return null;
-      const options = (mk.selections || [])
-        .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
-        .map(o => ({
-          pick: String(o.key),
-          odds: Number(o.odds),
-          pickLabel: String(o.name || o.key),
-          providerSelectionId: o.id != null ? String(o.id) : null,
-          providerSelectionKey: o.key != null ? String(o.key) : null,
-          bettable: !(o.suspended || mk.suspended),     // locked/suspended by the provider: shown, but not bettable
-          providerMarket: true
-        }));
-      if (!options.length) return null;
-      return {
-        market: sbUniqueKey(mk, index),
-        providerMarketId: mk.id != null ? String(mk.id) : null,
-        providerMarketKey: mk.key != null ? String(mk.key) : null,
-        label: String(mk.name || 'Market'),
-        isSynthetic: false,
-        providerMarket: true,
-        bookmaker: mk.bookmaker || 'SofaBets',
-        hasSuspendedPick: options.some(o => !o.bettable),
-        wholeMarketSuspended: options.every(o => !o.bettable),
-        options
-      };
-    }).filter(Boolean);
-
+    const { resolveOdds, isPickSuspended, REAL_MARKETS } = require('../services/marketResolver');
     const MARKETS = [
       { market: '1x2',      label: '1X2 / Winner',        picks: ['home','draw','away'] },
       { market: 'dc',       label: 'Double Chance',       picks: ['dc_1x','dc_x2','dc_12'] },
-      { market: 'dnb',      label: 'Draw No Bet',         picks: ['dnb_home','dnb_away'] },
-      { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] },
       { market: 'ou25',     label: 'Over/Under 2.5',      picks: ['over25','under25'] },
-      { market: 'btts',     label: 'Both Teams to Score', picks: ['btts','btts_no'] }
+      { market: 'btts',     label: 'Both Teams to Score', picks: ['btts','btts_no'] },
+      { market: 'handicap', label: 'Handicap',            picks: ['handicap_home','handicap_away'] }
     ];
 
-    const legacyMarkets = MARKETS.map(def => {
+    const markets = MARKETS.map(def => {
       let anySuspended = false;
-      const options = def.picks.map(pick => {
-        const reason = require('../services/marketResolver').getSuspensionReason(m, def.market, pick);
-        if (reason) { anySuspended = true; return { pick, suspended: true, reason }; }
-        const resolved = resolveOdds(m, def.market, pick);
-        if (!resolved) return null;
-        return { pick, odds: resolved.odds, bettable: true };
-      }).filter(Boolean);
-      if (!options.length) return null;
+      const options = def.picks
+        .map(pick => {
+          const suspended = isPickSuspended(m, def.market, pick);
+          if (suspended) { anySuspended = true; return { pick, suspended: true }; }
+          const resolved = resolveOdds(m, def.market, pick);
+          if (!resolved) return null; // genuinely no data for this pick — omit it entirely
+          return { pick, odds: resolved.odds };
+        })
+        .filter(Boolean);
+      if (!options.length) return null; // nothing at all to show for this market — hide it entirely
       return {
         market: def.market,
         label: def.label,
         isSynthetic: !REAL_MARKETS.has(def.market),
         hasSuspendedPick: anySuspended,
-        wholeMarketSuspended: isMarketSuspended(m, def.market),
         options
       };
     }).filter(Boolean);
 
-    // When SofaBets supplied its real catalogue, show that catalogue only.
-    // Otherwise retain the existing SafariBet markets as a safe fallback.
-    const markets = richMarkets.length ? richMarkets : legacyMarkets;
-    rememberCount(req.params.matchId, richMarkets.length);      // opening a game also teaches the home list its exact total
-
-    // Attach active odds boosts only to SafariBet-native markets.
+    // Attach any active odds boosts so the frontend can show the promotional
+    // price and the stake cap it applies up to.
     const OddsBoost = require('../models/OddsBoost');
     const boosts = await OddsBoost.find({
       matchId: req.params.matchId, active: true,
       $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
     }).lean();
     for (const boost of boosts) {
-      const mk = markets.find(x => x.market === boost.market);
+      const mk = markets.find(mk => mk.market === boost.market);
       if (!mk) continue;
       const opt = mk.options.find(o => o.pick === boost.pick);
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }
     }
 
-    const marketsPending = ((marketsTimedOut || resolveTimedOut) && richMarkets.length <= 1) || bgPending;
-    timings.total = lap();
-    timings.build = Math.max(0, timings.total - timings.db - timings.resolve - timings.provider);
-    res.set('Cache-Control', 'no-store');
-    res.set('Server-Timing', `db;dur=${timings.db}, resolve;dur=${timings.resolve}, provider;dur=${timings.provider};desc="${timings.src}", build;dur=${timings.build}, total;dur=${timings.total}`);
-    if (timings.total > 1500) console.warn(`[odds/match] slow ${req.params.matchId} total=${timings.total}ms db=${timings.db} resolve=${timings.resolve} provider=${timings.provider}(${timings.src}) build=${timings.build}`);
-    res.json({ success: true, data: { ...m, markets, marketsPending, fetchedAt: Date.now(), timings } });
+    res.json({ success: true, data: { ...m, markets } });
   } catch (e) { return safeError(res, e, 'odds/match', 500, 'Failed to load match'); }
 });
 
-// ── CACHE CLEAR ──
-router.post('/cache/clear', requireAdmin, (req, res) => {
-  Object.keys(cache).forEach(k => delete cache[k]);
-  res.json({ success: true, message: 'Cache cleared' });
+// ── FORCE RE-SYNC ──
+// admin.html's "clear cache" button now triggers an immediate DB re-sync
+// instead — there's no more in-memory cache to clear now that list endpoints
+// read straight from MongoDB.
+router.post('/cache/clear', async (req, res) => {
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_PASSWORD)
+    return res.status(401).json({ success: false });
+  try {
+    const { syncFixtures, updateLive } = require('../engine/apifootball');
+    const result = await syncFixtures();
+    await updateLive().catch(() => {});
+    res.json({ success: true, message: `Re-synced ${result.synced || 0} fixtures` });
+  } catch (e) {
+    res.status(502).json({ success: false, message: 'Re-sync failed: ' + e.message });
+  }
 });
 
 // ── DEBUG ──
@@ -883,4 +236,3 @@ async function deduplicateMatches() { return 0; }
 
 module.exports = router;
 module.exports.deduplicateMatches = deduplicateMatches;
-module.exports.applyOddsPipeline = applyOddsPipeline;
