@@ -1614,3 +1614,55 @@ async function fetchVirtualRaw(opts) {
 }
 
 module.exports = { fetchVirtualRaw, VIRTUAL_BASES: BASES, cachedMarketCount, holdCrawler, noteBetPlacing, betIsPlacing, providerName: 'sofabets', detectSport, canonicalSport, TWO_WAY_SPORTS, marketsCacheAge, queueWarmMarkets, warmQueueSize, marketsCacheSize, getMatchesForDates, isConfigured, getMatchesForDate, getStatus, normalizeMatch, parseOdds, SPORT_IDS, getMatchMarkets, getMatchById, getLiveMatchById, resolveExactFixture, getLiveFixtures: fetchLiveFootballFixtures, getLiveFootballFixtures: fetchLiveFootballFixtures };
+
+// ── STATS / EVENTS PROBE (added) ──
+// Asks every plausible SofaBets endpoint for one fixture and reports what each returns (status, top-level keys, and where
+// words like corner / card / event / statistic / result appear). Read-only: it changes nothing. Used to find out whether the
+// feed carries corners, cards and events, and under which endpoint.
+async function probeStats(providerMatchId, sportName = 'football') {
+  const id = encodeURIComponent(String(providerMatchId || '').trim());
+  const sportId = String(SPORT_IDS[String(sportName).toLowerCase()] || 1);
+  const targets = [];
+  const paths = [
+    `/api/live-games/${id}`, `/api/live-games/statistics/${id}`, `/api/live-games/stats/${id}`, `/api/live-games/events/${id}`,
+    `/api/live-games/incidents/${id}`, `/api/live-games/timeline/${id}`, `/api/live-games/markets/${id}`,
+    `/api/fixtures/${id}`, `/api/fixtures/${id}/statistics`, `/api/fixtures/${id}/stats`, `/api/fixtures/${id}/events`,
+    `/api/fixtures/${id}/incidents`, `/api/fixtures/${id}/timeline`, `/api/fixtures/${id}/result`,
+    `/api/events/${id}`, `/api/events/${id}/statistics`, `/api/events/${id}/incidents`,
+    `/api/matches/${id}`, `/api/matches/${id}/statistics`, `/api/matches/${id}/events`,
+    `/api/statistics/${id}`, `/api/stats/${id}`, `/api/results/${id}`, `/api/scoreboard/${id}`
+  ];
+  const hosts = Array.from(new Set([...BASES, 'https://feed.sofabets.com']));
+  for (const base of hosts) {
+    for (const p of paths) targets.push({ base, path: p, query: {} });
+    targets.push({ base, path: '/api/fixtures-by-sport', query: { sportId, fixtureId: String(providerMatchId), page: '1', limit: '1' } });
+    targets.push({ base, path: '/api/live-games', query: { fixtureId: String(providerMatchId) } });
+  }
+  const WORDS = /corner|yellow|red.?card|card|booking|offside|foul|shots?|possession|incident|event|statistic|stats|timeline|result|winner/i;
+  const scan = (node, path, hits, depth) => {
+    if (!node || typeof node !== 'object' || depth > 6 || hits.length >= 25) return;
+    for (const k of Object.keys(node)) {
+      if (WORDS.test(k) && hits.length < 25) hits.push(path + '.' + k);
+      if (node[k] && typeof node[k] === 'object') scan(node[k], path + '.' + k, hits, depth + 1);
+    }
+  };
+  const out = [];
+  let i = 0;
+  const worker = async () => {
+    while (i < targets.length) {
+      const t = targets[i++];
+      const url = t.base + t.path + (Object.keys(t.query).length ? '?' + new URLSearchParams(t.query).toString() : '');
+      try {
+        const payload = await sofaFetch(t.base, t.path, t.query, 2, 6000);
+        const hits = []; scan(payload, '$', hits, 0);
+        const text = JSON.stringify(payload) || '';
+        out.push({ url, ok: true, bytes: text.length, topKeys: payload && typeof payload === 'object' ? Object.keys(payload).slice(0, 25) : [], mentions: {
+          corner: (text.match(/corner/gi) || []).length, card: (text.match(/card|booking/gi) || []).length, event: (text.match(/event|incident/gi) || []).length, stat: (text.match(/statistic|possession|shots/gi) || []).length }, keyHits: hits });
+      } catch (e) { out.push({ url, ok: false, error: String(e && e.message || e).replace(/https?:\/\/\S+/g, '').slice(0, 60) }); }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  out.sort((a, b) => (b.ok === true) - (a.ok === true) || ((b.mentions ? b.mentions.corner + b.mentions.card + b.mentions.stat : 0) - (a.mentions ? a.mentions.corner + a.mentions.card + a.mentions.stat : 0)));
+  return out;
+}
+module.exports.probeStats = probeStats;

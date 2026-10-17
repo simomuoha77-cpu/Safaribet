@@ -514,6 +514,20 @@ router.get('/all-counts', (req, res) => {
   if (t.unref) t.unref();
 })();
 
+// GET /api/odds/stats-probe/<matchId> : which SofaBets endpoints carry corners / cards / events for one game (read-only, 1 run per 20s).
+let probeBusyUntil = 0;
+router.get('/stats-probe/:matchId', async (req, res) => {
+  try {
+    if (Date.now() < probeBusyUntil) return res.json({ success: false, message: 'probe ran a moment ago, wait 20 seconds' });
+    const p = require('../services/finalResultService').parseSofaMatchId(String(req.params.matchId || ''));
+    if (!p || !p.providerId) return res.json({ success: false, message: 'not a sofabets match id' });
+    probeBusyUntil = Date.now() + 20000;
+    const all = await sofaBets.probeStats(p.providerId, p.sport);
+    const answered = all.filter(x => x.ok);
+    res.json({ success: true, tried: all.length, answered: answered.length, withCornersOrCards: answered.filter(x => x.mentions.corner || x.mentions.card).map(x => x.url), answers: answered.slice(0, 15), failedSample: all.filter(x => !x.ok).slice(0, 6) });
+  } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
+});
+
 // GET /api/odds/market-diag-low : games whose count is still thin (under 40), with their ids to test /market-diag/<id>?fresh=1
 router.get('/market-diag-low', (req, res) => {
   try {
