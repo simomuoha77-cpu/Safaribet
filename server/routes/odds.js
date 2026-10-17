@@ -388,15 +388,16 @@ function mcPlayableCount(list) {
   }
   return n;
 }
-function mcFetchOne(id, p) {
+function mcFetchOne(id, p, force) {
   if (mcInflight.has(id)) return mcInflight.get(id);
   const job = (async () => {
     await mcAcquire();
     try {
-      const d = await sofaBets.getMatchMarkets(p.providerId, p.sport);
+      const d = await sofaBets.getMatchMarkets(p.providerId, p.sport, force ? { maxAgeMs: 1 } : undefined);
       let n = sofaBets.cachedMarketCount(p.providerId, p.sport);
       if (!Number.isFinite(n) || n < 1) n = mcPlayableCount(d && d.markets);
-      if (Number.isFinite(n) && n >= 1) {
+      const prevK = mcDone.get(id);
+      if (Number.isFinite(n) && n >= 1 && (!prevK || n >= prevK.n)) {      // a count only ever grows: a thin answer never replaces a fuller one
         mcRemember(id, n);
         if (d && Array.isArray(d.markets) && d.markets.length > 1) {
           Match.updateOne({ matchId: id, finalVerified: { $ne: true } },
@@ -450,12 +451,15 @@ router.post('/market-counts-all', async (req, res) => {
 // a count, only while the feed is warm and nothing else is busy. Counts are kept in MongoDB, so each game is fetched once.
 const mcTried = new Map();   // matchId -> last attempt time
 function mcKnown(id, p) {
-  let n = sofaBets.cachedMarketCount(p.providerId, p.sport);
-  if (Number.isFinite(n) && n >= 1) return n;
-  const k = mcDone.get(id); if (k && Date.now() - k.ts < MC_KEEP_MS) return k.n;
-  const o = marketCountStore.get(id); if (o && Date.now() - o.ts < COUNT_KEEP_MS) return o.n;
-  return null;
+  let best = null;
+  const c = sofaBets.cachedMarketCount(p.providerId, p.sport);
+  if (Number.isFinite(c) && c >= 1) best = c;
+  const k = mcDone.get(id); if (k && Date.now() - k.ts < MC_KEEP_MS && (best == null || k.n > best)) best = k.n;
+  const o = marketCountStore.get(id); if (o && Date.now() - o.ts < COUNT_KEEP_MS && (best == null || o.n > best)) best = o.n;
+  return best;
 }
+const mcRecheck = new Map();   // matchId -> { tries, last }  (thin football lists are asked again, a few times)
+const MC_THIN = 40;
 let mcMapCache = { ts: 0, json: '{}', etag: '' };
 router.get('/all-counts', (req, res) => {
   try {
@@ -491,24 +495,45 @@ router.get('/all-counts', (req, res) => {
         if (!m || !m.matchId || m.status === 'finished' || m.status === 'cancelled') continue;
         const id = String(m.matchId);
         const p = finalResults.parseSofaMatchId(id); if (!p || !p.providerId) continue;
-        if (mcKnown(id, p) != null) continue;
+        const known = mcKnown(id, p);
+        const tm = m.status === 'live' ? 0 : (new Date(m.commenceTime).getTime() || now + 1e12);
+        if (known != null) {
+          const rc = mcRecheck.get(id) || { tries: 0, last: 0 };
+          if (known >= MC_THIN || p.sport !== 'football' || rc.tries >= 3 || now - rc.last < 10 * 60000) continue;
+          cand.push({ id, p, t: tm + 1e11, force: true });          // after every game that has no count at all
+          continue;
+        }
         if (now - (mcTried.get(id) || 0) < 5 * 60000) continue;
-        cand.push({ id, p, t: m.status === 'live' ? 0 : (new Date(m.commenceTime).getTime() || now + 1e12) });
+        cand.push({ id, p, t: tm });
       }
       cand.sort((a, b) => a.t - b.t);
-      for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); mcFetchOne(x.id, x.p); }
+      for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); if (x.force) { const rc = mcRecheck.get(x.id) || { tries: 0, last: 0 }; mcRecheck.set(x.id, { tries: rc.tries + 1, last: now }); } mcFetchOne(x.id, x.p, !!x.force); }
       if (mcTried.size > 6000) mcTried.delete(mcTried.keys().next().value);
     } catch (_) {}
   }, 3000);
   if (t.unref) t.unref();
 })();
 
+// GET /api/odds/market-diag-low : games whose count is still thin (under 40), with their ids to test /market-diag/<id>?fresh=1
+router.get('/market-diag-low', (req, res) => {
+  try {
+    const fr = require('../services/finalResultService'); const out = [];
+    for (const m of (lastGoodFixtures || [])) {
+      if (!m || !m.matchId || m.status === 'finished') continue;
+      const p = fr.parseSofaMatchId(String(m.matchId)); if (!p || p.sport !== 'football') continue;
+      const n = mcKnown(String(m.matchId), p);
+      if (n != null && n < MC_THIN) out.push({ id: m.matchId, game: m.homeTeam + ' v ' + m.awayTeam, league: m.league, markets: n, rechecks: (mcRecheck.get(String(m.matchId)) || {}).tries || 0 });
+    }
+    res.json({ success: true, thin: out.length, sample: out.slice(0, 25) });
+  } catch (e) { res.json({ success: false }); }
+});
+
 // GET /api/odds/market-diag/<matchId> : where the markets of one game are lost (counts only, no prices).
 router.get('/market-diag/:matchId', async (req, res) => {
   try {
     const p = require('../services/finalResultService').parseSofaMatchId(String(req.params.matchId || ''));
     if (!p || !p.providerId) return res.json({ success: false, message: 'not a sofabets match id' });
-    const d = await sofaBets.getMatchMarkets(p.providerId, p.sport);
+    const d = await sofaBets.getMatchMarkets(p.providerId, p.sport, req.query.fresh ? { maxAgeMs: 1 } : undefined);
     const list = (d && d.markets) || [];
     const offer = require('../services/marketOffer');
     const priced = list.filter(mk => (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1));
