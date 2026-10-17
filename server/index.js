@@ -28,6 +28,12 @@ const scheduler     = require('./engine/scheduler');
 
 const app    = express();
 const server = http.createServer(app);
+// Behind a proxy (Render / Cloudflare / nginx) the proxy re-uses idle connections for longer than Node's default 5s
+// keep-alive. Node then closes the connection just as the proxy sends the next request, so the FIRST request after a
+// quiet moment (e.g. a login) fails with a gateway error and the second one works. Keep connections open longer than
+// any proxy does.
+server.keepAliveTimeout = 65 * 1000;
+server.headersTimeout   = 66 * 1000;
 // While the server is stopping (a deploy / restart) tell clients not to reuse connections.
 app.use((req, res, next) => { if (global.__sbShuttingDown) res.set('Connection', 'close'); next(); });
 // Behind Render's proxy every request otherwise looks like it comes from the proxy's own address, so ALL players
