@@ -282,7 +282,7 @@ async function loadMatch(){
     const first = (window.SB && SB.prefetchMatch) ? SB.prefetchMatch(matchId)
       : fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 7000);
     // never wait on one slow/hung request: after 7s fall back to polling
-    const d = await Promise.race([first, new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 7000))]);
+    const d = await Promise.race([first, new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 2500))]);
     if (!isCurrent()) return;
     mmMark('networkDone');
     if (d && d.pending) {            // server is still resolving this fixture — keep polling quietly
@@ -317,10 +317,10 @@ async function pollFullMarkets(){
   try {
     for (let i = 0; i < 30; i++) {
       if (!isCurrent()) return;
-      if (i === 4) showMarketsStuck();          // ~3s without markets: say so and offer Retry (never a blank page)
-      await new Promise(r => setTimeout(r, i < 4 ? 700 : 2000));
+      if (i === 5) showMarketsStuck();          // ~3s without markets: say so and offer Retry (never a blank page)
+      await new Promise(r => setTimeout(r, i < 6 ? 500 : 2000));
       try {
-        const d = await fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 7000);
+        const d = await fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 4000);
         if (!isCurrent()) return;
         if (d && d.success && d.data && !isStaleResponse(d)) {
           matchData = d.data; matchData.__full = true;
@@ -543,7 +543,7 @@ function renderCard(mk){
   return html.replace('class="market-card"', 'class="' + cls + '" data-mk="' + escapeHtml(mk.market) + '" data-grp="' + marketGroupOf(mk) + '"').replace(/<\/div>\s*$/, note + '</div>');
 }
 function cardSig(mk){
-  return JSON.stringify([mk.label, mk.viewOnly, mk.wholeMarketSuspended, mk.hasSuspendedPick,
+  return JSON.stringify([mk.label, mk.wholeMarketSuspended, mk.hasSuspendedPick,
     (mk.options || []).map(o => [o.pick, o.pickLabel, o.odds, o.boostedOdds, o.suspended]), !!mk.__closed]);
 }
 
@@ -647,8 +647,7 @@ function renderOneMarket(mk){
           <span class="market-name">${escapeHtml(mk.label)}</span>
           <span style="font-size:9px;color:var(--g);font-weight:700">SAFARIBET</span>
         </div>
-        ${mk.viewOnly ? `<div class="suspended-note">👁 View only — this market can't be bet on yet (the result can't be checked automatically).</div>` : ''}
-        <div class="market-body" style="${mk.viewOnly ? 'opacity:.6' : ''}">
+        <div class="market-body">
           ${options.map(opt => `
             <div class="odd-btn" style="${opt.bettable ? '' : 'cursor:default'}" ${opt.bettable ? `id=\"mkt_${escapeAttr(mk.market)}_${escapeAttr(opt.pick)}\" onclick=\"toggleMarketPick('${escapeAttr(mk.market)}','${escapeAttr(opt.pick)}',${num(opt.boostedOdds||opt.odds)},'${escapeAttr(opt.pickLabel || opt.pick)}','${escapeAttr(mk.providerMarketId || '')}','${escapeAttr(mk.providerMarketKey || '')}','${escapeAttr(opt.providerSelectionId || '')}','${escapeAttr(opt.providerSelectionKey || opt.pick || '')}')\"` : ''}>
               <div class="odd-lbl">${escapeHtml(opt.pickLabel || opt.pick)}</div>

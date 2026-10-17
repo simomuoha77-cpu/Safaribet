@@ -439,7 +439,9 @@ const DEADLINE = Symbol('deadline');
 // Full market list for an already-known fixture: the page paints instantly from
 // the summary it already has, so it is better to wait a little longer here than
 // to bounce the customer into slow 'pending' polling. Stays under the page's 7s cap.
-const MARKETS_DEADLINE_MS = 2500;
+const MARKETS_DEADLINE_MS = Number(process.env.MARKETS_DEADLINE_MS || 1200);
+// Background market fetches started for games we could already answer from MongoDB (key -> { ts, done }).
+const bgMarketFetch = new Map();
 const raceDeadline = (p, ms = MATCH_DEADLINE_MS) =>
   Promise.race([p, new Promise(r => setTimeout(() => r(DEADLINE), ms))]);
 
@@ -454,6 +456,7 @@ router.get('/match/:matchId', async (req, res) => {
   try {
     let marketsTimedOut = false;
     let resolveTimedOut = false;
+    let bgPending = false;
     let m = await Match.findOne({ matchId: req.params.matchId }).lean();
     timings.db = lap();
 
@@ -602,17 +605,40 @@ router.get('/match/:matchId', async (req, res) => {
           const tP = lap();
           const marketsP = sofaBets.getMatchMarkets(providerId, sport).catch(() => null);
           const liveP = sofaBets.getLiveMatchById(providerId, sport, { rich: false }).catch(() => null);
+          // STORED-FIRST: not live, nothing in memory, but MongoDB already holds this game's markets ->
+          // answer with them NOW (no provider wait at all) and refresh in the background.
+          const storedCount = Array.isArray(m.markets) ? m.markets.length : 0;
+          const skipWait = memAge === Infinity && storedCount > 1 && !(isLiveId || m.status === 'live');
+          if (skipWait) {
+            const bgKey = String(sport) + ':' + String(providerId);
+            let st = bgMarketFetch.get(bgKey);
+            if (!st || (st.done && Date.now() - st.ts > 30000)) {
+              st = { ts: Date.now(), done: false };
+              bgMarketFetch.set(bgKey, st);
+              if (bgMarketFetch.size > 500) bgMarketFetch.delete(bgMarketFetch.keys().next().value);
+              marketsP.then(d => {
+                if (d && Array.isArray(d.markets) && d.markets.length >= storedCount) {
+                  return Match.findOneAndUpdate(
+                    { matchId: req.params.matchId, finalVerified: { $ne: true } },
+                    { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(providerId), marketsRefreshedAt: new Date() } }
+                  );
+                }
+              }).catch(() => {}).finally(() => { st.done = true; });
+            }
+            bgPending = !st.done;
+            timings.src = 'stored';
+          }
           // The live-score lookup only matters for games already live, and never
           // delays the markets by more than 350ms.
           const wantLive = isLiveId || m.status === 'live';
           if (!wantLive) liveP.catch(() => {});
           const [racedMarkets, racedLive] = await Promise.all([
-            raceDeadline(marketsP, MARKETS_DEADLINE_MS),
+            skipWait ? Promise.resolve(DEADLINE) : raceDeadline(marketsP, MARKETS_DEADLINE_MS),
             wantLive ? raceDeadline(liveP, 350) : Promise.resolve(null)
           ]);
           timings.provider = lap() - tP;
           let details = null, liveNow = null;
-          if (racedMarkets === DEADLINE) { marketsTimedOut = true; timings.src = 'timeout'; marketsP.catch(() => {}); }
+          if (racedMarkets === DEADLINE) { if (!skipWait) { marketsTimedOut = true; timings.src = 'timeout'; } marketsP.catch(() => {}); }
           else details = racedMarkets;
           liveNow = racedLive === DEADLINE ? null : racedLive;
           const liveIsExact = liveNow && String(liveNow.providerMatchId) === String(providerId);
@@ -696,10 +722,9 @@ router.get('/match/:matchId', async (req, res) => {
     // synthetic market resolver so we never invent bookmaker prices.
     const marketRules = require('../services/marketRules');
     const richMarkets = providerMarkets.map((mk, index) => {
-      // EVERY SofaBets market is shown. Markets the server cannot grade by itself (corners, cards, players, goal timing ...)
-      // are VIEW-ONLY: visible with their prices, but not bettable - a bet on them would end in a refund instead of a
-      // win or a loss, so SafariBet never accepts it.
-      const settleable = marketRules.canSettle(String(mk.name || mk.label || ''));
+      // Only markets the server can actually settle are offered (no corners / cards / scoring types ...): a market
+      // that can never be graded would end in a refund instead of a win or a loss.
+      if (!marketRules.canSettle(String(mk.name || mk.label || ''))) return null;
       const options = (mk.selections || [])
         .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
         .map(o => ({
@@ -708,7 +733,7 @@ router.get('/match/:matchId', async (req, res) => {
           pickLabel: String(o.name || o.key),
           providerSelectionId: o.id != null ? String(o.id) : null,
           providerSelectionKey: o.key != null ? String(o.key) : null,
-          bettable: settleable && !(o.suspended || mk.suspended),     // not gradable / locked by the provider: shown, but not bettable
+          bettable: !(o.suspended || mk.suspended),     // locked/suspended by the provider: shown, but not bettable
           providerMarket: true
         }));
       if (!options.length) return null;
@@ -720,9 +745,8 @@ router.get('/match/:matchId', async (req, res) => {
         isSynthetic: false,
         providerMarket: true,
         bookmaker: mk.bookmaker || 'SofaBets',
-        hasSuspendedPick: settleable && options.some(o => !o.bettable),
-        wholeMarketSuspended: settleable && options.every(o => !o.bettable),
-        viewOnly: !settleable,
+        hasSuspendedPick: options.some(o => !o.bettable),
+        wholeMarketSuspended: options.every(o => !o.bettable),
         options
       };
     }).filter(Boolean);
@@ -773,7 +797,7 @@ router.get('/match/:matchId', async (req, res) => {
       if (opt) { opt.boostedOdds = boost.boostedOdds; opt.maxQualifyingStake = boost.maxQualifyingStake; }
     }
 
-    const marketsPending = (marketsTimedOut || resolveTimedOut) && richMarkets.length <= 1;
+    const marketsPending = ((marketsTimedOut || resolveTimedOut) && richMarkets.length <= 1) || bgPending;
     timings.total = lap();
     timings.build = Math.max(0, timings.total - timings.db - timings.resolve - timings.provider);
     res.set('Cache-Control', 'no-store');
