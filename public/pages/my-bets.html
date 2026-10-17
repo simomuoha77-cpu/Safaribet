@@ -209,6 +209,7 @@ async function refreshBalance(){
   }catch(e){}
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshBalance(); loadBets(true); } });
+window.addEventListener('sb:resume', ()=>{ try{ refreshBalance(); loadBets(true); }catch(e){} });
 setInterval(()=>{ if(!document.hidden){ loadBets(true); } }, 30000);
 
 async function loadBets(hadCache){

@@ -615,6 +615,7 @@ function startMarketsRefresh(){
   _refreshTimer = setTimeout(tick, 8000);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && _refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; _refreshBusy = false; startMarketsRefresh(); } });
+window.addEventListener('sb:resume', () => { try { if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; } _refreshBusy = false; startMarketsRefresh(); } catch (e) {} });
 
 const REASON_LABELS = {
   stale_data: 'Live data updating',
