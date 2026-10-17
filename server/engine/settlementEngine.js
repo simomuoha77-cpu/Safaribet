@@ -399,7 +399,9 @@ function pendingMessage(g, s) {
   return 'Awaiting result: ' + r;
 }
 
-const AUTO_VOID_GRACE_MS = 30 * 60 * 1000;   // after the match is verified final
+// After the match is verified final, markets the server cannot grade itself (corners, cards, players ...) wait this long for
+// SofaBets to publish its official result (checked fresh on every run) before the stake is refunded. Default 3 hours.
+const AUTO_VOID_GRACE_MS = Math.max(5, Number(process.env.AUTO_VOID_GRACE_MIN || 180)) * 60 * 1000;
 const officialMemo = new Map();   // per-run: one provider lookup per fixture
 async function gradeProviderSel(s, matchRows) {
   // The same provider fixture can have several Match rows (the Live tab id
@@ -424,7 +426,7 @@ async function gradeProviderSel(s, matchRows) {
     const started = s.commenceTime ? new Date(s.commenceTime).getTime() <= Date.now() : true;
     if (p && p.providerId && started && (s.providerMarketId || s.providerMarketKey)) {
       const mk0 = `${p.sport}:${p.providerId}`;
-      if (!officialMemo.has(mk0)) officialMemo.set(mk0, sofaBetsProvider.getMatchMarkets(p.providerId, p.sport).catch(() => null));
+      if (!officialMemo.has(mk0)) officialMemo.set(mk0, sofaBetsProvider.getMatchMarkets(p.providerId, p.sport, { maxAgeMs: 120000 }).catch(() => null));
       const det = await officialMemo.get(mk0);
       const mk = (det && det.markets || []).find(m => (s.providerMarketId && String(m.id) === String(s.providerMarketId)) || String(m.key) === String(s.providerMarketKey) && String(m.name || '') === String(s.marketLabel || m.name || ''));
       const sel = mk && (mk.selections || []).find(x => (s.providerSelectionId && String(x.id) === String(s.providerSelectionId)) || String(x.key) === String(s.providerSelectionKey));

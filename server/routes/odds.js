@@ -539,7 +539,7 @@ router.get('/market-diag/:matchId', async (req, res) => {
     const priced = list.filter(mk => (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1));
     const offered = priced.filter(mk => offer.canOffer(String(mk.name || mk.label || '')));
     const dropped = priced.filter(mk => !offer.canOffer(String(mk.name || mk.label || ''))).map(mk => String(mk.name || mk.label || '')).slice(0, 60);
-    res.json({ success: true, showAllMarkets: offer.showAll(), providerReturned: list.length, withPrice: priced.length, offeredByRules: offered.length, shownAfterDedupe: mcPlayableCount(list), droppedByRulesSample: dropped });
+    res.json({ success: true, showAllMarkets: offer.showAll(), providerReturned: list.length, withPrice: priced.length, offeredByRules: offered.length, shownAfterDedupe: mcPlayableCount(list), marketsWithOfficialResult: list.filter(mk => mk.providerSettled || (mk.selections || []).some(o => o && o.providerResult)).length, droppedByRulesSample: dropped });
   } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
 });
 
