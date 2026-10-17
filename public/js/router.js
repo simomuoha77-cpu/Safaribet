@@ -692,32 +692,18 @@
     checkBuild(Date.now() - hiddenAt > 120000);   // away 2+ min: check right now, otherwise throttled
   });
 
-  // ── COMING BACK: everything refreshes ──
-  // Opening the site/app again, returning to it after minutes or hours, or a phone that froze the page in the
-  // background: after 90s away the current page is rebuilt from fresh data (same as a refresh), short-lived caches are
-  // dropped so nothing old is painted first, and a new deploy is picked up. Shorter absences keep using the pages' own
-  // refreshers. Skipped on Deposit/Withdraw/Login/Register and while the person is typing, so nothing is lost.
+  // ── COMING BACK: quiet background refresh ──
+  // Opening the site/app again, returning after minutes or hours, or a phone that froze the page in the background:
+  // NOTHING on screen is cleared or rebuilt (no spinner, no blank list). The page just gets an 'sb:resume' signal and
+  // each page refreshes its own data in the background; a new deploy is picked up as before.
   var lastAlive = Date.now(), lastResume = 0;
-  function dropShortCaches() {
-    try {
-      sessionStorage.removeItem('sb_mkt_counts');
-      sessionStorage.removeItem('sb_home_scroll');
-      JSON.parse(sessionStorage.getItem('sb_mm_index') || '[]').forEach(function (id) { try { sessionStorage.removeItem(mmKey(id)); } catch (e) {} });
-      sessionStorage.removeItem('sb_mm_index');
-    } catch (e) {}
-    try { window.__sbHomeSnap = null; } catch (e) {}
-  }
   function onResume(awayMs) {
     var now = Date.now();
     if (now - lastResume < 3000) return;
     lastResume = now;
-    if (awayMs < 90000) { checkBuild(false); return; }
-    dropShortCaches();
-    checkBuild(true);
-    var ae = document.activeElement;
-    var typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && String(ae.value || '').length > 0;
-    if (SB_NO_RELOAD.test(location.pathname) || typing) return;
-    try { SB.reload(); } catch (e) { location.reload(); }
+    if (awayMs < 15000) { checkBuild(false); return; }     // quick glance
+    checkBuild(awayMs > 120000);                             // new deploy? (reloads only when the build changed)
+    try { window.dispatchEvent(new Event('sb:resume')); } catch (e) {}
   }
   function touchAlive() { var a = Date.now() - lastAlive; lastAlive = Date.now(); return a; }
   _docAdd.call(document, 'visibilitychange', function () {

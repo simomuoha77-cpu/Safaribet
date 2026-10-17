@@ -781,8 +781,8 @@ header{
         window.__sbSnapActive = true;
         return;
       }
-      var html = localStorage.getItem('matchListHTML'), hts = +localStorage.getItem('matchListHTMLts') || 0;
-      if (html && Date.now() - hts < 20 * 60000) ml.innerHTML = html;
+      var html = localStorage.getItem('matchListHTML');
+      if (html) ml.innerHTML = html;
     } catch(e) {}
   })();
   </script>
@@ -1081,12 +1081,11 @@ try {
   // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
   // tab kills and full app restarts) is the right scope for this cache.
   const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
-  const cacheFresh = !!(cached && Date.now() - (cached.ts || 0) < 30 * 60000);
-  if (cacheFresh && cached.data && cached.data.length) {
+  if (cached && cached.data && cached.data.length) {
     allMatches = cached.data;
     featuredMatches = cached.data;
   }
-  if (cacheFresh && cached.etag) matchesEtag = cached.etag;
+  if (cached && cached.etag) matchesEtag = cached.etag;
 } catch(e) {}
 
 // ── SCROLL POSITION ──
@@ -1558,6 +1557,12 @@ function freshSync(forceFull){
   ensureFreshSync(since, 0);
 }
 window.addEventListener('online', () => freshSync(true));
+window.addEventListener('sb:resume', function(){
+  if (Date.now() - lastForegroundSync < 3000) return;      // the visibility handler below already did it
+  lastForegroundSync = Date.now();
+  freshSync(true);
+  try { if (typeof refreshBalance === 'function') refreshBalance(); } catch(e) {}
+});
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'visible'){
     const awayMs = Date.now() - lastForegroundSync;
