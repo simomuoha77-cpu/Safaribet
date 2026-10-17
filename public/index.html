@@ -3682,7 +3682,8 @@ function showT(msg,type=''){
     for(var i = sp.length - 1; i >= 0; i--){ var t = (sp[i].textContent || '').trim(); if(/^(More markets|\d+ markets)/.test(t)) return sp[i]; }
     return null;
   }
-  function canAsk(id){ return counts[id] == null && (!asked[id] || Date.now() - asked[id] > 60000); }
+  var tries = {};
+  function canAsk(id){ return counts[id] == null && (tries[id] || 0) < 10 && (!asked[id] || Date.now() - asked[id] > 8000); }
   function scan(){
     var cards = document.querySelectorAll('#matchList .mc'), need = false;
     for(var i = 0; i < cards.length; i++){
@@ -3698,7 +3699,7 @@ function showT(msg,type=''){
     var cards = document.querySelectorAll('#matchList .mc'), ids = [];
     for(var i = 0; i < cards.length && ids.length < 60; i++){ var id = idOf(cards[i]); if(id && canAsk(id)) ids.push(id); }
     if(!ids.length) return;
-    inflight = true; ids.forEach(function(id){ asked[id] = Date.now(); });
+    inflight = true; ids.forEach(function(id){ asked[id] = Date.now(); tries[id] = (tries[id] || 0) + 1; });
     fetch('/api/odds/market-counts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids }) })
       .then(function(r){ return r.json(); })
       .then(function(d){
@@ -3723,7 +3724,7 @@ function showT(msg,type=''){
   }
   attach();
   setInterval(attach, 1500);     // the list element is replaced when you leave and come back to the home page
-  setInterval(scan, 20000);      // picks up games whose market list became available a little later
+  setInterval(scan, 5000);       // picks up games whose market list became available a little later
 })();
 </script>
 <script>SB.run()</script>

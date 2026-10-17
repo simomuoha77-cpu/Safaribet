@@ -244,18 +244,51 @@ router.get('/available', async (req, res) => {
 // score, live minute, odds price, or match status actually moves.
 // How many markets each game on the list has ("76 markets →"). Memory only: it never calls SofaBets, and games
 // whose full market list is not in memory yet are simply left out of the answer (the app keeps "More markets").
-router.post('/market-counts', (req, res) => {
+router.post('/market-counts', async (req, res) => {
   try {
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 80) : [];
     const finalResults = require('../services/finalResultService');
+    const rules = require('../services/marketRules');
+    // Same rule the match page uses: settleable, priced, de-duplicated by name.
+    const countPlayable = (list) => {
+      if (!Array.isArray(list) || list.length < 2) return null;
+      const seen = new Set();
+      let n = 0;
+      for (const mk of list) {
+        const nm = String(mk && (mk.name || mk.label) || '').trim().toLowerCase();
+        if (nm) { if (seen.has(nm)) continue; seen.add(nm); }
+        if (!rules.canSettle(String((mk && (mk.name || mk.label)) || ''))) continue;
+        if ((mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) n++;
+      }
+      return n;
+    };
     const counts = {};
+    const missing = [];
     for (const raw of ids) {
       const id = String(raw || '');
       if (!id || id.length > 100) continue;
       const p = finalResults.parseSofaMatchId(id);
       if (!p || !p.providerId) continue;
       const n = sofaBets.cachedMarketCount(p.providerId, p.sport);
-      if (Number.isFinite(n) && n >= 2) counts[id] = n;
+      if (Number.isFinite(n) && n >= 2) counts[id] = n; else missing.push({ id, p });
+    }
+    // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
+    if (missing.length) {
+      try {
+        const docs = await Match.find({ matchId: { $in: missing.map(x => x.id) } }, { matchId: 1, markets: 1 }).lean();
+        for (const d of docs) {
+          const n = countPlayable(d.markets);
+          if (Number.isFinite(n) && n >= 2) counts[d.matchId] = n;
+        }
+      } catch (_) {}
+      // Still unknown: start fetching them in the background so the next ask (a few seconds later) has the number.
+      for (const x of missing) {
+        if (counts[x.id] != null) continue;
+        try { sofaBets.queueWarmMarkets(x.p.providerId, x.p.sport, d => {
+          Match.updateOne({ matchId: String(x.id), finalVerified: { $ne: true } },
+            { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(x.p.providerId), marketsRefreshedAt: new Date() } }).catch(() => {});
+        }); } catch (_) {}
+      }
     }
     res.json({ success: true, counts });
   } catch (e) {
