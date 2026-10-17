@@ -59,6 +59,11 @@ function detectSimpleType(bare) {
   if (/clean\s*sheet/.test(n)) return 'CLEAN_SHEET';
   if (/win\s*to\s*nil/.test(n)) return 'WIN_TO_NIL';
   if (/highest\s*scoring\s*half|half\s*with\s*(the\s*)?most\s*goals|most\s*goals\s*half/.test(n)) return 'HIGHEST_HALF';
+  // Markets decided by the goals in EACH half: gradable from the verified half-time and full-time scores.
+  if (/both\s*halves?\s*(over|under)\s*\d/.test(n)) return 'BOTH_HALVES_OU';
+  if (/win\s*both\s*halves?/.test(n)) return 'WIN_BOTH_HALVES';
+  if (/win\s*(either|a|any|at\s*least\s*one)\s*half|win\s*in\s*either\s*half/.test(n)) return 'WIN_EITHER_HALF';
+  if (/score\s*(in\s*)?both\s*halves?/.test(n) && !/both\s*teams?/.test(n)) return 'SCORE_BOTH_HALVES';
   if (/half\s*time\s*\/\s*full\s*time|ht\s*\/\s*ft|halftime\s*fulltime/.test(n)) return 'HTFT';
   if (/draw\s*no\s*bet|\bdnb\b/.test(n)) return 'DNB';
   if (/double\s*chance/.test(n)) return 'DOUBLE_CHANCE';
@@ -240,6 +245,32 @@ function evalSimple(type, pickLabel, sc, ctx) {
       const scored = side === 'home' ? h > 0 : a > 0;
       if (/^yes$/.test(p)) return W(scored);
       if (/^no$/.test(p)) return W(!scored);
+      return null;
+    }
+    case 'BOTH_HALVES_OU': case 'SCORE_BOTH_HALVES': case 'WIN_BOTH_HALVES': case 'WIN_EITHER_HALF': {
+      const hs = ctx.halfScores;
+      if (!hs) return null;
+      let cond;
+      if (type === 'BOTH_HALVES_OU') {
+        const m = String(ctx.marketText || '').toLowerCase().match(/both\s*halves?\s*(over|under)\s*(\d+(?:\.\d+)?)/);
+        if (!m) return null;
+        const line = Number(m[2]);
+        const f1 = hs.first.home + hs.first.away, f2 = hs.second.home + hs.second.away;
+        if (f1 === line || f2 === line) return 'void';               // a whole-number line landed exactly: refund
+        cond = m[1] === 'over' ? (f1 > line && f2 > line) : (f1 < line && f2 < line);
+      } else {
+        const mt = String(ctx.marketText || '');
+        const cm = clean(mt), hc = clean(ctx.home), ac = clean(ctx.away);
+        let side = /\bhome\b/i.test(mt) ? 'home' : /\baway\b/i.test(mt) ? 'away' : (hc && cm.includes(hc) ? 'home' : (ac && cm.includes(ac) ? 'away' : null));
+        if (!side) { const w = teamOf(mt.split(/\s+to\s+/i)[0], ctx.home, ctx.away); if (w === 'home' || w === 'away') side = w; }
+        if (!side) return null;
+        const o = side === 'home' ? 'away' : 'home';
+        if (type === 'SCORE_BOTH_HALVES') cond = hs.first[side] > 0 && hs.second[side] > 0;
+        else if (type === 'WIN_BOTH_HALVES') cond = hs.first[side] > hs.first[o] && hs.second[side] > hs.second[o];
+        else cond = hs.first[side] > hs.first[o] || hs.second[side] > hs.second[o];
+      }
+      if (/^yes$/.test(p)) return W(cond);
+      if (/^no$/.test(p)) return W(!cond);
       return null;
     }
     case 'HIGHEST_HALF': {
@@ -430,6 +461,13 @@ function evaluate(sel, periodScores) {
   if (!sc.score) return { status: null, need, reason: sc.missing, market: pm };
   const ps0 = periodScores || {};
   ctx.scorers = ps0.scorers || null;
+  ctx.halfScores = null;
+  if (ps0.ht && ps0.ft && ps0.ftFinal) {
+    const sh = { home: ps0.ft.home - ps0.ht.home, away: ps0.ft.away - ps0.ht.away };
+    if (sh.home >= 0 && sh.away >= 0) ctx.halfScores = { first: ps0.ht, second: sh };
+  }
+  if (['BOTH_HALVES_OU', 'SCORE_BOTH_HALVES', 'WIN_BOTH_HALVES', 'WIN_EITHER_HALF'].includes(pm.type) && !ctx.halfScores)
+    return { status: null, need: 'FT', reason: 'half-time score was not recorded', market: pm };
   ctx.halves = (ps0.ht && ps0.ft && ps0.ftFinal) ? { first: ps0.ht.home + ps0.ht.away, second: (ps0.ft.home - ps0.ht.home) + (ps0.ft.away - ps0.ht.away) } : null;
   // First goal of the 1ST HALF: if the half ended 0-0 nobody scored; otherwise the first goal of the whole
   // match was scored in that half, so the match-wide first scorer is also the first scorer of the half.

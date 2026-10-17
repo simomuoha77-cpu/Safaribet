@@ -69,5 +69,19 @@ for (const [m, want] of [['Winning Margin', true], ['Goal Range', true], ['Clean
   const got = R.canSettle(m); got === want ? pass++ : fail++;
   console.log((got === want ? 'PASS ' : 'FAIL ') + 'canSettle(' + m + ') -> ' + got);
 }
+// ── per-half markets (graded from HT + FT) ──
+const ph = fin({ home: 3, away: 1 }, { home: 1, away: 1 });      // 1H 1-1, 2H 2-0
+t('Both halves over 1.5 yes (2 goals, 2 goals)', 'Both halves over 1.5', 'yes', ph, 'won');
+t('Both halves over 1.5 no',                      'Both halves over 1.5', 'no', ph, 'lost');
+t('Both halves under 1.5 yes',                    'Both halves under 1.5', 'yes', ph, 'lost');
+t('Both halves under 1.5 no',                     'Both halves under 1.5', 'no', ph, 'won');
+t('Mito to score in both halves yes',             H + ' to score in both halves', 'yes', ph, 'won');
+t('Tokyo to score in both halves yes (0 in 2H)',  A + ' to score in both halves', 'yes', ph, 'lost');
+t('Tokyo to score in both halves no',             A + ' to score in both halves', 'no', ph, 'won');
+t('Mito to win both halves no (drew 1H)',         H + ' to win both halves', 'no', ph, 'won');
+t('Mito to win either half yes (won 2H)',         H + ' to win either half', 'yes', ph, 'won');
+t('Tokyo to win either half yes',                 A + ' to win either half', 'yes', ph, 'lost');
+t('Both halves needs HT score -> pending',        'Both halves over 1.5', 'yes', { ft: { home: 3, away: 1 }, ftFinal: true }, null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
