@@ -120,6 +120,35 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   ]);
 });
 
+// ── APP BUILD ID ──
+// The pages ask this on every open / page change / return to the app. When the number differs from the one the phone
+// saw last, the page refreshes itself, so a deploy shows up WITHOUT logging out. It is the newest modified time (plus
+// total size) of everything in /public, so copying new files in changes it. Re-checked at most every 5s.
+const __fs = require('fs');
+let __build = { id: String(Date.now()), at: 0 };
+function __scanBuild() {
+  const root = path.join(__dirname, '../public');
+  let newest = 0, total = 0, files = 0;
+  (function walk(dir, depth) {
+    if (depth > 4) return;
+    let list = [];
+    try { list = __fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of list) {
+      if (e.name.startsWith('.') || e.name.includes('.bak')) continue;
+      const fp = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(fp, depth + 1); continue; }
+      if (!/\.(html|js|css|json)$/i.test(e.name)) continue;
+      try { const st = __fs.statSync(fp); if (st.mtimeMs > newest) newest = st.mtimeMs; total += st.size; files++; } catch (_) {}
+    }
+  })(root, 0);
+  return Math.round(newest).toString(36) + '-' + total.toString(36) + '-' + files;
+}
+app.get('/api/version', (req, res) => {
+  if (Date.now() - __build.at > 5000) __build = { id: __scanBuild(), at: Date.now() };
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, build: __build.id });
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,
