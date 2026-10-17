@@ -692,6 +692,49 @@
     checkBuild(Date.now() - hiddenAt > 120000);   // away 2+ min: check right now, otherwise throttled
   });
 
+  // ── COMING BACK: everything refreshes ──
+  // Opening the site/app again, returning to it after minutes or hours, or a phone that froze the page in the
+  // background: after 90s away the current page is rebuilt from fresh data (same as a refresh), short-lived caches are
+  // dropped so nothing old is painted first, and a new deploy is picked up. Shorter absences keep using the pages' own
+  // refreshers. Skipped on Deposit/Withdraw/Login/Register and while the person is typing, so nothing is lost.
+  var lastAlive = Date.now(), lastResume = 0;
+  function dropShortCaches() {
+    try {
+      sessionStorage.removeItem('sb_mkt_counts');
+      sessionStorage.removeItem('sb_home_scroll');
+      JSON.parse(sessionStorage.getItem('sb_mm_index') || '[]').forEach(function (id) { try { sessionStorage.removeItem(mmKey(id)); } catch (e) {} });
+      sessionStorage.removeItem('sb_mm_index');
+    } catch (e) {}
+    try { window.__sbHomeSnap = null; } catch (e) {}
+  }
+  function onResume(awayMs) {
+    var now = Date.now();
+    if (now - lastResume < 3000) return;
+    lastResume = now;
+    if (awayMs < 90000) { checkBuild(false); return; }
+    dropShortCaches();
+    checkBuild(true);
+    var ae = document.activeElement;
+    var typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && String(ae.value || '').length > 0;
+    if (SB_NO_RELOAD.test(location.pathname) || typing) return;
+    try { SB.reload(); } catch (e) { location.reload(); }
+  }
+  function touchAlive() { var a = Date.now() - lastAlive; lastAlive = Date.now(); return a; }
+  _docAdd.call(document, 'visibilitychange', function () {
+    if (document.hidden) { lastAlive = Date.now(); return; }
+    onResume(touchAlive());
+  });
+  _winAdd.call(window, 'pagehide', function () { lastAlive = Date.now(); });
+  _winAdd.call(window, 'pageshow', function () { onResume(touchAlive()); });
+  _winAdd.call(window, 'focus', function () { if (!document.hidden) onResume(touchAlive()); });
+  _winAdd.call(window, 'online', function () { onResume(touchAlive()); });
+  // A phone/WebView can freeze the page with no event at all: a timer that suddenly sees a big gap means it just woke up.
+  _si.call(window, function () {
+    if (document.hidden) return;
+    var gap = Date.now() - lastAlive; lastAlive = Date.now();
+    if (gap > 10000) onResume(gap);
+  }, 2000);
+
   // Warm the bottom-nav pages once the first page is idle so taps feel instant.
   function prefetch() {
     try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
