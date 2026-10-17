@@ -696,9 +696,10 @@ router.get('/match/:matchId', async (req, res) => {
     // synthetic market resolver so we never invent bookmaker prices.
     const marketRules = require('../services/marketRules');
     const richMarkets = providerMarkets.map((mk, index) => {
-      // Only markets the server can actually settle are offered (no corners / cards / scoring types ...): a market
-      // that can never be graded would end in a refund instead of a win or a loss.
-      if (!marketRules.canSettle(String(mk.name || mk.label || ''))) return null;
+      // EVERY SofaBets market is shown. Markets the server cannot grade by itself (corners, cards, players, goal timing ...)
+      // are VIEW-ONLY: visible with their prices, but not bettable - a bet on them would end in a refund instead of a
+      // win or a loss, so SafariBet never accepts it.
+      const settleable = marketRules.canSettle(String(mk.name || mk.label || ''));
       const options = (mk.selections || [])
         .filter(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)
         .map(o => ({
@@ -707,7 +708,7 @@ router.get('/match/:matchId', async (req, res) => {
           pickLabel: String(o.name || o.key),
           providerSelectionId: o.id != null ? String(o.id) : null,
           providerSelectionKey: o.key != null ? String(o.key) : null,
-          bettable: !(o.suspended || mk.suspended),     // locked/suspended by the provider: shown, but not bettable
+          bettable: settleable && !(o.suspended || mk.suspended),     // not gradable / locked by the provider: shown, but not bettable
           providerMarket: true
         }));
       if (!options.length) return null;
@@ -719,8 +720,9 @@ router.get('/match/:matchId', async (req, res) => {
         isSynthetic: false,
         providerMarket: true,
         bookmaker: mk.bookmaker || 'SofaBets',
-        hasSuspendedPick: options.some(o => !o.bettable),
-        wholeMarketSuspended: options.every(o => !o.bettable),
+        hasSuspendedPick: settleable && options.some(o => !o.bettable),
+        wholeMarketSuspended: settleable && options.every(o => !o.bettable),
+        viewOnly: !settleable,
         options
       };
     }).filter(Boolean);

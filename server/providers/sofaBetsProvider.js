@@ -558,8 +558,8 @@ function holdCrawler(maxMs) {
 function cachedMarketCount(providerMatchId, sportName = 'football') {
   const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
   if (!c || !c.data || !Array.isArray(c.data.markets) || c.data.markets.length < 2) return null;
-  const rules = require('../services/marketRules');
-  return c.data.markets.filter(mk => rules.canSettle(String(mk.name || mk.label || '')) &&
+  // Every market with a price is shown on the match page (unreadable ones view-only), so every one is counted.
+  return c.data.markets.filter(mk =>
     (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)).length;
 }
 
