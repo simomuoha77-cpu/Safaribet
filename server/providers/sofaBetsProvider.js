@@ -470,8 +470,9 @@ function normalizeMarketList(payload) {
 function dedupeMarketsByName(markets) {
   const byName = new Map();
   for (const m of (markets || [])) {
-    const nameKey = String(m?.name || '').trim().toLowerCase();
-    if (!nameKey) continue;
+    const nameKey0 = String(m?.name || '').trim().toLowerCase();
+    if (!nameKey0) continue;
+    const nameKey = nameKey0 + '|' + (m.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/');   // same name AND same selections = the same market
     const existing = byName.get(nameKey);
     if (!existing || (m.selections || []).length > (existing.selections || []).length) {
       byName.set(nameKey, m);

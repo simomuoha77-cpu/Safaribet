@@ -256,7 +256,7 @@ router.post('/market-counts', async (req, res) => {
       let n = 0;
       for (const mk of list) {
         const nm = String(mk && (mk.name || mk.label) || '').trim().toLowerCase();
-        if (nm) { if (seen.has(nm)) continue; seen.add(nm); }
+        if (nm) { const sig = nm + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/'); if (seen.has(sig)) continue; seen.add(sig); }
         if (!require('../services/marketOffer').canOffer(String((mk && (mk.name || mk.label)) || ''))) continue;
         if ((mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) n++;
       }
@@ -275,7 +275,7 @@ router.post('/market-counts', async (req, res) => {
     // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
     if (missing.length) {
       try {
-        const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1 }).lean();
+        const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1, 'markets.selections.name': 1, 'markets.selections.key': 1 }).lean();
         for (const d of docs) {
           const n = countPlayable(d.markets);
           if (Number.isFinite(n) && n >= 2) counts[d.matchId] = n;
@@ -733,8 +733,9 @@ router.get('/match/:matchId', async (req, res) => {
         : (Array.isArray(m.providerOdds?.markets) ? m.providerOdds.markets : []);
     const seenMarketNames = new Set();
     const providerMarkets = rawProviderMarkets.filter(mk => {
-      const nameKey = String(mk?.name || '').trim().toLowerCase();
-      if (!nameKey) return true; // keep unnamed entries rather than silently dropping them
+      const nameKey0 = String(mk?.name || '').trim().toLowerCase();
+      if (!nameKey0) return true; // keep unnamed entries rather than silently dropping them
+      const nameKey = nameKey0 + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/');   // same name AND same selections = a real duplicate
       if (seenMarketNames.has(nameKey)) return false;
       seenMarketNames.add(nameKey);
       return true;
@@ -746,6 +747,12 @@ router.get('/match/:matchId', async (req, res) => {
     // page. They are intentionally kept separate from SafariBet's legacy
     // synthetic market resolver so we never invent bookmaker prices.
     const marketRules = require('../services/marketRules');
+    const usedSbKeys = new Map();
+    const sbUniqueKey = (mk, index) => {
+      const base = 'sb:' + String(mk.key || ('market_' + index));
+      const n = usedSbKeys.get(base) || 0; usedSbKeys.set(base, n + 1);
+      return n ? base + '#' + n : base;
+    };
     const richMarkets = providerMarkets.map((mk, index) => {
       // Only markets the server can actually settle are offered (no corners / cards / scoring types ...): a market
       // that can never be graded would end in a refund instead of a win or a loss.
@@ -763,7 +770,7 @@ router.get('/match/:matchId', async (req, res) => {
         }));
       if (!options.length) return null;
       return {
-        market: 'sb:' + String(mk.key || ('market_' + index)),
+        market: sbUniqueKey(mk, index),
         providerMarketId: mk.id != null ? String(mk.id) : null,
         providerMarketKey: mk.key != null ? String(mk.key) : null,
         label: String(mk.name || 'Market'),
