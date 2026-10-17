@@ -255,9 +255,8 @@ router.post('/market-counts', async (req, res) => {
   try {
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 80) : [];
     const finalResults = require('../services/finalResultService');
-    let offer;
-    try { offer = require('../services/marketOffer').canOffer; } catch (_) { offer = label => require('../services/marketRules').canSettle(label); }
-    // Same rule the match page uses: offered, priced, de-duplicated.
+    const rules = require('../services/marketRules');
+    // Same rule the match page uses: settleable, priced, de-duplicated by name.
     const countPlayable = (list) => {
       if (!Array.isArray(list) || list.length < 2) return null;
       const seen = new Set();
@@ -265,7 +264,7 @@ router.post('/market-counts', async (req, res) => {
       for (const mk of list) {
         const nm = String(mk && (mk.name || mk.label) || '').trim().toLowerCase();
         if (nm) { const sig = nm + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/'); if (seen.has(sig)) continue; seen.add(sig); }
-        if (!offer(String((mk && (mk.name || mk.label)) || ''))) continue;
+        if (!require('../services/marketOffer').canOffer(String((mk && (mk.name || mk.label)) || ''))) continue;
         if ((mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) n++;
       }
       return n;
@@ -283,7 +282,7 @@ router.post('/market-counts', async (req, res) => {
       else if (kept && Date.now() - kept.ts < COUNT_KEEP_MS) counts[id] = kept.n;
       else missing.push({ id, p });
     }
-    // Not in memory: use the copy saved in MongoDB (a light read: only the fields needed, at most 30 games).
+    // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
     if (missing.length) {
       try {
         const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1, 'markets.selections.name': 1, 'markets.selections.key': 1 }).lean();

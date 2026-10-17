@@ -3689,7 +3689,6 @@ function showT(msg,type=''){
     return null;
   }
   var tries = {};
-  var tries = tries || {};
   function canAsk(id){
     if (counts[id] != null) return false;
     var t = tries[id] || 0; if (t >= 80) return false;
@@ -3719,6 +3718,15 @@ function showT(msg,type=''){
           for(var k in d.counts) counts[k] = d.counts[k];
           try{ sessionStorage.setItem('sb_mkt_counts', JSON.stringify(counts)); }catch(e){}
           scan();
+          // games on screen that the server does not have yet: ask it to fetch their market lists now (the same safe
+          // call the page already uses for visible cards: front of the queue, at most 12, dropped if not started in 30s)
+          var near = ids.filter(function(id){
+            if(counts[id] != null) return false;
+            var el = document.getElementById('mc_' + id); if(!el) return false;
+            var r = el.getBoundingClientRect();
+            return r.bottom > -600 && r.top < window.innerHeight + 900;
+          }).slice(0, 12);
+          if(near.length){ try{ fetch('/api/odds/warm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: near }), keepalive: true }).catch(function(){}); }catch(e){} }
         }
       })
       .catch(function(){})
