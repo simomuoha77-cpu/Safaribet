@@ -275,20 +275,12 @@ router.post('/market-counts', async (req, res) => {
     // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
     if (missing.length) {
       try {
-        const docs = await Match.find({ matchId: { $in: missing.map(x => x.id) } }, { matchId: 1, markets: 1 }).lean();
+        const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1 }).lean();
         for (const d of docs) {
           const n = countPlayable(d.markets);
           if (Number.isFinite(n) && n >= 2) counts[d.matchId] = n;
         }
       } catch (_) {}
-      // Still unknown: start fetching them in the background so the next ask (a few seconds later) has the number.
-      for (const x of missing) {
-        if (counts[x.id] != null) continue;
-        try { sofaBets.queueWarmMarkets(x.p.providerId, x.p.sport, d => {
-          Match.updateOne({ matchId: String(x.id), finalVerified: { $ne: true } },
-            { $set: { markets: d.markets, bookmakers: d.bookmakers || [], providerMatchId: String(x.p.providerId), marketsRefreshedAt: new Date() } }).catch(() => {});
-        }); } catch (_) {}
-      }
     }
     res.json({ success: true, counts });
   } catch (e) {

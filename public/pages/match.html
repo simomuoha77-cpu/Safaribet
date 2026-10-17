@@ -320,7 +320,7 @@ async function pollFullMarkets(){
       if (i === 5) showMarketsStuck();          // ~3s without markets: say so and offer Retry (never a blank page)
       await new Promise(r => setTimeout(r, i < 6 ? 500 : 2000));
       try {
-        const d = await fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 4000);
+        const d = await fetchJsonTimeout(`/api/odds/match/${encodeURIComponent(matchId)}?rich=1`, 6000);
         if (!isCurrent()) return;
         if (d && d.success && d.data && !isStaleResponse(d)) {
           matchData = d.data; matchData.__full = true;
