@@ -354,12 +354,13 @@ const MC_CONC = Number(process.env.MARKET_COUNT_CONCURRENCY || 2);
 let mcActive = 0; const mcWaiters = [];
 function mcAcquire() { return new Promise(r => { if (mcActive < MC_CONC) { mcActive++; r(); } else mcWaiters.push(r); }); }
 function mcRelease() { const w = mcWaiters.shift(); if (w) w(); else mcActive = Math.max(0, mcActive - 1); }
+function mcMode() { try { return require('../services/marketOffer').showAll() ? 1 : 0; } catch (_) { return 0; } }   // counts depend on SHOW_ALL_MARKETS: old-mode counts are never reused
 function mcCol() { try { const m = require('mongoose'); return m.connection && m.connection.readyState === 1 ? m.connection.collection('market_counts') : null; } catch (_) { return null; } }
 function mcRemember(id, n) {
   mcDone.set(id, { n, ts: Date.now() });
   if (mcDone.size > 4000) mcDone.delete(mcDone.keys().next().value);
   const col = mcCol();
-  if (col) col.updateOne({ _id: id }, { $set: { n, ts: new Date() } }, { upsert: true }).catch(() => {});
+  if (col) col.updateOne({ _id: id }, { $set: { n, ts: new Date(), sa: mcMode() } }, { upsert: true }).catch(() => {});
 }
 (function mcBoot() {          // counts survive restarts: reload the last 12h from MongoDB
   let tries = 0;
@@ -369,7 +370,7 @@ function mcRemember(id, n) {
     clearInterval(t);
     try {
       const docs = await col.find({ ts: { $gt: new Date(Date.now() - 12 * 3600000) } }).toArray();
-      for (const d of docs) if (d && d.n >= 1 && !mcDone.has(d._id)) mcDone.set(d._id, { n: d.n, ts: new Date(d.ts).getTime() });
+      for (const d of docs) if (d && d.n >= 1 && (d.sa || 0) === mcMode() && !mcDone.has(d._id)) mcDone.set(d._id, { n: d.n, ts: new Date(d.ts).getTime() });
     } catch (_) {}
   }, 1000);
   if (t.unref) t.unref();
