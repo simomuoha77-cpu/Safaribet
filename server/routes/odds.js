@@ -503,6 +503,21 @@ router.get('/all-counts', (req, res) => {
   if (t.unref) t.unref();
 })();
 
+// GET /api/odds/market-diag/<matchId> : where the markets of one game are lost (counts only, no prices).
+router.get('/market-diag/:matchId', async (req, res) => {
+  try {
+    const p = require('../services/finalResultService').parseSofaMatchId(String(req.params.matchId || ''));
+    if (!p || !p.providerId) return res.json({ success: false, message: 'not a sofabets match id' });
+    const d = await sofaBets.getMatchMarkets(p.providerId, p.sport);
+    const list = (d && d.markets) || [];
+    const offer = require('../services/marketOffer');
+    const priced = list.filter(mk => (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1));
+    const offered = priced.filter(mk => offer.canOffer(String(mk.name || mk.label || '')));
+    const dropped = priced.filter(mk => !offer.canOffer(String(mk.name || mk.label || ''))).map(mk => String(mk.name || mk.label || '')).slice(0, 60);
+    res.json({ success: true, showAllMarkets: offer.showAll(), providerReturned: list.length, withPrice: priced.length, offeredByRules: offered.length, shownAfterDedupe: mcPlayableCount(list), droppedByRulesSample: dropped });
+  } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
+});
+
 router.get('/featured', async (req, res) => {
   try {
     // A football game still flagged "live" 4.5h+ after kickoff is a stuck feed entry, not a live game: leave it out of
