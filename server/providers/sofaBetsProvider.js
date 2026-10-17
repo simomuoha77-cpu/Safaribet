@@ -559,9 +559,17 @@ function holdCrawler(maxMs) {
 function cachedMarketCount(providerMatchId, sportName = 'football') {
   const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
   if (!c || !c.data || !Array.isArray(c.data.markets) || c.data.markets.length < 2) return null;
-  // Every market with a price is shown on the match page (unreadable ones view-only), so every one is counted.
-  return c.data.markets.filter(mk =>
-    (mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)).length;
+  let offer;
+  try { offer = require('../services/marketOffer').canOffer; } catch (_) { offer = label => require('../services/marketRules').canSettle(label); }
+  const seen = new Set(); let n = 0;
+  for (const mk of c.data.markets) {
+    if (!offer(String(mk.name || mk.label || ''))) continue;
+    if (!(mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) continue;
+    const nm = String(mk.name || '').trim().toLowerCase();
+    if (nm) { const sig = nm + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/'); if (seen.has(sig)) continue; seen.add(sig); }
+    n++;
+  }
+  return n;
 }
 
 function marketsCacheAge(providerMatchId, sportName = 'football') {

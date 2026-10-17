@@ -3689,7 +3689,13 @@ function showT(msg,type=''){
     return null;
   }
   var tries = {};
-  function canAsk(id){ return counts[id] == null && (tries[id] || 0) < 10 && (!asked[id] || Date.now() - asked[id] > 8000); }
+  var tries = tries || {};
+  function canAsk(id){
+    if (counts[id] != null) return false;
+    var t = tries[id] || 0; if (t >= 80) return false;
+    return !asked[id] || Date.now() - asked[id] > (t < 6 ? 8000 : 30000);     // quick at first, then every 30s (the server fills them in as it goes)
+  }
+  window.addEventListener('sb:resume', function(){ tries = {}; asked = {}; scan(); });     // back in the app: ask again at once
   function scan(){
     var cards = document.querySelectorAll('#matchList .mc'), need = false;
     for(var i = 0; i < cards.length; i++){

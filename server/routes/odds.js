@@ -244,12 +244,20 @@ router.get('/available', async (req, res) => {
 // score, live minute, odds price, or match status actually moves.
 // How many markets each game on the list has ("76 markets →"). Memory only: it never calls SofaBets, and games
 // whose full market list is not in memory yet are simply left out of the answer (the app keeps "More markets").
+const marketCountStore = new Map();           // matchId -> { n, ts }   (counts barely change: keep them for hours)
+const COUNT_KEEP_MS = 6 * 3600000;
+function rememberCount(id, n) {
+  if (!id || !Number.isFinite(n) || n < 2) return;
+  marketCountStore.set(String(id), { n, ts: Date.now() });
+  if (marketCountStore.size > 4000) marketCountStore.delete(marketCountStore.keys().next().value);
+}
 router.post('/market-counts', async (req, res) => {
   try {
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 80) : [];
     const finalResults = require('../services/finalResultService');
-    const rules = require('../services/marketRules');
-    // Same rule the match page uses: settleable, priced, de-duplicated by name.
+    let offer;
+    try { offer = require('../services/marketOffer').canOffer; } catch (_) { offer = label => require('../services/marketRules').canSettle(label); }
+    // Same rule the match page uses: offered, priced, de-duplicated.
     const countPlayable = (list) => {
       if (!Array.isArray(list) || list.length < 2) return null;
       const seen = new Set();
@@ -257,7 +265,7 @@ router.post('/market-counts', async (req, res) => {
       for (const mk of list) {
         const nm = String(mk && (mk.name || mk.label) || '').trim().toLowerCase();
         if (nm) { const sig = nm + '|' + (mk.selections || []).map(o => String(o && (o.name || o.key) || '').trim().toLowerCase()).sort().join('/'); if (seen.has(sig)) continue; seen.add(sig); }
-        if (!require('../services/marketOffer').canOffer(String((mk && (mk.name || mk.label)) || ''))) continue;
+        if (!offer(String((mk && (mk.name || mk.label)) || ''))) continue;
         if ((mk.selections || []).some(o => Number.isFinite(Number(o.odds)) && Number(o.odds) > 1)) n++;
       }
       return n;
@@ -270,15 +278,18 @@ router.post('/market-counts', async (req, res) => {
       const p = finalResults.parseSofaMatchId(id);
       if (!p || !p.providerId) continue;
       const n = sofaBets.cachedMarketCount(p.providerId, p.sport);
-      if (Number.isFinite(n) && n >= 2) counts[id] = n; else missing.push({ id, p });
+      const kept = marketCountStore.get(id);
+      if (Number.isFinite(n) && n >= 2) { counts[id] = n; rememberCount(id, n); }
+      else if (kept && Date.now() - kept.ts < COUNT_KEEP_MS) counts[id] = kept.n;
+      else missing.push({ id, p });
     }
-    // Not in memory: use the copy saved in MongoDB, so every game that has been fetched before shows its total.
+    // Not in memory: use the copy saved in MongoDB (a light read: only the fields needed, at most 30 games).
     if (missing.length) {
       try {
         const docs = await Match.find({ matchId: { $in: missing.slice(0, 30).map(x => x.id) } }, { matchId: 1, 'markets.name': 1, 'markets.label': 1, 'markets.selections.odds': 1, 'markets.selections.name': 1, 'markets.selections.key': 1 }).lean();
         for (const d of docs) {
           const n = countPlayable(d.markets);
-          if (Number.isFinite(n) && n >= 2) counts[d.matchId] = n;
+          if (Number.isFinite(n) && n >= 2) { counts[d.matchId] = n; rememberCount(d.matchId, n); }
         }
       } catch (_) {}
     }
@@ -815,6 +826,7 @@ router.get('/match/:matchId', async (req, res) => {
     // When SofaBets supplied its real catalogue, show that catalogue only.
     // Otherwise retain the existing SafariBet markets as a safe fallback.
     const markets = richMarkets.length ? richMarkets : legacyMarkets;
+    rememberCount(req.params.matchId, richMarkets.length);      // opening a game also teaches the home list its exact total
 
     // Attach active odds boosts only to SafariBet-native markets.
     const OddsBoost = require('../models/OddsBoost');
