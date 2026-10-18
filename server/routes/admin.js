@@ -1721,4 +1721,99 @@ router.post('/storage/cleanup', async (req, res) => {
   } catch (e) { return safeError(res, e, 'admin/storage-cleanup'); }
 });
 
+
+// ── STAFF ASSISTANCE: player lookup, recent activity, and persisted support cases ──
+router.get('/support/player/:query', async (req, res) => {
+  try {
+    const raw = String(req.params.query || '').trim();
+    if (!raw || raw.length > 100) return res.status(400).json({ success: false, message: 'Enter a phone number or username.' });
+    const digits = raw.replace(/\D/g, '');
+    let phone = digits;
+    if (phone.startsWith('0')) phone = '254' + phone.slice(1);
+    const alternatives = [{ username: raw.toLowerCase() }];
+    if (digits.length >= 7) alternatives.push({ phone });
+    const user = await User.findOne({ $or: alternatives })
+      .select('username phone createdAt isActive role kycStatus phoneVerified dailyDepositLimit dailyStakeLimit selfExcludedUntil')
+      .lean();
+    if (!user) return res.status(404).json({ success: false, message: 'No player found for that phone number or username.' });
+
+    const [wallet, bets, transactions] = await Promise.all([
+      walletService.getBalance(user._id),
+      Bet.find({ userId: user._id }).sort({ createdAt: -1 }).limit(15).lean(),
+      Transaction.find({ userId: user._id }).sort({ createdAt: -1 }).limit(20).lean()
+    ]);
+    res.json({
+      success: true,
+      player: {
+        ...user,
+        balance: wallet.spendable,
+        walletMain: wallet.main,
+        walletBonus: wallet.bonus,
+        walletLocked: wallet.locked,
+        betsCount: await Bet.countDocuments({ userId: user._id })
+      },
+      bets,
+      transactions
+    });
+  } catch (e) { return safeError(res, e, 'admin/support-player'); }
+});
+
+router.get('/support/cases', async (req, res) => {
+  try {
+    const SupportCase = require('../models/SupportCase');
+    const filter = {};
+    if (req.query.userId && /^[a-f\d]{24}$/i.test(String(req.query.userId))) filter.userId = req.query.userId;
+    if (req.query.status && ['open', 'in_progress', 'resolved', 'closed'].includes(req.query.status)) filter.status = req.query.status;
+    const cases = await SupportCase.find(filter).populate('userId', 'username phone').sort({ updatedAt: -1 }).limit(100).lean();
+    res.json({ success: true, data: cases });
+  } catch (e) { return safeError(res, e, 'admin/support-cases'); }
+});
+
+router.post('/support/cases', async (req, res) => {
+  try {
+    const SupportCase = require('../models/SupportCase');
+    const { userId, subject, category, priority, description } = req.body || {};
+    if (!userId || !/^[a-f\d]{24}$/i.test(String(userId))) return res.status(400).json({ success: false, message: 'Select a valid player first.' });
+    if (!String(subject || '').trim() || String(subject).trim().length > 120) return res.status(400).json({ success: false, message: 'Subject is required (maximum 120 characters).' });
+    if (!String(description || '').trim() || String(description).trim().length > 2000) return res.status(400).json({ success: false, message: 'Description is required (maximum 2000 characters).' });
+    if (!await User.exists({ _id: userId })) return res.status(404).json({ success: false, message: 'Player not found.' });
+    const categories = ['account', 'deposit', 'withdrawal', 'bet', 'verification', 'responsible_gaming', 'other'];
+    const priorities = ['low', 'normal', 'high', 'urgent'];
+    const item = await SupportCase.create({
+      userId, subject: String(subject).trim(),
+      category: categories.includes(category) ? category : 'other',
+      priority: priorities.includes(priority) ? priority : 'normal',
+      description: String(description).trim(),
+      createdBy: req.admin?.username || 'admin',
+      updatedBy: req.admin?.username || 'admin'
+    });
+    audit('SUPPORT_CASE_CREATED', { caseId: String(item._id), userId: String(userId), subject: item.subject });
+    const populated = await SupportCase.findById(item._id).populate('userId', 'username phone').lean();
+    res.status(201).json({ success: true, data: populated });
+  } catch (e) { return safeError(res, e, 'admin/support-case-create', 400); }
+});
+
+router.patch('/support/cases/:id', async (req, res) => {
+  try {
+    const SupportCase = require('../models/SupportCase');
+    if (!/^[a-f\d]{24}$/i.test(String(req.params.id || ''))) return res.status(400).json({ success: false, message: 'Invalid case ID.' });
+    const updates = {};
+    if (req.body?.status !== undefined) {
+      if (!['open', 'in_progress', 'resolved', 'closed'].includes(req.body.status)) return res.status(400).json({ success: false, message: 'Invalid case status.' });
+      updates.status = req.body.status;
+    }
+    if (req.body?.staffNote !== undefined) {
+      if (typeof req.body.staffNote !== 'string' || req.body.staffNote.length > 2000) return res.status(400).json({ success: false, message: 'Staff note must be 2000 characters or fewer.' });
+      updates.staffNote = req.body.staffNote.trim();
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ success: false, message: 'No valid case updates provided.' });
+    updates.updatedBy = req.admin?.username || 'admin';
+    const item = await SupportCase.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true }).populate('userId', 'username phone').lean();
+    if (!item) return res.status(404).json({ success: false, message: 'Support case not found.' });
+    audit('SUPPORT_CASE_UPDATED', { caseId: String(item._id), status: item.status });
+    res.json({ success: true, data: item });
+  } catch (e) { return safeError(res, e, 'admin/support-case-update', 400); }
+});
+
+
 module.exports = router;

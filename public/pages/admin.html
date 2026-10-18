@@ -195,6 +195,31 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 }
 .overlay{display:none;position:fixed;inset:0;background:#00000060;z-index:150;pointer-events:none}
 .overlay.on{display:block;pointer-events:auto}
+
+/* Staff Assistance workspace */
+.support-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.support-search .inp{flex:1;min-width:190px;margin:0}
+.support-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
+.support-metric{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:13px;min-width:0}
+.support-metric small{display:block;color:var(--mt);font-size:11px;margin-bottom:6px}
+.support-metric strong{font-size:18px;overflow-wrap:anywhere}
+.support-profile{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.support-field{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:10px;min-width:0}
+.support-field small{display:block;color:var(--mt);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.support-field div{font-size:13px;overflow-wrap:anywhere}
+.support-table-wrap{overflow-x:auto}
+.support-table{width:100%;border-collapse:collapse;font-size:12px;min-width:620px}
+.support-table th,.support-table td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+.support-table th{color:var(--mt);font-weight:600}
+.support-pill{display:inline-block;padding:3px 7px;border-radius:99px;background:var(--bg2);border:1px solid var(--bd);font-size:10px;text-transform:capitalize;white-space:nowrap}
+.support-case{border:1px solid var(--bd);background:var(--bg2);border-radius:12px;padding:13px;margin:10px 0}
+.support-case-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.support-case-meta{font-size:11px;color:var(--mt);margin:5px 0 8px}
+.support-case-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.support-case-actions .inp{width:auto;min-width:130px;margin:0}
+@media(max-width:760px){.support-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.support-profile{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:420px){.support-profile{grid-template-columns:1fr}.support-search .btn{width:100%}}
+
 </style>
 </head>
 <body>
@@ -295,6 +320,7 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     </div>
     <div class="sb-section">
       <div class="sb-label">Support</div>
+      <div class="sb-item" onclick="nav('assistance',this)"><span class="ic">🧑‍💻</span>Staff Assistance</div>
       <div class="sb-item" onclick="nav('tickets',this)"><span class="ic">🎫</span>Support Tickets <span class="sb-badge" id="ticketBadge">0</span></div>
       <div class="sb-item" onclick="nav('reports',this)"><span class="ic">📊</span>Reports</div>
     </div>
@@ -1111,6 +1137,71 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
   </div>
 </div>
 
+<!-- STAFF ASSISTANCE -->
+<div class="panel" id="panel-assistance">
+  <div class="sec">
+    <div class="sec-hdr"><h3>🧑‍💻 Player Assistance Desk</h3></div>
+    <p style="font-size:12px;color:var(--mt);margin:0 0 12px">Search a player by phone number or username to review their account, betting activity, transactions, and support cases in one place.</p>
+    <div class="support-search">
+      <input class="inp" id="supportSearch" placeholder="Phone number (e.g. 0712...) or username" autocomplete="off" onkeydown="if(event.key==='Enter')searchSupportPlayer()"/>
+      <button class="btn btn-g" onclick="searchSupportPlayer()">🔎 Find Player</button>
+      <button class="btn btn-ghost" onclick="clearSupportPlayer()">Clear</button>
+    </div>
+    <div class="res" id="supportSearchRes" style="display:none;margin-top:10px"></div>
+  </div>
+  <div id="supportPlayerWorkspace" style="display:none">
+    <div class="sec">
+      <div class="sec-hdr"><h3>👤 Player Overview</h3><span class="support-pill" id="supportPlayerStatus">—</span></div>
+      <div class="support-grid">
+        <div class="support-metric"><small>Available balance</small><strong id="supportBalance">KES 0</strong></div>
+        <div class="support-metric"><small>Total bets</small><strong id="supportBetCount">0</strong></div>
+        <div class="support-metric"><small>Wallet main</small><strong id="supportWalletMain">KES 0</strong></div>
+        <div class="support-metric"><small>Wallet bonus</small><strong id="supportWalletBonus">KES 0</strong></div>
+      </div>
+      <div class="support-profile" id="supportProfile"></div>
+    </div>
+    <div class="sec">
+      <div class="sec-hdr"><h3>🎯 Recent Bets</h3></div>
+      <div class="support-table-wrap" id="supportBets"><div class="empty">No bets found.</div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-hdr"><h3>💳 Recent Transactions</h3></div>
+      <div class="support-table-wrap" id="supportTransactions"><div class="empty">No transactions found.</div></div>
+    </div>
+    <div class="sec">
+      <div class="sec-hdr"><h3>📝 Create Support Case</h3></div>
+      <div class="inp-row">
+        <div style="flex:2;min-width:180px">
+          <label class="lbl" for="supportCaseSubject">Subject</label>
+          <input class="inp" id="supportCaseSubject" maxlength="120" placeholder="Short summary of the issue"/>
+        </div>
+        <div style="flex:1;min-width:130px">
+          <label class="lbl" for="supportCaseCategory">Category</label>
+          <select class="inp" id="supportCaseCategory">
+            <option value="account">Account</option><option value="deposit">Deposit</option><option value="withdrawal">Withdrawal</option><option value="bet">Bet</option><option value="verification">Verification</option><option value="responsible_gaming">Responsible gaming</option><option value="other">Other</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label class="lbl" for="supportCasePriority">Priority</label>
+          <select class="inp" id="supportCasePriority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select>
+        </div>
+      </div>
+      <label class="lbl" for="supportCaseDescription">Issue details</label>
+      <textarea class="inp" id="supportCaseDescription" rows="3" maxlength="2000" placeholder="What did the player report? Include relevant reference numbers, but do not enter passwords or PINs."></textarea>
+      <button class="btn btn-g" onclick="createSupportCase()">＋ Create Case</button>
+      <div class="res" id="supportCaseRes" style="display:none"></div>
+    </div>
+    <div class="sec">
+      <div class="sec-hdr"><h3>📂 Player Support Cases</h3><button class="btn btn-ghost btn-sm" onclick="loadSupportCases()">↻ Refresh</button></div>
+      <div id="supportCases"><div class="empty">No cases loaded.</div></div>
+    </div>
+  </div>
+  <div class="sec" id="supportAllCasesSection">
+    <div class="sec-hdr"><h3>📋 Recent Support Cases</h3><button class="btn btn-ghost btn-sm" onclick="loadSupportCases()">↻ Refresh</button></div>
+    <div id="supportAllCases"><div class="empty">Loading support cases…</div></div>
+  </div>
+</div>
+
 <!-- 23. SUPPORT TICKETS -->
 <div class="panel" id="panel-tickets">
   <div class="sec">
@@ -1493,6 +1584,7 @@ function nav(name,el){
   else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
   else if(name==='sms') { smsLoadUsers(1); smsLoadHistory(); }
+  else if(name==='assistance') { loadSupportCases(); }
 }
 
 function toggleSidebar(){
@@ -3322,6 +3414,156 @@ async function loadRefStats(){
   } catch(e) {
     document.getElementById('refList').innerHTML = '<div class="empty">Failed to load referral stats</div>';
   }
+}
+
+
+// ══ STAFF ASSISTANCE ══
+let supportCurrentPlayer = null;
+
+function supportEsc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function supportMoney(value) {
+  const n = Number(value || 0);
+  return 'KES ' + n.toLocaleString('en-KE', { maximumFractionDigits: 2 });
+}
+function supportDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('en-KE');
+}
+function supportTable(headers, rows) {
+  if (!rows.length) return '<div class="empty">No records found.</div>';
+  return '<table class="support-table"><thead><tr>' + headers.map(h => '<th>'+supportEsc(h)+'</th>').join('') +
+    '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+}
+async function searchSupportPlayer() {
+  const q = document.getElementById('supportSearch').value.trim();
+  const msg = document.getElementById('supportSearchRes');
+  if (!q) { msg.style.display='block'; msg.className='res er'; msg.textContent='Enter a phone number or username.'; return; }
+  msg.style.display='block'; msg.className='res inf'; msg.textContent='Searching player…';
+  try {
+    const d = await api('/api/admin/support/player/' + encodeURIComponent(q));
+    if (!d.success || !d.player) {
+      supportCurrentPlayer = null;
+      document.getElementById('supportPlayerWorkspace').style.display='none';
+      msg.className='res er'; msg.textContent='❌ ' + (d.message || 'Player not found.');
+      return;
+    }
+    supportCurrentPlayer = d.player;
+    renderSupportPlayer(d);
+    msg.className='res ok'; msg.textContent='Player found. Review the details below.';
+    await loadSupportCases();
+  } catch (e) {
+    msg.className='res er'; msg.textContent='Could not load player: ' + (e.message || 'network error');
+  }
+}
+function renderSupportPlayer(d) {
+  const p = d.player;
+  document.getElementById('supportPlayerWorkspace').style.display='block';
+  document.getElementById('supportPlayerStatus').textContent = p.isActive ? 'Active account' : 'Suspended';
+  document.getElementById('supportPlayerStatus').style.color = p.isActive ? 'var(--g)' : 'var(--r)';
+  document.getElementById('supportBalance').textContent = supportMoney(p.balance);
+  document.getElementById('supportBetCount').textContent = Number(p.betsCount || 0).toLocaleString();
+  document.getElementById('supportWalletMain').textContent = supportMoney(p.walletMain);
+  document.getElementById('supportWalletBonus').textContent = supportMoney(p.walletBonus);
+  const fields = [
+    ['Username',p.username],['Phone',fmtPhone(p.phone)],['Player ID',p._id],['Role',p.role],
+    ['KYC status',p.kycStatus],['Phone verified',p.phoneVerified ? 'Yes':'No'],
+    ['Joined',supportDate(p.createdAt)],['Self-exclusion',p.selfExcludedUntil ? supportDate(p.selfExcludedUntil) : 'Not active'],
+    ['Daily deposit limit',p.dailyDepositLimit == null ? 'Not set':supportMoney(p.dailyDepositLimit)],
+    ['Daily stake limit',p.dailyStakeLimit == null ? 'Not set':supportMoney(p.dailyStakeLimit)]
+  ];
+  document.getElementById('supportProfile').innerHTML = fields.map(([k,v]) =>
+    '<div class="support-field"><small>'+supportEsc(k)+'</small><div>'+supportEsc(v || '—')+'</div></div>').join('');
+  const bets = Array.isArray(d.bets) ? d.bets : [];
+  document.getElementById('supportBets').innerHTML = supportTable(
+    ['Bet code','Date','Stake','Potential payout','Status'],
+    bets.map(b => '<tr><td>'+supportEsc(b.betCode || b._id)+'</td><td>'+supportEsc(supportDate(b.createdAt))+'</td><td>'+supportEsc(supportMoney(b.stake))+'</td><td>'+supportEsc(supportMoney(b.potentialWin))+'</td><td><span class="support-pill">'+supportEsc(b.status || '—')+'</span></td></tr>')
+  );
+  const txs = Array.isArray(d.transactions) ? d.transactions : [];
+  document.getElementById('supportTransactions').innerHTML = supportTable(
+    ['Date','Type','Amount','Status','Reference / details'],
+    txs.map(t => '<tr><td>'+supportEsc(supportDate(t.createdAt))+'</td><td>'+supportEsc(t.type)+'</td><td>'+supportEsc(supportMoney(t.amount))+'</td><td><span class="support-pill">'+supportEsc(t.status)+'</span></td><td>'+supportEsc([t.mpesaRef,t.reference,t.description].filter(Boolean).join(' · ') || '—')+'</td></tr>')
+  );
+  document.getElementById('supportCaseSubject').value='';
+  document.getElementById('supportCaseDescription').value='';
+  document.getElementById('supportCaseRes').style.display='none';
+}
+function clearSupportPlayer() {
+  supportCurrentPlayer = null;
+  document.getElementById('supportSearch').value='';
+  document.getElementById('supportSearchRes').style.display='none';
+  document.getElementById('supportPlayerWorkspace').style.display='none';
+  document.getElementById('supportCases').innerHTML='<div class="empty">Search for a player to view their cases.</div>';
+}
+async function createSupportCase() {
+  const res = document.getElementById('supportCaseRes');
+  res.style.display='block'; res.className='res inf'; res.textContent='Creating support case…';
+  if (!supportCurrentPlayer?._id) { res.className='res er'; res.textContent='Search for a player first.'; return; }
+  const body = {
+    userId:supportCurrentPlayer._id,
+    subject:document.getElementById('supportCaseSubject').value.trim(),
+    category:document.getElementById('supportCaseCategory').value,
+    priority:document.getElementById('supportCasePriority').value,
+    description:document.getElementById('supportCaseDescription').value.trim()
+  };
+  try {
+    const d = await api('/api/admin/support/cases',{method:'POST',body:JSON.stringify(body)});
+    if (!d.success) { res.className='res er'; res.textContent='❌ '+(d.message || 'Could not create case.'); return; }
+    res.className='res ok'; res.textContent='✅ Support case created.';
+    document.getElementById('supportCaseSubject').value='';
+    document.getElementById('supportCaseDescription').value='';
+    await loadSupportCases();
+  } catch(e) { res.className='res er'; res.textContent='❌ '+(e.message || 'Network error'); }
+}
+async function loadSupportCases() {
+  const all = document.getElementById('supportAllCases');
+  if (all) all.innerHTML='<div class="empty">Loading support cases…</div>';
+  try {
+    let url='/api/admin/support/cases';
+    if (supportCurrentPlayer?._id) url += '?userId=' + encodeURIComponent(supportCurrentPlayer._id);
+    const d = await api(url);
+    if (!d.success) throw new Error(d.message || 'Could not load cases');
+    const cases = Array.isArray(d.data) ? d.data : [];
+    const target = supportCurrentPlayer ? document.getElementById('supportCases') : null;
+    if (target) target.innerHTML = cases.length ? cases.map(renderSupportCase).join('') : '<div class="empty">No support cases for this player yet.</div>';
+    if (all) {
+      // In a player lookup, the main case list is filtered; the lower list intentionally shows recent cases for all players.
+      if (supportCurrentPlayer?._id) {
+        const allD = await api('/api/admin/support/cases');
+        const recent = Array.isArray(allD.data) ? allD.data : [];
+        all.innerHTML = recent.length ? recent.slice(0,12).map(renderSupportCase).join('') : '<div class="empty">No support cases yet.</div>';
+      } else {
+        all.innerHTML = cases.length ? cases.slice(0,12).map(renderSupportCase).join('') : '<div class="empty">No support cases yet.</div>';
+      }
+    }
+  } catch(e) {
+    if (all) all.innerHTML='<div class="empty">Could not load support cases: '+supportEsc(e.message || 'network error')+'</div>';
+    const target=document.getElementById('supportCases');
+    if (target) target.innerHTML='<div class="empty">Could not load cases.</div>';
+  }
+}
+function renderSupportCase(c) {
+  const user = c.userId && typeof c.userId === 'object' ? c.userId : {};
+  const statusOptions = [['open','Open'],['in_progress','In progress'],['resolved','Resolved'],['closed','Closed']];
+  const options = statusOptions.map(([v,label])=>'<option value="'+v+'" '+(c.status===v?'selected':'')+'>'+label+'</option>').join('');
+  return '<div class="support-case"><div class="support-case-head"><strong>'+supportEsc(c.subject)+'</strong><span class="support-pill">'+supportEsc(c.priority || 'normal')+' priority</span></div>'+
+    '<div class="support-case-meta">#'+supportEsc(String(c._id || '').slice(-8))+' · '+supportEsc(user.username || 'Player')+' '+(user.phone ? '· '+supportEsc(fmtPhone(user.phone)) : '')+' · '+supportEsc(supportDate(c.createdAt))+' · '+supportEsc(c.category || 'other')+'</div>'+
+    '<div style="font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere">'+supportEsc(c.description)+'</div>'+
+    (c.staffNote ? '<div style="font-size:12px;margin-top:8px"><strong>Staff note:</strong> '+supportEsc(c.staffNote)+'</div>' : '')+
+    '<div class="support-case-actions"><label style="font-size:11px;color:var(--mt)">Status</label><select class="inp" id="supportStatus-'+supportEsc(c._id)+'">'+options+'</select>'+
+    '<button class="btn btn-ghost btn-sm" onclick="updateSupportCase(\''+supportEsc(c._id)+'\')">Save status</button></div></div>';
+}
+async function updateSupportCase(id) {
+  const select=document.getElementById('supportStatus-'+id);
+  if (!select) return;
+  try {
+    const d=await api('/api/admin/support/cases/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:select.value})});
+    if (!d.success) { toast(d.message || 'Could not update case','err'); return; }
+    toast('Support case updated','ok');
+    await loadSupportCases();
+  } catch(e) { toast(e.message || 'Network error','err'); }
 }
 
 // ══ HELPERS ══
