@@ -345,7 +345,7 @@ const panelAccessLimiter = require('express-rate-limit')({
   handler: (req, res) => res.status(404).send('Not found')
 });
 const assistanceAdminEnabled = process.env.ASSISTANCE_ADMIN_ENABLED !== 'false';
-const assistanceAdminPath = process.env.ASSISTANCE_ADMIN_PATH || '/x9panel';
+const assistanceAdminPath = process.env.ASSISTANCE_ADMIN_PATH || '/staff-assistance';
 if (!assistanceAdminPath.startsWith('/') || assistanceAdminPath.includes('?') || assistanceAdminPath.includes('#')) {
   throw new Error('ASSISTANCE_ADMIN_PATH must be a URL path beginning with / and must not contain ? or #');
 }
