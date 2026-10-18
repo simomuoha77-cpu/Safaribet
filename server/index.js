@@ -332,11 +332,8 @@ app.post('/api/admin/settle', require('./utils/adminAuth').requireAdmin, async (
 });
 
 // ── ADMIN PANEL UI ──
-// Two independent layers are required to use the panel:
-//   1. ADMIN_PANEL_TOKEN in the URL (?t=...) proves the visitor was given the link.
-//   2. The admin page's real login requires username, email, password and TOTP.
-// Configure the private route with ASSISTANCE_ADMIN_PATH (default: /x9panel).
-// Set ASSISTANCE_ADMIN_ENABLED=false to disable this route without changing code.
+// Both the configured private path and /staff-assistance are handled here.
+// Access still requires ADMIN_PANEL_TOKEN and the page's normal staff login.
 const panelAccessLimiter = require('express-rate-limit')({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -349,14 +346,17 @@ const assistanceAdminPath = process.env.ASSISTANCE_ADMIN_PATH || '/staff-assista
 if (!assistanceAdminPath.startsWith('/') || assistanceAdminPath.includes('?') || assistanceAdminPath.includes('#')) {
   throw new Error('ASSISTANCE_ADMIN_PATH must be a URL path beginning with / and must not contain ? or #');
 }
-app.get(assistanceAdminPath, panelAccessLimiter, (req, res) => {
+const serveAssistanceAdmin = (req, res) => {
   if (!assistanceAdminEnabled) return res.status(404).send('Not found');
   const token = process.env.ADMIN_PANEL_TOKEN;
-  if (!token || req.query.t !== token) {
-    return res.status(404).send('Not found');
-  }
-  res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
-});
+  if (!token || req.query.t !== token) return res.status(404).send('Not found');
+  return res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
+};
+// Register explicit public path plus configured path, if different, before the homepage fallback.
+app.get('/staff-assistance', panelAccessLimiter, serveAssistanceAdmin);
+if (assistanceAdminPath !== '/staff-assistance') {
+  app.get(assistanceAdminPath, panelAccessLimiter, serveAssistanceAdmin);
+}
 
 // ── CLEAN URL ROUTING ──
 // Map clean URLs to page files
