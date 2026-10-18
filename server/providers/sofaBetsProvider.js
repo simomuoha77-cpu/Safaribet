@@ -529,6 +529,12 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
       return cached.data;
     }
   }
+  // Only the light crawler list is cached: a default caller (the match page) is answered with it AT ONCE and the full list
+  // is fetched behind the scenes. Callers that pass their own maxAgeMs (bet placement, settlement, counts) still wait for the full list.
+  if (cached && cached.data && !cached.data.full && cached.data.markets.length > 1 && age < MARKETS_STALE_MS && !(opts && Number.isFinite(opts.maxAgeMs))) {
+    refreshMatchMarkets(id, name, cacheKey).catch(() => {});
+    return cached.data;
+  }
   const releaseCrawler = holdCrawler(8000);
   return refreshMatchMarkets(id, name, cacheKey).finally(releaseCrawler);
 }
@@ -713,6 +719,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
 
   const runRound = () => {
   const tasks = [];
+  let fmPending = 0;     // /api/fixture-markets requests still running: the round does not end on the first (light) list while these are out
   // Dedicated live endpoint first in the list (path carries the exact fixture id)
   for (const base of hosts) {
     tasks.push((async () => {
@@ -728,11 +735,14 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
   // /api/live-games/markets/<id> returns only the first ~15 markets of a game that really has 100+, so this one is asked
   // as well and the richest list wins. The id is in the path; a payload that names a different fixture is rejected.
   if (!background) for (const base of hosts) {
+    fmPending++;
     tasks.push((async () => {
-      const payload = await get(base, `/api/fixture-markets/${encodeURIComponent(id)}`);
-      const foundId = findIdInPayload(payload && payload.fixture || payload);
-      if (foundId != null && String(foundId) !== String(id)) return;
-      saveIfRicher(payload, `${base}/api/fixture-markets/${id}`);
+      try {
+        const payload = await get(base, `/api/fixture-markets/${encodeURIComponent(id)}`);
+        const foundId = findIdInPayload(payload && payload.fixture || payload);
+        if (foundId != null && String(foundId) !== String(id)) return;
+        saveIfRicher(payload, `${base}/api/fixture-markets/${id}`);
+      } finally { fmPending--; }
     })());
   }
   // Exact fixture on the catalogue endpoint
@@ -770,7 +780,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
       resolve(result);
     };
     const check = () => {
-      if (result.markets.length > 1 && !graceTimer && !done) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
+      if (result.markets.length > 1 && !graceTimer && !done && fmPending <= 0) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
       if (pending === 0) finish();
     };
     tasks.forEach(t => t.then(() => {}, e => { if (errs.length < 40) errs.push(String(e && e.message || e).replace(/https?:\/\/[^ ]+/g, '').slice(0, 70)); }).then(() => { pending--; check(); }));
