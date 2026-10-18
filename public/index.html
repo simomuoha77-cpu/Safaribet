@@ -3700,7 +3700,7 @@ function showT(msg,type=''){
     for(var i = 0; i < cards.length; i++){
       var id = idOf(cards[i]); if(!id) continue;
       var n = counts[id];
-      if(n >= 2){ var sp = moreSpan(cards[i]); if(sp){ var t = n + ' markets \u2192'; if(sp.textContent !== t) sp.textContent = t; } }
+      if(n >= 2){ var sp = moreSpan(cards[i]); if(sp && !(sp.dataset && sp.dataset.sbn)){ var t = n + ' markets \u2192'; if(sp.textContent !== t) sp.textContent = t; } }   /* a span owned by the newer counter (data-sbn) is never rewritten here */
       else if(canAsk(id)) need = true;
     }
     if(need && !timer) timer = setTimeout(pull, 400);
@@ -3750,7 +3750,7 @@ function showT(msg,type=''){
 <script>SB.run()</script>
 <script type="text/sb-page">/* market-count-all */
 (function(){
-  var counts = {}, tries = {}, nextAt = {}, running = false, timer = null, obs = null, host = null;
+  var counts = {}, tries = {}, nextAt = {}, running = false, timer = null, obs = null, host = null, wt = 0, wn = 0;   // wn/wt: safety cap on text rewrites per second
   try{ counts = JSON.parse(localStorage.getItem('sb_mkt_all') || '{}') || {}; }catch(e){}
   function idOf(card){ var i = card.id || ''; return i.indexOf('mc_') === 0 ? i.slice(3) : null; }
   function moreSpan(card){
@@ -3770,7 +3770,7 @@ function showT(msg,type=''){
     for(var i = 0; i < cards.length; i++){
       var id = idOf(cards[i]); if(!id) continue;
       var n = counts[id];
-      if(n >= 1){ var sp = moreSpan(cards[i]); if(sp){ var t = label(n); if(sp.textContent !== t) sp.textContent = t; } }
+      if(n >= 1){ var sp = moreSpan(cards[i]); if(sp){ var t = label(n); if(sp.dataset) sp.dataset.sbn = '1'; if(sp.textContent !== t){ if(Date.now() - wt > 1000){ wt = Date.now(); wn = 0; } if(++wn > 300) continue; sp.textContent = t; } } }
       else if(id.indexOf('sofabets_') === 0 && (nextAt[id] || 0) <= Date.now()){ need.push({ id: id, top: cards[i].getBoundingClientRect().top }); }
     }
     need.sort(function(a, b){ return Math.abs(a.top) - Math.abs(b.top); });     // games on screen first

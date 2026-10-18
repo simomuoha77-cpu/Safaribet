@@ -522,7 +522,7 @@ async function getMatchMarkets(providerMatchId, sportName = 'football', opts) {
 
   const cached = matchMarketsCache.get(cacheKey);
   const age = cached ? Date.now() - cached.ts : Infinity;
-  if (cached && cached.data && cached.data.markets.length > 1 && age < maxAge) {
+  if (cached && cached.data && cached.data.markets.length > 1 && age < maxAge && cached.data.full) {   // a light crawler list is not enough for a customer
     if (age < MARKETS_TTL_MS) return cached.data;
     if (age < MARKETS_STALE_MS) {           // stale-while-revalidate: answer now, refresh behind the scenes
       refreshMatchMarkets(id, name, cacheKey).catch(() => {});
@@ -639,7 +639,7 @@ function pumpWarm() {
     // skip jobs the customer has already scrolled past, or whose markets arrived meanwhile (e.g. they tapped the game)
     if ((job.expires && Date.now() > job.expires) || marketsCacheAge(job.id, job.name) < 45000) { warmKeys.delete(job.key); continue; }
     warmActive++;
-    refreshMatchMarkets(job.id, job.name, job.key)
+    refreshMatchMarkets(job.id, job.name, job.key, true)      // background: the light endpoints only, as before
       .then(d => {
         const ok = !!(d && Array.isArray(d.markets) && d.markets.length > 1);
         recentWarm.push(ok); if (recentWarm.length > 30) recentWarm.shift();
@@ -662,10 +662,11 @@ setInterval(() => {
   for (const [k, t] of lastFullRound) if (t < cutoff) lastFullRound.delete(k);
 }, 10 * 60000).unref();
 
-function refreshMatchMarkets(id, name, cacheKey) {
-  if (matchMarketsInflight.has(cacheKey)) return matchMarketsInflight.get(cacheKey);
-  const p = fetchMatchMarketsParallel(id, name, cacheKey).finally(() => matchMarketsInflight.delete(cacheKey));
-  matchMarketsInflight.set(cacheKey, p);
+function refreshMatchMarkets(id, name, cacheKey, background) {
+  const ik = background ? cacheKey + ':bg' : cacheKey;
+  if (matchMarketsInflight.has(ik)) return matchMarketsInflight.get(ik);
+  const p = fetchMatchMarketsParallel(id, name, cacheKey, !!background).finally(() => matchMarketsInflight.delete(ik));
+  matchMarketsInflight.set(ik, p);
   return p;
 }
 
@@ -673,9 +674,9 @@ function refreshMatchMarkets(id, name, cacheKey) {
 // another, each with its own retry/timeout), and the answer is returned as soon
 // as one of them yields a real market list. Identity rules are unchanged: a
 // payload is only used when the item's own id equals the requested id.
-function fetchMatchMarketsParallel(id, name, cacheKey) {
+function fetchMatchMarketsParallel(id, name, cacheKey, background) {
   const sportIds = Array.from(new Set([...(SPORT_ID_CANDIDATES[name] || []), SPORT_IDS[name]].filter(Number.isFinite)));
-  const result = { markets: [], bookmakers: [] };
+  const result = { markets: [], bookmakers: [], full: !background };   // full: the complete list (a customer opened the game) vs the light crawler list
   const hosts = Array.from(new Set([...BASES, 'https://feed.sofabets.com']));
   // Endpoint learning: some host/path combinations never return markets (404,
   // wrong shape). After enough failed tries they are skipped (re-probed every 20
@@ -726,7 +727,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
   // The endpoint the SofaBets website itself uses for a game's FULL market list (found in its page code).
   // /api/live-games/markets/<id> returns only the first ~15 markets of a game that really has 100+, so this one is asked
   // as well and the richest list wins. The id is in the path; a payload that names a different fixture is rejected.
-  for (const base of hosts) {
+  if (!background) for (const base of hosts) {
     tasks.push((async () => {
       const payload = await get(base, `/api/fixture-markets/${encodeURIComponent(id)}`);
       const foundId = findIdInPayload(payload && payload.fixture || payload);
