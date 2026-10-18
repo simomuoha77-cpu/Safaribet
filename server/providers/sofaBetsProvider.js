@@ -994,6 +994,8 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
   return best;
 }
 
+// SofaBets sends `total_markets` on every fixture of its lists: the exact number its own site shows. Kept per fixture id.
+const TOTAL_MARKETS = new Map();
 function normalizeMatch(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -1196,6 +1198,11 @@ function normalizeMatch(raw) {
   }
   const clockRunRaw = pick(source, ['is_clock_running', 'isClockRunning']);
   const livePeriod = pick(source, ['current_phase', 'currentPhase', 'periodName', 'period_name', 'currentPeriod', 'current_period', 'matchPeriod', 'period', 'phase', 'statusText', 'status_text', 'statusDescription', 'matchStatus', 'status']);
+
+  try {
+    const tm = Number(pick(source, ['total_markets', 'totalMarkets']));
+    if (Number.isFinite(tm) && tm >= 1) { TOTAL_MARKETS.set(String(externalId), { n: tm, ts: Date.now() }); if (TOTAL_MARKETS.size > 20000) TOTAL_MARKETS.delete(TOTAL_MARKETS.keys().next().value); }
+  } catch (_) {}
 
   return {
     provider: 'sofabets',
@@ -1666,3 +1673,8 @@ async function probeStats(providerMatchId, sportName = 'football') {
   return out;
 }
 module.exports.probeStats = probeStats;
+
+module.exports.totalMarketsOf = function totalMarketsOf(providerId) {
+  const k = TOTAL_MARKETS.get(String(providerId));
+  return k && Date.now() - k.ts < 6 * 3600000 ? k.n : null;
+};
