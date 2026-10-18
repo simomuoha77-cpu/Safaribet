@@ -332,11 +332,11 @@ app.post('/api/admin/settle', require('./utils/adminAuth').requireAdmin, async (
 });
 
 // ── ADMIN PANEL UI ──
-// Two independent layers are required to even use the panel:
-//   1. ADMIN_PANEL_TOKEN in the URL (?t=...) — proves you were given the link, not just guessed the path
-//   2. Real login at /api/admin-auth/login — username + email + password + 6-digit TOTP code, issuing a signed JWT
-// Anyone without the URL token gets a plain 404 — indistinguishable from a nonexistent route,
-// so probing/guessing the path reveals nothing.
+// Two independent layers are required to use the panel:
+//   1. ADMIN_PANEL_TOKEN in the URL (?t=...) proves the visitor was given the link.
+//   2. The admin page's real login requires username, email, password and TOTP.
+// Configure the private route with ASSISTANCE_ADMIN_PATH (default: /x9panel).
+// Set ASSISTANCE_ADMIN_ENABLED=false to disable this route without changing code.
 const panelAccessLimiter = require('express-rate-limit')({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -344,7 +344,13 @@ const panelAccessLimiter = require('express-rate-limit')({
   legacyHeaders: false,
   handler: (req, res) => res.status(404).send('Not found')
 });
-app.get('/x9panel', panelAccessLimiter, (req, res) => {
+const assistanceAdminEnabled = process.env.ASSISTANCE_ADMIN_ENABLED !== 'false';
+const assistanceAdminPath = process.env.ASSISTANCE_ADMIN_PATH || '/x9panel';
+if (!assistanceAdminPath.startsWith('/') || assistanceAdminPath.includes('?') || assistanceAdminPath.includes('#')) {
+  throw new Error('ASSISTANCE_ADMIN_PATH must be a URL path beginning with / and must not contain ? or #');
+}
+app.get(assistanceAdminPath, panelAccessLimiter, (req, res) => {
+  if (!assistanceAdminEnabled) return res.status(404).send('Not found');
   const token = process.env.ADMIN_PANEL_TOKEN;
   if (!token || req.query.t !== token) {
     return res.status(404).send('Not found');
