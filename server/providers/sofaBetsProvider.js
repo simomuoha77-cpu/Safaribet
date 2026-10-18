@@ -687,7 +687,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
   const get = async (base, path, query) => {
     const k = epKey(base, path);
     const st = endpointStats.get(k) || { tries: 0, useful: 0, last: 0 };
-    if (!ignoreSkip && !String(path).startsWith('/api/live-games/') && shouldSkipEndpoint(st)) { skipped++; throw new Error('skipped endpoint (no markets so far)'); }
+    if (!ignoreSkip && !String(path).startsWith('/api/live-games/') && !String(path).startsWith('/api/fixture-markets/') && shouldSkipEndpoint(st)) { skipped++; throw new Error('skipped endpoint (no markets so far)'); }
     st.tries++; st.last = Date.now(); endpointStats.set(k, st);
     return sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
   };
@@ -721,6 +721,17 @@ function fetchMatchMarketsParallel(id, name, cacheKey) {
       const candidate = items.find(it => findIdInPayload(it) === id) || payload;
       const foundId = findIdInPayload(candidate) || findIdInPayload(payload);
       if (foundId === id) saveIfRicher(candidate, `${base}/api/live-games/markets/${id}`);
+    })());
+  }
+  // The endpoint the SofaBets website itself uses for a game's FULL market list (found in its page code).
+  // /api/live-games/markets/<id> returns only the first ~15 markets of a game that really has 100+, so this one is asked
+  // as well and the richest list wins. The id is in the path; a payload that names a different fixture is rejected.
+  for (const base of hosts) {
+    tasks.push((async () => {
+      const payload = await get(base, `/api/fixture-markets/${encodeURIComponent(id)}`);
+      const foundId = findIdInPayload(payload && payload.fixture || payload);
+      if (foundId != null && String(foundId) !== String(id)) return;
+      saveIfRicher(payload, `${base}/api/fixture-markets/${id}`);
     })());
   }
   // Exact fixture on the catalogue endpoint
@@ -1632,7 +1643,7 @@ async function probeStats(providerMatchId, sportName = 'football') {
   const targets = [];
   const paths = [
     `/api/live-games/${id}`, `/api/live-games/statistics/${id}`, `/api/live-games/stats/${id}`, `/api/live-games/events/${id}`,
-    `/api/live-games/incidents/${id}`, `/api/live-games/timeline/${id}`, `/api/live-games/markets/${id}`,
+    `/api/live-games/incidents/${id}`, `/api/live-games/timeline/${id}`, `/api/live-games/markets/${id}`, `/api/fixture-markets/${id}`,
     `/api/fixtures/${id}`, `/api/fixtures/${id}/statistics`, `/api/fixtures/${id}/stats`, `/api/fixtures/${id}/events`,
     `/api/fixtures/${id}/incidents`, `/api/fixtures/${id}/timeline`, `/api/fixtures/${id}/result`,
     `/api/events/${id}`, `/api/events/${id}/statistics`, `/api/events/${id}/incidents`,
