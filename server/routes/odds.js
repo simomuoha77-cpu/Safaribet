@@ -393,7 +393,7 @@ function mcFetchOne(id, p, force) {
   const job = (async () => {
     await mcAcquire();
     try {
-      const d = await sofaBets.getMatchMarkets(p.providerId, p.sport, force ? { maxAgeMs: 1 } : undefined);
+      const d = await sofaBets.getMatchMarkets(p.providerId, p.sport, force === 'full' ? { maxAgeMs: 600000 } : force ? { maxAgeMs: 1 } : undefined);
       let n = sofaBets.cachedMarketCount(p.providerId, p.sport);
       if (!Number.isFinite(n) || n < 1) n = mcPlayableCount(d && d.markets);
       const prevK = mcDone.get(id);
@@ -450,6 +450,7 @@ router.post('/market-counts-all', async (req, res) => {
 // The filler walks the feed's games a couple at a time (soonest first) and fetches the market list of any game without
 // a count, only while the feed is warm and nothing else is busy. Counts are kept in MongoDB, so each game is fetched once.
 const mcTried = new Map();   // matchId -> last attempt time
+const mcFullTried = new Map();   // matchId -> last time its FULL list was pre-loaded
 function mcKnown(id, p) {
   const official = sofaBets.totalMarketsOf ? sofaBets.totalMarketsOf(p.providerId) : null;   // SofaBets' own total from the fixture list
   if (Number.isFinite(official) && official >= 1) return official;
@@ -511,6 +512,27 @@ router.get('/all-counts', (req, res) => {
       cand.sort((a, b) => a.t - b.t);
       for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); if (x.force) { const rc = mcRecheck.get(x.id) || { tries: 0, last: 0 }; mcRecheck.set(x.id, { tries: rc.tries + 1, last: now }); } mcFetchOne(x.id, x.p, !!x.force); }
       if (mcTried.size > 6000) mcTried.delete(mcTried.keys().next().value);
+      // Nothing else to do: pre-load the FULL market list of the games people open most (live now, or starting within 6h; at most
+      // 40, a couple at a time), so opening them shows every market at once. Kept in memory and stored in MongoDB.
+      if (!cand.length && sofaBets.marketsCacheFull) {
+        const pri = [];
+        for (const m of lastGoodFixtures) {
+          if (!m || !m.matchId || m.status === 'finished' || m.status === 'cancelled') continue;
+          const id = String(m.matchId); const p = finalResults.parseSofaMatchId(id); if (!p || !p.providerId) continue;
+          const t = new Date(m.commenceTime).getTime();
+          if (m.status === 'live') pri.push({ id, p, t: 0 });
+          else if (Number.isFinite(t) && t > now - 3 * 3600000 && t < now + 6 * 3600000) pri.push({ id, p, t });
+        }
+        pri.sort((a, b) => a.t - b.t);
+        let started = 0;
+        for (const x of pri.slice(0, 40)) {
+          if (started >= MC_CONC - mcActive) break;
+          if (sofaBets.marketsCacheFull(x.p.providerId, x.p.sport)) continue;
+          if (now - (mcFullTried.get(x.id) || 0) < 120000) continue;
+          mcFullTried.set(x.id, now); mcFetchOne(x.id, x.p, 'full'); started++;
+        }
+        if (mcFullTried.size > 3000) mcFullTried.delete(mcFullTried.keys().next().value);
+      }
     } catch (_) {}
   }, 3000);
   if (t.unref) t.unref();

@@ -1700,3 +1700,9 @@ module.exports.totalMarketsOf = function totalMarketsOf(providerId) {
   const k = TOTAL_MARKETS.get(String(providerId));
   return k && Date.now() - k.ts < 6 * 3600000 ? k.n : null;
 };
+
+// true when the FULL market list of this fixture is cached and younger than maxAgeMs (the light crawler list does not count)
+module.exports.marketsCacheFull = function marketsCacheFull(providerMatchId, sportName = 'football', maxAgeMs = 10 * 60000) {
+  const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
+  return !!(c && c.data && c.data.full && c.data.markets.length > 1 && Date.now() - c.ts < maxAgeMs);
+};
