@@ -216,6 +216,10 @@ app.use('/api/casino/wallet', casinoWalletRoutes);
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);
 app.use('/api/admin-auth', require('./routes/adminAuth'));
+// Staff Assistance: account management for the main administrator (x9panel login required) …
+app.use('/api/admin/staff', require('./routes/staffAdminManage'));
+// … and the staff portal API itself (own session cookie, 2FA, CSRF; see middleware/staffAuth.js). Mounted BEFORE the catch-all.
+app.use('/api/assistance', require('./routes/staffAssistance'));
 app.use('/api/admin',   adminRoutes);
 
 // ── PUBLIC SITE CONTENT (banner, notice) — no auth, read-only ──
@@ -332,8 +336,11 @@ app.post('/api/admin/settle', require('./utils/adminAuth').requireAdmin, async (
 });
 
 // ── ADMIN PANEL UI ──
-// Both the configured private path and /staff-assistance are handled here.
-// Access still requires ADMIN_PANEL_TOKEN and the page's normal staff login.
+// Two independent layers are required to even use the panel:
+//   1. ADMIN_PANEL_TOKEN in the URL (?t=...) — proves you were given the link, not just guessed the path
+//   2. Real login at /api/admin-auth/login — username + email + password + 6-digit TOTP code, issuing a signed JWT
+// Anyone without the URL token gets a plain 404 — indistinguishable from a nonexistent route,
+// so probing/guessing the path reveals nothing.
 const panelAccessLimiter = require('express-rate-limit')({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -341,22 +348,27 @@ const panelAccessLimiter = require('express-rate-limit')({
   legacyHeaders: false,
   handler: (req, res) => res.status(404).send('Not found')
 });
-const assistanceAdminEnabled = process.env.ASSISTANCE_ADMIN_ENABLED !== 'false';
-const assistanceAdminPath = process.env.ASSISTANCE_ADMIN_PATH || '/staff-assistance';
-if (!assistanceAdminPath.startsWith('/') || assistanceAdminPath.includes('?') || assistanceAdminPath.includes('#')) {
-  throw new Error('ASSISTANCE_ADMIN_PATH must be a URL path beginning with / and must not contain ? or #');
-}
-const serveAssistanceAdmin = (req, res) => {
-  if (!assistanceAdminEnabled) return res.status(404).send('Not found');
+app.get('/x9panel', panelAccessLimiter, (req, res) => {
   const token = process.env.ADMIN_PANEL_TOKEN;
-  if (!token || req.query.t !== token) return res.status(404).send('Not found');
-  return res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
-};
-// Register explicit public path plus configured path, if different, before the homepage fallback.
-app.get('/staff-assistance', panelAccessLimiter, serveAssistanceAdmin);
-if (assistanceAdminPath !== '/staff-assistance') {
-  app.get(assistanceAdminPath, panelAccessLimiter, serveAssistanceAdmin);
+  if (!token || req.query.t !== token) {
+    return res.status(404).send('Not found');
+  }
+  res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
+});
+
+// ── STAFF ASSISTANCE PORTAL (/staff-assistance) ──
+// Its own page, served before the "404 → index" fallback so it can never show the betting homepage. The HTML lives outside
+// public/ so it is only reachable through this route. Set ASSISTANCE_ADMIN_ENABLED=false to switch the whole portal off (404).
+function serveStaffPortal(req, res) {
+  if (/^(0|false|no|off)$/i.test(String(process.env.ASSISTANCE_ADMIN_ENABLED == null ? 'true' : process.env.ASSISTANCE_ADMIN_ENABLED))) return res.status(404).send('Not found');
+  res.set({
+    'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+  });
+  res.sendFile(path.join(__dirname, 'staff/staff-assistance.html'));
 }
+app.get('/staff-assistance', serveStaffPortal);
+app.get('/staff-assistance/*', serveStaffPortal);
 
 // ── CLEAN URL ROUTING ──
 // Map clean URLs to page files

@@ -31,3 +31,6 @@ README_APPLY_CHANGE*
 *.backup
 safaribet/
 *.juan-backup
+
+# local backup copies made while patching
+*.bak-*

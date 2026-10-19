@@ -195,31 +195,6 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 }
 .overlay{display:none;position:fixed;inset:0;background:#00000060;z-index:150;pointer-events:none}
 .overlay.on{display:block;pointer-events:auto}
-
-/* Staff Assistance workspace */
-.support-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.support-search .inp{flex:1;min-width:190px;margin:0}
-.support-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
-.support-metric{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:13px;min-width:0}
-.support-metric small{display:block;color:var(--mt);font-size:11px;margin-bottom:6px}
-.support-metric strong{font-size:18px;overflow-wrap:anywhere}
-.support-profile{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.support-field{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:10px;min-width:0}
-.support-field small{display:block;color:var(--mt);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
-.support-field div{font-size:13px;overflow-wrap:anywhere}
-.support-table-wrap{overflow-x:auto}
-.support-table{width:100%;border-collapse:collapse;font-size:12px;min-width:620px}
-.support-table th,.support-table td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
-.support-table th{color:var(--mt);font-weight:600}
-.support-pill{display:inline-block;padding:3px 7px;border-radius:99px;background:var(--bg2);border:1px solid var(--bd);font-size:10px;text-transform:capitalize;white-space:nowrap}
-.support-case{border:1px solid var(--bd);background:var(--bg2);border-radius:12px;padding:13px;margin:10px 0}
-.support-case-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-.support-case-meta{font-size:11px;color:var(--mt);margin:5px 0 8px}
-.support-case-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
-.support-case-actions .inp{width:auto;min-width:130px;margin:0}
-@media(max-width:760px){.support-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.support-profile{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:420px){.support-profile{grid-template-columns:1fr}.support-search .btn{width:100%}}
-
 </style>
 </head>
 <body>
@@ -320,7 +295,6 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     </div>
     <div class="sb-section">
       <div class="sb-label">Support</div>
-      <div class="sb-item" onclick="nav('assistance',this)"><span class="ic">🧑‍💻</span>Staff Assistance</div>
       <div class="sb-item" onclick="nav('tickets',this)"><span class="ic">🎫</span>Support Tickets <span class="sb-badge" id="ticketBadge">0</span></div>
       <div class="sb-item" onclick="nav('reports',this)"><span class="ic">📊</span>Reports</div>
     </div>
@@ -1137,71 +1111,6 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
   </div>
 </div>
 
-<!-- STAFF ASSISTANCE -->
-<div class="panel" id="panel-assistance">
-  <div class="sec">
-    <div class="sec-hdr"><h3>🧑‍💻 Player Assistance Desk</h3></div>
-    <p style="font-size:12px;color:var(--mt);margin:0 0 12px">Search a player by phone number or username to review their account, betting activity, transactions, and support cases in one place.</p>
-    <div class="support-search">
-      <input class="inp" id="supportSearch" placeholder="Phone number (e.g. 0712...) or username" autocomplete="off" onkeydown="if(event.key==='Enter')searchSupportPlayer()"/>
-      <button class="btn btn-g" onclick="searchSupportPlayer()">🔎 Find Player</button>
-      <button class="btn btn-ghost" onclick="clearSupportPlayer()">Clear</button>
-    </div>
-    <div class="res" id="supportSearchRes" style="display:none;margin-top:10px"></div>
-  </div>
-  <div id="supportPlayerWorkspace" style="display:none">
-    <div class="sec">
-      <div class="sec-hdr"><h3>👤 Player Overview</h3><span class="support-pill" id="supportPlayerStatus">—</span></div>
-      <div class="support-grid">
-        <div class="support-metric"><small>Available balance</small><strong id="supportBalance">KES 0</strong></div>
-        <div class="support-metric"><small>Total bets</small><strong id="supportBetCount">0</strong></div>
-        <div class="support-metric"><small>Wallet main</small><strong id="supportWalletMain">KES 0</strong></div>
-        <div class="support-metric"><small>Wallet bonus</small><strong id="supportWalletBonus">KES 0</strong></div>
-      </div>
-      <div class="support-profile" id="supportProfile"></div>
-    </div>
-    <div class="sec">
-      <div class="sec-hdr"><h3>🎯 Recent Bets</h3></div>
-      <div class="support-table-wrap" id="supportBets"><div class="empty">No bets found.</div></div>
-    </div>
-    <div class="sec">
-      <div class="sec-hdr"><h3>💳 Recent Transactions</h3></div>
-      <div class="support-table-wrap" id="supportTransactions"><div class="empty">No transactions found.</div></div>
-    </div>
-    <div class="sec">
-      <div class="sec-hdr"><h3>📝 Create Support Case</h3></div>
-      <div class="inp-row">
-        <div style="flex:2;min-width:180px">
-          <label class="lbl" for="supportCaseSubject">Subject</label>
-          <input class="inp" id="supportCaseSubject" maxlength="120" placeholder="Short summary of the issue"/>
-        </div>
-        <div style="flex:1;min-width:130px">
-          <label class="lbl" for="supportCaseCategory">Category</label>
-          <select class="inp" id="supportCaseCategory">
-            <option value="account">Account</option><option value="deposit">Deposit</option><option value="withdrawal">Withdrawal</option><option value="bet">Bet</option><option value="verification">Verification</option><option value="responsible_gaming">Responsible gaming</option><option value="other">Other</option>
-          </select>
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label class="lbl" for="supportCasePriority">Priority</label>
-          <select class="inp" id="supportCasePriority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select>
-        </div>
-      </div>
-      <label class="lbl" for="supportCaseDescription">Issue details</label>
-      <textarea class="inp" id="supportCaseDescription" rows="3" maxlength="2000" placeholder="What did the player report? Include relevant reference numbers, but do not enter passwords or PINs."></textarea>
-      <button class="btn btn-g" onclick="createSupportCase()">＋ Create Case</button>
-      <div class="res" id="supportCaseRes" style="display:none"></div>
-    </div>
-    <div class="sec">
-      <div class="sec-hdr"><h3>📂 Player Support Cases</h3><button class="btn btn-ghost btn-sm" onclick="loadSupportCases()">↻ Refresh</button></div>
-      <div id="supportCases"><div class="empty">No cases loaded.</div></div>
-    </div>
-  </div>
-  <div class="sec" id="supportAllCasesSection">
-    <div class="sec-hdr"><h3>📋 Recent Support Cases</h3><button class="btn btn-ghost btn-sm" onclick="loadSupportCases()">↻ Refresh</button></div>
-    <div id="supportAllCases"><div class="empty">Loading support cases…</div></div>
-  </div>
-</div>
-
 <!-- 23. SUPPORT TICKETS -->
 <div class="panel" id="panel-tickets">
   <div class="sec">
@@ -1584,7 +1493,6 @@ function nav(name,el){
   else if(name==='jackpot') { loadJpPending(); loadJpRounds(); }
   else if(name==='loyalty') loadLoyaltyTiers();
   else if(name==='sms') { smsLoadUsers(1); smsLoadHistory(); }
-  else if(name==='assistance') { loadSupportCases(); }
 }
 
 function toggleSidebar(){
@@ -3416,156 +3324,6 @@ async function loadRefStats(){
   }
 }
 
-
-// ══ STAFF ASSISTANCE ══
-let supportCurrentPlayer = null;
-
-function supportEsc(value) {
-  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-}
-function supportMoney(value) {
-  const n = Number(value || 0);
-  return 'KES ' + n.toLocaleString('en-KE', { maximumFractionDigits: 2 });
-}
-function supportDate(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('en-KE');
-}
-function supportTable(headers, rows) {
-  if (!rows.length) return '<div class="empty">No records found.</div>';
-  return '<table class="support-table"><thead><tr>' + headers.map(h => '<th>'+supportEsc(h)+'</th>').join('') +
-    '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
-}
-async function searchSupportPlayer() {
-  const q = document.getElementById('supportSearch').value.trim();
-  const msg = document.getElementById('supportSearchRes');
-  if (!q) { msg.style.display='block'; msg.className='res er'; msg.textContent='Enter a phone number or username.'; return; }
-  msg.style.display='block'; msg.className='res inf'; msg.textContent='Searching player…';
-  try {
-    const d = await api('/api/admin/support/player/' + encodeURIComponent(q));
-    if (!d.success || !d.player) {
-      supportCurrentPlayer = null;
-      document.getElementById('supportPlayerWorkspace').style.display='none';
-      msg.className='res er'; msg.textContent='❌ ' + (d.message || 'Player not found.');
-      return;
-    }
-    supportCurrentPlayer = d.player;
-    renderSupportPlayer(d);
-    msg.className='res ok'; msg.textContent='Player found. Review the details below.';
-    await loadSupportCases();
-  } catch (e) {
-    msg.className='res er'; msg.textContent='Could not load player: ' + (e.message || 'network error');
-  }
-}
-function renderSupportPlayer(d) {
-  const p = d.player;
-  document.getElementById('supportPlayerWorkspace').style.display='block';
-  document.getElementById('supportPlayerStatus').textContent = p.isActive ? 'Active account' : 'Suspended';
-  document.getElementById('supportPlayerStatus').style.color = p.isActive ? 'var(--g)' : 'var(--r)';
-  document.getElementById('supportBalance').textContent = supportMoney(p.balance);
-  document.getElementById('supportBetCount').textContent = Number(p.betsCount || 0).toLocaleString();
-  document.getElementById('supportWalletMain').textContent = supportMoney(p.walletMain);
-  document.getElementById('supportWalletBonus').textContent = supportMoney(p.walletBonus);
-  const fields = [
-    ['Username',p.username],['Phone',fmtPhone(p.phone)],['Player ID',p._id],['Role',p.role],
-    ['KYC status',p.kycStatus],['Phone verified',p.phoneVerified ? 'Yes':'No'],
-    ['Joined',supportDate(p.createdAt)],['Self-exclusion',p.selfExcludedUntil ? supportDate(p.selfExcludedUntil) : 'Not active'],
-    ['Daily deposit limit',p.dailyDepositLimit == null ? 'Not set':supportMoney(p.dailyDepositLimit)],
-    ['Daily stake limit',p.dailyStakeLimit == null ? 'Not set':supportMoney(p.dailyStakeLimit)]
-  ];
-  document.getElementById('supportProfile').innerHTML = fields.map(([k,v]) =>
-    '<div class="support-field"><small>'+supportEsc(k)+'</small><div>'+supportEsc(v || '—')+'</div></div>').join('');
-  const bets = Array.isArray(d.bets) ? d.bets : [];
-  document.getElementById('supportBets').innerHTML = supportTable(
-    ['Bet code','Date','Stake','Potential payout','Status'],
-    bets.map(b => '<tr><td>'+supportEsc(b.betCode || b._id)+'</td><td>'+supportEsc(supportDate(b.createdAt))+'</td><td>'+supportEsc(supportMoney(b.stake))+'</td><td>'+supportEsc(supportMoney(b.potentialWin))+'</td><td><span class="support-pill">'+supportEsc(b.status || '—')+'</span></td></tr>')
-  );
-  const txs = Array.isArray(d.transactions) ? d.transactions : [];
-  document.getElementById('supportTransactions').innerHTML = supportTable(
-    ['Date','Type','Amount','Status','Reference / details'],
-    txs.map(t => '<tr><td>'+supportEsc(supportDate(t.createdAt))+'</td><td>'+supportEsc(t.type)+'</td><td>'+supportEsc(supportMoney(t.amount))+'</td><td><span class="support-pill">'+supportEsc(t.status)+'</span></td><td>'+supportEsc([t.mpesaRef,t.reference,t.description].filter(Boolean).join(' · ') || '—')+'</td></tr>')
-  );
-  document.getElementById('supportCaseSubject').value='';
-  document.getElementById('supportCaseDescription').value='';
-  document.getElementById('supportCaseRes').style.display='none';
-}
-function clearSupportPlayer() {
-  supportCurrentPlayer = null;
-  document.getElementById('supportSearch').value='';
-  document.getElementById('supportSearchRes').style.display='none';
-  document.getElementById('supportPlayerWorkspace').style.display='none';
-  document.getElementById('supportCases').innerHTML='<div class="empty">Search for a player to view their cases.</div>';
-}
-async function createSupportCase() {
-  const res = document.getElementById('supportCaseRes');
-  res.style.display='block'; res.className='res inf'; res.textContent='Creating support case…';
-  if (!supportCurrentPlayer?._id) { res.className='res er'; res.textContent='Search for a player first.'; return; }
-  const body = {
-    userId:supportCurrentPlayer._id,
-    subject:document.getElementById('supportCaseSubject').value.trim(),
-    category:document.getElementById('supportCaseCategory').value,
-    priority:document.getElementById('supportCasePriority').value,
-    description:document.getElementById('supportCaseDescription').value.trim()
-  };
-  try {
-    const d = await api('/api/admin/support/cases',{method:'POST',body:JSON.stringify(body)});
-    if (!d.success) { res.className='res er'; res.textContent='❌ '+(d.message || 'Could not create case.'); return; }
-    res.className='res ok'; res.textContent='✅ Support case created.';
-    document.getElementById('supportCaseSubject').value='';
-    document.getElementById('supportCaseDescription').value='';
-    await loadSupportCases();
-  } catch(e) { res.className='res er'; res.textContent='❌ '+(e.message || 'Network error'); }
-}
-async function loadSupportCases() {
-  const all = document.getElementById('supportAllCases');
-  if (all) all.innerHTML='<div class="empty">Loading support cases…</div>';
-  try {
-    let url='/api/admin/support/cases';
-    if (supportCurrentPlayer?._id) url += '?userId=' + encodeURIComponent(supportCurrentPlayer._id);
-    const d = await api(url);
-    if (!d.success) throw new Error(d.message || 'Could not load cases');
-    const cases = Array.isArray(d.data) ? d.data : [];
-    const target = supportCurrentPlayer ? document.getElementById('supportCases') : null;
-    if (target) target.innerHTML = cases.length ? cases.map(renderSupportCase).join('') : '<div class="empty">No support cases for this player yet.</div>';
-    if (all) {
-      // In a player lookup, the main case list is filtered; the lower list intentionally shows recent cases for all players.
-      if (supportCurrentPlayer?._id) {
-        const allD = await api('/api/admin/support/cases');
-        const recent = Array.isArray(allD.data) ? allD.data : [];
-        all.innerHTML = recent.length ? recent.slice(0,12).map(renderSupportCase).join('') : '<div class="empty">No support cases yet.</div>';
-      } else {
-        all.innerHTML = cases.length ? cases.slice(0,12).map(renderSupportCase).join('') : '<div class="empty">No support cases yet.</div>';
-      }
-    }
-  } catch(e) {
-    if (all) all.innerHTML='<div class="empty">Could not load support cases: '+supportEsc(e.message || 'network error')+'</div>';
-    const target=document.getElementById('supportCases');
-    if (target) target.innerHTML='<div class="empty">Could not load cases.</div>';
-  }
-}
-function renderSupportCase(c) {
-  const user = c.userId && typeof c.userId === 'object' ? c.userId : {};
-  const statusOptions = [['open','Open'],['in_progress','In progress'],['resolved','Resolved'],['closed','Closed']];
-  const options = statusOptions.map(([v,label])=>'<option value="'+v+'" '+(c.status===v?'selected':'')+'>'+label+'</option>').join('');
-  return '<div class="support-case"><div class="support-case-head"><strong>'+supportEsc(c.subject)+'</strong><span class="support-pill">'+supportEsc(c.priority || 'normal')+' priority</span></div>'+
-    '<div class="support-case-meta">#'+supportEsc(String(c._id || '').slice(-8))+' · '+supportEsc(user.username || 'Player')+' '+(user.phone ? '· '+supportEsc(fmtPhone(user.phone)) : '')+' · '+supportEsc(supportDate(c.createdAt))+' · '+supportEsc(c.category || 'other')+'</div>'+
-    '<div style="font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere">'+supportEsc(c.description)+'</div>'+
-    (c.staffNote ? '<div style="font-size:12px;margin-top:8px"><strong>Staff note:</strong> '+supportEsc(c.staffNote)+'</div>' : '')+
-    '<div class="support-case-actions"><label style="font-size:11px;color:var(--mt)">Status</label><select class="inp" id="supportStatus-'+supportEsc(c._id)+'">'+options+'</select>'+
-    '<button class="btn btn-ghost btn-sm" onclick="updateSupportCase(\''+supportEsc(c._id)+'\')">Save status</button></div></div>';
-}
-async function updateSupportCase(id) {
-  const select=document.getElementById('supportStatus-'+id);
-  if (!select) return;
-  try {
-    const d=await api('/api/admin/support/cases/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({status:select.value})});
-    if (!d.success) { toast(d.message || 'Could not update case','err'); return; }
-    toast('Support case updated','ok');
-    await loadSupportCases();
-  } catch(e) { toast(e.message || 'Network error','err'); }
-}
-
 // ══ HELPERS ══
 function fmtPhone(p){return p?p.replace('254','0'):'—';}
 
@@ -3582,5 +3340,146 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.getElementById('loginScreen').style.display!=='none') doLogin();
 });
 </script>
+<!-- ═══ STAFF ASSISTANCE MANAGEMENT (added) — creates and supervises staff accounts for /staff-assistance. Uses the same admin login as the rest of this panel. ═══ -->
+<script>
+(function () {
+  'use strict';
+  function el(tag, attrs) {
+    var e = document.createElement(tag), kids = Array.prototype.slice.call(arguments, 2);
+    if (attrs) Object.keys(attrs).forEach(function (k) { var v = attrs[k]; if (v == null || v === false) return; if (k === 'class') e.className = v; else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), v); else if (k === 'value') e.value = v; else e.setAttribute(k, v === true ? '' : v); });
+    (function add(list) { list.forEach(function (c) { if (c == null || c === false) return; if (Array.isArray(c)) return add(c); e.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c))); }); })(kids);
+    return e;
+  }
+  var fmt = function (d) { return d ? new Date(d).toLocaleString() : '—'; };
+  var meta = null, state = { tab: 'accounts' };
+  var css = '#staffOv{position:fixed;inset:0;background:#0a0f0dee;z-index:9000;overflow:auto;padding:14px;color:#e6f2ea;font:14px/1.45 system-ui,sans-serif}#staffOv .box{max-width:1100px;margin:0 auto}#staffOv .card{background:#121c18;border:1px solid #223229;border-radius:12px;padding:14px;margin-bottom:12px}#staffOv h2{margin:0 0 10px;font-size:18px}#staffOv h3{margin:14px 0 6px;font-size:14px;color:#1fd36b}#staffOv table{width:100%;border-collapse:collapse;font-size:13px}#staffOv th,#staffOv td{text-align:left;padding:7px 8px;border-bottom:1px solid #223229;vertical-align:top}#staffOv th{color:#8aa396;font-size:12px}#staffOv input,#staffOv select,#staffOv textarea{width:100%;background:#0c1511;border:1px solid #223229;border-radius:8px;padding:9px;color:#e6f2ea;font:inherit}#staffOv label{display:block;font-size:12px;color:#8aa396;margin:9px 0 3px}#staffOv .b{background:#0fa650;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;margin:2px}#staffOv .b.s{background:#17241f;border:1px solid #223229}#staffOv .b.r{background:#b83a3a}#staffOv .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}#staffOv .ok{background:#12301f;border:1px solid #1f5a37;color:#9be8bb;padding:10px;border-radius:9px;margin:8px 0}#staffOv .er{background:#3a1a1a;border:1px solid #6b2a2a;color:#ffb4b4;padding:10px;border-radius:9px;margin:8px 0}#staffOv .wn{background:#33290f;border:1px solid #6b5a1f;color:#f5d98a;padding:10px;border-radius:9px;margin:8px 0}#staffOv .sm{font-size:12px;color:#8aa396}#staffOv code{background:#0c1511;padding:3px 7px;border-radius:6px;font-size:15px;user-select:all}#staffOv .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}#staffOv .chk{display:flex;gap:6px;align-items:center;font-size:12px;margin:3px 0;color:#e6f2ea}#staffOv .chk input{width:auto}#staffOv .sc{overflow-x:auto}';
+  function note(host, text, kind) { var o = host.querySelector('.flash'); if (o) o.remove(); var n = el('div', { class: (kind || 'er') + ' flash' }, text); host.insertBefore(n, host.firstChild); }
+  function ov() { return document.getElementById('staffOv'); }
+  async function call(method, url, body) { return api('/api/admin/staff' + url, { method: method, body: body ? JSON.stringify(body) : undefined }); }
+
+  async function open() {
+    if (!document.getElementById('staffOvCss')) { var st = el('style', { id: 'staffOvCss' }); st.textContent = css; document.head.appendChild(st); }
+    var o = ov(); if (o) o.remove();
+    document.body.appendChild(el('div', { id: 'staffOv' }, el('div', { class: 'box', id: 'staffBox' })));
+    if (!meta) { var m = await call('GET', '/meta'); if (m && m.success) meta = m; }
+    render();
+  }
+  function shell(title, body) {
+    var box = document.getElementById('staffBox'); box.replaceChildren();
+    var tabs = [['accounts', 'Accounts'], ['create', '+ New staff'], ['exec', 'Approved decisions to carry out'], ['resets', 'Password-reset requests'], ['audit', 'Staff audit trail']];
+    box.appendChild(el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px' }, el('h2', { style: 'margin:0' }, '👔 Staff Assistance'), el('div', null, el('a', { class: 'b s', href: '/staff-assistance', target: '_blank', rel: 'noopener', style: 'text-decoration:none;display:inline-block' }, 'Open staff portal ↗'), el('button', { class: 'b s', onclick: function () { ov().remove(); } }, 'Close'))));
+    box.appendChild(el('div', { class: 'tabs' }, tabs.map(function (t) { return el('button', { class: 'b' + (state.tab === t[0] ? '' : ' s'), onclick: function () { state.tab = t[0]; render(); } }, t[1]); })));
+    box.appendChild(body); return box;
+  }
+  function render() { var tab = state.tab; ({ accounts: accounts, create: create, exec: exec, resets: resets, audit: auditTab })[tab](); }
+
+  async function accounts() {
+    var host = el('div', null, el('p', { class: 'sm' }, 'Loading…')); shell('', host);
+    var d = await call('GET', '/'); host.replaceChildren();
+    if (!d || !d.success) return host.appendChild(el('div', { class: 'er' }, (d && d.message) || 'Could not load staff.'));
+    if (!d.staff.length) host.appendChild(el('div', { class: 'card' }, 'No staff accounts yet. Use “+ New staff”.'));
+    d.staff.forEach(function (s) {
+      var card = el('div', { class: 'card' },
+        el('div', { style: 'display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap' }, el('div', null, el('b', null, s.displayName), ' ', el('span', { class: 'sm' }, '@' + s.username + (s.email ? ' · ' + s.email : ''))), el('div', null, el('b', { style: 'color:' + (s.status === 'active' ? '#1fd36b' : '#ff5d5d') }, s.status.toUpperCase()))),
+        el('div', { class: 'sm' }, (meta ? (meta.roles.filter(function (r) { return r.key === s.staffRole; })[0] || {}).label : s.staffRole), ' · 2FA ', s.totpEnabled ? 'on' : (s.require2fa ? 'required, not set up yet' : 'off'), ' · ', s.mustChangePassword ? 'must change password · ' : '', s.locked ? 'LOCKED (too many attempts) · ' : '', 'sessions: ', s.activeSessions, ' · last sign-in ', fmt(s.lastLoginAt), s.lastLoginIp ? ' (' + s.lastLoginIp + ')' : '', ' · created by ', s.createdBy || '—'),
+        s.statusReason ? el('div', { class: 'sm' }, 'Reason: ' + s.statusReason) : null);
+      var act = el('div', { style: 'margin-top:8px' });
+      var btn = function (label, cls, fn) { return el('button', { class: 'b ' + (cls || 's'), onclick: fn }, label); };
+      act.appendChild(btn('Edit role / permissions', 's', function () { edit(s); }));
+      if (s.status === 'active') { act.appendChild(btn('Suspend', 's', function () { setStatus(s, 'suspended', card); })); act.appendChild(btn('Disable', 'r', function () { setStatus(s, 'disabled', card); })); }
+      else act.appendChild(btn('Re-activate', '', function () { setStatus(s, 'active', card); }));
+      act.appendChild(btn('Reset password', 's', async function () { if (!confirm('Reset the password of ' + s.username + '? All their sessions will end.')) return; var r = await call('POST', '/' + s.id + '/reset-password'); if (!r.success) return note(card, r.message); secret(card, 'New temporary password for ' + s.username, r.temporaryPassword, r.message); }));
+      act.appendChild(btn('Reset 2FA', 's', async function () { if (!confirm('Clear two-factor for ' + s.username + '? They must enrol again.')) return; var r = await call('POST', '/' + s.id + '/reset-2fa'); note(card, r.success ? (r.message + ' Sessions ended: ' + r.sessionsRevoked) : r.message, r.success ? 'ok' : 'er'); }));
+      act.appendChild(btn('Revoke all sessions', 's', async function () { var r = await call('POST', '/' + s.id + '/revoke-sessions'); note(card, r.success ? ('Sessions ended: ' + r.sessionsRevoked) : r.message, r.success ? 'ok' : 'er'); }));
+      act.appendChild(btn('Activity', 's', function () { activity(s); }));
+      card.appendChild(act); host.appendChild(card);
+    });
+  }
+  function secret(card, title, pw, msg) { card.appendChild(el('div', { class: 'ok' }, el('b', null, title), el('div', { style: 'margin:8px 0' }, el('code', null, pw)), el('div', { class: 'sm' }, msg || 'Shown once. Give it to them privately.'))); }
+  async function setStatus(s, status, card) {
+    var reason = status === 'active' ? '' : prompt('Reason for ' + status + ' (required):'); if (status !== 'active' && !reason) return;
+    var r = await call('POST', '/' + s.id + '/status', { status: status, reason: reason }); if (!r.success) return note(card, r.message); render();
+  }
+  function permBoxes(selected) { var host = el('div', { class: 'grid' }); meta.permissions.forEach(function (p) { host.appendChild(el('label', { class: 'chk' }, el('input', { type: 'checkbox', value: p, checked: selected.indexOf(p) >= 0 }), p)); }); return host; }
+  function picked(host) { return Array.prototype.slice.call(host.querySelectorAll('input:checked')).map(function (i) { return i.value; }); }
+  function roleSelect(cur) { return el('select', { name: 'staffRole' }, meta.roles.map(function (r) { return el('option', { value: r.key, selected: r.key === cur }, r.label); })); }
+  function roleHelp() { return el('div', { class: 'sm' }, meta.roles.map(function (r) { return el('div', null, el('b', null, r.label + ': '), r.permissions.join(', ')); })); }
+
+  function edit(s) {
+    var extra = permBoxes(s.extraPermissions), denied = permBoxes(s.deniedPermissions), role = roleSelect(s.staffRole);
+    var f = el('div', { class: 'card' }, el('h2', null, 'Edit ' + s.displayName),
+      el('label', null, 'Name'), el('input', { name: 'displayName', value: s.displayName }), el('label', null, 'Email (optional)'), el('input', { name: 'email', value: s.email || '' }), el('label', null, 'Role'), role,
+      el('h3', null, 'Extra permissions (added to the role)'), extra, el('h3', null, 'Denied permissions (removed from the role)'), denied,
+      el('label', { class: 'chk' }, el('input', { type: 'checkbox', name: 'require2fa', checked: s.require2fa }), 'Require two-factor sign-in'),
+      el('div', { class: 'sm', style: 'margin-top:8px' }, 'Changes take effect on their very next request — no new sign-in needed.'), roleHelp(),
+      el('div', { style: 'margin-top:10px' }, el('button', { class: 'b', onclick: async function () {
+        var v = function (n) { return f.querySelector('[name=' + n + ']'); };
+        var r = await call('PATCH', '/' + s.id, { displayName: v('displayName').value, email: v('email').value, staffRole: role.value, extraPermissions: picked(extra), deniedPermissions: picked(denied), require2fa: v('require2fa').checked });
+        if (!r.success) return note(f, r.message); state.tab = 'accounts'; render(); } }, 'Save'), el('button', { class: 'b s', onclick: render }, 'Cancel')));
+    shell('', f);
+  }
+  async function activity(s) {
+    var host = el('div', null, el('p', { class: 'sm' }, 'Loading…')); shell('', host);
+    var d = await call('GET', '/' + s.id + '/activity?limit=100'), ss = await call('GET', '/' + s.id + '/sessions'); host.replaceChildren();
+    host.appendChild(el('button', { class: 'b s', onclick: render }, '← Back'));
+    host.appendChild(el('div', { class: 'card' }, el('h2', null, 'Activity of ' + s.displayName), el('div', { class: 'sm' }, 'Active sessions: ' + (ss.success ? ss.sessions.map(function (x) { return (x.ip || '?') + ' (last seen ' + fmt(x.lastSeenAt) + ')'; }).join('; ') || 'none' : '?')), eventTable(d)));
+  }
+  function eventTable(d) {
+    if (!d || !d.success) return el('div', { class: 'er' }, (d && d.message) || 'Failed.');
+    return el('div', { class: 'sc' }, el('table', null, el('thead', null, el('tr', null, ['When', 'Who', 'Action', 'Target', 'Outcome', 'Reason'].map(function (h) { return el('th', null, h); }))),
+      el('tbody', null, d.events.map(function (e) { return el('tr', null, el('td', null, fmt(e.at)), el('td', null, (e.actor || '—') + (e.actorType === 'admin' ? ' (admin)' : '')), el('td', null, e.action), el('td', { class: 'sm' }, e.target || ''), el('td', null, e.outcome), el('td', { class: 'sm' }, e.reason || '')); }))));
+  }
+  function create() {
+    if (!meta) return shell('', el('div', { class: 'er' }, 'Could not load roles.'));
+    var extra = permBoxes([]), denied = permBoxes([]), role = roleSelect('customer_support');
+    var f = el('div', { class: 'card' }, el('h2', null, 'Create staff account'), el('p', { class: 'sm' }, 'There is no public sign-up: only you can create staff. A temporary password is generated and shown once; the staff member must change it and set up two-factor at first sign-in.'),
+      el('label', null, 'Username (lowercase letters, digits, . _ -)'), el('input', { name: 'username', autocapitalize: 'none' }), el('label', null, 'Full name'), el('input', { name: 'displayName' }), el('label', null, 'Email (optional)'), el('input', { name: 'email' }),
+      el('label', null, 'Role'), role, el('h3', null, 'Extra permissions (optional)'), extra, el('h3', null, 'Denied permissions (optional)'), denied, roleHelp(),
+      el('label', { class: 'chk' }, el('input', { type: 'checkbox', name: 'require2fa', checked: true }), 'Require two-factor sign-in (recommended)'),
+      el('div', { style: 'margin-top:10px' }, el('button', { class: 'b', onclick: async function () {
+        var v = function (n) { return f.querySelector('[name=' + n + ']'); };
+        var r = await call('POST', '/', { username: v('username').value, displayName: v('displayName').value, email: v('email').value, staffRole: role.value, extraPermissions: picked(extra), deniedPermissions: picked(denied), require2fa: v('require2fa').checked });
+        if (!r.success) return note(f, r.message);
+        f.replaceChildren(el('h2', null, 'Account created: ' + r.staff.username), el('div', { class: 'ok' }, el('div', null, 'Temporary password (shown only once):'), el('div', { style: 'margin:8px 0' }, el('code', null, r.temporaryPassword)), el('div', { class: 'sm' }, 'Send it privately. Sign-in page: ' + location.origin + '/staff-assistance')), el('button', { class: 'b', onclick: function () { state.tab = 'accounts'; render(); } }, 'Done'));
+      } }, 'Create account')));
+    shell('', f);
+  }
+  async function exec() {
+    var host = el('div', null, el('p', { class: 'sm' }, 'Loading…')); shell('', host);
+    var d = await call('GET', '/reviews/awaiting-execution'); host.replaceChildren();
+    host.appendChild(el('div', { class: 'wn' }, 'Staff cannot move money or block accounts. When two staff agree on a reversal, manual credit or block, it appears here. Carry it out with your existing admin tools, then mark it done so the record is complete.'));
+    if (!d || !d.success) return host.appendChild(el('div', { class: 'er' }, (d && d.message) || 'Failed.'));
+    if (!d.reviews.length) host.appendChild(el('div', { class: 'card' }, 'Nothing is waiting.'));
+    d.reviews.forEach(function (r) {
+      var card = el('div', { class: 'card' }, el('b', null, r.decision.replace(/_/g, ' ')), ' · KES ' + Math.abs(r.amount || 0) + ' · ' + r.txType, el('div', { class: 'sm' }, 'Transaction ' + r.txId + ' · player ' + r.userId + ' · submitted by ' + r.submittedBy + ' · approved by ' + r.approvedBy + ' ' + fmt(r.approvedAt)), el('div', null, r.reason));
+      var note_ = el('input', { placeholder: 'What did you do? (required)' });
+      card.appendChild(el('div', { style: 'margin-top:8px;display:flex;gap:6px;flex-wrap:wrap' }, note_,
+        el('button', { class: 'b', onclick: async function () { var x = await call('POST', '/reviews/' + r.id + '/mark-executed', { note: note_.value }); if (!x.success) return note(card, x.message); exec(); } }, 'Mark carried out'),
+        el('button', { class: 'b r', onclick: async function () { var x = await call('POST', '/reviews/' + r.id + '/mark-executed', { note: note_.value, declined: true }); if (!x.success) return note(card, x.message); exec(); } }, 'Decline')));
+      host.appendChild(card);
+    });
+  }
+  async function resets() {
+    var host = el('div', null, el('p', { class: 'sm' }, 'Loading…')); shell('', host);
+    var d = await call('GET', '/reset-requests/list'); host.replaceChildren();
+    host.appendChild(el('p', { class: 'sm' }, 'People who used “forgot password” on the staff sign-in page (last 30 days). Reset their password from Accounts, then tell them privately.'));
+    if (!d || !d.success) return host.appendChild(el('div', { class: 'er' }, (d && d.message) || 'Failed.'));
+    host.appendChild(el('div', { class: 'card sc' }, d.requests.length ? el('table', null, el('thead', null, el('tr', null, ['When', 'Username', 'Account exists', 'IP'].map(function (h) { return el('th', null, h); }))), el('tbody', null, d.requests.map(function (r) { return el('tr', null, el('td', null, fmt(r.at)), el('td', null, r.username || ''), el('td', null, r.known ? 'yes' : 'no'), el('td', { class: 'sm' }, r.ip || '')); }))) : 'No requests.'));
+  }
+  async function auditTab() {
+    var host = el('div', null, el('p', { class: 'sm' }, 'Loading…')); shell('', host);
+    var d = await call('GET', '/audit/all?limit=100'); host.replaceChildren();
+    host.appendChild(el('div', { class: 'card' }, el('h2', null, 'Latest staff-system events (read-only)'), eventTable(d)));
+  }
+
+  function install() {
+    var sb = document.getElementById('sidebar'); if (!sb || document.getElementById('nav-staff')) return;
+    var item = el('div', { class: 'sb-item', id: 'nav-staff', onclick: open }, el('span', { class: 'ic' }, '👔'), 'Staff Assistance');
+    var sec = el('div', { class: 'sb-section' }, el('div', { class: 'sb-label' }, 'Staff'), item); sb.appendChild(sec);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install); else install();
+})();
+</script>
+
 </body>
 </html>
