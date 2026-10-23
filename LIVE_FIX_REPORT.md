@@ -59,3 +59,10 @@ There is no build step in this project (static files plus Node), so there is no 
 - Casino lobby, jackpot, virtual and referral pages reload after 10+ minutes away (they have no refresh logic of their own). The casino-game page and forms are never reloaded.
 - Not changed: the last match list is still painted instantly from the phone's saved copy while the fresh list loads (about a second); it is then replaced.
 - Not tested in a browser or in the APK. The image ETag route needs a quick manual check: replace a banner in admin, reopen the site.
+
+## Addendum: Live tab opens in about 1 second
+
+- The full live list is kept warm in the background (every 20 s while another tab is open, and when the app is reopened), so tapping LIVE paints it from memory at once.
+- The last complete live list is also kept on the phone for 10 minutes and shown immediately when the page opens on LIVE, then replaced by the fresh answer.
+- `/api/sports/live` is answered straight from server memory when a list exists (no waiting for a refresh), and is sent without the full market lists, which list cards never use (the match page loads those itself). The payload is much smaller.
+- Only a server that has just woken up, with no list yet, waits (up to 3 s) for its first list.

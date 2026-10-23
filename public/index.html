@@ -1397,7 +1397,7 @@ function restoreHomeCat(){
   if (o.cat === 'live' && !liveTabCache.data) {      // paint LIVE instantly from the last snapshot
     try {
       const cl = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-      if (cl?.data?.length && (Date.now() - cl.ts) < 60000) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
+      if (cl?.data?.length && (Date.now() - cl.ts) < LIVE_PAINT_MAX_MS) { liveTabCache.data = cl.data; liveTabCache.ts = cl.ts; }
     } catch(e) {}
   }
   if (window.__sbSnapActive && window.__sbHomeSnap) {
@@ -1481,7 +1481,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   if (!liveTabCache.data) {
     try {
       const cachedLive = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < 60000) {
+      if (cachedLive?.data?.length && (Date.now() - cachedLive.ts) < LIVE_PAINT_MAX_MS) {
         liveTabCache.data = cachedLive.data;
         liveTabCache.ts = cachedLive.ts;
       }
@@ -1508,6 +1508,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // not a client-side guess, so frequent resync is what keeps it accurate.
   oddsRefresh=setInterval(()=>{
     loadAllMatches(true);
+    if (currentCat !== 'live' && !document.hidden) loadMatches('live', true).catch(() => {});   // keep the full live list warm so the LIVE tab opens instantly
   }, 20000);
   ensureFreshSync(Date.now() - 1, 0);          // the first list must really arrive, retrying quickly if the connection was not ready
 });
@@ -1558,6 +1559,7 @@ function freshSync(forceFull){
   const since = Date.now();
   if (forceFull) matchesEtag = null;          // away for a while: take the full current list, not a "nothing changed"
   loadAllMatches(true);
+  if (currentCat !== 'live') loadMatches('live', true).catch(() => {});   // warm the live list again when coming back
   ensureFreshSync(since, 0);
 }
 window.addEventListener('online', () => freshSync(true));
@@ -2035,6 +2037,8 @@ const sportTabCache = new Map();
 const sportTabRequests = new Map();
 const footballTabCache = { data:null, ts:0 };
 const liveTabCache = { data:null, ts:0 };
+// The last COMPLETE live list is shown at once when the tab opens (then replaced by the fresh answer, normally < 1s).
+const LIVE_PAINT_MAX_MS = 10 * 60000;
 
 function pickCat(el) {
   const previousCat = currentCat;
@@ -2178,7 +2182,7 @@ async function loadCat(cat) {
     if (!liveTabCache.data?.length) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
-        if (stored?.data?.length && (Date.now() - stored.ts) < 60000) {
+        if (stored?.data?.length && (Date.now() - stored.ts) < LIVE_PAINT_MAX_MS) {
           liveTabCache.data = stored.data;
           liveTabCache.ts = stored.ts;
         }

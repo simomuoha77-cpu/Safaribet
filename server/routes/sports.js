@@ -125,6 +125,7 @@ function sportBadge(sport) {
 // Live is one mixed feed. The cache is continuously warmed in the background
 // so opening Live never waits for SofaBets.
 const LIVE_CACHE_KEY = 'sofa_live_all';
+const LIVE_SLIM_KEY = 'sofa_live_slim';
 let liveRefreshInFlight = false;
 
 function buildLiveMatches(sport, matches) {
@@ -205,6 +206,9 @@ function saveLiveCache(matches) {
     );
 
   C.set(LIVE_CACHE_KEY, clean);
+  // The list cards never use the full market lists (the match page loads those itself), and they are most of the bytes:
+  // the list answer is sent without them so 90+ games arrive in a fraction of the time.
+  C.set(LIVE_SLIM_KEY, clean.map(m => { const { markets, ...rest } = m; return rest; }));
   return clean;
 }
 
@@ -326,11 +330,13 @@ router.get('/live', async (req, res) => {
     // Normally the snapshot is <=10s old (background refresh) and is returned at once. If it is missing or older
     // than 30s (server just woke up / a refresh was slow), wait up to 3s for the refresh already running so the
     // customer gets the CURRENT live games instead of an empty or old list.
-    if (liveSnapshotAge() > LIVE_FRESH_MS) {
+    // A list already in memory is answered at ONCE (the refresh after the answer updates it for the next request);
+    // only a server with no list yet waits - up to 3s - for the first one.
+    if (liveSnapshotAge() > LIVE_FRESH_MS && !Array.isArray(C.get(LIVE_SLIM_KEY, LIVE_FAIL_KEEP_MS + 60000))) {
       await Promise.race([refreshLiveCache().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
     }
     // The stored list stays valid while refreshes keep failing (up to LIVE_FAIL_KEEP_MS + the refresh interval).
-    const cached = C.get(LIVE_CACHE_KEY, LIVE_FAIL_KEEP_MS + 60000);
+    const cached = C.get(LIVE_SLIM_KEY, LIVE_FAIL_KEEP_MS + 60000);
 
     if (Array.isArray(cached)) {
       res.json({
