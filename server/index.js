@@ -95,6 +95,12 @@ const globalLimiter = rateLimit({
   message: { success: false, message: 'Too many requests. Please slow down.' }
 });
 app.use('/api', globalLimiter);
+// Betting data (fixtures, live scores, event status, markets, balances) must never be reused by a browser, WebView or
+// proxy cache. Routes that deliberately set their own header (e.g. ETag + no-cache on /api/odds/featured) keep it.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' && !res.getHeader('Cache-Control')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // ── MIDDLEWARE ──
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));

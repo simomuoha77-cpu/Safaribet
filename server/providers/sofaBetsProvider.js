@@ -1435,15 +1435,21 @@ const LIVE_FEED_TTL_MS = 6000;
 // original one: fresh (<= LIVE_FEED_TTL_MS) or fetch.
 async function fetchLiveFootballFixtures(sportName = 'football', opts) {
   const key = String(sportName || 'football').toLowerCase();
+  // opts.strict: a provider FAILURE throws instead of looking like "no live games". Only the Live tab refresher
+  // uses it, so it can keep its last complete list. Every other caller keeps the old behaviour (failure -> []).
+  const strict = !!(opts && opts.strict);
+  const settle = p => strict ? p : p.catch(() => []);
   const hit = liveFeedCache.get(key);
   const age = hit ? Date.now() - hit.ts : Infinity;
   if (hit && age < LIVE_FEED_TTL_MS) return hit.data;
   const refresh = () => {
     if (liveFeedInflight.has(key)) return liveFeedInflight.get(key);
     const p = fetchLiveFootballFixturesUncached(sportName).then(data => {
-      if (Array.isArray(data) && data.length) liveFeedCache.set(key, { ts: Date.now(), data });
+      // A confirmed answer (even an empty one) replaces the cache; a failure never reaches here.
+      liveFeedCache.set(key, { ts: Date.now(), data: Array.isArray(data) ? data : [] });
       return data;
     }).finally(() => liveFeedInflight.delete(key));
+    p.catch(() => {});          // the shared promise may have no other listener: never an unhandled rejection
     liveFeedInflight.set(key, p);
     return p;
   };
@@ -1451,7 +1457,7 @@ async function fetchLiveFootballFixtures(sportName = 'football', opts) {
     refresh().catch(() => {});
     return hit.data;
   }
-  return refresh();
+  return settle(refresh());
 }
 
 // A live endpoint that answers 404 for a sport (some hosts only serve football) is remembered
@@ -1485,6 +1491,8 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
   }
   let lastError = null;
   let anyTried = false;
+  let confirmedEmpty = false;      // a COMPLETE, successful pagination run that held zero fixtures
+  const PAGE_LIMIT = 100;
 
   for (const base of BASES) {
     for (const path of livePaths) {
@@ -1494,22 +1502,34 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
         if (deadAt && Date.now() - deadAt < LIVE_DEAD_MS) continue;
         anyTried = true;
         try {
-          const all = [];
+          // Every page is fetched and combined; de-duplicated by the provider's own fixture id.
+          // ANY page that fails aborts this whole run (thrown), so a half-read list is never returned as if it were complete.
+          const byId = new Map();
+          let completed = false;
           for (let page = 1; page <= MAX_PAGES_PER_FETCH; page += 1) {
-            const payload = await sofaFetch(base, path, Object.assign({ page: String(page), limit: '100' }, variants[vi]));
+            const payload = await sofaFetch(base, path, Object.assign({ page: String(page), limit: String(PAGE_LIMIT) }, variants[vi]));
             const rawItems = extractItems(payload);
-            if (!rawItems.length) break;
-            all.push(...rawItems);
+            if (!rawItems.length) { completed = true; break; }
+            let added = 0;
+            for (const it of rawItems) {
+              const k = it ? String(it.id ?? it.fixtureId ?? it.fixture_id ?? it.eventId ?? it.event_id ?? it.matchId ?? it.match_id ?? '') : '';
+              if (k) { if (byId.has(k)) continue; byId.set(k, it); added += 1; }
+              else { byId.set('#' + byId.size + ':' + page, it); added += 1; }
+            }
             const pg = paginationInfo(payload);
-            if (pg.hasMore === false) break;
-            if (pg.totalPages && page >= Number(pg.totalPages)) break;
+            if (pg.hasMore === false) { completed = true; break; }
+            if (pg.totalPages && page >= Number(pg.totalPages)) { completed = true; break; }
+            if (!added) { completed = true; break; }                      // the provider repeated a page: nothing new left
             if (pg.nextPage != null && Number(pg.nextPage) > page) {
               page = Number(pg.nextPage) - 1;
             } else if (!(pg.hasMore === true || pg.totalPages || pg.nextPage != null)) {
-              break;
+              // No pagination metadata at all: a FULL page means there may be more, a short page means that was the last one.
+              if (rawItems.length < PAGE_LIMIT) { completed = true; break; }
             }
             await sleep(PAGE_FETCH_GAP_MS);
           }
+          if (!completed) throw new Error('live feed pagination did not finish within ' + MAX_PAGES_PER_FETCH + ' pages');
+          const all = Array.from(byId.values());
 
           let matches = all.map(safeNormalizeMatch).filter(Boolean);
           if (sport !== 'football') {
@@ -1523,6 +1543,7 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
             console.log(`[sofaBetsProvider] live sync: ${matches.length} live ${sport} fixtures from ${base}${path} (variant ${vi})`);
             return matches;
           }
+          confirmedEmpty = true;
         } catch (e) {
           if (/HTTP 404/.test(String(e.message))) {
             liveDead.set(deadKey, Date.now());
@@ -1536,8 +1557,13 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
     }
   }
 
+  // Nothing usable came back. Tell a real "no live games" (a request completed and was empty) apart from a FAILURE
+  // (errors, timeouts, rate limits): a failure is thrown so callers keep their last complete list instead of treating it as empty.
+  if (!confirmedEmpty && lastError) {
+    console.warn('[sofaBetsProvider] live feed unavailable (' + sport + '): ' + lastError.message);
+    throw lastError;
+  }
   if (sport !== 'football' && !lastError) liveEmptyUntil.set(sport, Date.now() + 90000);
-  if (lastError && anyTried) console.warn('[sofaBetsProvider] live feed unavailable (' + sport + '): ' + lastError.message);
   return [];
 }
 

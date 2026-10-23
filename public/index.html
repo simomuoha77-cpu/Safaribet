@@ -1575,7 +1575,7 @@ document.addEventListener('visibilitychange', function(){
     // call above resolves, this alone clears out anything that quietly
     // expired (e.g. a Highlights match whose kickoff time passed) while the
     // app was backgrounded, using data already in memory.
-    applyFilters(true);
+    if(currentCat !== 'live') applyFilters(true);
   }
 });
 
@@ -1776,11 +1776,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       // refreshes this silently afterward.
       // Highlights only carries FOOTBALL. It may start an empty Live list, but must never replace the full
       // all-sports Live list (that is what made games disappear). The dedicated live feed owns that list.
-      const instantLive = featuredMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
-      if (instantLive.length && !(liveTabCache.data && liveTabCache.data.length)) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
+      // (Highlights is football only: it is NEVER used to seed the Live list - that produced a one-match Live tab.)
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
       if (currentCat === 'featured') {          // draw it only if Highlights is the tab on screen RIGHT NOW
@@ -1896,7 +1892,10 @@ function applyFilters(silent=false){
   if(currentCat === 'live'){
     // Only the dedicated live feed decides what is live. Falling back to the Highlights list re-showed ended games.
     const live = (liveTabCache.data && liveTabCache.data.length) ? liveTabCache.data.filter(m => !isStuckLive(m)) : [];
-    if(live.length) renderMatches(live, true);
+    if(live.length){
+      const same = live.map(m => m.matchId).join(',') === lastRenderedMatchIds && lastRenderedViewKey === currentViewKey();
+      renderMatches(live, same);          // same games -> patch in place; different games -> replace (ended games leave)
+    }
     return;
   }
 
@@ -2172,20 +2171,6 @@ async function loadCat(cat) {
     // LIVE must never wait for the live endpoint when Highlights already
     // loaded the same matches. Derive the live list immediately, paint it,
     // then refresh the dedicated live endpoint silently in the background.
-    if (!liveTabCache.data?.length && progressiveMatches?.length) {
-      const instantLive = progressiveMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
-    }
-    if (!liveTabCache.data?.length && allMatches?.length) {
-      const instantLive = allMatches.filter(m => m && m.status === 'live' && !isStuckLive(m));
-      if (instantLive.length) {
-        liveTabCache.data = instantLive.slice();
-        liveTabCache.ts = Date.now();
-      }
-    }
     if (!liveTabCache.data?.length) {
       try {
         const stored = JSON.parse(localStorage.getItem('sb_matches_cache_live') || 'null');
@@ -2200,13 +2185,12 @@ async function loadCat(cat) {
       // of merging it with whatever tab was previously on screen.
       renderMatches(liveTabCache.data, false);
     } else {
-      // No LIVE snapshot yet: keep the tab empty while the dedicated
-      // endpoint is fetched silently. Never show Football/Highlights here.
-      if (el) el.innerHTML = '';
+      // No complete LIVE snapshot yet: show a loading state (never Football/Highlights, never a partial list)
+      // while the dedicated endpoint answers.
+      if (el) { stopProgressiveRender(); lastRenderedMatchIds = null; el.innerHTML = liveLoadingHTML(); }
     }
 
-    // Fetch the warm backend LIVE snapshot silently. It updates the tab
-    // as soon as the response arrives without ever showing a page loader.
+    // Always ask the server for the current live list when the tab opens (joins a request already running).
     loadMatches('live', true).catch(() => {});
     return;
   }
@@ -2596,7 +2580,22 @@ async function loadUpcoming(silent=false){
 }
 
 // ── LOAD MATCHES (used for the Live tab) ──
-async function loadMatches(sport, silent=false, retryAttempt=0){
+// ONE live request at a time: tab taps, the 20s poll, resume events and retries used to start overlapping requests
+// whose answers could land out of order. A first attempt joins the request already running (if it is recent).
+let __liveFlight = null;
+function loadMatches(sport, silent=false, retryAttempt=0){
+  if (sport === 'live' && retryAttempt === 0) {
+    if (__liveFlight && Date.now() - __liveFlight.t < 20000) return __liveFlight.p;
+    const p = loadMatchesImpl(sport, silent, retryAttempt).finally(() => { if (__liveFlight && __liveFlight.p === p) __liveFlight = null; });
+    __liveFlight = { p, t: Date.now() };
+    return p;
+  }
+  return loadMatchesImpl(sport, silent, retryAttempt);
+}
+// What the Live tab shows while NOTHING complete is available yet, and when the feed cannot be reached.
+function liveLoadingHTML(){ return '<div class="loading"><div class="spin"></div>Loading live games...</div>'; }
+function liveErrorHTML(){ return '<div class="empty" style="padding:40px 20px"><div style="font-size:36px;margin-bottom:12px">🔴</div><div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">Could not load live games</div><div style="font-size:13px;color:var(--mt);line-height:1.6;margin-bottom:14px">We will keep trying automatically.</div><button class="place-btn" style="max-width:200px;margin:0 auto" onclick="loadMatches(\'live\')">Try again</button></div>'; }
+async function loadMatchesImpl(sport, silent=false, retryAttempt=0){
   const el=document.getElementById('matchList');
   const cacheKey = 'sb_matches_cache_' + sport;
   let usedCache = false;
@@ -2640,6 +2639,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     const d=await r.json();
+    if (sport === 'live' && !(d && d.success)) throw new Error('live feed error');   // a failed answer must never read as "no live games"
     if (d && d.success && !d.warming) window.__sbSyncOk = Date.now();
     if (d && d.warming && !(d.data && d.data.length) && retryAttempt < 5) {
       // The server is still preparing its live snapshot - that is NOT "no live games". Ask again shortly.
@@ -2647,6 +2647,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       setTimeout(() => loadMatches(sport, true, retryAttempt + 1), 1500 + retryAttempt * 1000);
       return;
     }
+    if (sport === 'live' && d && d.warming && !(d.data && d.data.length)) throw new Error('live snapshot not ready');
 
     if (sport === 'live' && currentCat !== 'live') {
       // The live poll answered while another tab is showing: keep the snapshot for later, never draw into this tab.
@@ -2690,7 +2691,7 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
     } else {
       renderMatches(d.data, usedCache || silent);
     }
-    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); }
+    if (sport === 'live') { liveTabCache.data = d.data.slice(); liveTabCache.ts = Date.now(); liveTabCache.partial = false; try { window.dispatchEvent(new CustomEvent('sb:livecount', { detail: d.data.length })); } catch(e) {} }
     try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d.data, ts: Date.now() })); }catch(e){ /* storage full/unavailable — non-fatal */ }
     setUpdatingIndicator(false);
   }catch{
@@ -2704,7 +2705,10 @@ async function loadMatches(sport, silent=false, retryAttempt=0){
       setTimeout(() => loadMatches(sport, sport === 'live', retryAttempt+1), delay);
       return;
     }
-    if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    if (sport === 'live') {
+      // Keep whatever COMPLETE list is on screen; only when there is nothing show the error (the 20s poll keeps retrying).
+      if (currentCat === 'live' && !(liveTabCache.data && liveTabCache.data.length)) el.innerHTML = liveErrorHTML();
+    } else if(!silent && !usedCache) el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
     setUpdatingIndicator(false);
   }
 }
@@ -3675,6 +3679,8 @@ function showT(msg,type=''){
   timer = setInterval(pull, 30000);
   document.addEventListener('visibilitychange', function(){ if(!document.hidden) pull(); });
   window.addEventListener('online', pull);
+  window.addEventListener('sb:resume', pull);
+  window.addEventListener('sb:livecount', function(e){ if(e && typeof e.detail === 'number') paint(e.detail); });   // the badge shows exactly the number of games the Live tab just received
 })();
 </script>
 <script>SB.run()</script>

@@ -14,8 +14,10 @@
 //   * Google Fonts: cache-first (they never change).
 //   * /api/*, casino game launches, downloads, anything non-GET, admin: NEVER cached - always live.
 //
+// Betting data (fixtures, live scores, event status, markets) is only ever served under /api/*, which is in NEVER below:
+// the worker does not touch it, so it can never be frozen by static-asset caching. Static files keep their caching.
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v20-snappy';
+const VERSION = 'sb-v21-livefresh';
 const SHELL = ['/', '/login', '/register', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 

@@ -7,7 +7,8 @@ const cache = {};
 const C = {
   get:(k,ttl)=>{const c=cache[k];return(c&&Date.now()-c.ts<ttl)?c.data:null;},
   set:(k,d)=>{cache[k]={data:d,ts:Date.now()};},
-  age:(k)=>cache[k] ? Date.now()-cache[k].ts : Infinity
+  age:(k)=>cache[k] ? Date.now()-cache[k].ts : Infinity,
+  ts:(k)=>cache[k] ? cache[k].ts : 0
 };
 
 const TWO_WAY = new Set(['tennis','tabletennis','basketball','volleyball','cricket','hockeyus']);
@@ -214,6 +215,8 @@ function refreshLiveCache() {
   return liveRefreshPromise;
 }
 const LIVE_FRESH_MS = 30000;
+// Age of the live snapshot, counting a refresh ATTEMPT that failed as 'recent' so an outage does not make every request wait 3s.
+function liveSnapshotAge() { return Math.min(C.age(LIVE_CACHE_KEY), liveStatus.lastAttemptAt ? Date.now() - liveStatus.lastAttemptAt : Infinity); }
 // Live games must not vanish because the provider hiccuped. Every game seen live is remembered per sport:
 //  - a sport whose fetch FAILED keeps its last known live games (for up to LIVE_FAIL_KEEP_MS);
 //  - a game that merely dropped out of a SUCCESSFUL answer (halftime, a provider blip) stays for LIVE_GRACE_MS.
@@ -230,7 +233,9 @@ function isStuckLive(sport, m) {
 }
 const liveSeenBySport = new Map();            // sport -> Map(matchId -> { m, ts })
 const LIVE_GRACE_MS = 90000;
-const LIVE_FAIL_KEEP_MS = 180000;
+const LIVE_FAIL_KEEP_MS = 600000;           // a sport whose provider call is FAILING keeps its last complete list up to 10 min while we keep retrying
+const LIVE_FETCH_CONCURRENCY = 3;           // sports are asked 3 at a time: 9 parallel multi-page calls were tripping the provider's rate limit
+const liveStatus = { lastOkAt: 0, lastAttemptAt: 0, failedSports: [], bySport: {} };
 async function refreshLiveCacheInner() {
   if (liveRefreshInFlight) return;
 
@@ -242,17 +247,23 @@ async function refreshLiveCacheInner() {
       ...Object.keys(SPORT_CONFIG)
     ].filter((sport, i, arr) => arr.indexOf(sport) === i);
 
-    const parts = await Promise.all(
-      sports.map(async sport => {
-        try {
-          const raw = await sofaBets.getLiveFixtures(sport);
-          return { sport, ok: true, list: buildLiveMatches(sport, raw) };
-        } catch (e) {
-          console.warn(`[sports/live/${sport}]`, e.message);
-          return { sport, ok: false, list: [] };
-        }
-      })
-    );
+    // strict: a provider FAILURE throws (ok:false -> the last complete list for that sport is kept) instead of
+    // arriving as an empty list that would be read as "nothing is live".
+    const fetchOne = async sport => {
+      try {
+        const raw = await sofaBets.getLiveFixtures(sport, { strict: true });
+        return { sport, ok: true, list: buildLiveMatches(sport, raw) };
+      } catch (e) {
+        console.warn(`[sports/live/${sport}]`, e.message);
+        return { sport, ok: false, list: [] };
+      }
+    };
+    const parts = new Array(sports.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(LIVE_FETCH_CONCURRENCY, sports.length) }, async () => {
+      while (next < sports.length) { const i = next++; parts[i] = await fetchOne(sports[i]); }
+    }));
+    liveStatus.lastAttemptAt = Date.now();
 
     const now = Date.now();
     const all = [];
@@ -266,10 +277,21 @@ async function refreshLiveCacheInner() {
         else all.push(e.m);
       }
     }
+    // Safety net: if EVERY sport failed there is no new information at all - leave the stored list exactly as it is.
+    const failed = parts.filter(p => !p.ok).map(p => p.sport);
+    liveStatus.failedSports = failed;
+    if (failed.length === parts.length && C.get(LIVE_CACHE_KEY, 24 * 3600000)) {
+      console.warn('[sports/live] every provider call failed - keeping the last complete live list');
+      return;
+    }
+    if (failed.length < parts.length) liveStatus.lastOkAt = now;
     const merged = saveLiveCache(all);
+    const bySport = {};
+    for (const m of merged) bySport[m.sport] = (bySport[m.sport] || 0) + 1;
+    liveStatus.bySport = bySport;
 
     console.log(
-      `[sports/live] background live refresh: ${merged.length} mixed live matches`
+      `[sports/live] background live refresh: ${merged.length} mixed live matches` + (failed.length ? ` (kept last list for failed: ${failed.join(',')})` : '')
     );
   } catch (e) {
     console.warn('[sports/live] background refresh failed:', e.message);
@@ -283,10 +305,10 @@ async function refreshLiveCacheInner() {
 router.get('/live/count', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
-    if (C.age(LIVE_CACHE_KEY) > LIVE_FRESH_MS) {
+    if (liveSnapshotAge() > LIVE_FRESH_MS) {
       await Promise.race([refreshLiveCache().catch(() => {}), new Promise(r => setTimeout(r, 2000))]);
     }
-    const cached = C.get(LIVE_CACHE_KEY, 120000);
+    const cached = C.get(LIVE_CACHE_KEY, LIVE_FAIL_KEEP_MS + 60000);
     if (Array.isArray(cached)) {
       res.json({ success: true, count: cached.length });
     } else {
@@ -304,16 +326,21 @@ router.get('/live', async (req, res) => {
     // Normally the snapshot is <=10s old (background refresh) and is returned at once. If it is missing or older
     // than 30s (server just woke up / a refresh was slow), wait up to 3s for the refresh already running so the
     // customer gets the CURRENT live games instead of an empty or old list.
-    if (C.age(LIVE_CACHE_KEY) > LIVE_FRESH_MS) {
+    if (liveSnapshotAge() > LIVE_FRESH_MS) {
       await Promise.race([refreshLiveCache().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
     }
-    const cached = C.get(LIVE_CACHE_KEY, 120000);
+    // The stored list stays valid while refreshes keep failing (up to LIVE_FAIL_KEEP_MS + the refresh interval).
+    const cached = C.get(LIVE_CACHE_KEY, LIVE_FAIL_KEEP_MS + 60000);
 
     if (Array.isArray(cached)) {
       res.json({
         success: true,
         data: cached,
         count: cached.length,
+        bySport: liveStatus.bySport,
+        updatedAt: C.ts(LIVE_CACHE_KEY),
+        stale: Date.now() - (C.ts(LIVE_CACHE_KEY) || 0) > LIVE_FRESH_MS * 2,
+        degraded: liveStatus.failedSports.length > 0,
         source: 'SofaBets',
         cached: true
       });
@@ -464,7 +491,7 @@ router.get('/category/:sport', async (req, res) => {
       if (Date.now() - cached.ts >= SPORT_CATEGORY_TTL_MS) {
         refreshSportCategory(sport, dates, true).catch(() => {});
       }
-      res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=60');
+      res.set('Cache-Control', 'no-store');
       return res.json({ success:true, data:cached.data, count:cached.data.length, sport, source:'SofaBets', cached:true });
     }
 
@@ -472,7 +499,7 @@ router.get('/category/:sport', async (req, res) => {
     // the response, so the user gets the first games as soon as today's feed is
     // ready instead of waiting for every date.
     const data = await refreshSportCategory(sport, dates, false);
-    res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=60');
+    res.set('Cache-Control', 'no-store');
     res.json({ success:true, data, count:data.length, sport, source:'SofaBets', cached:false });
   } catch(e) {
     console.error(`[sports/sofabets/${sport}]`, e.message);

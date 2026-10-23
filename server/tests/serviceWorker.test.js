@@ -32,7 +32,7 @@ let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.l
   check('server answers 503 (waking up) -> reconnect page', (await r.text()).includes('Connecting'));
 
   e = makeEnv(async () => { throw new TypeError('Failed to fetch'); });
-  await (await e.open('sb-v20-snappy')).put(new Request(ORIGIN + '/account'), new Response('CACHED ACCOUNT', { headers: { 'content-type': 'text/html' } }));
+  await (await e.open('sb-v21-livefresh')).put(new Request(ORIGIN + '/account'), new Response('CACHED ACCOUNT', { headers: { 'content-type': 'text/html' } }));
   r = await nav(e, ORIGIN + '/account');
   check('network error but page cached -> cached page opens', (await r.text()) === 'CACHED ACCOUNT');
 
@@ -45,7 +45,7 @@ let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.l
   check('server never answers, nothing cached -> reconnect page after the 12s rule', (await r.text()).includes('Connecting') && Date.now() - t0 < 1000);
 
   e = makeEnv(() => new Promise(() => {}));
-  await (await e.open('sb-v20-snappy')).put(new Request(ORIGIN + '/account'), new Response('CACHED ACCOUNT', { headers: { 'content-type': 'text/html' } }));
+  await (await e.open('sb-v21-livefresh')).put(new Request(ORIGIN + '/account'), new Response('CACHED ACCOUNT', { headers: { 'content-type': 'text/html' } }));
   r = await nav(e, ORIGIN + '/account');
   check('server never answers, page cached -> cached page after the 8s rule', (await r.text()) === 'CACHED ACCOUNT');
 
