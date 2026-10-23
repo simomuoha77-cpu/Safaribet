@@ -172,7 +172,7 @@ app.use(express.static(path.join(__dirname, '../public'), {
       res.setHeader('Cache-Control', 'no-cache');            // the worker itself must always be re-checked
       res.setHeader('Service-Worker-Allowed', '/');
     } else if (/\.(png|jpe?g|webp|svg|ico|woff2?)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', 'public, max-age=604800'); // images/fonts: 7 days
+      res.setHeader('Cache-Control', 'no-cache');               // images/fonts: always revalidated (ETag -> cheap 304), so a replaced logo/poster shows on the next open
     }
   }
 }));
@@ -193,7 +193,7 @@ app.get('/casino-art/:file', async (req, res) => {
   try {
     const art = await require('./services/juanaiPartnerCasino').getArt(id);
     if (!art) return res.status(404).end();
-    res.set({ 'Content-Type': art.type, 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' });
+    res.set({ 'Content-Type': art.type, 'Cache-Control': 'no-cache' });
     res.send(art.buf);
   } catch (e) { res.status(404).end(); }
 });
@@ -261,13 +261,19 @@ app.get('/api/content', (req, res) => {
 app.get('/api/content/image/:key', async (req, res) => {
   try {
     const SiteImage = require('./models/SiteImage');
+    // Revalidate on every open: a cheap metadata lookup answers 304 when the picture is unchanged, so a replaced
+    // banner/poster/popup is never served from an old browser copy.
+    const meta = await SiteImage.findOne({ key: req.params.key }, { uploadedAt: 1, sizeBytes: 1 }).lean();
+    if (!meta) return res.status(404).send('Not found');
+    const etag = 'W/"' + req.params.key + '-' + (meta.sizeBytes || 0) + '-' + new Date(meta.uploadedAt || 0).getTime() + '"';
+    res.set('Cache-Control', 'no-cache'); res.set('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
     const img = await SiteImage.findOne({ key: req.params.key }).lean();
     if (!img) return res.status(404).send('Not found');
     const match = img.dataUrl.match(/^data:(.+?);base64,(.+)$/);
     if (!match) return res.status(500).send('Corrupt image data');
     const [, mimeType, base64] = match;
     res.set('Content-Type', mimeType);
-    res.set('Cache-Control', 'public, max-age=86400');
     res.send(Buffer.from(base64, 'base64'));
   } catch (e) {
     console.error('[content/image]', e.message);

@@ -704,6 +704,9 @@
     if (awayMs < 15000) { checkBuild(false); return; }     // quick glance
     checkBuild(awayMs > 120000);                             // new deploy? (reloads only when the build changed)
     try { window.dispatchEvent(new Event('sb:resume')); } catch (e) {}
+    // Pages with no refresh logic of their own (casino lobby, jackpot, virtual, referral): after a long absence reload them
+    // so nothing old stays. Never the casino-game page or a form.
+    if (awayMs > 600000 && /^\/(casino|jackpot|virtual|referral)\/?$/.test(normPath(location.pathname))) sbReloadOnce();
   }
   function touchAlive() { var a = Date.now() - lastAlive; lastAlive = Date.now(); return a; }
   _docAdd.call(document, 'visibilitychange', function () {

@@ -847,9 +847,9 @@ header{
 
 <script type="text/sb-page">
 // Load footer content from settings API
-(async function loadFooter(){
+async function loadFooter(){
   try{
-    const r=await fetch('/api/settings/site');
+    const r=await fetch('/api/settings/site', { cache: 'no-store' });
     const d=await r.json();
     if(!d.success) return;
     const s=d.data;
@@ -913,7 +913,9 @@ header{
     document.getElementById('footerSocial').innerHTML = socHtml ||
       `<p style="font-size:12px;color:var(--mt)">Social links not set yet — admin can add them in Settings.</p>`;
   }catch(e){}
-})();
+}
+loadFooter();
+window.addEventListener('sb:resume', function(){ loadFooter(); });   // coming back: footer/contact/social links refresh too
 
 function toggleFaq(i){
   const ans=document.getElementById('faqAns'+i);
@@ -1328,36 +1330,38 @@ async function loadAdminBanner(){
   const cacheKey = 'sb_content_cache';
   const render = (d) => {
     const list = Array.isArray(d.banners) ? d.banners.filter(b => b.image) : [];
-    if (!list.length) return;
+    if (!list.length) { bannerList = []; stopBannerAutoAdvance(); const ab = document.getElementById('adminBanner'); if (ab) ab.style.display = 'none'; return; }   // admin removed every banner: nothing old stays
     bannerList = list;
     document.getElementById('adminBanner').style.display = 'block';
     renderBannerTrack();
   };
   try{
     const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
-    if (cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant banner, no wait for fetch
+    if (!window.__sbBannerLoaded && cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant first paint only; every open/return fetches fresh below
   }catch(e){}
   try{
-    const r = await fetch('/api/content');
+    const r = await fetch('/api/content', { cache: 'no-store' });
     const d = await r.json();
     if(!d.success) return;
+    window.__sbBannerLoaded = true;
 
     // Inline banner strip (existing feature — untouched logic below)
     render(d);
     try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
 
     // Full-screen popup ad — shows once per browser session, not on every page nav
-    if (d.popupEnabled && d.popupImage && !sessionStorage.getItem('popupAdSeen')) {
+    if (d.popupEnabled && d.popupImage && sessionStorage.getItem('popupAdSeen') !== d.popupImage) {
       const overlay = document.getElementById('popupAdOverlay');
       const pimg = document.getElementById('popupAdImg');
       pimg.src = d.popupImage;
       pimg.onerror = () => { overlay.style.display = 'none'; };
       pimg.onclick = () => { if (d.popupLink) SB.go(d.popupLink); };
       overlay.style.display = 'flex';
-      sessionStorage.setItem('popupAdSeen', '1');
+      sessionStorage.setItem('popupAdSeen', d.popupImage);   // a NEW popup image shows again even within the same session
     }
   }catch(e){ /* banner/popup are optional — fail silently */ }
 }
+window.addEventListener('sb:resume', function(){ try { loadAdminBanner(); } catch(e) {} });
 function closePopupAd(){
   document.getElementById('popupAdOverlay').style.display = 'none';
 }

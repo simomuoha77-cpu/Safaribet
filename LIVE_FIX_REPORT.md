@@ -48,3 +48,14 @@ There is no build step in this project (static files plus Node), so there is no 
 - Finished matches leaving the list rely on the existing 90 s grace logic. It was read and checked in code but not run against a real provider.
 - More Markets, bet placement, wallet and settlement code were **not modified**. The existing settlement tests pass, but I did not click through these flows in a browser.
 - Provider fixture ids are untouched: `routes/odds.js` and the market lookups are byte-identical to your upload.
+
+## Addendum: banners, posters, popup ads and static images
+
+- Admin banner / popup images (`/api/content/image/:key`) were cached for 24 h: now revalidated on every open with an ETag (304 when unchanged).
+- Logos, icons and other images were cached for 7 days (`max-age=604800`) and served from the service worker first: now `no-cache` + network-first, so a replaced file shows on the next open.
+- Casino lobby art (`/casino-art/*`) was cached for 1 h to 1 day: now revalidated.
+- Home banner strip: fetched with `no-store` on every open and every return to the app; if the admin removes all banners the strip hides (before, the old one stayed). A new popup image shows even within the same session.
+- Footer (FAQ, contact, social links) refreshes on return.
+- Casino lobby, jackpot, virtual and referral pages reload after 10+ minutes away (they have no refresh logic of their own). The casino-game page and forms are never reloaded.
+- Not changed: the last match list is still painted instantly from the phone's saved copy while the fresh list loads (about a second); it is then replaced.
+- Not tested in a browser or in the APK. The image ETag route needs a quick manual check: replace a banner in admin, reopen the site.
