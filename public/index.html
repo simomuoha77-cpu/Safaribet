@@ -758,6 +758,32 @@ header{
   </div>
 
   <script type="text/sb-page">
+  // ── NEVER SHOW OLD DATA AS CURRENT ──
+  // Grey placeholder rows (like Betika) are shown while the fresh list loads. A saved list is only painted when it is
+  // less than a minute old; anything older (games that have since started, ended or changed price) is never drawn.
+  window.SB_FRESH_MS = 60000;
+  window.sbSkel = function(n){
+    var h = ''; for (var i = 0; i < (n || 7); i++) h += '<div class="sbsk"><div class="l"><i></i><i></i><i></i></div><div class="o"><b></b><b></b><b></b></div></div>';
+    return h;
+  };
+  (function(){
+    try {
+      if (document.getElementById('sbskCss')) return;
+      var st = document.createElement('style'); st.id = 'sbskCss';
+      st.textContent = '.sbsk{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:16px 14px;margin:8px 10px;border-radius:10px;background:rgba(255,255,255,.035)}' +
+        '.sbsk .l{flex:1;display:flex;flex-direction:column;gap:9px}.sbsk .l i{display:block;height:11px;border-radius:5px;background:rgba(255,255,255,.07);animation:sbsh 1.2s ease-in-out infinite}' +
+        '.sbsk .l i:nth-child(1){width:40%}.sbsk .l i:nth-child(2){width:75%}.sbsk .l i:nth-child(3){width:60%}' +
+        '.sbsk .o{display:flex;gap:7px}.sbsk .o b{display:block;width:52px;height:46px;border-radius:8px;background:rgba(255,255,255,.07);animation:sbsh 1.2s ease-in-out infinite}' +
+        '@keyframes sbsh{0%,100%{opacity:.55}50%{opacity:1}}' +
+        '#matchList.sb-stale{opacity:.35;pointer-events:none;transition:opacity .15s}';
+      document.head.appendChild(st);
+      var ml = document.getElementById('matchList');
+      if (ml && ml.querySelector('.loading')) ml.innerHTML = window.sbSkel(7);
+    } catch(e) {}
+  })();
+  </script>
+  <script>SB.run()</script>
+  <script type="text/sb-page">
   // ── EARLY MATCH-LIST PAINT ──
   // Same idea as the header's early-paint script: this runs the instant the
   // parser reaches this point, right after #matchList exists — not once
@@ -772,7 +798,7 @@ header{
   (function(){
     try {
       var snap = window.__sbHomeSnap, ml = document.getElementById('matchList');
-      if (snap && snap.html && (Date.now() - snap.ts) < 30 * 60000 && sessionStorage.getItem('sb_home_scroll')) {
+      if (snap && snap.html && (Date.now() - snap.ts) < 90000 && sessionStorage.getItem('sb_home_scroll')) {
         // Back from a match: put back exactly the list the user left (same tab/filter/cards), instantly.
         ml.innerHTML = snap.html;
         if (snap.bar) { var tmp = document.createElement('div'); tmp.innerHTML = snap.bar; if (tmp.firstChild) ml.parentNode.insertBefore(tmp.firstChild, ml); }
@@ -781,8 +807,8 @@ header{
         window.__sbSnapActive = true;
         return;
       }
-      var html = localStorage.getItem('matchListHTML');
-      if (html) ml.innerHTML = html;
+      var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
+      if (html && Date.now() - hts < window.SB_FRESH_MS) ml.innerHTML = html;      // older than a minute: placeholders, never old games
     } catch(e) {}
   })();
   </script>
@@ -1083,11 +1109,12 @@ try {
   // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
   // tab kills and full app restarts) is the right scope for this cache.
   const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
-  if (cached && cached.data && cached.data.length) {
+  const cachedFresh = cached && cached.ts && (Date.now() - cached.ts) < 60000;     // an older saved list is never drawn as if it were current
+  if (cachedFresh && cached.data && cached.data.length) {
     allMatches = cached.data;
     featuredMatches = cached.data;
   }
-  if (cached && cached.etag) matchesEtag = cached.etag;
+  if (cachedFresh && cached.etag) matchesEtag = cached.etag;
 } catch(e) {}
 
 // ── SCROLL POSITION ──
@@ -1555,8 +1582,27 @@ function ensureFreshSync(since, attempt){
     ensureFreshSync(since, attempt + 1);
   }, delays[attempt]);
 }
+// Coming back after a while: the games on screen are OLD (a "live" game may have ended, an "upcoming" one may have started).
+// They are dimmed and cannot be tapped until the fresh list arrives (normally under a second); a failsafe lifts it after 8s.
+function markStale(on){
+  const ml = document.getElementById('matchList');
+  clearTimeout(window.__staleT);
+  if (!ml) return;
+  if (on) { ml.classList.add('sb-stale'); window.__staleT = setTimeout(() => ml.classList.remove('sb-stale'), 8000); }
+  else ml.classList.remove('sb-stale');
+}
+// A fresh answer for the tab that is on screen has arrived (or was confirmed unchanged).
+function markFresh(forLive){
+  window.__sbSyncOk = Date.now();
+  if (forLive === (currentCat === 'live')) markStale(false);
+}
+// "Last seen alive": updated every 5s while the page runs; a frozen/backgrounded page stops updating it, so the gap = time away.
+window.__sbLastSeen = Date.now();
+setInterval(() => { if (!document.hidden) window.__sbLastSeen = Date.now(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) window.__sbLastSeen = Date.now(); });
 function freshSync(forceFull){
   const since = Date.now();
+  if (forceFull && Date.now() - window.__sbLastSeen > 45000) markStale(true);       // away 45s+: the list on screen is old
   if (forceFull) matchesEtag = null;          // away for a while: take the full current list, not a "nothing changed"
   loadAllMatches(true);
   if (currentCat !== 'live') loadMatches('live', true).catch(() => {});   // warm the live list again when coming back
@@ -1730,7 +1776,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     if (currentCat === 'featured') { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash
     silent = true; // still fetch fresh data below, just don't block the UI for it
   } else if(!silent && retryAttempt===0 && currentCat === 'featured'){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Loading matches...</div>';
+    el.innerHTML=window.sbSkel(7);
   }
   // Only the small pill shows for a background refresh — never a full-page
   // loader once real data is already visible.
@@ -1758,7 +1804,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       clearTimeout(timeoutId);
     }
     if (r.status === 304) {
-      window.__sbSyncOk = Date.now();
+      markFresh(false);
       // Confirmed up to date — nothing to re-render, just refresh the cache
       // timestamp so this still counts as a recent sync.
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: featuredMatches, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
@@ -1767,7 +1813,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     }
     const newEtag = r.headers.get('ETag');
     const d=await r.json();
-    if (d && d.success) window.__sbSyncOk = Date.now();
+    if (d && d.success) markFresh(false);
     // Only replace what's on screen if this response actually has matches, OR
     // this is a genuine first load with nothing shown yet. A background poll
     // that comes back empty (e.g. a brief upstream hiccup) must never wipe out
@@ -2038,7 +2084,7 @@ const sportTabRequests = new Map();
 const footballTabCache = { data:null, ts:0 };
 const liveTabCache = { data:null, ts:0 };
 // The last COMPLETE live list is shown at once when the tab opens (then replaced by the fresh answer, normally < 1s).
-const LIVE_PAINT_MAX_MS = 10 * 60000;
+const LIVE_PAINT_MAX_MS = 60000;
 
 function pickCat(el) {
   const previousCat = currentCat;
@@ -2081,7 +2127,7 @@ function storeSportList(sport, list) {
   if (!Array.isArray(list) || !list.length) return false;
   sportTabCache.set(sport, list);
   try { localStorage.setItem('sb_sport_cache_' + sport, JSON.stringify({data:list, ts:Date.now()})); } catch(e) {}
-  if (currentCat === sport) renderNonFootball(list);
+  if (currentCat === sport) { renderNonFootball(list); markStale(false); }
   return true;
 }
 
@@ -2091,7 +2137,7 @@ function warmAllSports() {
     if (sportTabCache.has(sport)) return;
     try {
       const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
-      if (cached?.data?.length && (Date.now() - cached.ts) < 6 * 3600000) sportTabCache.set(sport, cached.data);
+      if (cached?.data?.length && (Date.now() - cached.ts) < 60000) sportTabCache.set(sport, cached.data);
     } catch(e) {}
   });
   // 2) One request for every sport (served from server memory), then per-sport
@@ -2169,7 +2215,7 @@ async function loadCat(cat) {
       applyFilters(true);
       afterTabSettles(() => loadAllMatches(true));
     } else {
-      if (el) el.innerHTML = '<div class="loading"><div class="spin"></div>Loading matches...</div>';
+      if (el) el.innerHTML = window.sbSkel(7);
       loadAllMatches(false);
     }
     return;
@@ -2188,6 +2234,7 @@ async function loadCat(cat) {
         }
       } catch(e) {}
     }
+    if (liveTabCache.data && liveTabCache.data.length && Date.now() - liveTabCache.ts > LIVE_PAINT_MAX_MS) liveTabCache.data = null;   // older than a minute: never drawn
     if (liveTabCache.data && liveTabCache.data.length) {
       // Switching into Live is a new dataset: render it cleanly instead
       // of merging it with whatever tab was previously on screen.
@@ -2235,7 +2282,7 @@ async function loadCat(cat) {
   if (!cachedSport?.length) {
     try {
       const stored = JSON.parse(localStorage.getItem('sb_sport_cache_' + cat) || 'null');
-      if (stored?.data?.length) {
+      if (stored?.data?.length && Date.now() - stored.ts < 60000) {
         cachedSport = stored.data;
         sportTabCache.set(cat, cachedSport);
         renderNonFootball(cachedSport);
@@ -2247,7 +2294,7 @@ async function loadCat(cat) {
   } else {
     // No cache yet: show a loader (never the previous tab's games under this
     // tab's name). The moment the games arrive they replace it.
-    el.innerHTML = '<div class="loading" style="padding:30px"><div class="spin"></div>Loading games...</div>';
+    el.innerHTML = window.sbSkel(7);
     setUpdatingIndicator(true);
   }
 
@@ -2601,7 +2648,7 @@ function loadMatches(sport, silent=false, retryAttempt=0){
   return loadMatchesImpl(sport, silent, retryAttempt);
 }
 // What the Live tab shows while NOTHING complete is available yet, and when the feed cannot be reached.
-function liveLoadingHTML(){ return '<div class="loading"><div class="spin"></div>Loading live games...</div>'; }
+function liveLoadingHTML(){ return window.sbSkel(7); }
 function liveErrorHTML(){ return '<div class="empty" style="padding:40px 20px"><div style="font-size:36px;margin-bottom:12px">🔴</div><div style="font-size:16px;font-weight:700;color:var(--tx);margin-bottom:8px">Could not load live games</div><div style="font-size:13px;color:var(--mt);line-height:1.6;margin-bottom:14px">We will keep trying automatically.</div><button class="place-btn" style="max-width:200px;margin:0 auto" onclick="loadMatches(\'live\')">Try again</button></div>'; }
 async function loadMatchesImpl(sport, silent=false, retryAttempt=0){
   const el=document.getElementById('matchList');
@@ -2648,7 +2695,7 @@ async function loadMatchesImpl(sport, silent=false, retryAttempt=0){
     }
     const d=await r.json();
     if (sport === 'live' && !(d && d.success)) throw new Error('live feed error');   // a failed answer must never read as "no live games"
-    if (d && d.success && !d.warming) window.__sbSyncOk = Date.now();
+    if (d && d.success && !d.warming) markFresh(sport === 'live');
     if (d && d.warming && !(d.data && d.data.length) && retryAttempt < 5) {
       // The server is still preparing its live snapshot - that is NOT "no live games". Ask again shortly.
       setUpdatingIndicator(true);

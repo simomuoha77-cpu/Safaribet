@@ -14,9 +14,9 @@ const ctx = {
   localStorage: { getItem: k => store[k] || null, setItem: (k, v) => { store[k] = v; } },
   fetch: async () => { fetches++; const r = responses.shift(); if (r instanceof Error) throw r; await new Promise(x => setTimeout(x, 30)); return { json: async () => r }; },
   AbortController, setTimeout, clearTimeout, console, Date, JSON, Promise,
-  renderMatches: (list) => { rendered = list; }, setUpdatingIndicator() {}, currentViewKey: () => 'k', esc: s => s, stopProgressiveRender() {}
+  markFresh() {}, renderMatches: (list) => { rendered = list; }, setUpdatingIndicator() {}, currentViewKey: () => 'k', esc: s => s, stopProgressiveRender() {}
 };
-ctx.window.dispatchEvent = e => { ctx.__evt = e; };
+ctx.window.dispatchEvent = e => { ctx.__evt = e; }; ctx.window.sbSkel = () => '<div class="sbsk"></div>';
 vm.createContext(ctx); vm.runInContext(src, ctx);
 let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.log((c ? 'PASS ' : 'FAIL ') + n); };
 (async () => {

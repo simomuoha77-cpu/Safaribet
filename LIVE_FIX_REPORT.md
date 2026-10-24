@@ -76,3 +76,11 @@ There is no build step in this project (static files plus Node), so there is no 
 - Banner / popup URLs are unique per upload, so they are cached for a year (`immutable`): a new upload has a new URL and shows at once, an unchanged one costs no download and leaves no empty gap.
 - Static images (logo, icons) are shown from the phone's copy at once and refreshed in the background (the server revalidates them on every request).
 - The last banner list is kept on the phone (7 days) and painted immediately; the fresh list replaces it within about a second.
+
+## Addendum: old data is never shown as current
+
+- A saved match list (home list, live list, sport tabs) is drawn only if it is under 60 seconds old. Otherwise grey placeholder rows are shown until the fresh list arrives (normally under a second). Before, lists saved hours earlier were drawn first, so ended games could still say LIVE.
+- Coming back after 45 s or more away: the list on screen is dimmed and cannot be tapped until the fresh list arrives (failsafe: 8 s).
+- Back from a match: the saved list is reused for 90 s (was 30 min).
+- Live list: kept warm in memory every 20 s while another tab is open, so tapping LIVE still opens at once with a list under a minute old.
+- Not tested on a device. Please test: open the app after 5+ minutes away; the list should show placeholders, then current games.
