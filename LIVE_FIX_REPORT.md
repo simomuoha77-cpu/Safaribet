@@ -84,3 +84,7 @@ There is no build step in this project (static files plus Node), so there is no 
 - Back from a match: the saved list is reused for 90 s (was 30 min).
 - Live list: kept warm in memory every 20 s while another tab is open, so tapping LIVE still opens at once with a list under a minute old.
 - Not tested on a device. Please test: open the app after 5+ minutes away; the list should show placeholders, then current games.
+
+## Addendum: market placeholders
+
+- The match page shows grey shimmering placeholder cards (instead of the text "Loading markets…") while markets load. They are in the page from the first moment and are replaced by the real markets.

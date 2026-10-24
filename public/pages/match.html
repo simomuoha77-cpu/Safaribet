@@ -61,6 +61,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .lt-lg{position:absolute;right:0;top:0;font-size:9px;color:var(--mt);letter-spacing:.3px}
 .lt-lg.b{top:auto;bottom:0}
 .main{padding:12px}
+.mk-sk{background:var(--s1);border:1px solid var(--bd);border-radius:12px;margin-bottom:12px;padding:14px}
+.mk-sk .t{display:block;width:45%;height:12px;border-radius:6px;background:var(--s3);margin-bottom:12px;animation:mksh 1.2s ease-in-out infinite}
+.mk-sk .r{display:flex;gap:8px}.mk-sk .r b{flex:1;height:44px;border-radius:8px;background:var(--s3);animation:mksh 1.2s ease-in-out infinite}
+@keyframes mksh{0%,100%{opacity:.5}50%{opacity:1}}
 .market-card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;margin-bottom:12px;overflow:hidden}
 .market-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s2)}
 .suspended-tag{font-size:10px;background:rgba(255,59,59,0.15);color:var(--rd);padding:2px 7px;border-radius:6px;font-weight:700;letter-spacing:0.3px}
@@ -123,7 +127,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <button class="mode-btn" id="modeBtnBuilder" onclick="setMode('builder')">🧩 Bet Builder</button>
 </div>
 
-<div class="main" id="marketsContainer"></div>
+<div class="main" id="marketsContainer"><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div></div>
 
 <div class="slip-bar" id="slipBar" onclick="SB.go('/?openSlip=1')">
   <span id="slipCount">0 selections</span>
@@ -207,6 +211,8 @@ function fetchJsonTimeout(url, ms){
   const t = setTimeout(() => c.abort(), ms || 7000);
   return fetch(url, { cache: 'no-store', signal: c.signal }).then(r => r.json()).finally(() => clearTimeout(t));
 }
+// Grey shimmering placeholder cards (like Betika) shown while the markets load.
+const MK_SKEL = '<div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div>';
 function showMarketsStuck(){
   const c = document.getElementById('marketsContainer');
   if (!c || (matchData && (matchData.markets || []).some(mk => mk.options && mk.options.length > 1))) return;
@@ -215,7 +221,7 @@ function showMarketsStuck(){
 }
 function retryMarkets(){
   const c = document.getElementById('marketsContainer');
-  if (c) c.innerHTML = '<div class="market-card" style="text-align:center;padding:28px 16px"><div class="loading" style="margin:0">Loading markets…</div></div>';
+  if (c) c.innerHTML = MK_SKEL;
   renderGroups('loading');
   if (window.SB && SB.prefetchMatch) { try { SB.prefetchMatch(matchId); } catch(e) {} }
   _pollingMarkets = false;
@@ -496,9 +502,7 @@ function renderMarkets(isPreliminary){
       // We know more markets are coming (the real fetch is still in flight)
       // — say so plainly rather than a generic/empty state that reads like
       // this match simply has no odds at all.
-      ? `<div class="market-card" style="text-align:center;padding:28px 16px">
-           <div class="loading" style="margin:0">Loading markets…</div>
-         </div>`
+      ? MK_SKEL
       : '<div class="loading">No odds available for this match right now.</div>';
     document.getElementById('modeToggle').style.display = 'none';
     renderGroups(isPreliminary ? 'loading' : 'empty');
