@@ -39,10 +39,13 @@ const FOOTBALL_SPORT_ID = SPORT_IDS.football;
 const REQUEST_TIMEOUT_MS = Number(process.env.SOFABETS_TIMEOUT_MS || 12000);
 const MAX_PAGES_PER_FETCH = Number(process.env.SOFABETS_MAX_PAGES || 30);
 const PAGE_FETCH_GAP_MS = 250;
-// Keep SofaBets odds fresh. Default is no cache so an odds change is picked up
-// on the next provider refresh. Set SOFABETS_FIXTURE_CACHE_TTL_MS only if
-// you intentionally want caching to reduce upstream requests.
-const ALL_FIXTURES_CACHE_TTL_MS = Number(process.env.SOFABETS_FIXTURE_CACHE_TTL_MS || 0);
+// The football catalogue is up to 30 pages x 100 fixtures. With no cache EVERY caller (live poll every 10s, the home feed
+// warmer, the football tab, the 5-minute sync, category refreshes) downloaded all of it again: this was the main source of
+// the "Service-Initiated" outbound traffic on Render. Games that are LIVE are overlaid from the separate live feed
+// (6s cache) on every request, so a short catalogue cache does not delay scores or live odds. Set
+// SOFABETS_FIXTURE_CACHE_TTL_MS=0 to switch the cache off again, or a larger number to save even more.
+const ALL_FIXTURES_CACHE_TTL_MS = process.env.SOFABETS_FIXTURE_CACHE_TTL_MS != null && process.env.SOFABETS_FIXTURE_CACHE_TTL_MS !== ''
+  ? Number(process.env.SOFABETS_FIXTURE_CACHE_TTL_MS) : 45000;
 
 const DEFAULT_PATHS = [
   '/api/fixtures-by-sport',

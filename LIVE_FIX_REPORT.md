@@ -66,3 +66,7 @@ There is no build step in this project (static files plus Node), so there is no 
 - The last complete live list is also kept on the phone for 10 minutes and shown immediately when the page opens on LIVE, then replaced by the fresh answer.
 - `/api/sports/live` is answered straight from server memory when a list exists (no waiting for a refresh), and is sent without the full market lists, which list cards never use (the match page loads those itself). The payload is much smaller.
 - Only a server that has just woken up, with no list yet, waits (up to 3 s) for its first list.
+
+## Addendum: outbound traffic on Render
+
+- Render's "Service-Initiated" traffic (3.43 GB in the first days of the month, against 488 MB sent to players) is the server downloading from SofaBets. The whole football catalogue (up to 30 pages) was re-downloaded on every call because its cache default was 0. It is now cached for 45 s (`SOFABETS_FIXTURE_CACHE_TTL_MS`, 0 = off). Live games still come from the live feed, which is cached for 6 s.
