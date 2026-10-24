@@ -94,3 +94,9 @@ There is no build step in this project (static files plus Node), so there is no 
 - Once the list has settled, the full market lists of the first 3 games are fetched quietly (each at most once per 90 s, not on "data saver", not while the page is hidden), so tapping one opens with its markets already there. This also warms them on the server.
 - A prefetched market list is used for instant paint only while under 90 s old (was 10 min).
 - Not changed: the server-side market path (stored-first, parallel endpoints, deadlines) was already optimised. A game nobody has opened yet still depends on how fast SofaBets answers.
+
+## Addendum: games show at once again
+
+- The saved game list is drawn immediately when the page opens (as before). Before it is drawn, every game that has already kicked off, or was marked live or finished, is removed from it, so nothing old can claim to be live or upcoming. The fresh list replaces the rest within about a second. Grey placeholders appear only when there is no saved list at all.
+- Saved lists are used for up to 6 h (home) and 5 min (sport tabs); the home list is drawn through the normal filters, which drop started games.
+- The "returning after a while" dimming is lighter (70 % opacity) and no longer blocks taps.

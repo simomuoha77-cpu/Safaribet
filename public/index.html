@@ -775,7 +775,7 @@ header{
         '.sbsk .l i:nth-child(1){width:40%}.sbsk .l i:nth-child(2){width:75%}.sbsk .l i:nth-child(3){width:60%}' +
         '.sbsk .o{display:flex;gap:7px}.sbsk .o b{display:block;width:52px;height:46px;border-radius:8px;background:rgba(255,255,255,.07);animation:sbsh 1.2s ease-in-out infinite}' +
         '@keyframes sbsh{0%,100%{opacity:.55}50%{opacity:1}}' +
-        '#matchList.sb-stale{opacity:.35;pointer-events:none;transition:opacity .15s}';
+        '#matchList.sb-stale{opacity:.7;transition:opacity .15s}';
       document.head.appendChild(st);
       var ml = document.getElementById('matchList');
       if (ml && ml.querySelector('.loading')) ml.innerHTML = window.sbSkel(7);
@@ -807,8 +807,18 @@ header{
         window.__sbSnapActive = true;
         return;
       }
+      // The saved list is shown AT ONCE (like before), but every game that has since kicked off or was marked live is
+      // removed first, so nothing old can claim to be live or upcoming. The fresh list replaces the rest within a second.
       var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
-      if (html && Date.now() - hts < window.SB_FRESH_MS) ml.innerHTML = html;      // older than a minute: placeholders, never old games
+      if (html && html.indexOf('data-ko=') !== -1 && Date.now() - hts < 6 * 3600000) {
+        ml.innerHTML = html;
+        var now = Date.now(), cs = ml.querySelectorAll('.mc');
+        for (var ci = 0; ci < cs.length; ci++) {
+          var ko = Number(cs[ci].getAttribute('data-ko') || 0), st = cs[ci].getAttribute('data-st');
+          if (st === 'live' || st === 'finished' || !ko || ko <= now) cs[ci].remove();
+        }
+        if (!ml.querySelector('.mc')) ml.innerHTML = window.sbSkel(7);
+      }
     } catch(e) {}
   })();
   </script>
@@ -1109,7 +1119,7 @@ try {
   // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
   // tab kills and full app restarts) is the right scope for this cache.
   const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
-  const cachedFresh = cached && cached.ts && (Date.now() - cached.ts) < 60000;     // an older saved list is never drawn as if it were current
+  const cachedFresh = cached && cached.ts && (Date.now() - cached.ts) < 6 * 3600000;     // drawn through the normal filters (games that have started are dropped); the fresh list replaces it at once
   if (cachedFresh && cached.data && cached.data.length) {
     allMatches = cached.data;
     featuredMatches = cached.data;
@@ -2137,7 +2147,7 @@ function warmAllSports() {
     if (sportTabCache.has(sport)) return;
     try {
       const cached = JSON.parse(localStorage.getItem('sb_sport_cache_' + sport) || 'null');
-      if (cached?.data?.length && (Date.now() - cached.ts) < 60000) sportTabCache.set(sport, cached.data);
+      if (cached?.data?.length && (Date.now() - cached.ts) < 300000) sportTabCache.set(sport, cached.data);
     } catch(e) {}
   });
   // 2) One request for every sport (served from server memory), then per-sport
@@ -2282,7 +2292,7 @@ async function loadCat(cat) {
   if (!cachedSport?.length) {
     try {
       const stored = JSON.parse(localStorage.getItem('sb_sport_cache_' + cat) || 'null');
-      if (stored?.data?.length && Date.now() - stored.ts < 60000) {
+      if (stored?.data?.length && Date.now() - stored.ts < 300000) {
         cachedSport = stored.data;
         sportTabCache.set(cat, cachedSport);
         renderNonFootball(cachedSport);
@@ -2410,7 +2420,7 @@ function renderNonFootball(matches) {
   el.innerHTML = matches.map(m => {
     const icon = m.sportIcon || '🏆';
     const time = m.commenceTime ? fmtTime(m.commenceTime) : 'TBD';
-    return `<div class="mc" id="mc_${m.matchId}">
+    return `<div class="mc" id="mc_${m.matchId}" data-ko="${m.commenceTime ? (new Date(m.commenceTime).getTime() || 0) : 0}" data-st="${m.status || ''}">
       <div class="mc-meta">
         <span class="mc-league">${icon} ${m.league}</span>
       </div>
@@ -3337,7 +3347,7 @@ function renderMatch(m){
       oddBtn(m.matchId,'away','2',a,m.homeTeam,m.awayTeam,m.league,m.sport,m.commenceTime,m.awayTeam,m);
   }
 
-  return `<div class="mc" id="mc_${m.matchId}">
+  return `<div class="mc" id="mc_${m.matchId}" data-ko="${m.commenceTime ? (new Date(m.commenceTime).getTime() || 0) : 0}" data-st="${m.status || ''}">
     ${metaHtml}
     <div class="${rowClass}">
       ${teamsHtml}
