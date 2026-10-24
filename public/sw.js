@@ -81,9 +81,9 @@ async function networkFirst(req, url) {
   }
   // cached copy is ONLY a safety net: network error / 5xx, or a server that does not answer (8s for pages, 15s otherwise)
   // A page the user taps open (link, app icon) must never sit on a black screen waiting for a sleeping server:
-  // when a cached copy exists, give the network only 1.2s, then show the cached page at once. The network
+  // when a cached copy exists, give the network only 0.3s, then show the cached page at once (an app opened from the icon must never sit on a black screen). The network
   // request keeps going and refreshes the cache, so the next open is up to date.
-  return Promise.race([net.catch(() => hit), wait(nav ? 1200 : spa ? 3000 : 15000, res => res(hit))]);
+  return Promise.race([net.catch(() => hit), wait(nav ? 300 : spa ? 3000 : 15000, res => res(hit))]);
 }
 
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });

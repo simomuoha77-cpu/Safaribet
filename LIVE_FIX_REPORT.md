@@ -100,3 +100,9 @@ There is no build step in this project (static files plus Node), so there is no 
 - The saved game list is drawn immediately when the page opens (as before). Before it is drawn, every game that has already kicked off, or was marked live or finished, is removed from it, so nothing old can claim to be live or upcoming. The fresh list replaces the rest within about a second. Grey placeholders appear only when there is no saved list at all.
 - Saved lists are used for up to 6 h (home) and 5 min (sport tabs); the home list is drawn through the normal filters, which drop started games.
 - The "returning after a while" dimming is lighter (70 % opacity) and no longer blocks taps.
+
+## Addendum: black screen when the app opens
+
+- The page now paints the app colour (#0a0e0a, or the light theme colour) from its very first byte, so the web part never shows black or white.
+- When the phone already holds a copy of the page, the service worker shows it after 0.3 s (was 1.2 s) even if the server is slow or asleep; the fresh page keeps loading behind it.
+- The rest of the black time is outside the web code: the Android window/WebView background before the page arrives, and Render's free instance sleeping after 15 minutes without visitors (set APP_URL so the server keeps itself awake, or use a free uptime monitor).
