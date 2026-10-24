@@ -288,12 +288,17 @@ app.get('/api/content/image/:key', async (req, res) => {
 app.get('/download/app.apk', async (req, res) => {
   try {
     const apkStorage = require('./utils/apkStorage');
-    const info = await apkStorage.getApkInfo();
+    const info = await apkStorage.getApkInfoCached();
     if (!info) return res.status(404).send('App download is not available yet.');
 
     res.set('Content-Type', 'application/vnd.android.package-archive');
     res.set('Content-Disposition', 'attachment; filename="SafariBet.apk"');
     res.set('Content-Length', info.length);
+    res.set('Cache-Control', 'no-cache');
+    // Kept in memory: the bytes start flowing at once (no wait for MongoDB).
+    const mem = apkStorage.cachedApk();
+    if (mem && mem.buf.length === info.length) return res.end(mem.buf);
+    apkStorage.warmApk().catch(() => {});      // not in memory yet: read it from MongoDB this time, keep it for the next tap
 
     const downloadStream = apkStorage.streamApk(res);
     downloadStream.on('error', (e) => {
@@ -307,12 +312,15 @@ app.get('/download/app.apk', async (req, res) => {
   }
 });
 
+setTimeout(() => { try { require('./utils/apkStorage').warmApk().catch(() => {}); } catch (e) {} }, 20000).unref();   // ready before the first visitor taps Download
+
 // Public info about the current app build (version, size) — for the download page
 app.get('/api/app-info', async (req, res) => {
   try {
     const apkStorage = require('./utils/apkStorage');
-    const info = await apkStorage.getApkInfo();
+    const info = await apkStorage.getApkInfoCached();
     if (!info) return res.json({ success: true, available: false });
+    apkStorage.warmApk().catch(() => {});      // the page showing the Download button is open: get the file ready now
     res.json({
       success: true,
       available: true,

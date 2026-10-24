@@ -656,7 +656,7 @@ header{
   <div class="ftab" data-filter="favorites" onclick="pickFilter(this)">⭐ Favorites</div>
   <div class="league-sel" id="leagueSel">
     🏆 <select id="leagueSelect" onchange="pickLeagueFilter()">
-      <option value="">Leagues</option>
+      <option value="">All Leagues</option>
     </select>
   </div>
 </div>
@@ -697,7 +697,7 @@ header{
         <div id="downloadAppSub" style="font-size:11px;color:var(--mt)">Faster, lighter, works better on slow data</div>
       </div>
     </div>
-    <a href="/download/app.apk" style="flex-shrink:0;background:var(--g);color:#000;font-weight:700;font-size:12px;padding:8px 14px;border-radius:8px;text-decoration:none">Download</a>
+    <a href="/download/app.apk" download="SafariBet.apk" onclick="sbDownloadTap(this)" style="flex-shrink:0;background:var(--g);color:#000;font-weight:700;font-size:12px;padding:8px 14px;border-radius:8px;text-decoration:none">Download</a>
   </div>
 
   <!-- COMPACT PROMO STRIP -->
@@ -1712,6 +1712,12 @@ function pickLeagueFilter(){
   const val=document.getElementById('leagueSelect').value;
   currentLeague=val;
   saveHomeState();
+  if(!val && !currentFilter){
+    // "All Leagues" chosen: back to the normal Highlights view
+    currentFilter='highlights';
+    document.querySelectorAll('.ftab').forEach(t=>t.classList.toggle('on', t.dataset.filter==='highlights'));
+    saveHomeState();
+  }
   if(val){
     // Deselect all filter tabs when a specific league is chosen
     document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
@@ -1757,20 +1763,42 @@ function updateMarketHeader(){
   }
 }
 
-async function loadLeagueOptions(){
-  try{
-    const r=await fetch('/api/odds/available');
-    const d=await r.json();
-    if(!d.success||!d.data) return;
-    const sel=document.getElementById('leagueSelect');
-    sel.innerHTML='<option value="">Leagues</option>';
-    d.data.filter(l=>l.key!=='live').forEach(l=>{
-      const opt=document.createElement('option');
-      opt.value=l.key; opt.textContent=l.title;
-      sel.appendChild(opt);
-    });
-  }catch{}
+// Download button: the browser starts the download by itself (the `download` attribute keeps the page where it is);
+// the button only confirms the tap at once.
+function sbDownloadTap(a){
+  try { const old = a.textContent; a.textContent = 'Downloading…'; setTimeout(() => { a.textContent = old; }, 4000); } catch(e) {}
 }
+// "All Leagues" + every league that is on the list. Filled from the server's league list; if that cannot be reached
+// (slow start, no signal) it is filled from the games already loaded, and retried - the dropdown is never left empty.
+function fillLeagueOptions(items){
+  const sel=document.getElementById('leagueSelect');
+  if(!sel || !items.length) return false;
+  const keep = sel.value;
+  sel.innerHTML='<option value="">All Leagues</option>';
+  items.slice().sort((a,b)=>String(a.title).localeCompare(String(b.title))).forEach(l=>{
+    const opt=document.createElement('option');
+    opt.value=l.key; opt.textContent=l.title;
+    sel.appendChild(opt);
+  });
+  if (keep) sel.value = keep;
+  return true;
+}
+function leaguesFromMatches(list){
+  const seen=new Map();
+  (list||[]).forEach(m=>{ if(m && m.sport && m.league && m.status!=='live' && !seen.has(m.sport)) seen.set(m.sport,{key:m.sport,title:m.league}); });
+  return Array.from(seen.values());
+}
+async function loadLeagueOptions(attempt=0){
+  let ok=false;
+  try{
+    const r=await fetch('/api/odds/available',{cache:'no-store'});
+    const d=await r.json();
+    if(d && d.success && Array.isArray(d.data)) ok=fillLeagueOptions(d.data.filter(l=>l.key!=='live'));
+  }catch(e){}
+  if(!ok) ok=fillLeagueOptions(leaguesFromMatches(featuredMatches));
+  if(!ok && attempt<5) setTimeout(()=>loadLeagueOptions(attempt+1), 1500*(attempt+1));
+}
+window.addEventListener('sb:resume',()=>{ loadLeagueOptions(); });
 
 async function loadAllMatches(silent=false, retryAttempt=0){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
@@ -1833,6 +1861,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // the previous good list was still perfectly valid.
     if(d.success && d.data && (d.data.length || !hasExistingData)){
       featuredMatches = d.data;
+      try { const ls = document.getElementById('leagueSelect'); if (ls && ls.options.length <= 1) fillLeagueOptions(leaguesFromMatches(featuredMatches)); } catch(e) {}
       seedFootballFromFeatured(featuredMatches);
       // Seed Live from the already-fetched Highlights payload so switching
       // Highlights -> Live is effectively zero-wait. The dedicated live API

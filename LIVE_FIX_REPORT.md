@@ -106,3 +106,10 @@ There is no build step in this project (static files plus Node), so there is no 
 - The page now paints the app colour (#0a0e0a, or the light theme colour) from its very first byte, so the web part never shows black or white.
 - When the phone already holds a copy of the page, the service worker shows it after 0.3 s (was 1.2 s) even if the server is slow or asleep; the fresh page keeps loading behind it.
 - The rest of the black time is outside the web code: the Android window/WebView background before the page arrives, and Render's free instance sleeping after 15 minutes without visitors (set APP_URL so the server keeps itself awake, or use a free uptime monitor).
+
+## Addendum: instant APK download and the Leagues list
+
+- The APK is kept in server memory after its first read (warmed at start-up and when a page with the Download button opens), so a tap starts sending bytes at once instead of reading from MongoDB first. A copy is only served when it has the full size. A new upload clears it.
+- The Download link has the `download` attribute (the page stays where it is) and the button says "Downloading…" at once.
+- The league dropdown starts with "All Leagues" and lists every league on the games list. If the server's league list is slow or unreachable it is filled from the games already loaded and retried. Choosing "All Leagues" returns to the normal Highlights view.
+- New test: `server/tests/apkDownload.test.js`.
