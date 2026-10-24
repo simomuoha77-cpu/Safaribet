@@ -400,8 +400,9 @@ function pendingMessage(g, s) {
 }
 
 // After the match is verified final, markets the server cannot grade itself (corners, cards, players ...) wait this long for
-// SofaBets to publish its official result (checked fresh on every run) before the stake is refunded. Default 3 hours.
-const AUTO_VOID_GRACE_MS = Math.max(5, Number(process.env.AUTO_VOID_GRACE_MIN || 180)) * 60 * 1000;
+// SofaBets to publish its official result (checked fresh on every run) before the stake is refunded. Default 3 MINUTES
+// (was 3 hours), at least 1; set AUTO_VOID_GRACE_MIN to change it.
+const AUTO_VOID_GRACE_MS = Math.max(1, Number(process.env.AUTO_VOID_GRACE_MIN || 3)) * 60 * 1000;
 const officialMemo = new Map();   // per-run: one provider lookup per fixture
 async function gradeProviderSel(s, matchRows) {
   // The same provider fixture can have several Match rows (the Live tab id
@@ -653,8 +654,14 @@ async function _runSettlementInner(includeApiFetch) {
           const finalEntry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
           if (finalEntry) {
             const mrow = matchRows.get(s.matchId);
-            const finalAt = mrow && mrow.finalVerifiedAt ? new Date(mrow.finalVerifiedAt).getTime()
-              : (s.commenceTime ? new Date(s.commenceTime).getTime() + 4 * 3600000 : now);
+            // When the result became final: the verified time if we have it, otherwise the moment THIS run first saw the
+            // match final (remembered on the selection) - never "kickoff + 4 hours", which kept refunds waiting for hours.
+            let finalAt;
+            if (mrow && mrow.finalVerifiedAt) finalAt = new Date(mrow.finalVerifiedAt).getTime();
+            else {
+              if (!s.finalSeenAt) { s.finalSeenAt = new Date(now); changed = true; }
+              finalAt = new Date(s.finalSeenAt).getTime();
+            }
             if (now - finalAt >= AUTO_VOID_GRACE_MS) {
               s.result = 'void'; s.settledAt = new Date(); s.settledSource = 'auto-void';
               s.voidReason = 'This market could not be settled automatically - stake refunded';

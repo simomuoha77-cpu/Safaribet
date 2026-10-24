@@ -113,3 +113,11 @@ There is no build step in this project (static files plus Node), so there is no 
 - The Download link has the `download` attribute (the page stays where it is) and the button says "Downloading…" at once.
 - The league dropdown starts with "All Leagues" and lists every league on the games list. If the server's league list is slow or unreachable it is filled from the games already loaded and retried. Choosing "All Leagues" returns to the normal Highlights view.
 - New test: `server/tests/apkDownload.test.js`.
+
+## Addendum: bets on markets the server cannot grade
+
+- Bets on markets the server cannot read itself (e.g. player to score, scoring type, corners odd/even) waited 3 HOURS after the match was final before the stake was refunded automatically (and a fallback could wait kickoff + 4 h). The wait is now 3 MINUTES (`AUTO_VOID_GRACE_MIN`, minimum 1) and the fallback starts when settlement first sees the match final.
+- Bets that are already past that time (like the three in the screenshot) are refunded on the next settlement run after deployment.
+- If SofaBets publishes an official result for the market inside those minutes, it is still used. Otherwise the stake is returned, as the My Bets message already tells the player.
+- To stop offering markets that can only be refunded, set `SHOW_ALL_MARKETS=0` (the app then offers only markets it can grade).
+- Tested: existing settlement tests (15 + 4). The refund timing itself was not run against real bets.
