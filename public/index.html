@@ -1249,15 +1249,15 @@ async function loadDownloadAppBanner(){
     document.getElementById('downloadAppSub').textContent = `${ver}${sizeMb} MB · Faster on slow data · b65`;
   };
   try{
-    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
-    if (cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant, no pop-in delay
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && (Date.now() - cached.ts) < 7 * 86400000) render(cached.data); // instant (kept on the phone), replaced by the fresh list below
   }catch(e){}
   try{
     const r = await fetch('/api/app-info');
     const d = await r.json();
     if (!d.success) return;
     render(d);
-    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
   }catch(e){ /* optional feature — fail silently */ }
 }
 
@@ -1336,8 +1336,8 @@ async function loadAdminBanner(){
     renderBannerTrack();
   };
   try{
-    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
-    if (!window.__sbBannerLoaded && cached && (Date.now() - cached.ts) < 300000) render(cached.data); // instant first paint only; every open/return fetches fresh below
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (!window.__sbBannerLoaded && cached && (Date.now() - cached.ts) < 7 * 86400000) render(cached.data); // instant first paint only; every open/return fetches fresh below
   }catch(e){}
   try{
     const r = await fetch('/api/content', { cache: 'no-store' });
@@ -1347,7 +1347,7 @@ async function loadAdminBanner(){
 
     // Inline banner strip (existing feature — untouched logic below)
     render(d);
-    try{ sessionStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
+    try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
 
     // Full-screen popup ad — shows once per browser session, not on every page nav
     if (d.popupEnabled && d.popupImage && sessionStorage.getItem('popupAdSeen') !== d.popupImage) {

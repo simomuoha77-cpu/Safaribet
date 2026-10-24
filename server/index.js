@@ -266,7 +266,10 @@ app.get('/api/content/image/:key', async (req, res) => {
     const meta = await SiteImage.findOne({ key: req.params.key }, { uploadedAt: 1, sizeBytes: 1 }).lean();
     if (!meta) return res.status(404).send('Not found');
     const etag = 'W/"' + req.params.key + '-' + (meta.sizeBytes || 0) + '-' + new Date(meta.uploadedAt || 0).getTime() + '"';
-    res.set('Cache-Control', 'no-cache'); res.set('ETag', etag);
+    // Banner/popup URLs are unique per upload (banner_<time>_<rand> or ?v=<time>): a stored copy can never be an OLD picture,
+    // so it is kept and shown instantly. An unversioned URL is revalidated every time.
+    const versioned = /^banner_/.test(req.params.key) || !!req.query.v;
+    res.set('Cache-Control', versioned ? 'public, max-age=31536000, immutable' : 'no-cache'); res.set('ETag', etag);
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
     const img = await SiteImage.findOne({ key: req.params.key }).lean();
     if (!img) return res.status(404).send('Not found');

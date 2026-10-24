@@ -70,3 +70,9 @@ There is no build step in this project (static files plus Node), so there is no 
 ## Addendum: outbound traffic on Render
 
 - Render's "Service-Initiated" traffic (3.43 GB in the first days of the month, against 488 MB sent to players) is the server downloading from SofaBets. The whole football catalogue (up to 30 pages) was re-downloaded on every call because its cache default was 0. It is now cached for 45 s (`SOFABETS_FIXTURE_CACHE_TTL_MS`, 0 = off). Live games still come from the live feed, which is cached for 6 s.
+
+## Addendum: banners and images appear instantly again
+
+- Banner / popup URLs are unique per upload, so they are cached for a year (`immutable`): a new upload has a new URL and shows at once, an unchanged one costs no download and leaves no empty gap.
+- Static images (logo, icons) are shown from the phone's copy at once and refreshed in the background (the server revalidates them on every request).
+- The last banner list is kept on the phone (7 days) and painted immediately; the fresh list replaces it within about a second.

@@ -105,7 +105,7 @@ self.addEventListener('fetch', e => {
   }
   if (url.origin !== self.location.origin) return;
   if (NEVER.some(re => re.test(url.pathname))) return;
-  e.respondWith(networkFirst(req, url).catch(async () => {
+  e.respondWith((isCode(url) ? networkFirst(req, url) : swr(req, url)).catch(async () => {
     if (req.mode === 'navigate') return offlinePage();       // never the browser's "No internet connection" screen
     return fetch(req);
   }));
