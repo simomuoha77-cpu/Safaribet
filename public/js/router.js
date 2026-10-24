@@ -606,7 +606,7 @@
   SB.cachedMatch = function (id) {
     try {
       var r = JSON.parse(sessionStorage.getItem(mmKey(id)) || 'null');
-      if (r && r.data && Date.now() - r.ts < 10 * 60000) return r.data;
+      if (r && r.data && Date.now() - r.ts < 90000) return r.data;     // a prefetched market list is used only while it is under 90 s old
     } catch (e) {}
     return null;
   };

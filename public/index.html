@@ -3739,6 +3739,40 @@ function showT(msg,type=''){
 })();
 </script>
 <script>SB.run()</script>
+<script type="text/sb-page">/* warm-top-markets */
+(function(){
+  // The first few games on the list have their full market list fetched quietly once the list has settled, so tapping one
+  // opens with its markets already there (a cold lookup of a game nobody has opened can take several seconds upstream).
+  // Only 3 games, each at most once per 90 s, never on "data saver", never while the page is hidden.
+  var warmed = {}, timer = null, host = null, obs = null;
+  function run(){
+    timer = null;
+    try {
+      if (document.hidden || !window.SB || !SB.prefetchMatch) return;
+      if (navigator.connection && navigator.connection.saveData) return;
+      var cards = document.querySelectorAll('#matchList .mc'), n = 0;
+      for (var i = 0; i < cards.length && n < 3; i++) {
+        var id = (cards[i].id || '').indexOf('mc_') === 0 ? cards[i].id.slice(3) : null;
+        if (!id) continue;
+        n++;
+        if (warmed[id] && Date.now() - warmed[id] < 90000) continue;
+        warmed[id] = Date.now();
+        (function(mid, delay){ setTimeout(function(){ try { SB.prefetchMatch(mid).catch(function(){}); } catch(e){} }, delay); })(id, n * 500);
+      }
+    } catch(e) {}
+  }
+  function schedule(){ if (timer) clearTimeout(timer); timer = setTimeout(run, 1500); }
+  function attach(){
+    host = document.getElementById('matchList');
+    if (!host) { setTimeout(attach, 500); return; }
+    if (typeof MutationObserver !== 'undefined') { obs = new MutationObserver(schedule); obs.observe(host, { childList: true }); }
+    schedule();
+  }
+  window.addEventListener('sb:resume', schedule);
+  attach();
+})();
+</script>
+<script>SB.run()</script>
 <script type="text/sb-page">/* market-count */
 (function(){
   var counts = {}, asked = {}, timer = null, inflight = false, obs = null, host = null;

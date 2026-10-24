@@ -88,3 +88,9 @@ There is no build step in this project (static files plus Node), so there is no 
 ## Addendum: market placeholders
 
 - The match page shows grey shimmering placeholder cards (instead of the text "Loading markets…") while markets load. They are in the page from the first moment and are replaced by the real markets.
+
+## Addendum: faster markets
+
+- Once the list has settled, the full market lists of the first 3 games are fetched quietly (each at most once per 90 s, not on "data saver", not while the page is hidden), so tapping one opens with its markets already there. This also warms them on the server.
+- A prefetched market list is used for instant paint only while under 90 s old (was 10 min).
+- Not changed: the server-side market path (stored-first, parallel endpoints, deadlines) was already optimised. A game nobody has opened yet still depends on how fast SofaBets answers.
