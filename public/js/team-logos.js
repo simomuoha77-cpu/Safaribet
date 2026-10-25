@@ -1,11 +1,13 @@
 /* Team crests next to team names, shown at once.
+   NO timers and NO window listeners on purpose: router.js cancels every tracked timer/listener on each page change, which
+   used to kill this script after 'More markets' -> Back. Only a MutationObserver (not tracked) and fetch callbacks are used.
    Sources, in order: (1) crests shipped with the site (/crests/index.json), (2) every crest the server has found so far
    (/api/sports/team-logos/all - one request), (3) a per-team ask for anything still unknown.
    Both lists are kept on the phone, so a repeat visit paints the crests in the very first frame.
    A team that has no crest anywhere yet gets a coloured initials shield (same look for every team) instead of a bare letter. */
 (function () {
   var K_LOCAL = 'sb_crest_idx_v2', K_ALL = 'sb_crest_all_v2', K_ONE = 'sb_team_logos_v1', MAXN = 6000;
-  var LOCAL = null, ALL = {}, ONE = {}, asked = {}, rounds = {}, timer = null, allTimer = null, allRuns = 0;
+  var LOCAL = null, ALL = {}, ONE = {}, asked = {}, rounds = {}, pend = false, lastAll = 0;
   var STOP = { fc: 1, cf: 1, afc: 1, sc: 1, ac: 1, fk: 1, sk: 1, bk: 1, 'if': 1, ud: 1, cd: 1, sd: 1, club: 1, de: 1, the: 1 };
   function norm(s) {
     s = String(s || '').toLowerCase(); try { s = s.normalize('NFKD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
@@ -49,28 +51,30 @@
       var name = nameOf(el); if (!name || name.length > 60) return;
       var cur = el.firstElementChild && el.firstElementChild.classList && el.firstElementChild.classList.contains('tlg') ? el.firstElementChild : null;
       var url = urlFor(name);
-      if (cur && (url ? cur.tagName === 'IMG' && cur.getAttribute('src') === url : cur.tagName === 'SPAN')) { if (!url && ready() && !asked[name]) need.push(name); return; }
+      if (cur && (url ? cur.tagName === 'IMG' && cur.getAttribute('src') === url : cur.tagName === 'SPAN')) { if (!url && wantAsk(name)) need.push(name); return; }
       var b = badge(name, url);
       if (cur) el.replaceChild(b, cur); else el.insertBefore(b, el.firstChild);
-      if (!url && ready() && !asked[name]) need.push(name);
+      if (!url && wantAsk(name)) need.push(name);
     });
     if (need.length) ask(need);
+    if (ready() && Date.now() - lastAll > 60000) loadAll();       // keep the crest list fresh while the site is open
   }
   function ready() { return LOCAL !== null; }
+  // ask the server about a still-unknown team now, and again every 10 s (max 5 times) - checked whenever the page changes
+  function wantAsk(name) { var a = asked[name]; return ready() && (!a || (Date.now() - a > 10000 && (rounds[name] || 0) < 5)); }
 
   function ask(names) {
-    names = names.filter(function (n) { return !asked[n]; }).slice(0, 60); if (!names.length) return;
-    names.forEach(function (n) { asked[n] = 1; });
+    names = names.filter(wantAsk).slice(0, 60); if (!names.length) return;
+    names.forEach(function (n) { asked[n] = Date.now(); rounds[n] = (rounds[n] || 0) + 1; });
     fetch('/api/sports/team-logos?names=' + encodeURIComponent(names.join('|'))).then(function (r) { return r.json(); }).then(function (d) {
       var got = 0; if (d && d.logos) Object.keys(d.logos).forEach(function (k) { if (d.logos[k] && ONE[k] !== d.logos[k]) { ONE[k] = d.logos[k]; got++; } });
       if (got) { lsSet(K_ONE, ONE); schedule(); }
-      var again = names.filter(function (n) { return !urlFor(n) && (rounds[n] = (rounds[n] || 0) + 1) <= 4; });
-      if (again.length) setTimeout(function () { again.forEach(function (n) { delete asked[n]; }); ask(again); }, 8000);
     }).catch(function () { names.forEach(function (n) { delete asked[n]; }); });
   }
 
-  // one request that brings every crest the server knows; repeated for the first minutes while it is still finding more
+  // one request that brings every crest the server knows
   function loadAll() {
+    lastAll = Date.now();
     fetch('/api/sports/team-logos/all').then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.logos) {
         var ks = Object.keys(d.logos), changed = ks.length !== Object.keys(ALL).length;
@@ -79,23 +83,20 @@
         if (changed) { lsSet(K_ALL, ALL); schedule(); }
       }
     }).catch(function () {});
-    if (++allRuns < 12) allTimer = setTimeout(loadAll, allRuns < 4 ? 15000 : 45000);
   }
   function loadLocal() {
     if (LOCAL) return;                                              // already on the phone from an earlier visit
     fetch('/crests/index.json').then(function (r) { return r.json(); }).then(function (d) { LOCAL = d || {}; lsSet(K_LOCAL, LOCAL); paint(); })
       .catch(function () { LOCAL = {}; schedule(); });
   }
-  function schedule() { if (timer) return; timer = setTimeout(function () { timer = null; try { paint(); } catch (e) {} }, 60); }
+  // microtask debounce (not a timer): runs right after the DOM change that triggered it, before the next paint
+  function schedule() { if (pend) return; pend = true; Promise.resolve().then(function () { pend = false; try { paint(); } catch (e) {} }); }
 
   function start() {
     paint();                                                        // first frame: everything already on the phone is drawn now
     loadLocal(); loadAll();
-    // Watch the whole page: going back / switching tabs rebuilds the list. Re-check on back/forward, focus, and every 2 s.
+    // document.body is the same node for every page (router.js swaps its innerHTML), so this keeps working after Back.
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-    window.addEventListener('pageshow', schedule); window.addEventListener('popstate', function () { setTimeout(schedule, 50); setTimeout(schedule, 400); });
-    document.addEventListener('visibilitychange', schedule); window.addEventListener('focus', schedule);
-    setInterval(function () { if (!document.hidden) schedule(); }, 2000);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

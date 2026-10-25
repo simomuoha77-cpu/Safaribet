@@ -202,3 +202,6 @@ The debug status showed the feed carries no logos (only team names, ids absent) 
 ## Addendum - Crests ready before anyone asks (v23)
 - Server: every team in a fixture the provider loads is queued for a crest lookup straight away (`teamLogos.warm`, football-type sports only, 3 parallel workers, results stored permanently), and `GET /api/sports/team-logos/all` returns every known crest in one request.
 - Browser: crests come from the shipped set + the all-crests list, both saved on the phone, so a repeat visit paints them in the first frame; teams with no crest yet get a coloured initials shield instead of a plain letter; images are no longer lazy-loaded.
+
+## Addendum - Crests survive "More markets -> Back" (v24)
+router.js cancels every tracked timer/interval/listener on each page change. team-logos.js used a timer debounce, so after one round trip its `timer` flag stayed set and it never painted again. It now uses no timers and no window listeners: a MutationObserver on document.body (the same node for every page) with a microtask debounce, retries and list refreshes driven by "has it been long enough" checks at paint time.
