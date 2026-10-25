@@ -1050,6 +1050,8 @@ function normalizeMatch(raw) {
   }
   if (!home || !away) return null;
 
+  try { harvestTeamLogos(raw, source, nestedTeams, home, away); } catch (_) {}
+
   const competition = teamName(pick(source, ['competition', 'league', 'competitionName', 'competition_name', 'tournament', 'championship', 'league_name', 'leagueName']))
     || teamName(nestedLeague);
 
@@ -1735,3 +1737,43 @@ module.exports.marketsCacheFull = function marketsCacheFull(providerMatchId, spo
   const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
   return !!(c && c.data && c.data.full && c.data.markets.length > 1 && Date.now() - c.ts < maxAgeMs);
 };
+
+// ── TEAM LOGOS FROM THE FEED ──
+// If the odds feed itself carries a crest / image for a team (any field that looks like one), keep it by team name so the
+// site can show it. FEED_SAMPLE records which logo-looking fields the feed really has (read at /api/sports/team-logos?debug=1).
+const FEED_LOGOS = new Map();
+const FEED_SAMPLE = { fixtures: 0, topKeys: null, logoFields: {}, example: null };
+const LOGO_KEY = /(logo|image|img|icon|crest|badge|emblem|shield|photo|avatar)/i;
+function absLogo(u) {
+  u = String(u || '').trim(); if (!u || u.length > 400) return '';
+  if (/^https:\/\//i.test(u)) return u;
+  if (/^\/\//.test(u)) return 'https:' + u;
+  if (/^\//.test(u) && BASES && BASES[0]) return String(BASES[0]).replace(/\/+$/, '') + u;
+  return '';
+}
+function logoFrom(obj, side) {
+  if (!obj || typeof obj !== 'object') return '';
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (typeof v === 'string' && LOGO_KEY.test(k) && (k.toLowerCase().includes(side) || obj.__own)) { const a = absLogo(v); if (a) return a; }
+  }
+  return '';
+}
+function harvestTeamLogos(raw, source, nestedTeams, home, away) {
+  FEED_SAMPLE.fixtures++;
+  if (!FEED_SAMPLE.topKeys) FEED_SAMPLE.topKeys = Object.keys(raw).slice(0, 60);
+  const sides = [['home', home, [source.homeTeam, source.home_team, source.home, nestedTeams.home, nestedTeams.Home]], ['away', away, [source.awayTeam, source.away_team, source.away, nestedTeams.away, nestedTeams.Away]]];
+  for (const [side, name, objs] of sides) {
+    if (!name) continue;
+    let url = logoFrom(source, side);                                   // flat fields: home_logo, homeImage, home_team_logo ...
+    if (!url) for (const o of objs) { if (o && typeof o === 'object') { o.__own = 1; try { url = logoFrom(o, side); } finally { delete o.__own; } if (url) break; } }
+    for (const o of [source].concat(objs)) if (o && typeof o === 'object') for (const k of Object.keys(o)) if (LOGO_KEY.test(k) || /team_?id|home_?id|away_?id/i.test(k)) FEED_SAMPLE.logoFields[k] = (FEED_SAMPLE.logoFields[k] || 0) + 1;
+    if (url) {
+      const key = require('../services/teamLogos').norm(name);
+      if (key) { FEED_LOGOS.set(key, url); if (FEED_LOGOS.size > 20000) FEED_LOGOS.delete(FEED_LOGOS.keys().next().value); }
+      if (!FEED_SAMPLE.example) FEED_SAMPLE.example = { team: name, url };
+    }
+  }
+}
+module.exports.feedLogoFor = function (name) { return FEED_LOGOS.get(require('../services/teamLogos').norm(name)) || ''; };
+module.exports.feedLogoStats = function () { return { teamsWithFeedLogo: FEED_LOGOS.size, sample: FEED_SAMPLE }; };

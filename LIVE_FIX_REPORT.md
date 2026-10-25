@@ -192,3 +192,6 @@ Match data has no logos, so `server/services/teamLogos.js` looks crests up on Th
 
 ## Addendum - Bundled team crests (v19)
 The live logo lookup was not showing anything on the real site, so 396 crests (top 25 European leagues, from the open GitHub set luukhopman/football-logos, resized to 48 px, ~1.5 MB in total) now ship in `public/crests/` with `index.json` (name -> file, with short-name aliases such as "Man Utd"). `public/js/team-logos.js` matches by normalised name, so crests appear instantly with no API call; teams not in the set still fall back to the server lookup, then to a letter badge. Crest images are trademarks of their clubs; the file set has no stated licence - remove `public/crests/` if you prefer not to carry them.
+
+## Addendum - Crests for every team (v20)
+`sofaBetsProvider.normalizeMatch` now keeps any crest/image URL the feed sends for a team (flat fields such as home_logo, or nested team objects), by team name. `/api/sports/team-logos` answers from the feed first, then the cached TheSportsDB lookup. `?debug=1` shows which logo-looking fields the feed really has (`status.feed.sample.logoFields`) so the next step can be chosen from facts.

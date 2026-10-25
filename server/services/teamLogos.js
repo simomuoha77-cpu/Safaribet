@@ -105,9 +105,11 @@ async function lookup(names) {
   const out = {}, need = [];
   const list = [...new Set((names || []).map(n => String(n || '').trim()).filter(Boolean))].slice(0, 80);
   const keyOf = {}; list.forEach(n => { keyOf[n] = norm(n); });
+  let feed = null; try { feed = require('../providers/sofaBetsProvider').feedLogoFor; } catch (e) {}
+  if (feed) for (const n of list) { const u = safeUrl(feed(n)); if (u) out[n] = u; }
   const fromDb = [];
   for (const n of list) {
-    const k = keyOf[n]; if (!k) continue;
+    const k = keyOf[n]; if (!k || out[n]) continue;
     const m = MEM.get(k);
     if (m) { if (m.url) out[n] = m.url; else if (m.missing && Date.now() - m.at > MISSING_TTL) need.push(n); continue; }
     fromDb.push(n);
@@ -129,5 +131,8 @@ async function lookup(names) {
   return out;
 }
 
-function status() { return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: running }, STATS); }
+function status() {
+  let feed = {}; try { feed = require('../providers/sofaBetsProvider').feedLogoStats(); } catch (e) {}
+  return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: running }, STATS, { feed });
+}
 module.exports = { lookup, norm, pick, variants, status, _MEM: MEM };
