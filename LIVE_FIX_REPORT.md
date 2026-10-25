@@ -208,3 +208,6 @@ router.js cancels every tracked timer/interval/listener on each page change. tea
 
 ## Addendum - Crest size after Back (v25)
 router.js deletes injected <style> sheets when a page is left, so the crest CSS vanished and crests returned at natural (huge) size after More markets -> Back. Size/shape are now written inline on every crest/shield element (plus width/height attributes), so no style sheet is needed.
+
+## Addendum - Crest script no longer re-scans the page (v26)
+The v25 script re-scanned every `.tname` on the page after any DOM change; on a long match list that is scrolled (rows added/removed constantly) this made the page hang. The script now looks only at rows that were just added, ignores its own badges (no feedback loop), caches name normalisation, and blacklists crest URLs that fail to load. Stress test (3000 rows, scroll up/down rounds, 10000 name rewrites, failing images): one badge per row, no duplicates, zero work when idle, about half the time of v25 for the initial 3000 rows.
