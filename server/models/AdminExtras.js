@@ -38,7 +38,7 @@ const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new Sche
 }, { timestamps: true }));
 
 // Things the admin should look at (large bet, large win, large withdrawal, stuck settlement, feed down ...).
-const AdminAlert = mongoose.models.AdminAlert || mongoose.model('AdminAlert', new Schema({
+const adminAlertSchema = new Schema({
   type:     { type: String, required: true, index: true },
   severity: { type: String, enum: ['info', 'warn', 'critical'], default: 'info' },
   message:  { type: String, required: true },
@@ -46,8 +46,9 @@ const AdminAlert = mongoose.models.AdminAlert || mongoose.model('AdminAlert', ne
   ref:      { type: String, index: true },                       // bet code / tx id: stops the same thing alerting twice
   data:     { type: Schema.Types.Mixed },
   read:     { type: Boolean, default: false, index: true }
-}, { timestamps: true }));
-AdminAlert.schema.index({ type: 1, ref: 1 }, { unique: true, partialFilterExpression: { ref: { $type: 'string' } } });
+}, { timestamps: true });
+adminAlertSchema.index({ type: 1, ref: 1 }, { unique: true, partialFilterExpression: { ref: { $type: 'string' } } });   // must be declared BEFORE the model is built
+const AdminAlert = mongoose.models.AdminAlert || mongoose.model('AdminAlert', adminAlertSchema);
 
 // Affiliate commission payout ledger.
 const AffiliatePayout = mongoose.models.AffiliatePayout || mongoose.model('AffiliatePayout', new Schema({

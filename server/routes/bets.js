@@ -1195,8 +1195,15 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
       }
     }
 
+    // Roles: a support or marketing admin may not change results (they move money). Old accounts without a role are superadmin.
+    try {
+      const ad = req.admin && /^[a-f0-9]{24}$/i.test(String(req.admin.sub)) ? await require('../models/AdminUser').findById(req.admin.sub).select('adminRole extraPermissions').lean() : null;
+      if (!require('../services/adminControls').can((ad && ad.adminRole) || 'superadmin', ad && ad.extraPermissions, 'POST', '/settle')) return res.status(403).json({ success:false, message:'Your admin role cannot change bet results.' });
+    } catch (_) {}
+
     const bet = await Bet.findById(req.params.betId);
     if (!bet) return res.status(404).json({ success:false, message:'Bet not found' });
+    if (bet.status === 'cashed_out' || bet.status === 'cancelled') return res.status(400).json({ success:false, message:`This bet was ${bet.status.replace('_', ' ')} - its result can no longer be changed.` });
 
     const sel = bet.selections.find(s => s.matchId === matchId);
     if (!sel) return res.status(404).json({ success:false, message:'That match is not a selection on this bet' });
@@ -1209,104 +1216,69 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
     const oldBetStatus = bet.status;
     const oldNetPayout = bet.netPayout || 0;
 
+    const snapshot = { status: bet.status, payout: bet.payout, netPayout: bet.netPayout, settledAt: bet.settledAt, selections: bet.selections.map(x => x.toObject()) };   // to put the bet back if the wallet step fails
     sel.result = result;
     sel.settledAt = new Date();
     sel.adminCorrected = true;
     if (hasScoreCorrection) sel.score = { home: homeScore, away: awayScore };
 
-    // Recompute the bet's outcome from scratch, exactly the same math
-    // settlementEngine.finalizeBet uses — so a manual correction can never
-    // diverge from what the automated engine would conclude given the same
-    // set of results. See that file for the canonical version.
-    const realSelections = bet.selections.filter(s => !s.excludedFromPayout);
-    const nonVoid = realSelections.filter(s => s.result !== 'void');
-    const anyLost = nonVoid.some(s => s.result === 'lost');
-    const anyPending = nonVoid.some(s => s.result === 'pending');
-
-    let newStatus, newPayout, newNetPayout;
-    if (anyPending) {
-      newStatus = 'pending'; newPayout = 0; newNetPayout = 0;
-    } else if (nonVoid.length === 0) {
-      newStatus = 'won'; newPayout = bet.stake; newNetPayout = bet.stake; // all void — full refund
-    } else if (anyLost) {
-      newStatus = 'lost'; newPayout = 0; newNetPayout = 0;
-    } else {
-      const wonOdds = nonVoid.reduce((acc, s) => acc * (s.result === 'won' ? s.odds : 1), 1);
-      newPayout = parseFloat((bet.stake * wonOdds).toFixed(2));
-      const winnings = newPayout - bet.stake;
-      const tax = parseFloat((Math.max(0, winnings) * 0.20).toFixed(2));
-      newNetPayout = parseFloat((newPayout - tax).toFixed(2));
-      newStatus = 'won';
-    }
+    // Work out the bet's new outcome and exactly how much money must move (services/betCorrection.js).
+    // The bet is saved FIRST and the wallet moved second: if the save fails no money has moved, and if the
+    // wallet step fails the bet is put back as it was, so the correction can simply be tried again.
+    const betCorrection = require('../services/betCorrection');
+    const outc = betCorrection.outcome(bet);
+    const newStatus = outc.status, newPayout = outc.payout, newNetPayout = outc.netPayout;
+    const plan = betCorrection.plan({ oldStatus: oldBetStatus, oldNetPayout, stake: bet.stake, newStatus, newNetPayout });
 
     bet.status = newStatus;
     bet.payout = newPayout;
     bet.netPayout = newNetPayout;
     bet.settledAt = newStatus === 'pending' ? null : new Date();
 
-    // Fix the original settlement notification's own text too (see
-    // notificationService.correctBetNotification) — so a "Bet Won!" from the
-    // first settlement doesn't sit there being wrong if the status changed.
-    // Only relevant if the bet had actually reached a final state before, and
-    // that final state is different now.
+    // Keep the original "You Won!" / "Bet Settled" notification truthful.
     if (oldBetStatus !== 'pending' && oldBetStatus !== newStatus) {
       require('../services/notificationService').correctBetNotification(bet.userId, bet.betCode, newStatus).catch(() => {});
     }
 
-    // ── Reconcile the wallet against whatever was already paid ──
-    // financialAction describes exactly what happened to the wallet, both
-    // for the audit log and the response shown to the admin.
     let financialAction = { type: 'none', amount: 0 };
     const adminId = req.admin?.sub;
     const adminName = req.admin?.username || 'admin';
     const notificationService = require('../services/notificationService');
 
-    if (oldBetStatus === 'won' && oldNetPayout > 0 && newStatus !== 'won') {
-      // Was paid out, shouldn't have been — claw back what we can.
-      const debited = await walletService.debit(bet.userId, 'main', oldNetPayout,
-        `Correction by ${adminName}: reversing incorrect payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
-      if (debited) {
-        financialAction = { type: 'clawback', amount: oldNetPayout, shortfall: 0 };
-        notificationService.notify(bet.userId, 'bet_correction_now_lost', { betCode: bet.betCode, amount: oldNetPayout }).catch(() => {});
-      } else {
-        // User doesn't have the full amount available anymore (spent/withdrawn) —
-        // take what's there rather than blocking the correction outright; the
-        // grading itself must still be fixed. Shortfall is reported clearly so
-        // it can be pursued/written off manually.
-        const balance = await walletService.getBalance(bet.userId);
-        const available = Math.max(0, parseFloat(balance.main.toFixed(2)));
-        if (available > 0) {
-          await walletService.debit(bet.userId, 'main', available,
-            `Correction by ${adminName}: partial reversal for ${bet.betCode} (insufficient balance for full amount)`, bet.betCode, { adminId, reason });
-        }
-        financialAction = { type: 'clawback_partial', amount: available, shortfall: parseFloat((oldNetPayout - available).toFixed(2)) };
-        notificationService.notify(bet.userId, 'bet_correction_shortfall', { betCode: bet.betCode, amount: available, shortfall: financialAction.shortfall }).catch(() => {});
-      }
-    } else if (oldBetStatus !== 'won' && newStatus === 'won' && newNetPayout > 0) {
-      // Wasn't paid, should have been — pay it now.
-      await walletService.credit(bet.userId, 'main', newNetPayout,
-        `Correction by ${adminName}: paying out ${bet.betCode} after result correction`, bet.betCode, { adminId, reason });
-      financialAction = { type: 'payout', amount: newNetPayout };
-      notificationService.notify(bet.userId, 'bet_correction_now_won', { betCode: bet.betCode, amount: newNetPayout }).catch(() => {});
-    } else if (oldBetStatus === 'won' && newStatus === 'won' && newNetPayout !== oldNetPayout) {
-      // Still a win, but the payout amount changed — true up the difference.
-      const diff = parseFloat((newNetPayout - oldNetPayout).toFixed(2));
-      if (diff > 0) {
-        await walletService.credit(bet.userId, 'main', diff,
-          `Correction by ${adminName}: additional payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
-        financialAction = { type: 'topup', amount: diff };
-        notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: diff }).catch(() => {});
-      } else if (diff < 0) {
-        const debited = await walletService.debit(bet.userId, 'main', -diff,
-          `Correction by ${adminName}: reducing payout for ${bet.betCode}`, bet.betCode, { adminId, reason });
-        financialAction = debited
-          ? { type: 'reduction', amount: -diff, shortfall: 0 }
-          : { type: 'reduction_partial', amount: 0, shortfall: -diff };
-        notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: diff }).catch(() => {});
-      }
-    }
-
     await bet.save();
+    try {
+      // NOTE: the wallet ledger's `reason` must be one of its fixed codes; the free text goes in `meta`.
+      const meta = { adminId, adminName, reason, from: oldBetStatus, to: newStatus };
+      if (plan.type === 'credit') {
+        const w = await walletService.credit(bet.userId, 'main', plan.amount, 'admin_adjustment', bet.betCode, meta);
+        financialAction = { type: newStatus === 'void' ? 'refund' : 'payout', amount: plan.amount };
+        await User.findByIdAndUpdate(bet.userId, { $inc: { balance: plan.amount } }).catch(() => {});
+        await Transaction.create({ userId: bet.userId, type: newStatus === 'void' ? 'refund' : 'win', amount: plan.amount, balance: w ? w.main : undefined, reference: bet.betCode, description: `Correction: ${bet.betCode} - KES ${plan.amount}` }).catch(() => {});
+        if (newStatus === 'won') notificationService.notify(bet.userId, 'bet_correction_now_won', { betCode: bet.betCode, amount: plan.amount }).catch(() => {});
+        else notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: plan.amount }).catch(() => {});
+      } else if (plan.type === 'debit') {
+        const debited = await walletService.debit(bet.userId, 'main', plan.amount, 'admin_adjustment', bet.betCode, meta);
+        if (debited) {
+          financialAction = { type: 'clawback', amount: plan.amount, shortfall: 0 };
+          await User.findByIdAndUpdate(bet.userId, { $inc: { balance: -plan.amount } }).catch(() => {});
+          if (newStatus === 'lost') notificationService.notify(bet.userId, 'bet_correction_now_lost', { betCode: bet.betCode, amount: plan.amount }).catch(() => {});
+          else notificationService.notify(bet.userId, 'bet_correction_adjusted', { betCode: bet.betCode, amount: -plan.amount }).catch(() => {});
+        } else {
+          // Not enough left (spent or withdrawn): take what is there; the shortfall is reported so it can be chased or written off.
+          const balance = await walletService.getBalance(bet.userId);
+          const available = Math.max(0, parseFloat(balance.main.toFixed(2)));
+          if (available > 0) {
+            await walletService.debit(bet.userId, 'main', available, 'admin_adjustment', bet.betCode, { ...meta, partial: true });
+            await User.findByIdAndUpdate(bet.userId, { $inc: { balance: -available } }).catch(() => {});
+          }
+          financialAction = { type: 'clawback_partial', amount: available, shortfall: parseFloat((plan.amount - available).toFixed(2)) };
+          notificationService.notify(bet.userId, 'bet_correction_shortfall', { betCode: bet.betCode, amount: available, shortfall: financialAction.shortfall }).catch(() => {});
+        }
+      }
+    } catch (moneyErr) {
+      await Bet.updateOne({ _id: bet._id }, { $set: { status: snapshot.status, payout: snapshot.payout, netPayout: snapshot.netPayout, settledAt: snapshot.settledAt, selections: snapshot.selections } }).catch(() => {});
+      throw moneyErr;
+    }
 
     require('../services/auditService').log('admin.bet.override_selection', {
       targetType: 'Bet', targetId: bet._id,

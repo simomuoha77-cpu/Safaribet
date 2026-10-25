@@ -153,3 +153,12 @@ Tests: `npm run test:admin` (46 checks: roles, approval gate incl. reuse/mismatc
 **Not tested:** the new endpoints against a real MongoDB (none available here), a real SMS/email send, a real payout, the campaign runner, and the screens in a real browser.
 Email reports need `npm i nodemailer` and `SMTP_HOST/PORT/USER/PASS/FROM`; without them only SMS is used.
 Notes: IP matching is a weak signal; "House net" in a player profile is stakes minus returns; campaign SMS is capped at `CAMPAIGN_SMS_MAX` (default 2000) players.
+
+## Addendum: fix for "Something went wrong" when setting a result (Settlement Review)
+
+Found while checking the new screen. The existing "set result" code (`POST /api/bets/admin/override-selection`) had two real bugs:
+1. It passed a free-text sentence as the wallet-ledger `reason`, which only accepts fixed codes. The wallet was changed first and the ledger row failed after, so the player could be paid while the bet stayed unchanged and the admin saw an error.
+2. It treated a VOID bet (stake already refunded) as unpaid: void -> won would have paid the stake twice, void -> lost would not have taken the refund back.
+
+Now (`server/services/betCorrection.js`, `routes/bets.js`): the money is worked out from what was already paid (void counts as the refunded stake); the bet is saved first and the wallet moved second, and the bet is put back if the wallet step fails; ledger reason is `admin_adjustment` with the text in `meta`; a credit also writes a Transaction row so the player sees it; cashed-out / cancelled bets cannot be changed; support and marketing roles cannot change results. Also: alert de-duplication index is now created before the model (it was declared too late), and links in the new screens are readable.
+Tests: `npm run test:admin` (46 + 38 checks, including every document the new code writes validated against the real models).

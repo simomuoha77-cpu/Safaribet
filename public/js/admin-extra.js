@@ -58,6 +58,7 @@
       }).join('') + '</div>';
     });
     nav.insertAdjacentHTML('beforeend', html);
+    document.head.insertAdjacentHTML('beforeend', '<style>[id^="panel-x-"] a,#xa-modal a{color:var(--g2)}[id^="panel-x-"] a.badge,#xa-modal a.badge{color:#82b1ff}#xa-modal-box details summary{list-style:none}</style>');
     PANELS.forEach(function (p) { content.insertAdjacentHTML('beforeend', '<div class="panel" id="panel-x-' + p[0] + '"></div>'); });
     document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg" id="xa-modal" onclick="if(event.target===this)XA.closeModal()"><div class="modal" id="xa-modal-box" style="max-width:920px;max-height:92vh;overflow:auto"></div></div>');
     setInterval(pollAlerts, 90000); setTimeout(pollAlerts, 4000);

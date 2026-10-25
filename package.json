@@ -8,7 +8,7 @@
     "dev": "nodemon server/index.js",
     "test:staff": "node server/tests/staffAssistance.test.js && node server/tests/staffAuthMiddleware.test.js && node server/tests/staffFlows.test.js && node server/tests/staffPortalSmoke.test.js && node server/tests/staffAdminPanelSmoke.test.js",
     "test:live": "node server/tests/liveEndpoint.test.js && node server/tests/liveTabClient.test.js && node server/tests/tabSwitch.test.js && node server/tests/serviceWorker.test.js && node server/tests/liveResilience.test.js",
-    "test:admin": "node server/tests/adminExtra.test.js"
+    "test:admin": "node server/tests/adminExtra.test.js && node server/tests/betCorrection.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
