@@ -19,7 +19,7 @@ const router      = express.Router();
 // password checked directly against these routes.
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300, // generous — real throttling now happens at the login gate itself; this just caps abuse of an already-valid session
+  max: 1500, // generous — real throttling now happens at the login gate itself; this just caps abuse of an already-valid session
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many admin requests. Try again later.' }

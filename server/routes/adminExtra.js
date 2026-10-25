@@ -17,7 +17,7 @@ const AuditLog = require('../models/AuditLog');
 const AdminUser = require('../models/AdminUser');
 const { ApprovalRequest, AdminAlert, AdminReport } = require('../models/AdminExtras');
 const ctl = require('../services/adminControls');
-const { wrap, audit, isId } = require('../utils/adminHelpers');
+const { wrap, audit, isId, cacheJson, clearMemo } = require('../utils/adminHelpers');
 
 const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 
@@ -37,6 +37,7 @@ async function gate(req, res, next) {
     let doc = null;
     try { doc = isId(req.admin && req.admin.sub) ? await adminDoc(req.admin.sub) : null; } catch (e) { console.error('[adminGate] lookup', e.message); }
     req.adminDoc = doc;
+    if (req.method !== 'GET' && req.method !== 'HEAD') clearMemo();   // any change: reports are rebuilt on the next read
     req.adminRole = roleOf(doc);
     if (doc && doc.isActive === false) return res.status(401).json({ success: false, message: 'This admin account is disabled.' });
     if (!ctl.can(req.adminRole, doc && doc.extraPermissions, req.method, req.path)) {
@@ -198,7 +199,7 @@ router.post('/withdrawal-rules', wrap(async (req, res) => {
 }));
 
 // ───────────────────────── exposure / liability ─────────────────────────
-router.get('/exposure', wrap(async (req, res) => {
+router.get('/exposure', cacheJson(8000), wrap(async (req, res) => {
   const rows = await Bet.aggregate([
     { $match: { status: 'pending' } },
     { $unwind: '$selections' },
@@ -232,7 +233,7 @@ router.get('/exposure', wrap(async (req, res) => {
 }));
 
 // ───────────────────────── settlement review ─────────────────────────
-router.get('/settlement/review', wrap(async (req, res) => {
+router.get('/settlement/review', cacheJson(8000), wrap(async (req, res) => {
   const days = Math.min(60, Math.max(1, num(req.query.days, 14)));
   const since = new Date(Date.now() - days * 86400000);
   const brief = b => ({
@@ -282,7 +283,7 @@ router.get('/withdrawals/queue', wrap(async (req, res) => {
 }));
 
 // ───────────────────────── reconciliation ─────────────────────────
-router.get('/reconcile', wrap(async (req, res) => {
+router.get('/reconcile', cacheJson(45000), wrap(async (req, res) => {
   const days = Math.min(30, Math.max(1, num(req.query.days, 7)));
   const since = new Date(Date.now() - days * 86400000);
   const halfHour = new Date(Date.now() - 30 * 60000);
@@ -321,7 +322,7 @@ async function lookupUsers(ids) {
   const list = await User.find({ _id: { $in: ids } }).select('username phone isActive createdAt tags bettingRestricted').lean();
   return new Map(list.map(u => [String(u._id), u]));
 }
-router.get('/multi-account', wrap(async (req, res) => {
+router.get('/multi-account', cacheJson(60000), wrap(async (req, res) => {
   const mk = key => Device.aggregate([
     { $match: { [key]: { $nin: [null, ''] } } },
     { $group: { _id: '$' + key, users: { $addToSet: '$userId' }, last: { $max: '$lastSeenAt' } } },
@@ -373,7 +374,7 @@ router.get('/bet/:code', wrap(async (req, res) => {
 }));
 
 // ───────────────────────── feed / system health ─────────────────────────
-router.get('/feed-health', wrap(async (req, res) => {
+router.get('/feed-health', cacheJson(4000), wrap(async (req, res) => {
   let provider = null, live = null;
   try { provider = require('../providers/sofaBetsProvider').getStatus(); } catch (_) {}
   try { live = require('./sports').getLiveStatus(); } catch (_) {}
@@ -484,7 +485,7 @@ async function reportTick() {
   const rep = await AdminReport.create({ kind: 'daily', day, data });
   await deliverReport(data, rep);
 }
-router.get('/reports/daily', wrap(async (req, res) => {
+router.get('/reports/daily', cacheJson(20000), wrap(async (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : dayStr(new Date());
   res.json({ success: true, data: await buildDaily(day), history: (await AdminReport.find({ kind: 'daily' }).sort({ day: -1 }).limit(14).select('day data sentTo').lean()) });
 }));

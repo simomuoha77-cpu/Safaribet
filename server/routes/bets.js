@@ -1287,6 +1287,7 @@ router.post('/admin/override-selection/:betId', requireAdmin, async (req, res) =
 
     console.log(`  🛠️  [admin] ${adminName} corrected ${sel.homeTeam} vs ${sel.awayTeam} on bet ${bet.betCode}: ${oldSelResult} → ${result} (bet ${oldBetStatus} → ${newStatus}). Reason: ${reason}`);
 
+    try { require('../utils/adminHelpers').clearMemo(); } catch (_) {}   // admin reports must not show the old result
     res.json({ success:true, message:`Selection corrected to '${result}'. Bet is now '${newStatus}'.`, bet, financialAction });
   } catch (e) { return safeError(res, e, 'bets/admin/override-selection'); }
 });

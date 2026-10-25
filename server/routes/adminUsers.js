@@ -19,7 +19,7 @@ const UserPromotion = require('../models/UserPromotion');
 const walletService = require('../services/walletService');
 const ctl = require('../services/adminControls');
 const { Campaign, AffiliatePayout } = require('../models/AdminExtras');
-const { wrap, audit, normPhone, escRe, isId } = require('../utils/adminHelpers');
+const { wrap, audit, normPhone, escRe, isId, cacheJson } = require('../utils/adminHelpers');
 
 const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 const OID = s => new mongoose.Types.ObjectId(String(s));
@@ -116,23 +116,17 @@ router.get('/user360/:key', wrap(async (req, res) => {
   const u = await resolveUser(req.params.key);
   if (!u) return res.status(404).json({ success: false, message: 'User not found' });
   const uid = u._id;
-  const SupportTicket = require('../models/SupportTicket');
-  const [wallet, betAgg, depAgg, wdAgg, bets, txs, devices, sessions, tickets, promos, audits, linked, referrer, referredCount, whist] = await Promise.all([
+  // Only what the top of the profile needs. The heavier tabs (transactions, devices, linked accounts, audit ...)
+  // are loaded when opened: see /user360-tab below.
+  const [wallet, betAgg, depAgg, wdAgg, bets, sessions, referrer, referredCount] = await Promise.all([
     walletService.getBalance(uid),
     Bet.aggregate([{ $match: { userId: uid } }, { $group: { _id: '$status', n: { $sum: 1 }, stake: { $sum: '$stake' }, payout: { $sum: '$payout' } } }]),
     Transaction.aggregate([{ $match: { userId: uid, type: 'deposit', status: 'completed' } }, { $group: { _id: null, t: { $sum: '$amount' }, n: { $sum: 1 }, last: { $max: '$createdAt' } } }]),
     Transaction.aggregate([{ $match: { userId: uid, type: 'withdrawal', status: 'completed' } }, { $group: { _id: null, t: { $sum: { $abs: '$amount' } }, n: { $sum: 1 }, last: { $max: '$createdAt' } } }]),
     Bet.find({ userId: uid }).sort({ createdAt: -1 }).limit(25).select('betCode betType stake totalOdds potentialWin payout status createdAt settledAt selections.homeTeam selections.awayTeam').lean(),
-    Transaction.find({ userId: uid }).sort({ createdAt: -1 }).limit(25).select('type amount status reference description createdAt').lean(),
-    Device.find({ userId: uid }).sort({ lastSeenAt: -1 }).limit(15).select('deviceId browser os ip firstSeenAt lastSeenAt').lean(),
     RefreshToken.countDocuments({ userId: uid, revoked: false, expiresAt: { $gt: new Date() } }),
-    SupportTicket.find({ userId: uid }).sort({ createdAt: -1 }).limit(10).select('ticketNo subject status kind createdAt').lean().catch(() => []),
-    UserPromotion.find({ userId: uid }).sort({ createdAt: -1 }).limit(15).populate('promotionId', 'name type').lean(),
-    AuditLog.find({ targetId: String(uid) }).sort({ createdAt: -1 }).limit(40).lean(),
-    linkedFor(uid),
     u.referredBy ? User.findById(u.referredBy).select('username phone').lean() : null,
-    User.countDocuments({ referredBy: uid }),
-    WalletHistory.find({ userId: uid }).sort({ createdAt: -1 }).limit(20).lean()
+    User.countDocuments({ referredBy: uid })
   ]);
   const by = {}; let staked = 0, returned = 0, count = 0;
   betAgg.forEach(b => { by[b._id] = b.n; staked += b.stake; returned += (b.payout || 0); count += b.n; });
@@ -142,9 +136,24 @@ router.get('/user360/:key', wrap(async (req, res) => {
     user: { ...u, isLocked: !!(u.lockUntil && new Date(u.lockUntil) > Date.now()), lockUntil: u.lockUntil, loginAttempts: u.loginAttempts },
     wallet,
     stats: { bets: count, byStatus: by, staked, returned, net: +(staked - returned).toFixed(2), deposits: d.t || 0, depositCount: d.n || 0, lastDeposit: d.last, withdrawals: w.t || 0, withdrawalCount: w.n || 0, lastWithdrawal: w.last, depositMinusWithdrawals: (d.t || 0) - (w.t || 0) },
-    bets, transactions: txs, walletHistory: whist, devices, activeSessions: sessions, tickets, promotions: promos.map(p => ({ id: p._id, name: p.promotionId ? p.promotionId.name : 'Admin bonus', type: p.type, amount: p.amountGranted, wagering: p.wageringProgress + '/' + p.wageringRequired, status: p.status, expiresAt: p.expiresAt, createdAt: p.createdAt })),
-    audit: audits, linked, referral: { referredBy: referrer, referredCount, code: u.referralCode }
+    bets, activeSessions: sessions,
+    referral: { referredBy: referrer, referredCount, code: u.referralCode }
   });
+}));
+
+router.get('/user360-tab/:id/:tab', wrap(async (req, res) => {
+  if (!isId(req.params.id)) return res.status(400).json({ success: false, message: 'bad id' });
+  const uid = OID(req.params.id), tab = req.params.tab;
+  let data = [];
+  if (tab === 'transactions') data = await Transaction.find({ userId: uid }).sort({ createdAt: -1 }).limit(40).select('type amount status reference description createdAt').lean();
+  else if (tab === 'wallet') data = await WalletHistory.find({ userId: uid }).sort({ createdAt: -1 }).limit(40).lean();
+  else if (tab === 'devices') data = await Device.find({ userId: uid }).sort({ lastSeenAt: -1 }).limit(15).select('deviceId browser os ip firstSeenAt lastSeenAt').lean();
+  else if (tab === 'linked') data = await linkedFor(uid);
+  else if (tab === 'tickets') data = await require('../models/SupportTicket').find({ userId: uid }).sort({ createdAt: -1 }).limit(10).select('ticketNo subject status kind createdAt').lean().catch(() => []);
+  else if (tab === 'promos') data = (await UserPromotion.find({ userId: uid }).sort({ createdAt: -1 }).limit(15).populate('promotionId', 'name type').lean()).map(p => ({ id: p._id, name: p.promotionId ? p.promotionId.name : 'Admin bonus', type: p.type, amount: p.amountGranted, wagering: p.wageringProgress + '/' + p.wageringRequired, status: p.status, expiresAt: p.expiresAt, createdAt: p.createdAt }));
+  else if (tab === 'audit') data = await AuditLog.find({ targetId: String(uid) }).sort({ createdAt: -1 }).limit(40).lean();
+  else return res.status(400).json({ success: false, message: 'unknown tab' });
+  res.json({ success: true, data });
 }));
 
 // ───────────────────────── actions on one player ─────────────────────────
@@ -312,7 +321,7 @@ router.post('/users/bulk', wrap(async (req, res) => {
   res.json({ success: true, message: (r.modifiedCount != null ? r.modifiedCount : ids.length) + ' player(s) ' + msg + '.' });
 }));
 
-router.get('/rg/users', wrap(async (req, res) => {
+router.get('/rg/users', cacheJson(20000), wrap(async (req, res) => {
   const now = new Date();
   const rows = await User.find({ $or: [{ selfExcludedUntil: { $gt: now } }, { cooloffUntil: { $gt: now } }, { dailyDepositLimit: { $gt: 0 } }, { dailyStakeLimit: { $gt: 0 } }, { maxStakePerBet: { $gt: 0 } }] })
     .sort({ updatedAt: -1 }).limit(300).select('username phone selfExcludedUntil cooloffUntil dailyDepositLimit dailyStakeLimit maxStakePerBet').lean();
@@ -408,7 +417,7 @@ async function runCampaign(c) {
 }
 
 // ───────────────────────── promo usage ─────────────────────────
-router.get('/promotions/usage', wrap(async (req, res) => {
+router.get('/promotions/usage', cacheJson(20000), wrap(async (req, res) => {
   const promos = await Promotion.find().sort({ createdAt: -1 }).limit(200).lean();
   const agg = await UserPromotion.aggregate([{ $group: { _id: { p: '$promotionId', s: '$status' }, n: { $sum: 1 }, granted: { $sum: '$amountGranted' }, req: { $sum: '$wageringRequired' }, prog: { $sum: '$wageringProgress' } } }]);
   const by = new Map();
@@ -417,7 +426,7 @@ router.get('/promotions/usage', wrap(async (req, res) => {
 }));
 
 // ───────────────────────── lifecycle report ─────────────────────────
-router.get('/lifecycle', wrap(async (req, res) => {
+router.get('/lifecycle', cacheJson(120000), wrap(async (req, res) => {
   const days = Math.min(90, Math.max(7, num(req.query.days, 30)));
   const from = new Date(Date.now() - days * 86400000), now = Date.now();
   const [signups, cohort, depositors, bettors, active7, active30, prev30] = await Promise.all([
@@ -472,7 +481,7 @@ async function affiliateRows(onlyId) {
   }
   return { rate, minPayout: num(conf.minPayout), rows };
 }
-router.get('/affiliate-payout/summary', wrap(async (req, res) => {
+router.get('/affiliate-payout/summary', cacheJson(45000), wrap(async (req, res) => {
   const { rate, minPayout, rows } = await affiliateRows();
   rows.sort((a, b) => b.due - a.due || b.referred - a.referred);
   res.json({ success: true, rate, minPayout, enabled: rate > 0, data: rows.slice(0, 200), note: 'Commission = rate x the net loss of the players an affiliate referred (their stakes minus their winnings on settled bets). Set the rate under Settings > Affiliate.' });

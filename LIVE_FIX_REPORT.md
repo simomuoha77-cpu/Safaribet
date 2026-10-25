@@ -162,3 +162,25 @@ Found while checking the new screen. The existing "set result" code (`POST /api/
 
 Now (`server/services/betCorrection.js`, `routes/bets.js`): the money is worked out from what was already paid (void counts as the refunded stake); the bet is saved first and the wallet moved second, and the bet is put back if the wallet step fails; ledger reason is `admin_adjustment` with the text in `meta`; a credit also writes a Transaction row so the player sees it; cashed-out / cancelled bets cannot be changed; support and marketing roles cannot change results. Also: alert de-duplication index is now created before the model (it was declared too late), and links in the new screens are readable.
 Tests: `npm run test:admin` (46 + 38 checks, including every document the new code writes validated against the real models).
+
+---
+
+## Addendum - Admin panel speed (v15)
+
+Goal: every admin screen opens on one click, shows data at once, and is still fresh.
+
+**Browser (public/js/admin-extra.js, fast data layer)**
+- Every admin GET is answered instantly from the last copy (memory + this device); a fresh copy is fetched in the background and the open screen redraws by itself if it changed.
+- Any change you make (POST/PATCH/DELETE) clears the copies, so nothing stale is shown after your own action.
+- Screens refresh every 30 s and when you return to the tab; common screens are pre-loaded after login.
+- A skeleton shows only when there is nothing saved yet. Requests time out after 25 s and show the real error with a "Try again" button instead of an endless "Loading...".
+- Player Manager opens the profile at once (Bets tab ready); Transactions, Wallet, Devices, Linked, Promos, Tickets and Audit load lazily when clicked.
+
+**Server**
+- New indexes: User(referredBy, createdAt), Device(deviceId), AuditLog(targetId, createdAt), Transaction(type, status, createdAt), Bet(createdAt), Bet(status, settledAt).
+- Short response memo on heavy reports (exposure, settlement review, feed health, reconcile, multi-account, daily report, lifecycle, affiliate, promotions usage, RG list); cleared on any admin change.
+- `/user360/:key` is now light; heavy parts moved to `/user360-tab/:id/:tab`.
+- Admin rate limit raised to 1500 so background refresh never trips it.
+
+Tests: admin 46 + betCorrection 38 pass; jsdom smoke renders all 17 screens, 8 player tabs, instant reopen, cache-clear-after-POST, error + retry.
+Not testable here: behaviour against the real MongoDB. First open after deploy builds indexes (a few seconds on a large collection).

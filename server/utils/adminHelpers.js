@@ -25,4 +25,27 @@ function normPhone(p) {
 const escRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const isId = s => /^[a-f0-9]{24}$/i.test(String(s || ''));
 
-module.exports = { wrap, audit, normPhone, escRe, isId };
+// Short server-side cache for heavy admin GET reports. Concurrent identical requests share one run.
+// Any non-GET admin request clears it (see the gate in routes/adminExtra.js), so changes show at once.
+const memo = new Map();
+function cacheJson(ttlMs) {
+  return (req, res, next) => {
+    const key = req.originalUrl;
+    const hit = memo.get(key);
+    if (hit && hit.body && Date.now() - hit.at < ttlMs) return res.json(hit.body);
+    if (hit && hit.waiters) { hit.waiters.push(res); return; }
+    const entry = { at: 0, body: null, waiters: [] };
+    memo.set(key, entry);
+    const orig = res.json.bind(res);
+    res.json = body => {
+      const waiters = entry.waiters || []; entry.waiters = null;
+      if (res.statusCode < 400 && body && body.success !== false) { entry.body = body; entry.at = Date.now(); } else memo.delete(key);
+      waiters.forEach(w => { try { w.status(res.statusCode).json(body); } catch (_) {} });
+      return orig(body);
+    };
+    next();
+  };
+}
+const clearMemo = () => memo.clear();
+
+module.exports = { wrap, audit, normPhone, escRe, isId, cacheJson, clearMemo };

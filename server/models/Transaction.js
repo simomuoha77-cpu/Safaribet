@@ -13,5 +13,6 @@ const txSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 txSchema.index({ userId: 1, createdAt: -1 });
+txSchema.index({ type: 1, status: 1, createdAt: -1 });   // admin: deposits / withdrawals queues and reports
 
 module.exports = mongoose.model('Transaction', txSchema);

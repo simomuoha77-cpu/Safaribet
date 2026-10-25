@@ -18,5 +18,6 @@ const deviceSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 deviceSchema.index({ userId: 1, deviceId: 1 }, { unique: true });
+deviceSchema.index({ deviceId: 1 });   // admin: find other accounts on the same device
 
 module.exports = mongoose.model('Device', deviceSchema);

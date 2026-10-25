@@ -47,6 +47,8 @@ const userSchema = new mongoose.Schema({
   createdAt:    { type: Date, default: Date.now }
 }, { timestamps: true });
 
+userSchema.index({ referredBy: 1 });   // admin: referral counts
+userSchema.index({ createdAt: -1 });
 userSchema.virtual('isLocked').get(function() {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });

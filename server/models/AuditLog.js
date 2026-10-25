@@ -16,6 +16,7 @@ const auditLogSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ targetId: 1, createdAt: -1 });   // admin: a player's / bet's history without scanning the whole log
 auditLogSchema.index({ actorId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

@@ -44,6 +44,116 @@
 
   var S = { players: { page: 1, sel: {} }, me: null };
 
+  // ═══════════════ FAST DATA LAYER ═══════════════
+  // Every admin GET is answered instantly from the last copy (memory + this phone), while a fresh copy is fetched
+  // in the background; when it differs the open screen redraws by itself. Any change (POST/PATCH/DELETE) clears the
+  // copies so a screen never shows data from before your own action. Requests time out after 25 s with a message.
+  var MEM = {}, INFLIGHT = {}, ACTIVE = null, WATCH = {}, LSMAX = 60, MAXAGE = 30 * 60 * 1000;
+  var origApi = window.api, origNav = window.nav, origLogout = window.doLogout;
+  function who() { try { return JSON.parse(atob(String(ADMIN_TOKEN).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub || 'a'; } catch (e) { return 'a'; } }
+  function lsKey(u) { return 'sbx1:' + who() + ':' + u; }
+  function cacheable(u) { return /^\/api\/admin\//.test(u) && !/\/(export|sms\/job|live-stats|storage|test-stk)/.test(u); }
+  function sig(d) { try { return JSON.stringify(d); } catch (e) { return String(Math.random()); } }
+  function readCache(u) {
+    var m = MEM[u];
+    if (!m) { try { var t = localStorage.getItem(lsKey(u)); if (t) { m = JSON.parse(t); MEM[u] = m; } } catch (e) {} }
+    return m && Date.now() - m.at < MAXAGE ? m : null;
+  }
+  function writeCache(u, d) {
+    var m = { at: Date.now(), data: d }; m.sig = sig(d); MEM[u] = m;
+    try {
+      var s = JSON.stringify({ at: m.at, data: d }); if (s.length > 450000) return;
+      var idx = JSON.parse(localStorage.getItem('sbx1:idx') || '[]').filter(function (k) { return k !== u; }); idx.push(u);
+      while (idx.length > LSMAX) { try { localStorage.removeItem(lsKey(idx.shift())); } catch (e) {} }
+      localStorage.setItem(lsKey(u), s); localStorage.setItem('sbx1:idx', JSON.stringify(idx));
+    } catch (e) { try { clearCaches(true); } catch (e2) {} }
+  }
+  function clearCaches(keepMem) {
+    if (!keepMem) MEM = {};
+    try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('sbx1:') === 0) localStorage.removeItem(k); }); } catch (e) {}
+  }
+  function netJson(url, opts) {
+    var ctl = window.AbortController ? new AbortController() : null, timer = ctl && setTimeout(function () { ctl.abort(); }, 25000);
+    var o = Object.assign({}, opts || {}, { headers: Object.assign({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ADMIN_TOKEN }, (opts && opts.headers) || {}) });
+    if (ctl) o.signal = ctl.signal;
+    return fetch(url, o).then(function (r) {
+      if (r.status === 401) { window.doLogout(); return { success: false, message: 'Session expired - please log in again.' }; }
+      return r.text().then(function (text) {
+        try { return JSON.parse(text); } catch (e) { throw new Error('Server returned ' + r.status + ' (not JSON) for ' + url.split('?')[0] + ' - it may be restarting. Try again in a few seconds.'); }
+      });
+    }, function (e) { throw new Error(e && e.name === 'AbortError' ? 'The server is slow or asleep (no answer in 25 s). Try again.' : 'No connection to the server.'); })
+      .then(function (d) { clearTimeout(timer); return d; }, function (e) { clearTimeout(timer); throw e; });
+  }
+  function track(u) { if (ACTIVE && Date.now() - ACTIVE.t < 5000) ACTIVE.urls[u] = 1; }
+  function busy() {
+    var a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+    var m = $('xa-modal'); return !!(m && m.classList.contains('on') && m.contains(a)) || !!a.closest('.panel.on');
+  }
+  function refresh(u) {
+    if (INFLIGHT[u]) return INFLIGHT[u];
+    var p = netJson(u).then(function (d) {
+      var prev = MEM[u];
+      if (d && d.success !== false) { writeCache(u, d); if (prev && prev.sig !== MEM[u].sig) changed(u); }
+      return d;
+    });
+    INFLIGHT[u] = p; var done = function () { delete INFLIGHT[u]; }; p.then(done, done);
+    return p;
+  }
+  function changed(u) {
+    if (WATCH[u] && !busy()) { try { WATCH[u](); } catch (e) {} }
+    if (ACTIVE && ACTIVE.urls[u] && !busy() && Date.now() - (ACTIVE.last || 0) > 1200) { ACTIVE.last = Date.now(); try { ACTIVE.run(); } catch (e) {} }
+  }
+  window.api = function (url, opts) {
+    var get = !opts || !opts.method || String(opts.method).toUpperCase() === 'GET';
+    if (!get) { var r = netJson(url, opts); var inv = function () { clearCaches(); setTimeout(warm, 1500); }; r.then(inv, inv); return r; }
+    if (!cacheable(url)) return netJson(url, opts);
+    track(url);
+    var c = readCache(url);
+    if (c) { if (Date.now() - c.at > 2500) refresh(url).catch(function () {}); return Promise.resolve(c.data); }
+    return refresh(url);
+  };
+  window.__xaHas = function (u) { return !!readCache(u); };
+  function setActive(run) { ACTIVE = { t: Date.now(), urls: {}, run: run, last: 0 }; }
+  window.nav = function (name, el) { setActive(function () { origNav(name, el); }); return origNav(name, el); };
+  window.doLogout = function () { clearCaches(); ACTIVE = null; WARMED = ''; return origLogout.apply(this, arguments); };
+  function refreshActive() {
+    if (document.hidden || !ACTIVE || typeof ADMIN_TOKEN === 'undefined' || !ADMIN_TOKEN) return;
+    Object.keys(ACTIVE.urls).forEach(function (u) { if (cacheable(u)) refresh(u).catch(function () {}); });
+  }
+  setInterval(refreshActive, 30000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { refreshActive(); setTimeout(warm, 800); } });
+
+  // warm the copies for the screens used most, so the first tap is instant too
+  var WARMED = '';
+  var HOT = ['/api/admin/stats', '/api/admin/users/search?sort=newest&page=1', '/api/admin/transactions?type=withdrawal&status=pending', '/api/admin/transactions?type=deposit', '/api/admin/transactions?type=withdrawal', '/api/admin/alerts?unread=1', '/api/admin/me', '/api/admin/withdrawals/queue?status=pending', '/api/admin/withdrawal-rules', '/api/admin/settlement/review?days=14', '/api/admin/feed-health', '/api/admin/markets', '/api/admin/margins', '/api/admin/campaigns', '/api/admin/promotions/usage', '/api/admin/approvals', '/api/admin/admins', '/api/admin/alerts', '/api/admin/reports/daily', '/api/admin/controls', '/api/admin/limits', '/api/admin/site-config', '/api/admin/content', '/api/admin/revenue', '/api/admin/wallet', '/api/admin/blacklist', '/api/admin/referrals', '/api/admin/bonus-settings', '/api/admin/live-risk', '/api/admin/login-activity'];
+  var HEAVY = ['/api/admin/exposure', '/api/admin/rg/users', '/api/admin/multi-account', '/api/admin/reconcile?days=7', '/api/admin/lifecycle?days=30', '/api/admin/affiliate-payout/summary'];
+  function warm() {
+    if (document.hidden || typeof ADMIN_TOKEN === 'undefined' || !ADMIN_TOKEN) return;
+    try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) {}
+    var list = HOT.concat(HEAVY), i = 0;
+    (function step() {
+      if (i >= list.length || document.hidden) return;
+      var u = list[i++], c = readCache(u);
+      if (c && Date.now() - c.at < 45000) return step();
+      refresh(u).catch(function () {}).then(function () { setTimeout(step, i > HOT.length ? 900 : 250); });
+    })();
+  }
+  setInterval(function () { if (typeof ADMIN_TOKEN !== 'undefined' && ADMIN_TOKEN && WARMED !== who()) { WARMED = who(); setTimeout(warm, 1200); } }, 2500);
+
+  // draw a loading placeholder only when the screen has nothing on it yet
+  function pending(el) {
+    var c = el.firstElementChild;
+    if (c && !(c.classList.contains('xa-sk'))) return;
+    el.innerHTML = '<div class="xa-sk"><i></i><i></i><i style="width:70%"></i><i style="width:85%"></i><i style="width:50%"></i></div>';
+  }
+  function fail(el, e) {
+    el.innerHTML = '<div class="empty">' + esc(e && e.message ? e.message : 'Could not load') + '<br><br><button class="btn btn-g btn-sm" onclick="XA.retry()">Try again</button></div>';
+  }
+  function view(url, render, isStillShown) {            // draw now from the copy (or the network), redraw if a newer copy differs
+    WATCH[url] = function () { if (isStillShown && !isStillShown()) return; get(url).then(render).catch(function () {}); };
+    return get(url).then(render);
+  }
+
   // ───────── install sidebar + panels ─────────
   function install() {
     var nav = $('sidebar') || document.querySelector('nav');
@@ -58,27 +168,29 @@
       }).join('') + '</div>';
     });
     nav.insertAdjacentHTML('beforeend', html);
-    document.head.insertAdjacentHTML('beforeend', '<style>[id^="panel-x-"] a,#xa-modal a{color:var(--g2)}[id^="panel-x-"] a.badge,#xa-modal a.badge{color:#82b1ff}#xa-modal-box details summary{list-style:none}</style>');
+    document.head.insertAdjacentHTML('beforeend', '<style>[id^="panel-x-"] a,#xa-modal a{color:var(--g2)}[id^="panel-x-"] a.badge,#xa-modal a.badge{color:#82b1ff}#xa-modal-box details summary{list-style:none}.xa-sk{padding:18px 4px}.xa-sk i{display:block;height:14px;margin:12px 0;border-radius:7px;width:100%;background:linear-gradient(90deg,var(--c2) 25%,var(--c3) 50%,var(--c2) 75%);background-size:200% 100%;animation:xash 1.1s linear infinite}@keyframes xash{to{background-position:-200% 0}}</style>');
     PANELS.forEach(function (p) { content.insertAdjacentHTML('beforeend', '<div class="panel" id="panel-x-' + p[0] + '"></div>'); });
     document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg" id="xa-modal" onclick="if(event.target===this)XA.closeModal()"><div class="modal" id="xa-modal-box" style="max-width:920px;max-height:92vh;overflow:auto"></div></div>');
     setInterval(pollAlerts, 90000); setTimeout(pollAlerts, 4000);
   }
 
   function go(name, el) {
+    S.panelEl = null;
     document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('on'); });
     document.querySelectorAll('.sb-item').forEach(function (t) { t.classList.remove('on'); });
     var panel = $('panel-x-' + name); panel.classList.add('on'); if (el) el.classList.add('on');
     var p = PANELS.filter(function (x) { return x[0] === name; })[0];
     $('pageTitle').textContent = p ? p[2] : 'Admin';
     if (window.innerWidth <= 640 && window.closeSidebar) window.closeSidebar();
-    (LOAD[name] || function () {})(panel);
+    var run = function () { var r; try { r = (LOAD[name] || function () {})(panel); } catch (e) { fail(panel, e); return; } if (r && r.catch) r.catch(function (e) { fail(panel, e); }); };
+    S.retry = run; setActive(run); run();
   }
   function openModal(html) { $('xa-modal-box').innerHTML = '<button class="modal-close" onclick="XA.closeModal()">×</button>' + html; $('xa-modal').classList.add('on'); }
-  function closeModal() { $('xa-modal').classList.remove('on'); }
+  function closeModal() { $('xa-modal').classList.remove('on'); Object.keys(WATCH).forEach(function (k) { if (/user360/.test(k)) delete WATCH[k]; }); }
 
   function pollAlerts() {
     if (typeof ADMIN_TOKEN === 'undefined' || !ADMIN_TOKEN) return;
-    get('/api/admin/alerts?unread=1').then(function (d) { var b = $('xa-alert-badge'); if (b && d && d.success) { b.textContent = d.unread; b.style.display = d.unread ? '' : 'none'; } }).catch(function () {});
+    return get('/api/admin/alerts?unread=1').then(function (d) { var b = $('xa-alert-badge'); if (b && d && d.success) { b.textContent = d.unread; b.style.display = d.unread ? '' : 'none'; } }).catch(function () {});
   }
 
   var LOAD = {};
@@ -101,7 +213,7 @@
         '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-ghost btn-sm" onclick="XA.pmExport()">⬇ Export CSV</button><button class="btn btn-ghost btn-sm" onclick="XA.pmCreate()">➕ New player</button></div>') +
         '<div class="sec" id="pm-bulk" style="display:none"></div><div class="sec" id="pm-list"></div>';
     }
-    pmSearch(S.players.page || 1);
+    return pmSearch(S.players.page || 1);
   };
   function pmQuery(page) {
     var q = { q: val('pm-q'), status: val('pm-status'), kyc: val('pm-kyc'), tag: val('pm-tag'), inactiveDays: val('pm-inactive'), minBalance: val('pm-minb'), maxBalance: val('pm-maxb'), from: val('pm-from'), to: val('pm-to'), sort: val('pm-sort') };
@@ -109,8 +221,8 @@
     return Object.keys(q).filter(function (k) { return q[k] !== ''; }).map(function (k) { return k + '=' + encodeURIComponent(q[k]); }).join('&');
   }
   function pmSearch(page) {
-    S.players.page = page || 1; var box = $('pm-list'); empty(box);
-    get('/api/admin/users/search?' + pmQuery(S.players.page)).then(function (d) {
+    S.players.page = page || 1; var box = $('pm-list'); pending(box);
+    return get('/api/admin/users/search?' + pmQuery(S.players.page)).then(function (d) {
       if (!d.success) { box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
       S.players.rows = d.data;
       var rows = d.data.map(function (u) {
@@ -153,8 +265,16 @@
   // ── player 360 modal ──
   var cur = null;
   function pmOpen(id) {
-    openModal('<div class="empty">Loading player...</div>');
-    get('/api/admin/user360/' + encodeURIComponent(id)).then(function (d) { if (!d.success) { openModal('<div class="empty">' + esc(d.message) + '</div>'); return; } cur = d; renderPlayer('bets'); }).catch(function (e) { openModal('<div class="empty">' + esc(e.message) + '</div>'); });
+    var url = '/api/admin/user360/' + encodeURIComponent(id), modal = $('xa-modal');
+    if (!window.__xaHas(url)) openModal('<div class="xa-sk"><i></i><i style="width:60%"></i><i></i><i style="width:80%"></i></div>');
+    else modal.classList.add('on');                       // the profile is drawn from the saved copy in the same moment
+    return view(url, function (d) {
+      if (!d.success) { openModal('<div class="empty">' + esc(d.message) + '</div>'); return; }
+      var same = cur && cur.user && String(cur.user._id) === String(d.user._id);
+      var tab = (same && cur.tab) || 'bets'; cur = d; cur.tab = tab; renderPlayer(tab);
+    }, function () { return modal.classList.contains('on'); }).catch(function (e) {
+      openModal('<div class="empty">' + esc(e.message) + '<br><br><button class="btn btn-g btn-sm" onclick="XA.pmOpen(\'' + esc(id) + '\')">Try again</button></div>');
+    });
   }
   function reopen() { if (cur) pmOpen(cur.user._id); }
   function renderPlayer(tab) {
@@ -188,24 +308,28 @@
       (u.adminNotes || []).slice().reverse().map(function (n) { return '<div style="font-size:12px;border-top:1px solid var(--bd);padding:6px 0"><b>' + esc(n.by) + '</b> · ' + dt(n.at) + ' <a href="#" style="color:var(--r);float:right" onclick="XA.pNoteDel(\'' + n._id + '\');return false">delete</a><div>' + esc(n.text) + '</div></div>'; }).join(''));
     // tabs
     var tabs = ['bets', 'transactions', 'wallet', 'devices', 'linked', 'promos', 'tickets', 'audit'];
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' + tabs.map(function (t) { return '<button class="btn ' + (t === tab ? 'btn-g' : 'btn-ghost') + ' btn-sm" onclick="XA.pTab(\'' + t + '\')">' + t + (t === 'linked' && d.linked.length ? ' (' + d.linked.length + ')' : '') + '</button>'; }).join('') + '</div><div id="pt-body"></div>';
+    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' + tabs.map(function (t) { return '<button data-tab="' + t + '" class="btn ' + (t === tab ? 'btn-g' : 'btn-ghost') + ' btn-sm" onclick="XA.pTab(\'' + t + '\')">' + t + '</button>'; }).join('') + '</div><div id="pt-body"></div>';
     $('xa-modal-box').innerHTML = '<button class="modal-close" onclick="XA.closeModal()">×</button>' + h;
     pTab(tab);
   }
+  var TAB = {
+    bets: function (rows) { return table(['Code', 'Type', 'Stake', 'Odds', 'Status', 'Payout', 'Placed'], rows.map(function (b) { return '<tr><td><a href="#" onclick="XA.lookup(\'' + esc(b.betCode) + '\');return false">' + esc(b.betCode) + '</a></td><td>' + esc(b.betType) + '</td><td>' + kes(b.stake) + '</td><td>' + b.totalOdds + '</td><td>' + badge(b.status, b.status === 'won' ? 'g' : b.status === 'lost' ? 'r' : 'y') + '</td><td>' + kes(b.payout) + '</td><td>' + dt(b.createdAt) + '</td></tr>'; })); },
+    transactions: function (rows) { return table(['Type', 'Amount', 'Status', 'Description', 'When'], rows.map(function (t) { return '<tr><td>' + esc(t.type) + '</td><td>' + kes(t.amount) + '</td><td>' + esc(t.status) + '</td><td>' + esc(t.description || t.reference || '') + '</td><td>' + dt(t.createdAt) + '</td></tr>'; })); },
+    wallet: function (rows) { return table(['Bucket', 'Change', 'After', 'Reason', 'Ref', 'When'], rows.map(function (t) { return '<tr><td>' + esc(t.bucket) + '</td><td>' + (t.change >= 0 ? '+' : '') + t.change + '</td><td>' + t.balanceAfter + '</td><td>' + esc(t.reason) + '</td><td>' + esc(t.reference || '') + '</td><td>' + dt(t.createdAt) + '</td></tr>'; })); },
+    devices: function (rows) { return table(['Device', 'Browser / OS', 'IP', 'First seen', 'Last seen'], rows.map(function (x) { return '<tr><td>' + esc((x.deviceId || '').slice(0, 10)) + '</td><td>' + esc((x.browser || '') + ' / ' + (x.os || '')) + '</td><td>' + esc(x.ip || '') + '</td><td>' + dt(x.firstSeenAt) + '</td><td>' + dt(x.lastSeenAt) + '</td></tr>'; })); },
+    linked: function (rows) { return '<div style="color:var(--mt);font-size:11px;margin-bottom:6px">Other accounts that used the same device (strong) or IP (weak).</div>' + table(['Player', 'Phone', 'Same devices', 'Same IPs', 'Status'], rows.map(function (x) { return '<tr><td><a href="#" onclick="XA.pmOpen(\'' + x.userId + '\');return false">' + esc(x.username) + '</a></td><td>' + esc(x.phone) + '</td><td>' + x.sharedDevices + '</td><td>' + x.sharedIps + '</td><td>' + (x.isActive === false ? badge('Suspended', 'r') : badge('Active', 'g')) + '</td></tr>'; })); },
+    promos: function (rows) { return table(['Name', 'Amount', 'Play-through', 'Status', 'Expires'], rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>' + kes(x.amount) + '</td><td>' + esc(x.wagering) + '</td><td>' + esc(x.status) + '</td><td>' + dt(x.expiresAt) + '</td></tr>'; })); },
+    tickets: function (rows) { return table(['No.', 'Subject', 'Kind', 'Status', 'Opened'], rows.map(function (x) { return '<tr><td>' + esc(x.ticketNo) + '</td><td>' + esc(x.subject) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.status) + '</td><td>' + dt(x.createdAt) + '</td></tr>'; })); },
+    audit: function (rows) { return table(['When', 'Action', 'Detail'], rows.map(function (x) { return '<tr><td>' + dt(x.createdAt) + '</td><td>' + esc(x.action) + '</td><td style="font-size:11px;color:var(--mt)">' + esc(JSON.stringify(x.meta || {}).slice(0, 220)) + '</td></tr>'; })); }
+  };
   function pTab(t) {
-    var d = cur, body = $('pt-body'); if (!body) return;
-    document.querySelectorAll('#xa-modal-box > .btn').forEach(function () {});
-    var R = {
-      bets: function () { return table(['Code', 'Type', 'Stake', 'Odds', 'Status', 'Payout', 'Placed'], d.bets.map(function (b) { return '<tr><td><a href="#" onclick="XA.lookup(\'' + esc(b.betCode) + '\');return false">' + esc(b.betCode) + '</a></td><td>' + esc(b.betType) + '</td><td>' + kes(b.stake) + '</td><td>' + b.totalOdds + '</td><td>' + badge(b.status, b.status === 'won' ? 'g' : b.status === 'lost' ? 'r' : 'y') + '</td><td>' + kes(b.payout) + '</td><td>' + dt(b.createdAt) + '</td></tr>'; })); },
-      transactions: function () { return table(['Type', 'Amount', 'Status', 'Description', 'When'], d.transactions.map(function (t) { return '<tr><td>' + esc(t.type) + '</td><td>' + kes(t.amount) + '</td><td>' + esc(t.status) + '</td><td>' + esc(t.description || t.reference || '') + '</td><td>' + dt(t.createdAt) + '</td></tr>'; })); },
-      wallet: function () { return table(['Bucket', 'Change', 'After', 'Reason', 'Ref', 'When'], d.walletHistory.map(function (t) { return '<tr><td>' + esc(t.bucket) + '</td><td>' + (t.change >= 0 ? '+' : '') + t.change + '</td><td>' + t.balanceAfter + '</td><td>' + esc(t.reason) + '</td><td>' + esc(t.reference || '') + '</td><td>' + dt(t.createdAt) + '</td></tr>'; })); },
-      devices: function () { return table(['Device', 'Browser / OS', 'IP', 'First seen', 'Last seen'], d.devices.map(function (x) { return '<tr><td>' + esc((x.deviceId || '').slice(0, 10)) + '</td><td>' + esc((x.browser || '') + ' / ' + (x.os || '')) + '</td><td>' + esc(x.ip || '') + '</td><td>' + dt(x.firstSeenAt) + '</td><td>' + dt(x.lastSeenAt) + '</td></tr>'; })); },
-      linked: function () { return '<div style="color:var(--mt);font-size:11px;margin-bottom:6px">Other accounts that used the same device (strong) or IP (weak).</div>' + table(['Player', 'Phone', 'Same devices', 'Same IPs', 'Status'], d.linked.map(function (x) { return '<tr><td><a href="#" onclick="XA.pmOpen(\'' + x.userId + '\');return false">' + esc(x.username) + '</a></td><td>' + esc(x.phone) + '</td><td>' + x.sharedDevices + '</td><td>' + x.sharedIps + '</td><td>' + (x.isActive === false ? badge('Suspended', 'r') : badge('Active', 'g')) + '</td></tr>'; })); },
-      promos: function () { return table(['Name', 'Amount', 'Play-through', 'Status', 'Expires'], d.promotions.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>' + kes(x.amount) + '</td><td>' + esc(x.wagering) + '</td><td>' + esc(x.status) + '</td><td>' + dt(x.expiresAt) + '</td></tr>'; })); },
-      tickets: function () { return table(['No.', 'Subject', 'Kind', 'Status', 'Opened'], d.tickets.map(function (x) { return '<tr><td>' + esc(x.ticketNo) + '</td><td>' + esc(x.subject) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.status) + '</td><td>' + dt(x.createdAt) + '</td></tr>'; })); },
-      audit: function () { return table(['When', 'Action', 'Detail'], d.audit.map(function (x) { return '<tr><td>' + dt(x.createdAt) + '</td><td>' + esc(x.action) + '</td><td style="font-size:11px;color:var(--mt)">' + esc(JSON.stringify(x.meta || {}).slice(0, 220)) + '</td></tr>'; })); }
-    };
-    body.innerHTML = (R[t] || R.bets)();
+    var body = $('pt-body'); if (!body || !cur) return; cur.tab = t;
+    document.querySelectorAll('#xa-modal-box [data-tab]').forEach(function (b) { b.className = 'btn ' + (b.getAttribute('data-tab') === t ? 'btn-g' : 'btn-ghost') + ' btn-sm'; });
+    if (t === 'bets') { body.innerHTML = TAB.bets(cur.bets || []); return; }
+    var url = '/api/admin/user360-tab/' + cur.user._id + '/' + t;
+    if (!window.__xaHas(url)) body.innerHTML = '<div class="xa-sk"><i></i><i></i><i style="width:70%"></i></div>';
+    view(url, function (r) { var b = $('pt-body'); if (cur && cur.tab === t && b) b.innerHTML = r.success ? TAB[t](r.data || []) : '<div class="empty">' + esc(r.message) + '</div>'; }, function () { return cur && cur.tab === t; })
+      .catch(function (e) { var b = $('pt-body'); if (b) b.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
   function pPost(path, body, then) { post('/api/admin/user/' + cur.user._id + '/' + path, body).then(function (r) { say(r); if (r.success) { (then || reopen)(); } }); }
   function pAct(a, suspend) {
@@ -253,8 +377,8 @@
 
   // ═══════════════ EXPOSURE ═══════════════
   LOAD.exposure = function (el) {
-    empty(el);
-    get('/api/admin/exposure').then(function (d) {
+    pending(el);
+    return get('/api/admin/exposure').then(function (d) {
       if (!d.success) return empty(el, d.message);
       var t = d.totals;
       el.innerHTML = '<div class="stats-grid">' + stat('Open bets', t.bets) + stat('Stake held', kes(t.stake), 'var(--y)') + stat('Max possible payout', kes(t.potential), 'var(--r)') + '</div>' +
@@ -271,8 +395,8 @@
 
   // ═══════════════ MARKET CONTROLS ═══════════════
   LOAD.markets = function (el) {
-    empty(el);
-    Promise.all([get('/api/admin/markets'), get('/api/admin/margins')]).then(function (a) {
+    pending(el);
+    return Promise.all([get('/api/admin/markets'), get('/api/admin/margins')]).then(function (a) {
       var m = a[0].data || {}, g = a[1];
       el.innerHTML =
         sec('🚨 Betting switch', '<div style="margin-bottom:8px">' + (m.panic ? badge('BETTING PAUSED', 'r') : badge('Betting open', 'g')) + '</div>' + inp('mk-pr', 'Message shown to players while paused', null, m.panicReason) + '<button class="btn ' + (m.panic ? 'btn-g' : 'btn-r') + ' btn-sm" onclick="XA.mkPanic(' + (!m.panic) + ')">' + (m.panic ? 'Resume betting' : 'PAUSE ALL BETTING') + '</button>') +
@@ -298,8 +422,8 @@
 
   // ═══════════════ SETTLEMENT REVIEW ═══════════════
   LOAD.settle = function (el) {
-    empty(el);
-    get('/api/admin/settlement/review?days=14').then(function (d) {
+    pending(el);
+    return get('/api/admin/settlement/review?days=14').then(function (d) {
       if (!d.success) return empty(el, d.message);
       var row = function (b) {
         return '<tr><td><a href="#" onclick="XA.lookup(\'' + esc(b.betCode) + '\');return false">' + esc(b.betCode) + '</a><div style="color:var(--mt);font-size:10px">' + esc(b.user) + '</div></td><td>' + kes(b.stake) + '</td><td>' + badge(b.status, b.status === 'won' ? 'g' : b.status === 'lost' ? 'r' : 'y') + '</td><td style="font-size:11px">' + b.selections.map(function (s) {
@@ -326,7 +450,7 @@
   function lookup(code) {
     if (code) { var tab = document.querySelectorAll('.sb-item'); go('betlookup'); closeModal(); $('bl-code').value = code; }
     var c = val('bl-code'); if (!c) return; var out = $('bl-out'); empty(out);
-    get('/api/admin/bet/' + encodeURIComponent(c)).then(function (d) {
+    return get('/api/admin/bet/' + encodeURIComponent(c)).then(function (d) {
       if (!d.success) return empty(out, d.message);
       var b = d.bet, u = d.user || {};
       out.innerHTML = sec(esc(b.betCode) + ' ' + badge(b.status, b.status === 'won' ? 'g' : b.status === 'lost' ? 'r' : 'y'),
@@ -338,8 +462,8 @@
 
   // ═══════════════ FEED HEALTH ═══════════════
   LOAD.feed = function (el) {
-    empty(el);
-    get('/api/admin/feed-health').then(function (d) {
+    pending(el);
+    return get('/api/admin/feed-health').then(function (d) {
       if (!d.success) return empty(el, d.message);
       var p = d.provider || {}, l = d.live || {};
       el.innerHTML = '<div class="stats-grid">' + stat('Overall', d.healthy ? 'Healthy' : 'Problems', d.healthy ? 'var(--g)' : 'var(--r)') + stat('Odds provider', p.status || '—', p.status === 'connected' ? 'var(--g)' : 'var(--r)') + stat('Live list age', l.ageMs != null ? Math.round(l.ageMs / 1000) + 's' : '—', 'var(--b)') + stat('Live games in DB', d.matches.liveInDatabase, 'var(--y)') + stat('Pending bets', d.bets.pending) + stat('Stuck bets', d.bets.stuck, d.bets.stuck ? 'var(--r)' : 'var(--g)') + '</div>' +
@@ -350,8 +474,8 @@
 
   // ═══════════════ WITHDRAWAL QUEUE ═══════════════
   LOAD.wdqueue = function (el) {
-    empty(el);
-    Promise.all([get('/api/admin/withdrawals/queue?status=' + (S.wdStatus || 'pending')), get('/api/admin/withdrawal-rules')]).then(function (a) {
+    pending(el);
+    return Promise.all([get('/api/admin/withdrawals/queue?status=' + (S.wdStatus || 'pending')), get('/api/admin/withdrawal-rules')]).then(function (a) {
       var d = a[0], r = a[1]; if (!d.success) return empty(el, d.message);
       S.reasons = d.rejectReasons || [];
       var rule = r.data || {};
@@ -375,8 +499,8 @@
 
   // ═══════════════ RECONCILIATION ═══════════════
   LOAD.recon = function (el) {
-    empty(el);
-    get('/api/admin/reconcile?days=7').then(function (d) {
+    pending(el);
+    return get('/api/admin/reconcile?days=7').then(function (d) {
       if (!d.success) return empty(el, d.message); var s = d.summary;
       el.innerHTML = '<div class="stats-grid">' + stat('Deposits recorded', kes(s.depositsRecorded)) + stat('Credited in wallets', kes(s.depositsInWallet)) + stat('Difference', kes(s.difference), Math.abs(s.difference) > 1 ? 'var(--r)' : 'var(--g)') + stat('Duplicate refs', s.duplicateRefs, s.duplicateRefs ? 'var(--r)' : 'var(--g)') + stat('Stale deposits', s.staleDeposits, 'var(--y)') + stat('Stuck withdrawals', s.stuckWithdrawals, 'var(--y)') + '</div><div style="color:var(--mt);font-size:11px;margin-bottom:10px">' + esc(d.note) + ' (last ' + d.days + ' days)</div>' +
         sec('Players where deposits and wallet credits differ', table(['Player', 'Phone', 'Transactions', 'Wallet', 'Difference'], d.mismatches.map(function (m) { return '<tr><td>' + esc(m.username) + '</td><td>' + esc(m.phone) + '</td><td>' + kes(m.transactions) + ' (' + m.transactionCount + ')</td><td>' + kes(m.wallet) + ' (' + m.walletCount + ')</td><td style="color:var(--r)">' + kes(m.difference) + '</td></tr>'; }))) +
@@ -388,8 +512,8 @@
 
   // ═══════════════ MULTI-ACCOUNT ═══════════════
   LOAD.multi = function (el) {
-    empty(el);
-    get('/api/admin/multi-account').then(function (d) {
+    pending(el);
+    return get('/api/admin/multi-account').then(function (d) {
       if (!d.success) return empty(el, d.message);
       var grp = function (g) { return '<div style="border-bottom:1px solid var(--bd);padding:8px 0"><b>' + esc(g.kind === 'device' ? 'Device ' + String(g.key).slice(0, 10) : 'IP ' + g.key) + '</b> · ' + g.count + ' accounts · ' + dt(g.lastSeen) + (g.likelyShared ? ' ' + badge('likely shared network', 'mt') : '') + '<div style="margin-top:4px">' + g.users.map(function (u) { return '<a href="#" class="badge bg-b" style="margin:2px;text-decoration:none" onclick="XA.go(\'players\');setTimeout(function(){XA.pmOpen(\'' + u.id + '\')},300);return false">' + esc(u.username) + (u.isActive === false ? ' (susp.)' : '') + '</a>'; }).join('') + '</div></div>'; };
       el.innerHTML = '<div style="color:var(--mt);font-size:12px;margin-bottom:10px">' + esc(d.note) + '</div>' + sec('Same device (strong)', d.byDevice.map(grp).join('') || '<div class="empty">None found</div>') + sec('Same IP (weak)', d.byIp.map(grp).join('') || '<div class="empty">None found</div>');
@@ -398,8 +522,8 @@
 
   // ═══════════════ APPROVALS & ROLES ═══════════════
   LOAD.approvals = function (el) {
-    empty(el);
-    Promise.all([get('/api/admin/approvals'), get('/api/admin/admins'), get('/api/admin/me')]).then(function (a) {
+    pending(el);
+    return Promise.all([get('/api/admin/approvals'), get('/api/admin/admins'), get('/api/admin/me')]).then(function (a) {
       var ap = a[0], ad = a[1], me = a[2];
       el.innerHTML = '<div style="color:var(--mt);font-size:12px;margin-bottom:8px">You are <b>' + esc(me.username) + '</b> (' + esc(me.role) + '). Two-admin approval is ' + (ap.settings && ap.settings.enabled ? badge('ON', 'g') : badge('OFF', 'mt')) + ' - change it under Admin Controls.</div>' +
         sec('Approval requests', table(['Request', 'By', 'Status', 'When', ''], (ap.data || []).map(function (r) {
@@ -422,8 +546,8 @@
 
   // ═══════════════ ALERTS ═══════════════
   LOAD.alerts = function (el) {
-    empty(el);
-    get('/api/admin/alerts').then(function (d) {
+    pending(el);
+    return get('/api/admin/alerts').then(function (d) {
       if (!d.success) return empty(el, d.message);
       el.innerHTML = sec('Alerts (' + d.unread + ' unread)', table(['When', 'Level', 'What', ''], d.data.map(function (a) { return '<tr style="' + (a.read ? 'opacity:.6' : '') + '"><td>' + dt(a.createdAt) + '</td><td>' + badge(a.severity, a.severity === 'critical' ? 'r' : a.severity === 'warn' ? 'y' : 'b') + '</td><td>' + esc(a.message) + '</td><td>' + (a.data && a.data.betCode ? '<a href="#" onclick="XA.lookup(\'' + esc(a.data.betCode) + '\');return false">open bet</a>' : '') + '</td></tr>'; })), '<button class="btn btn-ghost btn-sm" onclick="XA.readAlerts()">Mark all read</button>');
     });
@@ -432,8 +556,8 @@
 
   // ═══════════════ CAMPAIGNS & PROMOS ═══════════════
   LOAD.campaigns = function (el) {
-    empty(el);
-    Promise.all([get('/api/admin/campaigns'), get('/api/admin/promotions/usage')]).then(function (a) {
+    pending(el);
+    return Promise.all([get('/api/admin/campaigns'), get('/api/admin/promotions/usage')]).then(function (a) {
       var c = a[0], p = a[1];
       el.innerHTML = sec('New campaign',
         grid(200, fld('Name', inp('cp-name', 'Weekend boost')) + fld('Who', '<select class="inp" id="cp-seg"><option value="all">Everyone</option><option value="new7">Joined in last 7 days</option><option value="inactive7">Inactive 7+ days</option><option value="inactive30">Inactive 30+ days</option><option value="highvalue:10000">High value (deposited 10,000+)</option><option value="never_deposited">Never deposited</option><option value="deposited_no_bet">Deposited, never bet</option><option value="tag:vip">Tag: vip</option></select>') + fld('Or custom segment', inp('cp-seg2', 'tag:watch, inactive14, highvalue:50000')) + fld('Channel', '<select class="inp" id="cp-ch"><option value="notification">In-app notification</option><option value="sms">SMS</option><option value="both">Both</option></select>') + fld('Send at (blank = now)', inp('cp-at', '', 'datetime-local')) + fld('Also give bonus (KES)', inp('cp-bonus', '0', 'number', 0)) + fld('Play-through ×', inp('cp-bw', '', 'number', 1)) + fld('Bonus valid (days)', inp('cp-bd', '', 'number', 7))) +
@@ -453,8 +577,8 @@
 
   // ═══════════════ LIFECYCLE ═══════════════
   LOAD.lifecycle = function (el) {
-    empty(el);
-    get('/api/admin/lifecycle?days=30').then(function (d) {
+    pending(el);
+    return get('/api/admin/lifecycle?days=30').then(function (d) {
       if (!d.success) return empty(el, d.message); var f = d.funnel, r = d.retention, a = d.activity, max = Math.max.apply(null, d.signupsByDay.map(function (x) { return x.n; }).concat([1]));
       var pc = function (v) { return v == null ? '—' : v + '%'; };
       el.innerHTML = '<div class="stats-grid">' + stat('Registered (30d)', f.registered) + stat('Deposited', f.deposited + ' (' + pc(f.depositRate) + ')', 'var(--y)') + stat('Placed a bet', f.betPlaced + ' (' + pc(f.betRate) + ')', 'var(--b)') + stat('Day-1 return', pc(r['Day 1'])) + stat('Day-7 return', pc(r['Day 7'])) + stat('Day-30 return', pc(r['Day 30'])) + stat('Active bettors 7d', a.activeBettors7d) + stat('Active bettors 30d', a.activeBettors30d) + stat('Churn', pc(a.churnRate) + ' (' + a.churned + ')', 'var(--r)') + '</div><div style="color:var(--mt);font-size:11px;margin-bottom:10px">' + esc(r.note) + ' ' + esc(a.note) + '</div>' +
@@ -464,8 +588,8 @@
 
   // ═══════════════ RESPONSIBLE GAMBLING ═══════════════
   LOAD.rg = function (el) {
-    empty(el);
-    get('/api/admin/rg/users').then(function (d) {
+    pending(el);
+    return get('/api/admin/rg/users').then(function (d) {
       if (!d.success) return empty(el, d.message); var s = d.summary, now = new Date();
       el.innerHTML = '<div class="stats-grid">' + stat('Self-excluded', s.excluded, 'var(--b)') + stat('In cool-off', s.cooloff, 'var(--y)') + stat('With limits', s.withLimits) + '</div><div style="color:var(--mt);font-size:12px;margin-bottom:8px">Set exclusions, cool-off and limits for a player from Player Manager > Open > Responsible gambling.</div>' +
         sec('Players with controls', table(['Player', 'Excluded until', 'Cool-off until', 'Deposit limit', 'Stake limit', 'Max per bet', ''], d.data.map(function (u) { return '<tr><td>' + esc(u.username) + '</td><td>' + (u.selfExcludedUntil && new Date(u.selfExcludedUntil) > now ? dt(u.selfExcludedUntil) : '—') + '</td><td>' + (u.cooloffUntil && new Date(u.cooloffUntil) > now ? dt(u.cooloffUntil) : '—') + '</td><td>' + (u.dailyDepositLimit ? kes(u.dailyDepositLimit) : '—') + '</td><td>' + (u.dailyStakeLimit ? kes(u.dailyStakeLimit) : '—') + '</td><td>' + (u.maxStakePerBet ? kes(u.maxStakePerBet) : '—') + '</td><td><button class="btn btn-g btn-sm" onclick="XA.go(\'players\');setTimeout(function(){XA.pmOpen(\'' + u._id + '\')},300)">Open</button></td></tr>'; })));
@@ -474,8 +598,8 @@
 
   // ═══════════════ AFFILIATES ═══════════════
   LOAD.affiliate = function (el) {
-    empty(el);
-    get('/api/admin/affiliate-payout/summary').then(function (d) {
+    pending(el);
+    return get('/api/admin/affiliate-payout/summary').then(function (d) {
       if (!d.success) return empty(el, d.message);
       el.innerHTML = '<div style="color:var(--mt);font-size:12px;margin-bottom:8px">' + (d.enabled ? 'Commission rate <b>' + d.rate + '%</b>, minimum payout ' + kes(d.minPayout) + '. ' : '<b style="color:var(--y)">Commission is OFF.</b> Set a rate under Admin Controls. ') + esc(d.note) + '</div>' +
         sec('Affiliates', table(['Affiliate', 'Referred', 'Active', 'Players net loss', 'Commission earned', 'Paid', 'Due', ''], d.data.map(function (x) { return '<tr><td><b>' + esc(x.username) + '</b><div style="font-size:10px;color:var(--mt)">' + esc(x.phone) + '</div></td><td>' + x.referred + '</td><td>' + x.activeReferred + '</td><td>' + kes(x.playersNetLoss) + '</td><td>' + kes(x.commission) + '</td><td>' + kes(x.paid) + '</td><td><b>' + kes(x.due) + '</b></td><td>' + (d.enabled && x.due >= Math.max(1, d.minPayout) ? '<button class="btn btn-g btn-sm" onclick="XA.affPay(\'' + x.affiliateId + '\',\'' + esc(x.username) + '\',' + x.due + ')">Pay</button>' : '') + '</td></tr>'; })));
@@ -485,8 +609,8 @@
 
   // ═══════════════ DAILY REPORTS ═══════════════
   LOAD.reports = function (el) {
-    empty(el);
-    get('/api/admin/reports/daily').then(function (d) {
+    pending(el);
+    return get('/api/admin/reports/daily').then(function (d) {
       if (!d.success) return empty(el, d.message); var r = d.data;
       el.innerHTML = sec('Today so far (' + r.day + ')', '<div class="stats-grid">' + stat('Deposits', kes(r.deposits) + ' (' + r.depositCount + ')') + stat('Withdrawals', kes(r.withdrawals) + ' (' + r.withdrawalCount + ')', 'var(--b)') + stat('Bets', r.bets) + stat('Stake', kes(r.stake), 'var(--y)') + stat('Payouts', kes(r.payouts), 'var(--r)') + stat('Stake − payouts', kes(r.margin), r.margin >= 0 ? 'var(--g)' : 'var(--r)') + stat('New players', r.newUsers) + stat('Active bettors', r.activeBettors) + stat('Pending withdrawals', kes(r.pendingWithdrawals) + ' (' + r.pendingWithdrawalCount + ')', 'var(--o)') + '</div><button class="btn btn-g btn-sm" onclick="XA.sendReport()">Send now (SMS / email)</button> <span style="color:var(--mt);font-size:11px">Recipients and the daily send time are set in Admin Controls. Yesterday\'s report is created automatically.</span>') +
         sec('Past reports', table(['Day', 'Deposits', 'Withdrawals', 'Bets', 'Stake', 'Payouts', 'Stake − payouts', 'New', 'Sent to'], d.history.map(function (h) { var x = h.data || {}; return '<tr><td>' + h.day + '</td><td>' + kes(x.deposits) + '</td><td>' + kes(x.withdrawals) + '</td><td>' + x.bets + '</td><td>' + kes(x.stake) + '</td><td>' + kes(x.payouts) + '</td><td>' + kes(x.margin) + '</td><td>' + x.newUsers + '</td><td>' + esc((h.sentTo || []).join(', ')) + '</td></tr>'; })));
@@ -496,8 +620,8 @@
 
   // ═══════════════ ADMIN CONTROLS ═══════════════
   LOAD.ctrl = function (el) {
-    empty(el);
-    get('/api/admin/controls').then(function (d) {
+    pending(el);
+    return get('/api/admin/controls').then(function (d) {
       if (!d.success) return empty(el, d.message === undefined ? 'Only a superadmin can open this.' : d.message);
       var c = d.data;
       el.innerHTML =
@@ -520,7 +644,7 @@
     }).then(function (r) { say(r, 'Saved'); });
   }
 
-  window.XA = { go: go, closeModal: closeModal, pmSearch: pmSearch, pmPick: pmPick, pmClear: pmClear, pmBulk: pmBulk, pmExport: pmExport, pmCreate: pmCreate, pmCreateGo: pmCreateGo, pmOpen: pmOpen,
+  window.XA = { retry: function () { if (S.retry) S.retry(); }, go: go, closeModal: closeModal, pmSearch: pmSearch, pmPick: pmPick, pmClear: pmClear, pmBulk: pmBulk, pmExport: pmExport, pmCreate: pmCreate, pmCreateGo: pmCreateGo, pmOpen: pmOpen,
     pAct: pAct, pControls: pControls, pRg: pRg, pBonus: pBonus, pAdjust: pAdjust, pTag: pTag, pNote: pNote, pNoteDel: pNoteDel, pNotify: pNotify, pSms: pSms, pTwofa: pTwofa, pPassword: pPassword, pDelete: pDelete, pEdit: pEdit, pEditGo: pEditGo, pTab: pTab,
     suspendGame: suspendGame, mkPanic: mkPanic, mkSave: mkSave, mkResume: mkResume, mgSave: mgSave, override: override, lookup: lookup, wdStatus: wdStatus, wrSave: wrSave, wdApprove: wdApprove, wdReject: wdReject,
     decide: decide, runApproved: runApproved, setRole: setRole, toggleAdmin: toggleAdmin, readAlerts: readAlerts, cpPreview: cpPreview, cpCreate: cpCreate, cpCancel: cpCancel, affPay: affPay, sendReport: sendReport, ctSave: ctSave };
