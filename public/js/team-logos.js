@@ -61,8 +61,12 @@
   }
   function start() {
     loadLocal();
-    var root = document.getElementById('matchList') || document.body;
-    new MutationObserver(schedule).observe(root, { childList: true, subtree: true });
+    // Watch the whole page, not one list: going back / switching tabs rebuilds the list, and a watcher stuck on the old
+    // list would never see the new team names. Also re-check on back/forward, tab focus, and every 2 s as a safety net.
+    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('pageshow', schedule); window.addEventListener('popstate', function () { setTimeout(schedule, 50); setTimeout(schedule, 400); });
+    document.addEventListener('visibilitychange', schedule); window.addEventListener('focus', schedule);
+    setInterval(function () { if (!document.hidden) schedule(); }, 2000);
     schedule();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
