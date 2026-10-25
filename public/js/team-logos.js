@@ -17,11 +17,9 @@
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   LOCAL = ls(K_LOCAL); ALL = ls(K_ALL) || {}; ONE = ls(K_ONE) || {};
 
-  var css = document.createElement('style');
-  css.textContent = '.tlg{display:inline-block;width:18px;height:18px;margin-right:7px;vertical-align:-4px;border-radius:50%;flex-shrink:0}' +
-    'img.tlg{object-fit:contain;border-radius:0}' +
-    'span.tlg{border-radius:5px 5px 9px 9px;color:#fff;font-size:8px;font-weight:800;line-height:18px;text-align:center;letter-spacing:-.3px;text-shadow:0 1px 1px rgba(0,0,0,.35)}';
-  document.head.appendChild(css);
+  // Sizing is written on every element (not in an injected <style>): router.js removes injected style sheets when a page is
+  // left, which made the crests spring back to full size after More markets -> Back.
+  var BASE = 'display:inline-block;width:18px;height:18px;min-width:18px;max-width:18px;max-height:18px;margin:0 7px 0 0;vertical-align:-4px;flex-shrink:0;box-sizing:border-box;';
 
   function urlFor(name) {
     var k = norm(name); if (!k) return '';
@@ -35,11 +33,13 @@
   function hue(name) { var h = 0, s = String(name || ''); for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
   function shield(name) {
     var s = document.createElement('span'); s.className = 'tlg'; s.textContent = initials(name);
-    s.style.background = 'linear-gradient(145deg,hsl(' + hue(name) + ',55%,42%),hsl(' + ((hue(name) + 40) % 360) + ',55%,28%))'; return s;
+    s.style.cssText = BASE + 'border-radius:5px 5px 9px 9px;color:#fff;font-size:8px;font-weight:800;line-height:18px;text-align:center;letter-spacing:-.3px;overflow:hidden;' +
+      'text-shadow:0 1px 1px rgba(0,0,0,.35);background:linear-gradient(145deg,hsl(' + hue(name) + ',55%,42%),hsl(' + ((hue(name) + 40) % 360) + ',55%,28%))';
+    return s;
   }
   function badge(name, url) {
     if (!url) return shield(name);
-    var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
+    var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.width = 18; n.height = 18; n.style.cssText = BASE + 'object-fit:contain;border-radius:0;background:transparent;'; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
     n.onerror = function () { var k = norm(name); delete ALL[k]; delete ONE[name]; if (n.parentNode) n.parentNode.replaceChild(shield(name), n); };
     n.src = url; return n;
   }

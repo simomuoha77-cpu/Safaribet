@@ -205,3 +205,6 @@ The debug status showed the feed carries no logos (only team names, ids absent) 
 
 ## Addendum - Crests survive "More markets -> Back" (v24)
 router.js cancels every tracked timer/interval/listener on each page change. team-logos.js used a timer debounce, so after one round trip its `timer` flag stayed set and it never painted again. It now uses no timers and no window listeners: a MutationObserver on document.body (the same node for every page) with a microtask debounce, retries and list refreshes driven by "has it been long enough" checks at paint time.
+
+## Addendum - Crest size after Back (v25)
+router.js deletes injected <style> sheets when a page is left, so the crest CSS vanished and crests returned at natural (huge) size after More markets -> Back. Size/shape are now written inline on every crest/shield element (plus width/height attributes), so no style sheet is needed.
