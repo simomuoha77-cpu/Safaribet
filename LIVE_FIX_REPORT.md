@@ -198,3 +198,7 @@ The live logo lookup was not showing anything on the real site, so 396 crests (t
 
 ## Addendum - Crest source switched to Wikipedia (v21)
 The debug status showed the feed carries no logos (only team names, ids absent) and TheSportsDB answered HTTP 403 to the server. Lookups now use the Wikipedia API (en, then es): the club article's image is accepted only if the title shares the team's words, the short description says club/team, and the image is svg/png. Results are cached permanently; `?debug=1` shows `ok/fail/found/bySource/lastError`.
+
+## Addendum - Crests ready before anyone asks (v23)
+- Server: every team in a fixture the provider loads is queued for a crest lookup straight away (`teamLogos.warm`, football-type sports only, 3 parallel workers, results stored permanently), and `GET /api/sports/team-logos/all` returns every known crest in one request.
+- Browser: crests come from the shipped set + the all-crests list, both saved on the phone, so a repeat visit paints them in the first frame; teams with no crest yet get a coloured initials shield instead of a plain letter; images are no longer lazy-loaded.

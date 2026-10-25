@@ -737,6 +737,10 @@ router.getLiveStatus = () => ({
 });
 
 // Team crests: answers at once with what is cached; unknown teams are looked up in the background.
+router.get('/team-logos/all', async (req, res) => {
+  try { res.set('Cache-Control', 'public, max-age=60'); res.json({ success: true, logos: await require('../services/teamLogos').all() }); }
+  catch (e) { res.json({ success: true, logos: {} }); }
+});
 router.get('/team-logos', async (req, res) => {
   try {
     const names = String(req.query.names || '').split('|').slice(0, 80);

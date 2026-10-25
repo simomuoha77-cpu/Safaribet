@@ -23,8 +23,7 @@ const MEM = new Map();            // key -> { url, missing, at }
 const RETRY = new Map();          // key -> next allowed attempt (ms)
 const QUEUE = [];
 const QUEUED = new Set();
-let running = false;
-const GAP_MS = 600, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 400;
+const GAP_MS = 300, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 4000;
 
 function norm(s) {
   return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
@@ -108,26 +107,59 @@ async function fetchOne(name) {
   return '';
 }
 
-async function work() {
-  if (running) return; running = true;
+const WORKERS = 3;
+let active = 0;
+async function runOne() {
+  const { key, name } = QUEUE.shift(); QUEUED.delete(key);
   try {
-    while (QUEUE.length) {
-      const { key, name } = QUEUE.shift(); QUEUED.delete(key);
-      try {
-        const url = await fetchOne(name);
-        const doc = { key, name, url, missing: !url, checkedAt: new Date() };
-        MEM.set(key, { url, missing: !url, at: Date.now() }); url ? STATS.found++ : STATS.notFound++;
-        try { await TeamLogo.updateOne({ key }, { $set: doc }, { upsert: true }); } catch (e) {}
-      } catch (e) { RETRY.set(key, Date.now() + FAIL_TTL); }
-      await new Promise(r => setTimeout(r, GAP_MS));
-    }
-  } finally { running = false; }
+    const url = await fetchOne(name);
+    const doc = { key, name, url, missing: !url, checkedAt: new Date() };
+    MEM.set(key, { url, missing: !url, at: Date.now() }); url ? STATS.found++ : STATS.notFound++; ALL.at = 0;
+    try { await TeamLogo.updateOne({ key }, { $set: doc }, { upsert: true }); } catch (e) {}
+  } catch (e) { RETRY.set(key, Date.now() + FAIL_TTL); }
+  await new Promise(r => setTimeout(r, GAP_MS));
+}
+function work() {
+  while (active < WORKERS && QUEUE.length) { active++; runOne().catch(() => {}).then(() => { active--; work(); }); }
 }
 
 function enqueue(key, name) {
   if (QUEUED.has(key) || QUEUE.length >= MAX_QUEUE) return;
   if ((RETRY.get(key) || 0) > Date.now()) return;
   QUEUED.add(key); QUEUE.push({ key, name }); work();
+}
+
+// ---- ahead-of-time: every team the server loads is looked up before any player asks ----
+const SEEN = new Set(), PENDING = new Set(); let flushT = null;
+function warm(names) {
+  for (const n of names || []) {
+    const k = norm(n); if (!k || SEEN.has(k)) continue;
+    SEEN.add(k); if (SEEN.size > 30000) SEEN.delete(SEEN.values().next().value);
+    if (MEM.has(k)) continue; PENDING.add(JSON.stringify([k, String(n).trim()]));
+  }
+  if (PENDING.size && !flushT) flushT = setTimeout(flush, 2000);
+}
+async function flush() {
+  flushT = null; const batch = [...PENDING].slice(0, 600).map(x => JSON.parse(x)); batch.forEach(b => PENDING.delete(JSON.stringify(b)));
+  let docs = []; try { docs = await TeamLogo.find({ key: { $in: batch.map(b => b[0]) } }).lean(); } catch (e) {}
+  const by = new Map(docs.map(d => [d.key, d]));
+  for (const [k, n] of batch) {
+    const d = by.get(k);
+    if (d) { const at = new Date(d.checkedAt).getTime(); MEM.set(k, { url: d.url, missing: d.missing, at }); if (!d.url && Date.now() - at > MISSING_TTL) enqueue(k, n); }
+    else enqueue(k, n);
+  }
+  if (PENDING.size) flushT = setTimeout(flush, 1500);
+}
+
+// every crest known so far as { normalisedName: url } - one request fills the whole site
+const ALL = { at: 0, data: {} };
+async function all() {
+  if (Date.now() - ALL.at < 30000) return ALL.data;
+  const out = {};
+  try { (await TeamLogo.find({ url: { $ne: '' } }, { key: 1, url: 1 }).lean()).forEach(d => { if (safeUrl(d.url)) out[d.key] = d.url; }); } catch (e) {}
+  for (const [k, v] of MEM) if (v.url && !out[k]) out[k] = v.url;
+  try { const f = require('../providers/sofaBetsProvider').feedLogoFor; } catch (e) {}
+  ALL.at = Date.now(); ALL.data = out; return out;
 }
 
 /** names -> { name: url } for logos already known; unknown names are looked up in the background. */
@@ -163,6 +195,6 @@ async function lookup(names) {
 
 function status() {
   let feed = {}; try { feed = require('../providers/sofaBetsProvider').feedLogoStats(); } catch (e) {}
-  return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: running }, STATS, { feed });
+  return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: active > 0 }, STATS, { feed });
 }
-module.exports = { lookup, norm, pick, pickWiki, titleOk, variants, status, _MEM: MEM };
+module.exports = { warm, all, lookup, norm, pick, pickWiki, titleOk, variants, status, _MEM: MEM };

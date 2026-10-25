@@ -1,73 +1,101 @@
-/* Team crests next to team names (like 1xBet). Watches the match list; every .tname gets a small crest.
-   Known crests come from this phone's saved copy instantly; unknown ones are asked from /api/sports/team-logos,
-   which looks them up in the background, so we ask again a few times. A letter badge shows until a crest is found. */
+/* Team crests next to team names, shown at once.
+   Sources, in order: (1) crests shipped with the site (/crests/index.json), (2) every crest the server has found so far
+   (/api/sports/team-logos/all - one request), (3) a per-team ask for anything still unknown.
+   Both lists are kept on the phone, so a repeat visit paints the crests in the very first frame.
+   A team that has no crest anywhere yet gets a coloured initials shield (same look for every team) instead of a bare letter. */
 (function () {
-  var KEY = 'sb_team_logos_v1', MAXN = 1500, logos = {}, asked = {}, timer = null, rounds = {}, LOCAL = null;
+  var K_LOCAL = 'sb_crest_idx_v2', K_ALL = 'sb_crest_all_v2', K_ONE = 'sb_team_logos_v1', MAXN = 6000;
+  var LOCAL = null, ALL = {}, ONE = {}, asked = {}, rounds = {}, timer = null, allTimer = null, allRuns = 0;
   var STOP = { fc: 1, cf: 1, afc: 1, sc: 1, ac: 1, fk: 1, sk: 1, bk: 1, 'if': 1, ud: 1, cd: 1, sd: 1, club: 1, de: 1, the: 1 };
-  // same rule the crest index was built with (public/crests/index.json): lower-case, no accents, no FC/AC/CF style words
   function norm(s) {
-    s = String(s || '').toLowerCase(); try { s = s.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+    s = String(s || '').toLowerCase(); try { s = s.normalize('NFKD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
     return s.replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(function (w) { return w && !STOP[w]; }).join(' ');
   }
-  function local(name) { var f = LOCAL && LOCAL[norm(name)]; return f ? '/crests/' + f : ''; }
-  try { logos = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { logos = {}; }
-  function save() { try { var k = Object.keys(logos); if (k.length > MAXN) k.slice(0, k.length - MAXN).forEach(function (x) { delete logos[x]; }); localStorage.setItem(KEY, JSON.stringify(logos)); } catch (e) {} }
+  function ls(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  LOCAL = ls(K_LOCAL); ALL = ls(K_ALL) || {}; ONE = ls(K_ONE) || {};
+
   var css = document.createElement('style');
   css.textContent = '.tlg{display:inline-block;width:18px;height:18px;margin-right:7px;vertical-align:-4px;border-radius:50%;flex-shrink:0}' +
-    'img.tlg{object-fit:contain;background:transparent}' +
-    'span.tlg{background:var(--s3);color:var(--mt);font-size:10px;font-weight:800;line-height:18px;text-align:center}';
+    'img.tlg{object-fit:contain;border-radius:0}' +
+    'span.tlg{border-radius:5px 5px 9px 9px;color:#fff;font-size:8px;font-weight:800;line-height:18px;text-align:center;letter-spacing:-.3px;text-shadow:0 1px 1px rgba(0,0,0,.35)}';
   document.head.appendChild(css);
 
-  function nameOf(el) { var t = ''; for (var i = 0; i < el.childNodes.length; i++) if (el.childNodes[i].nodeType === 3) t += el.childNodes[i].nodeValue; return t.trim(); }
-  function badge(name, url) {
-    var n;
-    if (url) { n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.loading = 'lazy'; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
-      n.onerror = function () { delete logos[name]; var s = letter(name); if (n.parentNode) n.parentNode.replaceChild(s, n); }; n.src = url; return n; }
-    return letter(name);
+  function urlFor(name) {
+    var k = norm(name); if (!k) return '';
+    var f = LOCAL && LOCAL[k]; if (f) return '/crests/' + f;
+    return ALL[k] || ONE[name] || '';
   }
-  function letter(name) { var s = document.createElement('span'); s.className = 'tlg'; s.textContent = (name || '?').charAt(0).toUpperCase(); return s; }
+  function initials(name) {
+    var w = String(name || '').replace(/[^A-Za-zÀ-ɏ0-9 ]/g, ' ').split(/\s+/).filter(function (x) { return x && !STOP[x.toLowerCase()]; });
+    if (!w.length) return '?'; return (w.length === 1 ? w[0].slice(0, 2) : w[0].charAt(0) + w[1].charAt(0)).toUpperCase();
+  }
+  function hue(name) { var h = 0, s = String(name || ''); for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+  function shield(name) {
+    var s = document.createElement('span'); s.className = 'tlg'; s.textContent = initials(name);
+    s.style.background = 'linear-gradient(145deg,hsl(' + hue(name) + ',55%,42%),hsl(' + ((hue(name) + 40) % 360) + ',55%,28%))'; return s;
+  }
+  function badge(name, url) {
+    if (!url) return shield(name);
+    var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
+    n.onerror = function () { var k = norm(name); delete ALL[k]; delete ONE[name]; if (n.parentNode) n.parentNode.replaceChild(shield(name), n); };
+    n.src = url; return n;
+  }
+  function nameOf(el) { var t = ''; for (var i = 0; i < el.childNodes.length; i++) if (el.childNodes[i].nodeType === 3) t += el.childNodes[i].nodeValue; return t.trim(); }
 
   function paint() {
     var need = [];
     document.querySelectorAll('.tname').forEach(function (el) {
       var name = nameOf(el); if (!name || name.length > 60) return;
       var cur = el.firstElementChild && el.firstElementChild.classList && el.firstElementChild.classList.contains('tlg') ? el.firstElementChild : null;
-      var url = local(name) || logos[name];
-      if (cur && (url ? cur.tagName === 'IMG' && cur.getAttribute('src') === url : cur.tagName === 'SPAN')) return;
+      var url = urlFor(name);
+      if (cur && (url ? cur.tagName === 'IMG' && cur.getAttribute('src') === url : cur.tagName === 'SPAN')) { if (!url && ready() && !asked[name]) need.push(name); return; }
       var b = badge(name, url);
       if (cur) el.replaceChild(b, cur); else el.insertBefore(b, el.firstChild);
-      if (!url && LOCAL && !asked[name]) need.push(name);
+      if (!url && ready() && !asked[name]) need.push(name);
     });
     if (need.length) ask(need);
   }
+  function ready() { return LOCAL !== null; }
+
   function ask(names) {
     names = names.filter(function (n) { return !asked[n]; }).slice(0, 60); if (!names.length) return;
     names.forEach(function (n) { asked[n] = 1; });
     fetch('/api/sports/team-logos?names=' + encodeURIComponent(names.join('|'))).then(function (r) { return r.json(); }).then(function (d) {
-      var got = 0; if (d && d.logos) Object.keys(d.logos).forEach(function (k) { if (d.logos[k] && logos[k] !== d.logos[k]) { logos[k] = d.logos[k]; got++; } });
-      if (got) { save(); schedule(); }
-      // names the server is still looking up: ask again shortly (max 4 times each)
-      var again = names.filter(function (n) { return !logos[n] && (rounds[n] = (rounds[n] || 0) + 1) <= 4; });
-      if (again.length) setTimeout(function () { again.forEach(function (n) { delete asked[n]; }); ask(again); }, 7000);
+      var got = 0; if (d && d.logos) Object.keys(d.logos).forEach(function (k) { if (d.logos[k] && ONE[k] !== d.logos[k]) { ONE[k] = d.logos[k]; got++; } });
+      if (got) { lsSet(K_ONE, ONE); schedule(); }
+      var again = names.filter(function (n) { return !urlFor(n) && (rounds[n] = (rounds[n] || 0) + 1) <= 4; });
+      if (again.length) setTimeout(function () { again.forEach(function (n) { delete asked[n]; }); ask(again); }, 8000);
     }).catch(function () { names.forEach(function (n) { delete asked[n]; }); });
   }
-  function schedule() { if (timer) return; timer = setTimeout(function () { timer = null; try { paint(); } catch (e) {} }, 120); }
 
-  function loadLocal() {
-    try { var c = sessionStorage.getItem('sb_crest_idx'); if (c) { LOCAL = JSON.parse(c); schedule(); return; } } catch (e) {}
-    fetch('/crests/index.json').then(function (r) { return r.json(); }).then(function (d) {
-      LOCAL = d || {}; try { sessionStorage.setItem('sb_crest_idx', JSON.stringify(LOCAL)); } catch (e) {} paint();
-    }).catch(function () { LOCAL = {}; schedule(); });
+  // one request that brings every crest the server knows; repeated for the first minutes while it is still finding more
+  function loadAll() {
+    fetch('/api/sports/team-logos/all').then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.logos) {
+        var ks = Object.keys(d.logos), changed = ks.length !== Object.keys(ALL).length;
+        if (ks.length > MAXN) ks = ks.slice(ks.length - MAXN);
+        var m = {}; ks.forEach(function (k) { m[k] = d.logos[k]; }); ALL = m;
+        if (changed) { lsSet(K_ALL, ALL); schedule(); }
+      }
+    }).catch(function () {});
+    if (++allRuns < 12) allTimer = setTimeout(loadAll, allRuns < 4 ? 15000 : 45000);
   }
+  function loadLocal() {
+    if (LOCAL) return;                                              // already on the phone from an earlier visit
+    fetch('/crests/index.json').then(function (r) { return r.json(); }).then(function (d) { LOCAL = d || {}; lsSet(K_LOCAL, LOCAL); paint(); })
+      .catch(function () { LOCAL = {}; schedule(); });
+  }
+  function schedule() { if (timer) return; timer = setTimeout(function () { timer = null; try { paint(); } catch (e) {} }, 60); }
+
   function start() {
-    loadLocal();
-    // Watch the whole page, not one list: going back / switching tabs rebuilds the list, and a watcher stuck on the old
-    // list would never see the new team names. Also re-check on back/forward, tab focus, and every 2 s as a safety net.
+    paint();                                                        // first frame: everything already on the phone is drawn now
+    loadLocal(); loadAll();
+    // Watch the whole page: going back / switching tabs rebuilds the list. Re-check on back/forward, focus, and every 2 s.
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     window.addEventListener('pageshow', schedule); window.addEventListener('popstate', function () { setTimeout(schedule, 50); setTimeout(schedule, 400); });
     document.addEventListener('visibilitychange', schedule); window.addEventListener('focus', schedule);
     setInterval(function () { if (!document.hidden) schedule(); }, 2000);
-    schedule();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

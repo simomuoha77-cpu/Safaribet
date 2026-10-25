@@ -33,6 +33,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   await t('aliases and club-prefix variants', () => { assert.strictEqual(L.variants('Man Utd')[0], 'Manchester United'); assert.ok(L.variants('CA Aldosivi').includes('Aldosivi')); });
   await t('status reports counters', () => { const st = L.status(); assert.ok(st.ok >= 1 && st.found >= 1); });
+  await t('warm() looks teams up before anyone asks, all() returns them by key', async () => {
+    L.warm(['Leeds United', 'Boca']); await sleep(3500);
+    const all = await L.all(); assert.ok(/Leeds\.svg/.test(all['leeds united'])); assert.ok(/boca\.png/.test(all['boca']));
+  });
   await t('caps names per request', async () => { const r = await L.lookup(Array.from({ length: 500 }, (_, i) => 'T' + i)); assert.deepStrictEqual(r, {}); });
   console.log(passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
 })();

@@ -1761,6 +1761,7 @@ function logoFrom(obj, side) {
 }
 function harvestTeamLogos(raw, source, nestedTeams, home, away) {
   FEED_SAMPLE.fixtures++;
+  if (!/tennis|table/i.test(String(raw.sport_name || raw.sport || ''))) require('../services/teamLogos').warm([home, away]);   // look crests up before anyone asks
   if (!FEED_SAMPLE.topKeys) FEED_SAMPLE.topKeys = Object.keys(raw).slice(0, 60);
   const sides = [['home', home, [source.homeTeam, source.home_team, source.home, nestedTeams.home, nestedTeams.Home]], ['away', away, [source.awayTeam, source.away_team, source.away, nestedTeams.away, nestedTeams.Away]]];
   for (const [side, name, objs] of sides) {
