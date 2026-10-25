@@ -4,7 +4,7 @@
  * Match data from the odds feed has no logos, so crests come from TheSportsDB (free key "3", override with
  * THESPORTSDB_KEY). Rules that keep this safe on a free host:
  *   - the player never waits: /team-logos answers at once with what is already known and queues the rest;
- *   - lookups run one at a time, ~2.5 s apart (the free key allows about 30 a minute);
+ *   - lookups run one at a time, ~0.6 s apart;
  *   - a found logo is kept forever (MongoDB + memory); "no logo found" is retried after 3 days;
  *   - a network failure is NOT remembered as "missing" - it is retried after 10 minutes.
  */
@@ -24,7 +24,7 @@ const RETRY = new Map();          // key -> next allowed attempt (ms)
 const QUEUE = [];
 const QUEUED = new Set();
 let running = false;
-const GAP_MS = 2500, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 400;
+const GAP_MS = 600, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 400;
 
 function norm(s) {
   return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
@@ -36,7 +36,7 @@ const ALIAS = { 'man united': 'Manchester United', 'man utd': 'Manchester United
   'brighton': 'Brighton and Hove Albion', 'leicester': 'Leicester City', 'leeds': 'Leeds United', 'nottm forest': 'Nottingham Forest', 'forest': 'Nottingham Forest',
   'psg': 'Paris Saint-Germain', 'paris sg': 'Paris Saint-Germain', 'inter': 'Inter Milan', 'internazionale': 'Inter Milan', 'ac milan': 'AC Milan', 'milan': 'AC Milan',
   'atletico madrid': 'Atletico Madrid', 'bayern': 'Bayern Munich', 'bayern munchen': 'Bayern Munich', 'dortmund': 'Borussia Dortmund', 'leverkusen': 'Bayer Leverkusen' };
-const STATS = { ok: 0, fail: 0, found: 0, notFound: 0, lastError: '', lastOkAt: 0 };
+const STATS = { source: 'wikipedia', ok: 0, fail: 0, found: 0, notFound: 0, bySource: {}, lastError: '', lastOkAt: 0 };
 function variants(name) {
   const out = [], add = v => { v = String(v || '').trim(); if (v && !out.includes(v)) out.push(v); };
   const a = ALIAS[norm(name)]; if (a) add(a);
@@ -56,24 +56,54 @@ function pick(teams, name) {
   return best ? safeUrl(best.strBadge) : '';
 }
 
-async function searchOnce(q) {
-  const key = process.env.THESPORTSDB_KEY || '3';
-  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+// Source: Wikipedia (free, no key; TheSportsDB answered HTTP 403 to this server). The club's article image is its crest.
+// A page is accepted only when its title shares the team's words, its short description says it is a club/team,
+// and the image is a vector/PNG (crests are; match photos are JPG).
+const LANGS = ['en', 'es'];
+const DESC = /(football|soccer|futsal|fútbol|futbol|basketball|baloncesto|handball|rugby|volleyball|hockey|cricket|sports? club|club|team|equipo)/i;
+function tokens(s) { return norm(s).split(' ').filter(w => w.length > 1); }
+function titleOk(title, name, variant) {
+  const tt = new Set(tokens(title));
+  for (const base of [name, variant]) {
+    const w = tokens(base); if (!w.length) continue;
+    const hit = w.filter(x => tt.has(x)).length;
+    if (hit / w.length >= 0.5 && hit >= 1 && (w.length > 1 || hit === 1)) return true;
+  }
+  return false;
+}
+async function wiki(lang, q) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 9000);
+  const suffix = lang === 'es' ? ' club de fútbol' : ' football club';
+  const url = 'https://' + lang + '.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrlimit=4&gsrsearch=' + encodeURIComponent(q + suffix) +
+    '&prop=pageimages%7Cdescription&piprop=thumbnail%7Cname&pithumbsize=96';
   try {
-    const r = await fetch('https://www.thesportsdb.com/api/v1/json/' + encodeURIComponent(key) + '/searchteams.php?t=' + encodeURIComponent(q), { signal: ctl.signal });
+    const r = await fetch(url, { signal: ctl.signal, headers: { 'User-Agent': 'SafariBet/1.0 (https://safaribet.top; team crest lookup)', 'Accept': 'application/json' } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json(); STATS.ok++; STATS.lastOkAt = Date.now();
-    return d && d.teams;
+    const pages = (d && d.query && d.query.pages) || [];
+    return pages.slice().sort((x, y) => (x.index || 9) - (y.index || 9));
   } catch (e) { STATS.fail++; STATS.lastError = String(e && e.message || e).slice(0, 120); throw e; }
   finally { clearTimeout(timer); }
 }
+function pickWiki(pages, name, variant) {
+  for (const pg of pages) {
+    const src = pg && pg.thumbnail && pg.thumbnail.source, file = String(pg && pg.pageimage || '');
+    if (!src || !/\.(svg|png)$/i.test(file)) continue;
+    if (pg.description && !DESC.test(pg.description)) continue;
+    if (!titleOk(pg.title, name, variant)) continue;
+    const u = safeUrl(src); if (u) return u;
+  }
+  return '';
+}
 async function fetchOne(name) {
   const vs = variants(name);
-  for (let i = 0; i < vs.length; i++) {
-    if (i) await new Promise(r => setTimeout(r, 1200));
-    const teams = await searchOnce(vs[i]);
-    const url = pick(teams, name) || pick(teams, vs[i]);
-    if (url) return url;
+  for (const lang of LANGS) {
+    for (let i = 0; i < vs.length; i++) {
+      const pages = await wiki(lang, vs[i]);
+      const url = pickWiki(pages, name, vs[i]);
+      if (url) { STATS.bySource[lang] = (STATS.bySource[lang] || 0) + 1; return url; }
+      await new Promise(r => setTimeout(r, 350));
+    }
   }
   return '';
 }
@@ -135,4 +165,4 @@ function status() {
   let feed = {}; try { feed = require('../providers/sofaBetsProvider').feedLogoStats(); } catch (e) {}
   return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: running }, STATS, { feed });
 }
-module.exports = { lookup, norm, pick, variants, status, _MEM: MEM };
+module.exports = { lookup, norm, pick, pickWiki, titleOk, variants, status, _MEM: MEM };

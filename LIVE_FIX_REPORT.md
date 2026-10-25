@@ -195,3 +195,6 @@ The live logo lookup was not showing anything on the real site, so 396 crests (t
 
 ## Addendum - Crests for every team (v20)
 `sofaBetsProvider.normalizeMatch` now keeps any crest/image URL the feed sends for a team (flat fields such as home_logo, or nested team objects), by team name. `/api/sports/team-logos` answers from the feed first, then the cached TheSportsDB lookup. `?debug=1` shows which logo-looking fields the feed really has (`status.feed.sample.logoFields`) so the next step can be chosen from facts.
+
+## Addendum - Crest source switched to Wikipedia (v21)
+The debug status showed the feed carries no logos (only team names, ids absent) and TheSportsDB answered HTTP 403 to the server. Lookups now use the Wikipedia API (en, then es): the club article's image is accepted only if the title shares the team's words, the short description says club/team, and the image is svg/png. Results are cached permanently; `?debug=1` shows `ok/fail/found/bySource/lastError`.
