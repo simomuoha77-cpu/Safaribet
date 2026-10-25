@@ -211,3 +211,6 @@ router.js deletes injected <style> sheets when a page is left, so the crest CSS 
 
 ## Addendum - Crest script no longer re-scans the page (v26)
 The v25 script re-scanned every `.tname` on the page after any DOM change; on a long match list that is scrolled (rows added/removed constantly) this made the page hang. The script now looks only at rows that were just added, ignores its own badges (no feedback loop), caches name normalisation, and blacklists crest URLs that fail to load. Stress test (3000 rows, scroll up/down rounds, 10000 name rewrites, failing images): one badge per row, no duplicates, zero work when idle, about half the time of v25 for the initial 3000 rows.
+
+## Addendum - Bottom tabs on the match page (v27)
+`public/pages/match.html` now shows the same bottom tab bar as the home page (Home, Bet Slip, Casino, My Bets, Account) at all times. The green "N selections / View Slip" bar is removed; the Bet Slip tab carries a red count badge and opens the slip (`/?openSlip=1`). The Bet Builder bar sits just above the tabs and the page has extra bottom padding so nothing is hidden behind them.

@@ -20,7 +20,7 @@
 :root{--g:#00c853;--bg:#0a0e0a;--s1:#111711;--s2:#182018;--s3:#1e271e;--bd:rgba(0,200,83,0.1);--tx:#e8f5e9;--mt:#6a8a6a;--yl:#ffd600;--rd:#ff3b3b}
 html[data-theme="light"]{--g:#00a844;--bg:#f4f7f4;--s1:#ffffff;--s2:#eef3ee;--s3:#e4ece4;--bd:rgba(0,140,58,0.18);--tx:#14231a;--mt:#5c7a63;--yl:#b8860b;--rd:#d32f2f}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:90px;transition:background 0.2s,color 0.2s}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:calc(90px + 56px + env(safe-area-inset-bottom));transition:background 0.2s,color 0.2s}
 .topbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--s1);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
 .back{font-size:20px;color:var(--tx);background:none;border:none;cursor:pointer;padding:4px}
 .topbar-ttl{font-size:13px;color:var(--mt);flex:1}
@@ -89,13 +89,20 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 
 .loading{text-align:center;padding:60px 20px;color:var(--mt);font-size:13px}
 
-.slip-bar{position:fixed;bottom:0;left:0;right:0;background:var(--g);color:#04140a;padding:14px 16px;display:none;align-items:center;justify-content:space-between;font-weight:700;cursor:pointer;z-index:20}
+/* bottom tab bar - same as the home page (Home, Bet Slip, Casino, My Bets, Account); replaces the old green "View Slip" bar */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:199;background:rgba(8,12,8,.98);border-top:1px solid var(--bd);display:flex;height:calc(56px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+html[data-theme="light"] .bnav{background:rgba(255,255,255,.98)}
+.bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--mt);cursor:pointer;gap:2px;position:relative;padding:6px 0;letter-spacing:.3px;text-transform:uppercase}
+.bni.on{color:var(--g)}
+.bni-ic{width:26px;height:26px;display:flex;align-items:center;justify-content:center}
+.bni svg{width:22px;height:22px;fill:currentColor}
+.bni-badge{position:absolute;top:-4px;right:-8px;min-width:15px;height:15px;border-radius:8px;background:var(--rd);color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 0 2px #0a0e0a}
 
 .mode-toggle{display:flex;gap:8px;padding:10px 12px;background:var(--s1);border-bottom:1px solid var(--bd)}
 .mode-btn{flex:1;padding:9px;border-radius:8px;border:1px solid var(--bd);background:var(--s2);color:var(--mt);font-weight:700;font-size:12px;cursor:pointer}
 .mode-btn.active{background:var(--g);color:#04140a;border-color:var(--g)}
 
-.builder-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);padding:12px 16px;z-index:20;box-shadow:0 -4px 16px rgba(0,0,0,0.3)}
+.builder-bar{display:none;position:fixed;bottom:calc(56px + env(safe-area-inset-bottom));left:0;right:0;background:var(--s1);border-top:1px solid var(--bd);padding:12px 16px;z-index:20;box-shadow:0 -4px 16px rgba(0,0,0,0.3)}
 .builder-bar-top{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-bottom:6px}
 .builder-note{font-size:10px;color:var(--mt);line-height:1.4;margin-bottom:10px}
 .field-row{display:flex;gap:8px}
@@ -129,10 +136,31 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 
 <div class="main" id="marketsContainer"><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b><b></b></div></div><div class="mk-sk"><i class="t"></i><div class="r"><b></b><b></b></div></div></div>
 
-<div class="slip-bar" id="slipBar" onclick="SB.go('/?openSlip=1')">
-  <span id="slipCount">0 selections</span>
-  <span id="slipOdds">View Slip on Home →</span>
-</div>
+<nav class="bnav" id="matchNav">
+  <div class="bni" onclick="SB.go('/')">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
+    Home
+  </div>
+  <div class="bni" id="bni-slip" onclick="SB.go('/?openSlip=1')">
+    <div class="bni-ic" style="position:relative">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+      <span class="bni-badge" id="slipTabBadge" style="display:none">0</span>
+    </div>
+    Bet Slip
+  </div>
+  <div class="bni" onclick="SB.go('/casino')">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm4 4v2h2V8H8zm6 0v2h2V8h-2zm-6 6v2h2v-2H8zm6 0v2h2v-2h-2zm-3-3v2h2v-2h-2z"/></svg></div>
+    Casino
+  </div>
+  <div class="bni" onclick="SB.go('/my-bets')">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg></div>
+    My Bets
+  </div>
+  <div class="bni" onclick="SB.go('/account')">
+    <div class="bni-ic"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+    Account
+  </div>
+</nav>
 
 <div class="builder-bar" id="builderBar">
   <div class="builder-bar-top">
@@ -733,7 +761,6 @@ function setMode(m){
   mode = m;
   document.getElementById('modeBtnSlip').classList.toggle('active', m==='slip');
   document.getElementById('modeBtnBuilder').classList.toggle('active', m==='builder');
-  document.getElementById('slipBar').style.display = (m==='slip' && slip.length) ? 'flex' : 'none';
   document.getElementById('builderBar').style.display = (m==='builder') ? 'block' : 'none';
   // Clear visual selection state and re-apply for the active mode only
   document.querySelectorAll('.odd-btn').forEach(el => el.classList.remove('sel'));
@@ -860,12 +887,9 @@ async function placeBetBuilder(){
 }
 
 function updateSlipBar(){
-  const bar = document.getElementById('slipBar');
-  if (!slip.length || mode !== 'slip') { bar.style.display = 'none'; return; }
-  bar.style.display = 'flex';
-  document.getElementById('slipCount').textContent = `${slip.length} selection${slip.length>1?'s':''}`;
-  const totalOdds = slip.reduce((acc,s)=>acc*s.odds, 1);
-  document.getElementById('slipOdds').textContent = `Odds ${totalOdds.toFixed(2)} · View Slip →`;
+  // the Bet Slip tab in the bottom bar shows how many selections are in the slip
+  const badge = document.getElementById('slipTabBadge');
+  if (badge) { badge.style.display = slip.length ? 'flex' : 'none'; badge.textContent = slip.length; }
 }
 
 // Refresh live score/minute periodically without losing selections
