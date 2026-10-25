@@ -171,6 +171,8 @@ app.use(express.static(path.join(__dirname, '../public'), {
     } else if (filePath.endsWith('sw.js')) {
       res.setHeader('Cache-Control', 'no-cache');            // the worker itself must always be re-checked
       res.setHeader('Service-Worker-Allowed', '/');
+    } else if (/[\\/]crests[\\/]/.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');  // team crests never change under the same name
     } else if (/\.(png|jpe?g|webp|svg|ico|woff2?)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');               // images/fonts: always revalidated (ETag -> cheap 304), so a replaced logo/poster shows on the next open
     }

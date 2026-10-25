@@ -2,7 +2,14 @@
    Known crests come from this phone's saved copy instantly; unknown ones are asked from /api/sports/team-logos,
    which looks them up in the background, so we ask again a few times. A letter badge shows until a crest is found. */
 (function () {
-  var KEY = 'sb_team_logos_v1', MAXN = 1500, logos = {}, asked = {}, timer = null, rounds = {};
+  var KEY = 'sb_team_logos_v1', MAXN = 1500, logos = {}, asked = {}, timer = null, rounds = {}, LOCAL = null;
+  var STOP = { fc: 1, cf: 1, afc: 1, sc: 1, ac: 1, fk: 1, sk: 1, bk: 1, 'if': 1, ud: 1, cd: 1, sd: 1, club: 1, de: 1, the: 1 };
+  // same rule the crest index was built with (public/crests/index.json): lower-case, no accents, no FC/AC/CF style words
+  function norm(s) {
+    s = String(s || '').toLowerCase(); try { s = s.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+    return s.replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(function (w) { return w && !STOP[w]; }).join(' ');
+  }
+  function local(name) { var f = LOCAL && LOCAL[norm(name)]; return f ? '/crests/' + f : ''; }
   try { logos = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { logos = {}; }
   function save() { try { var k = Object.keys(logos); if (k.length > MAXN) k.slice(0, k.length - MAXN).forEach(function (x) { delete logos[x]; }); localStorage.setItem(KEY, JSON.stringify(logos)); } catch (e) {} }
   var css = document.createElement('style');
@@ -25,11 +32,11 @@
     document.querySelectorAll('.tname').forEach(function (el) {
       var name = nameOf(el); if (!name || name.length > 60) return;
       var cur = el.firstElementChild && el.firstElementChild.classList && el.firstElementChild.classList.contains('tlg') ? el.firstElementChild : null;
-      var url = logos[name];
+      var url = local(name) || logos[name];
       if (cur && (url ? cur.tagName === 'IMG' && cur.getAttribute('src') === url : cur.tagName === 'SPAN')) return;
       var b = badge(name, url);
       if (cur) el.replaceChild(b, cur); else el.insertBefore(b, el.firstChild);
-      if (!url && !asked[name]) need.push(name);
+      if (!url && LOCAL && !asked[name]) need.push(name);
     });
     if (need.length) ask(need);
   }
@@ -46,7 +53,14 @@
   }
   function schedule() { if (timer) return; timer = setTimeout(function () { timer = null; try { paint(); } catch (e) {} }, 120); }
 
+  function loadLocal() {
+    try { var c = sessionStorage.getItem('sb_crest_idx'); if (c) { LOCAL = JSON.parse(c); schedule(); return; } } catch (e) {}
+    fetch('/crests/index.json').then(function (r) { return r.json(); }).then(function (d) {
+      LOCAL = d || {}; try { sessionStorage.setItem('sb_crest_idx', JSON.stringify(LOCAL)); } catch (e) {} paint();
+    }).catch(function () { LOCAL = {}; schedule(); });
+  }
   function start() {
+    loadLocal();
     var root = document.getElementById('matchList') || document.body;
     new MutationObserver(schedule).observe(root, { childList: true, subtree: true });
     schedule();
