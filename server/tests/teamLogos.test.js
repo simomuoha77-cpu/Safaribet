@@ -21,11 +21,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   await t('found logo is cached: no second API call', async () => { const n = calls.length; await L.lookup(['Leeds United']); await L.lookup(['Leeds United']); assert.strictEqual(calls.length, n); });
   await t('not found is remembered as missing, not asked again', async () => {
-    await L.lookup(['Nobody FC']); await sleep(2700); const n = calls.length; const r = await L.lookup(['Nobody FC']); assert.deepStrictEqual(r, {}); await sleep(50); assert.strictEqual(calls.length, n); assert.strictEqual(db.get('nobody').missing, true);
+    await L.lookup(['Nobody FC']); await sleep(4800); const n = calls.length; const r = await L.lookup(['Nobody FC']); assert.deepStrictEqual(r, {}); await sleep(50); assert.strictEqual(calls.length, n); assert.strictEqual(db.get('nobody').missing, true);
   });
   await t('network failure is not remembered as missing', async () => {
     mode = 'fail'; await L.lookup(['Brand New Team']); await sleep(2800); assert.ok(!db.has('brand new team')); mode = 'ok';
   });
+  await t('aliases and club-prefix variants', () => { assert.strictEqual(L.variants('Man Utd')[0], 'Manchester United'); assert.ok(L.variants('CA Aldosivi').includes('Aldosivi')); });
+  await t('status reports counters', () => { const st = L.status(); assert.ok(st.ok >= 1 && st.found >= 1); });
   await t('caps names per request', async () => { const r = await L.lookup(Array.from({ length: 500 }, (_, i) => 'T' + i)); assert.deepStrictEqual(r, {}); });
   console.log(passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
 })();

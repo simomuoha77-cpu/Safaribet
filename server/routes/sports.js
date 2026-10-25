@@ -740,9 +740,10 @@ router.getLiveStatus = () => ({
 router.get('/team-logos', async (req, res) => {
   try {
     const names = String(req.query.names || '').split('|').slice(0, 80);
-    const logos = await require('../services/teamLogos').lookup(names);
+    const svc = require('../services/teamLogos');
+    const logos = await svc.lookup(names);
     res.set('Cache-Control', 'public, max-age=60');
-    res.json({ success: true, logos });
+    res.json(req.query.debug ? { success: true, logos, status: svc.status() } : { success: true, logos });
   } catch (e) { res.json({ success: true, logos: {} }); }
 });
 

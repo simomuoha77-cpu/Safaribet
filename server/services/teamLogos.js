@@ -31,6 +31,18 @@ function norm(s) {
     .replace(/&/g, ' and ').replace(/\b(fc|cf|afc|sc|ac|fk|sk|bk|if|ud|cd|sd|club|de|the)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ').trim();
 }
+const ALIAS = { 'man united': 'Manchester United', 'man utd': 'Manchester United', 'manchester utd': 'Manchester United', 'man city': 'Manchester City',
+  'spurs': 'Tottenham Hotspur', 'tottenham': 'Tottenham Hotspur', 'wolves': 'Wolverhampton Wanderers', 'newcastle': 'Newcastle United', 'west ham': 'West Ham United',
+  'brighton': 'Brighton and Hove Albion', 'leicester': 'Leicester City', 'leeds': 'Leeds United', 'nottm forest': 'Nottingham Forest', 'forest': 'Nottingham Forest',
+  'psg': 'Paris Saint-Germain', 'paris sg': 'Paris Saint-Germain', 'inter': 'Inter Milan', 'internazionale': 'Inter Milan', 'ac milan': 'AC Milan', 'milan': 'AC Milan',
+  'atletico madrid': 'Atletico Madrid', 'bayern': 'Bayern Munich', 'bayern munchen': 'Bayern Munich', 'dortmund': 'Borussia Dortmund', 'leverkusen': 'Bayer Leverkusen' };
+const STATS = { ok: 0, fail: 0, found: 0, notFound: 0, lastError: '', lastOkAt: 0 };
+function variants(name) {
+  const out = [], add = v => { v = String(v || '').trim(); if (v && !out.includes(v)) out.push(v); };
+  const a = ALIAS[norm(name)]; if (a) add(a);
+  add(name); add(String(name).replace(/\b(FC|CF|AFC|SC|AC|FK|SK|BK|IF|UD|CD|SD|CA|CS|SS|US|AS|AD)\b\.?/gi, ' ').replace(/\s+/g, ' '));
+  return out.slice(0, 3);
+}
 const safeUrl = u => /^https:\/\/[a-z0-9.-]+\/[^\s"'<>]+$/i.test(u || '') ? u : '';
 
 function pick(teams, name) {
@@ -44,15 +56,26 @@ function pick(teams, name) {
   return best ? safeUrl(best.strBadge) : '';
 }
 
-async function fetchOne(name) {
+async function searchOnce(q) {
   const key = process.env.THESPORTSDB_KEY || '3';
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
   try {
-    const r = await fetch('https://www.thesportsdb.com/api/v1/json/' + encodeURIComponent(key) + '/searchteams.php?t=' + encodeURIComponent(name), { signal: ctl.signal });
+    const r = await fetch('https://www.thesportsdb.com/api/v1/json/' + encodeURIComponent(key) + '/searchteams.php?t=' + encodeURIComponent(q), { signal: ctl.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    const d = await r.json();
-    return pick(d && d.teams, name);
-  } finally { clearTimeout(timer); }
+    const d = await r.json(); STATS.ok++; STATS.lastOkAt = Date.now();
+    return d && d.teams;
+  } catch (e) { STATS.fail++; STATS.lastError = String(e && e.message || e).slice(0, 120); throw e; }
+  finally { clearTimeout(timer); }
+}
+async function fetchOne(name) {
+  const vs = variants(name);
+  for (let i = 0; i < vs.length; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1200));
+    const teams = await searchOnce(vs[i]);
+    const url = pick(teams, name) || pick(teams, vs[i]);
+    if (url) return url;
+  }
+  return '';
 }
 
 async function work() {
@@ -63,7 +86,7 @@ async function work() {
       try {
         const url = await fetchOne(name);
         const doc = { key, name, url, missing: !url, checkedAt: new Date() };
-        MEM.set(key, { url, missing: !url, at: Date.now() });
+        MEM.set(key, { url, missing: !url, at: Date.now() }); url ? STATS.found++ : STATS.notFound++;
         try { await TeamLogo.updateOne({ key }, { $set: doc }, { upsert: true }); } catch (e) {}
       } catch (e) { RETRY.set(key, Date.now() + FAIL_TTL); }
       await new Promise(r => setTimeout(r, GAP_MS));
@@ -106,4 +129,5 @@ async function lookup(names) {
   return out;
 }
 
-module.exports = { lookup, norm, pick, _MEM: MEM };
+function status() { return Object.assign({ queued: QUEUE.length, cached: MEM.size, working: running }, STATS); }
+module.exports = { lookup, norm, pick, variants, status, _MEM: MEM };
