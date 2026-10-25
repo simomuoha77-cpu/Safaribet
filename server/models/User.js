@@ -31,6 +31,19 @@ const userSchema = new mongoose.Schema({
   kycSubmittedAt: { type: Date },
   kycReviewedAt:  { type: Date },
   kycRejectReason:{ type: String },
+  // ── Admin-managed controls (see routes/adminExtra.js, services/adminControls.js) ──
+  bettingRestricted:   { type: Boolean, default: false },   // cannot place bets; can still withdraw
+  restrictionReason:   { type: String, default: '' },
+  withdrawalHold:      { type: Boolean, default: false },   // cannot withdraw
+  withdrawalHoldReason:{ type: String, default: '' },
+  withdrawalReview:    { type: Boolean, default: false },   // every withdrawal waits for manual approval
+  cashoutDisabled:     { type: Boolean, default: false },
+  maxStakePerBet:      { type: Number, default: null },
+  maxWithdrawalPerDay: { type: Number, default: null },
+  cooloffUntil:        { type: Date, default: null },
+  suspendReason:       { type: String, default: '' },
+  tags:                { type: [String], default: [] },
+  adminNotes:          { type: [{ text: String, by: String, at: { type: Date, default: Date.now } }], default: [] },
   createdAt:    { type: Date, default: Date.now }
 }, { timestamps: true });
 

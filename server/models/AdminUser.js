@@ -7,6 +7,8 @@ const adminUserSchema = new mongoose.Schema({
   totpSecret:   { type: String, required: true }, // base32 secret, set once at account creation — scanned into an authenticator app
   totpEnabled:  { type: Boolean, default: true },  // 2FA is mandatory for admin accounts, always true in practice, kept as a field for a future emergency-disable path if ever needed
   isActive:     { type: Boolean, default: true },
+  adminRole:    { type: String, enum: ['superadmin','finance','trader','support','marketing'], default: 'superadmin' }, // existing accounts stay superadmin
+  extraPermissions: { type: [String], default: [] },
   lastLoginAt:  { type: Date },
   createdAt:    { type: Date, default: Date.now }
 });

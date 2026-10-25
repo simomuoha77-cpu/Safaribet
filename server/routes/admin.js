@@ -28,6 +28,10 @@ const adminLimiter = rateLimit({
 router.use(adminLimiter);
 router.use(requireAdmin);
 
+// Extra admin features: roles + approvals gate, markets, exposure, settlement review, reconciliation, user management,
+// campaigns, alerts and reports (see routes/adminExtra.js and routes/adminUsers.js). Mounted first so its role gate covers every route below.
+router.use(require('./adminExtra').router);
+
 // ── IN-MEMORY STORE (settings, blacklist, content, audit) ──
 // NOTE: `content` (banner/popup/notice) is now backed by MongoDB via SiteContent —
 // see loadPersistedContent() below. The in-memory copy here is just a fast-read

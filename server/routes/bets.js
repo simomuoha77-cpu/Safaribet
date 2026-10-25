@@ -10,6 +10,7 @@ const User    = require('../models/User');
 const Transaction = require('../models/Transaction');
 const walletService = require('../services/walletService');
 const router  = express.Router();
+const adminControls = require('../services/adminControls');
 
 // Odds older than this are considered stale and rejected at bet-placement time,
 // even if a Match document still has hasOdds:true from an earlier sync (e.g. the
@@ -525,7 +526,7 @@ async function placeBetHandler(req, res) {
 // also stored on the bet itself, so this still works after a restart or once the in-memory entry
 // has expired. GET /place-status/:key lets the app ask "was my bet placed?" while it waits.
 const placeInflight = new Map(); // userId:key -> { done, result, p }
-router.post('/place', auth, betLimiter, async (req, res) => {
+router.post('/place', auth, adminControls.bettingGuard, betLimiter, async (req, res) => {
   const key = String(req.headers['x-idempotency-key'] || '').trim().slice(0, 80);
   if (!key) return placeBetHandler(req, res);
   req.idemKey = key;
@@ -724,7 +725,7 @@ router.post('/settle', auth, async (req, res) => {
 });
 
 // ── PLACE BET BUILDER (multiple markets, same match) ──
-router.post('/place-builder', auth, betLimiter, async (req, res) => {
+router.post('/place-builder', auth, adminControls.bettingGuard, betLimiter, async (req, res) => {
   try {
     const { legs, stake } = req.body;
     const bettingService = require('../services/bettingService');
@@ -800,7 +801,7 @@ router.post('/place-builder', auth, betLimiter, async (req, res) => {
 });
 
 // ── PLACE SYSTEM BET (e.g. 2/3, 3/4) ──
-router.post('/place-system', auth, betLimiter, async (req, res) => {
+router.post('/place-system', auth, adminControls.bettingGuard, betLimiter, async (req, res) => {
   try {
     const { selections, stake, pick } = req.body;
     const bettingService = require('../services/bettingService');
@@ -898,6 +899,7 @@ router.post('/place-system', auth, betLimiter, async (req, res) => {
 // ── CASH OUT: GET QUOTE ──
 router.get('/:code/cashout-quote', auth, async (req, res) => {
   try {
+    if (adminControls.cashoutBlocked(req.user)) return res.status(403).json({ success: false, message: 'Cash out is not available on your account. Please contact support.' });
     const cashoutService = require('../services/cashoutService');
     const bet = await Bet.findOne({ betCode: req.params.code.toUpperCase(), userId: req.user._id });
     if (!bet) return res.status(404).json({ success: false, message: 'Bet not found' });

@@ -148,6 +148,9 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
     const u = uFull;
     if (!u) return res.status(404).json({ success: false, message: 'Account not found' });
     if (!u.isActive) return res.status(403).json({ success: false, message: 'Account suspended' });
+    // Admin rules: hold, daily cap, new-account / flagged review (see services/adminControls.js)
+    const wdRule = await require('../services/adminControls').evaluateWithdrawal(u, amount);
+    if (wdRule.block) return res.status(403).json({ success: false, message: wdRule.block });
 
     const locked = await walletService.lockForWithdrawal(req.user._id, amount, null);
     if (!locked) {
@@ -173,7 +176,7 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
       amount:      -amount,
       balance:     user.balance,
       reference:   ref,
-      description: `Withdrawal KES ${amount} to ${phone}`,
+      description: `Withdrawal KES ${amount} to ${phone}` + (wdRule.review ? ` - review: ${wdRule.review}` : ''),
       status:      'pending'
     });
 
@@ -184,13 +187,13 @@ router.post('/request', auth, wdLimiter, dailyLimiter, async (req, res) => {
     // 'pending' with funds already locked — no B2C call is attempted here at
     // all — until an admin reviews and approves it via POST /admin/withdrawal/approve.
     const autoApproveLimit = limits.withdrawalAutoApproveLimit ?? 1000;
-    const needsApproval = amount > autoApproveLimit;
+    const needsApproval = amount > autoApproveLimit || !!wdRule.review;
 
     if (needsApproval) {
       console.log(`⏳ Withdrawal KES ${amount} exceeds auto-approve limit (KES ${autoApproveLimit}) — held for admin approval [${ref}]`);
       return res.json({
         success:    true,
-        message:    `Withdrawal of KES ${amount.toLocaleString()} requires admin approval since it's above KES ${autoApproveLimit.toLocaleString()}. You'll be paid once approved.`,
+        message:    amount > autoApproveLimit ? `Withdrawal of KES ${amount.toLocaleString()} requires admin approval since it's above KES ${autoApproveLimit.toLocaleString()}. You'll be paid once approved.` : `Your withdrawal of KES ${amount.toLocaleString()} is being reviewed. You'll be paid once it is approved.`,
         reference:  ref,
         newBalance: user.balance,
         pendingApproval: true

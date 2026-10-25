@@ -121,3 +121,35 @@ There is no build step in this project (static files plus Node), so there is no 
 - If SofaBets publishes an official result for the market inside those minutes, it is still used. Otherwise the stake is returned, as the My Bets message already tells the player.
 - To stop offering markets that can only be refunded, set `SHOW_ALL_MARKETS=0` (the app then offers only markets it can grade).
 - Tested: existing settlement tests (15 + 4). The refund timing itself was not run against real bets.
+
+## Addendum: admin panel upgrade (17 new screens)
+
+New sidebar groups (marked with a star): **Users, Risk & Trading, Money & Security, Growth**. Server code: `server/routes/adminExtra.js`, `server/routes/adminUsers.js`, `server/services/adminControls.js`, `server/models/AdminExtras.js`. Screens: `public/js/admin-extra.js`.
+
+| Screen | What it does |
+|---|---|
+| Player Manager | Search + filters (status, KYC, tag, inactive days, balance range, join dates), sorting, paging, bulk actions, CSV export, create player. "Open" shows a full profile: wallet, stats, restrictions, responsible-gambling, bonus, balance adjust, notes/tags, bets, transactions, wallet ledger, devices, linked accounts, promotions, tickets, audit trail; suspend/activate with reason, force logout, unlock login, reset password/2FA, edit profile/KYC, SMS, in-app message, delete. |
+| Exposure & Liability | Open-bet liability per game / market / pick, biggest open bets, one-click "suspend this game". |
+| Market Controls | Pause all betting, close sports / leagues / markets by name, suspend single games, margin per sport (pre-match and live). |
+| Settlement Review | Bets stuck pending after the match ended, bets auto-refunded because a market was unreadable, bets corrected by an admin; "Set result" uses the existing override (audited). |
+| Bet Lookup | Search by bet code: full timeline (placed, each selection result, admin actions, wallet moves). |
+| Feed Health | Provider status, live-list age, failing sports, stuck bets, last bet / settlement. |
+| Withdrawal Queue | Player context beside every request (account age, deposits vs withdrawals, bets, shared device, KYC), coded rejection reasons, rules: auto-pay limit, daily cap, new-account review, minimum bets, tags that force review. |
+| Reconciliation | Deposits vs wallet credits per player, repeated M-Pesa references, deposits pending 30+ min, withdrawals stuck "processing". Read-only. |
+| Multi-Account | Accounts sharing a device (strong) or IP (weak, with a "likely shared network" mark). |
+| Approvals & Roles | Roles: superadmin, finance, trader, support, marketing. Optional second-admin approval for large balance adjustments and withdrawal approvals. Existing admin accounts stay superadmin. |
+| Alerts | Large bet / win / withdrawal, feed down, stuck bets. Optional SMS to chosen numbers. |
+| Campaigns & Promos | Scheduled in-app / SMS campaigns to segments (inactive, new, high value, never deposited, tags), optional bonus with play-through and expiry; promo usage table. |
+| Player Lifecycle | Sign-ups per day, deposit/bet funnel, Day 1/7/30 return, churn. |
+| Responsible Gambling | Self-exclusion, cool-off, limits overview (set per player in Player Manager). |
+| Affiliate Payouts | Commission = rate x referred players' net loss, minus what was already paid; pay into wallet. Off until a rate is set. |
+| Daily Reports | Yesterday's totals created automatically; SMS (and email if SMTP is set up) to chosen recipients. |
+| Admin Controls | Approval limits, alert limits, report recipients and hour, affiliate rate, rejection reasons. |
+
+What the player side now obeys (new, all default to "off"): betting block per player, cool-off, max stake per bet, cash-out block, withdrawal hold, forced withdrawal review, per-player and global daily withdrawal cap, new-account review, minimum bets before withdrawing, paused betting, closed sports / leagues / markets, suspended games, per-sport margins. Hooks: `bets.js` (three place routes + cash-out), `withdraw.js`, `marketResolver.js`. Nothing is switched on until an admin sets it.
+
+Tests: `npm run test:admin` (46 checks: roles, approval gate incl. reuse/mismatch, betting guard, withdrawal rules, margins). All screens were also rendered in a simulated browser with mocked data (no errors). Existing tests still pass.
+
+**Not tested:** the new endpoints against a real MongoDB (none available here), a real SMS/email send, a real payout, the campaign runner, and the screens in a real browser.
+Email reports need `npm i nodemailer` and `SMTP_HOST/PORT/USER/PASS/FROM`; without them only SMS is used.
+Notes: IP matching is a weak signal; "House net" in a player profile is stakes minus returns; campaign SMS is capped at `CAMPAIGN_SMS_MAX` (default 2000) players.

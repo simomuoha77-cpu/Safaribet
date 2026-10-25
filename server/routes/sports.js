@@ -730,4 +730,10 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// Read-only view for the admin "Feed health" screen.
+router.getLiveStatus = () => ({
+  lastOkAt: liveStatus.lastOkAt, lastAttemptAt: liveStatus.lastAttemptAt, failedSports: liveStatus.failedSports.slice(),
+  bySport: Object.assign({}, liveStatus.bySport), snapshotAgeMs: (() => { try { const a = liveSnapshotAge(); return Number.isFinite(a) ? a : null; } catch (_) { return null; } })()
+});
+
 module.exports = router;
