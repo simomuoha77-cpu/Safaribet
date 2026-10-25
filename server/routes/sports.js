@@ -736,4 +736,15 @@ router.getLiveStatus = () => ({
   bySport: Object.assign({}, liveStatus.bySport), snapshotAgeMs: (() => { try { const a = liveSnapshotAge(); return Number.isFinite(a) ? a : null; } catch (_) { return null; } })()
 });
 
+// Team crests: answers at once with what is cached; unknown teams are looked up in the background.
+router.get('/team-logos', async (req, res) => {
+  try {
+    const names = String(req.query.names || '').split('|').slice(0, 80);
+    const logos = await require('../services/teamLogos').lookup(names);
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json({ success: true, logos });
+  } catch (e) { res.json({ success: true, logos: {} }); }
+});
+
+
 module.exports = router;

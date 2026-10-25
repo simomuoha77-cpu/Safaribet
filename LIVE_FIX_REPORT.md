@@ -184,3 +184,8 @@ Goal: every admin screen opens on one click, shows data at once, and is still fr
 
 Tests: admin 46 + betCorrection 38 pass; jsdom smoke renders all 17 screens, 8 player tabs, instant reopen, cache-clear-after-POST, error + retry.
 Not testable here: behaviour against the real MongoDB. First open after deploy builds indexes (a few seconds on a large collection).
+
+---
+
+## Addendum - Team crests (v17)
+Match data has no logos, so `server/services/teamLogos.js` looks crests up on TheSportsDB (free key; set THESPORTSDB_KEY to use your own), caches them permanently in MongoDB (collection `teamlogos`) and serves them from `GET /api/sports/team-logos?names=A|B`. The player never waits: known crests return at once, unknown teams are queued (one lookup every 2.5 s) and picked up on the next ask. `public/js/team-logos.js` puts a crest before every `.tname`, with a letter badge until the crest is found, and remembers crests on the phone. Only exact team-name matches are accepted. Not testable here: the live TheSportsDB responses (sandbox has no access to that site).
