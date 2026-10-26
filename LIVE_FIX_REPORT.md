@@ -220,3 +220,6 @@ The place-bet path itself already limits provider lookups to ~2 s, so a 30-60 s 
 - `scanAlerts` no longer runs the unindexed `$not/$elemMatch` pending-bet scan every minute; it is an indexed check (`Bet {status, createdAt}`) every 10 minutes.
 - Crest lookups: 1 worker (was 3), 500 ms gap, and they pause (up to 10 s) while a bet is being placed. Feed-logo harvesting stops after 300 fixtures when the feed has no logos. `warm()` skips already-seen raw names before normalising.
 - Diagnostics in the server log: `[bets/place] SLOW-TOTAL <ms>` (whole request incl. login check and guards) and `[bets/place] SLOW ...` (per-step marks, already there) when a placement takes > 3 s / 1.5 s; `[loop-lag] max=...` every 30 s when the event loop was blocked for > 500 ms.
+
+## Addendum - Live health page (v29)
+`GET /api/perf` (no secrets): process CPU % (last 5 s), memory, event-loop lag p50/p99/max, database ping time, and the last 10 bet placements with the time of each step (`validated`, `wallet`, `betSaved`, `done`). Open it on the phone while the site feels slow to see whether the server is CPU-starved, blocked, or waiting on the database. Measured separately: the crest additions cost ~0.16 s of CPU for 12,000 fixtures, so they are not a load source.

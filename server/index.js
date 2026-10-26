@@ -161,6 +161,28 @@ function __scanBuild() {
   })(root, 0);
   return Math.round(newest).toString(36) + '-' + total.toString(36) + '-' + files;
 }
+// ── LIVE HEALTH (open https://<site>/api/perf on the phone while things feel slow) ──
+// No secrets: process CPU, how long the event loop was blocked, database round-trip time, and the last bet placements with the time each step took.
+let __cpu = { pct: 0, at: Date.now(), last: process.cpuUsage(), lastAt: process.hrtime.bigint() };
+try {
+  const t = setInterval(() => {
+    const now = process.hrtime.bigint(), u = process.cpuUsage(), dt = Number(now - __cpu.lastAt) / 1000;
+    __cpu.pct = Math.round(((u.user - __cpu.last.user + u.system - __cpu.last.system) / dt) * 100); __cpu.last = u; __cpu.lastAt = now; __cpu.at = Date.now();
+  }, 5000); if (t.unref) t.unref();
+} catch (_) {}
+let __lagH = null; try { __lagH = require('perf_hooks').monitorEventLoopDelay({ resolution: 20 }); __lagH.enable(); } catch (_) {}
+app.get('/api/perf', async (req, res) => {
+  const out = { success: true, uptimeSec: Math.round(process.uptime()), cpuPercentLast5s: __cpu.pct, memoryMB: Math.round(process.memoryUsage().rss / 1048576), node: process.version };
+  try { if (__lagH) { out.eventLoopLagMs = { p50: Math.round(__lagH.percentile(50) / 1e6), p99: Math.round(__lagH.percentile(99) / 1e6), max: Math.round(__lagH.max / 1e6) }; __lagH.reset(); } } catch (_) {}
+  try {
+    const mongoose = require('mongoose'); out.db = { state: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] };
+    const t0 = Date.now();
+    await Promise.race([mongoose.connection.db.admin().ping(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 4s')), 4000))]);
+    out.db.pingMs = Date.now() - t0;
+  } catch (e) { out.db = Object.assign(out.db || {}, { error: String(e.message || e).slice(0, 80) }); }
+  out.lastBetPlacements = (global.__sbPlaceLog || []).slice(-10).reverse();
+  res.set('Cache-Control', 'no-store'); res.json(out);
+});
 app.get('/api/version', (req, res) => {
   if (Date.now() - __build.at > 5000) __build = { id: __scanBuild(), at: Date.now() };
   res.set('Cache-Control', 'no-store');

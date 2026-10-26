@@ -502,6 +502,7 @@ async function placeBetHandler(req, res) {
     ]).catch(e => console.error('[bets/place] audit write failed', bet.betCode, e.message));
 
     mark('done');
+    try { const L = (global.__sbPlaceLog = global.__sbPlaceLog || []); L.push({ at: new Date().toISOString(), ms: marks.done, steps: Object.assign({}, marks), legs: verifiedSelections.length }); if (L.length > 25) L.shift(); } catch (_) {}
     // Where the time goes: logged whenever a placement is slow, so a slow step can be pinned down.
     if (marks.done > 1500) console.warn(`[bets/place] SLOW ${marks.done}ms for ${req.user._id}:`, JSON.stringify(marks), `legs=${verifiedSelections.length}`);
     res.json({
