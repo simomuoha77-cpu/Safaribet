@@ -2,6 +2,8 @@ const express = require('express');
 const { getFixtures, getLastFixtures } = require('../engine/apifootball');
 const sofaBets = require('../providers/sofaBetsProvider');
 const router = express.Router();
+// While a customer is placing a bet, background refreshes stand aside (they only skip one tick; the next one catches up).
+const betBusy = () => { try { return sofaBets.betIsPlacing(); } catch (e) { return false; } };
 
 const cache = {};
 const C = {
@@ -75,7 +77,7 @@ router.get('/football', async (req, res) => {
 });
 // Keep football warm so even the first visitor after a quiet period gets it from memory.
 setTimeout(() => { refreshFootballFeed().catch(() => {}); }, 1500);
-setInterval(() => { refreshFootballFeed().catch(() => {}); }, 15000).unref();
+setInterval(() => { if (betBusy()) return; refreshFootballFeed().catch(() => {}); }, 15000).unref();
 
 function normalizeSofaSportMatch(m, sport) {
   const cfg = SPORT_CONFIG[sport];
@@ -388,6 +390,7 @@ router.get('/live', async (req, res) => {
 // This is what makes the next Live tap effectively instant.
 refreshLiveCache().catch(() => {});
 setInterval(() => {
+  if (betBusy()) return;
   refreshLiveCache().catch(() => {});
 }, 10000);
 
@@ -674,9 +677,9 @@ function crawlerTick() {
 const refreshIndex = () => buildSearchIndex().catch(() => {});
 refreshIndex();
 setInterval(() => { searchFootball = (getLastFixtures().data.length ? getLastFixtures().data : searchFootball); }, 30000);
-setInterval(refreshIndex, 5 * 60000);
+setInterval(() => { if (!betBusy()) refreshIndex(); }, 5 * 60000);
 // Start crawling once the first game lists exist, then tick every 15s.
-setTimeout(() => { crawlerTick(); setInterval(crawlerTick, 15000); }, 20000);
+setTimeout(() => { crawlerTick(); setInterval(() => { if (!betBusy()) crawlerTick(); }, 15000); }, 20000);
 
 router.get('/search', async (req, res) => {
   try {

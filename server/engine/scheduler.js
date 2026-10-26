@@ -15,7 +15,8 @@ function start() {
 
   // Live scores — interval via env, default 20s
   const liveMs = parseInt(process.env.LIVE_POLL_MS) || 10000; // 10s — catch score changes before match disappears
-  setInterval(() => { updateLive().catch(console.error); }, liveMs);
+  const betBusy = () => { try { return require('../providers/sofaBetsProvider').betIsPlacing(); } catch (e) { return false; } };   // a customer placing a bet goes first
+  setInterval(() => { if (betBusy()) return; updateLive().catch(console.error); }, liveMs);
 
   // Settlement: fast DB-only pass every minute (cheap — matches are already
   // polled every 10s by updateLive above, so this alone delivers near-instant
@@ -23,7 +24,7 @@ function start() {
   // fallback every 5 minutes as a safety net for anything the DB path missed.
   // every 20s (was 60s): the pass is cheap - it exits at once when no bet is waiting
   const settleMs = Math.max(5000, parseInt(process.env.SETTLE_POLL_MS) || 20000);
-  setInterval(() => { runSettlement(false).catch(console.error); }, settleMs);
+  setInterval(() => { if (betBusy()) return; runSettlement(false).catch(console.error); }, settleMs);
   cron.schedule('*/5 * * * *', () => { runSettlement(true).catch(console.error); });
 
   // Jackpot settlement — same cadence, checks if all fixtures in any open round finished

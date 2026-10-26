@@ -3536,6 +3536,7 @@ function addStake(v){
 }
 
 function openSlip(){
+  try { fetch('/api/ping',{cache:'no-store'}).catch(()=>{}); } catch(e) {}   // wakes a sleeping server / warms the connection before PLACE BET is pressed
   document.getElementById('slip').classList.add('open');
   document.getElementById('overlay').classList.add('on');
   document.getElementById('bni-slip')?.classList.add('on');
@@ -3650,6 +3651,27 @@ async function submitLoadCode(){
 }
 
 // ── PLACE BET ──
+// While a bet is being placed, this phone's own page refreshes (match lists, live scores ...) wait their turn: the server
+// answers the bet first. Anything the placing itself needs (status check, balance, ping) is never held. Max hold: 8 s.
+if (!window.__sbGate) {
+  window.__sbGate = 1;
+  var __gateFetch = window.fetch;
+  window.fetch = function (input, init) {
+    try {
+      var until = window.__sbPlacing || 0;
+      if (until && Date.now() < until) {
+        var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (method === 'GET' && /\/api\//.test(url) && !/\/api\/(bets\/place-status|ping|wallet|version)/.test(url)) {
+          var self = this, args = arguments;
+          return new Promise(function (resolve) { var t0 = Date.now(); (function wait() { if (!window.__sbPlacing || Date.now() >= until || Date.now() - t0 > 8000) resolve(); else setTimeout(wait, 150); })(); })
+            .then(function () { return __gateFetch.apply(self, args); });
+        }
+      }
+    } catch (e) {}
+    return __gateFetch.apply(this, arguments);
+  };
+}
 async function placeBet(){
   if(!USER){ SB.go('/login'); return; }
   if(!slip.length) return showT('Add selections first','err');
@@ -3659,6 +3681,7 @@ async function placeBet(){
 
   const btn=document.getElementById('placeBtn');
   btn.disabled=true; btn.textContent='Placing bet...';
+  window.__sbPlacing=Date.now()+12000;      // page refreshes pause while this bet is placed (see __sbGate)
 
   // One key per press. The server answers a repeat of the same key with the ORIGINAL bet, so
   // nothing here can place (or charge for) a bet twice, and the app can always ask the server
@@ -3703,7 +3726,7 @@ async function placeBet(){
     }catch(e){}
     if(!done&&polls<60) pollTimer=setTimeout(poll,1000);
   };
-  const t1=setTimeout(()=>{ if(!done) btn.textContent='Still working - please wait...'; },6000);
+  const t1=setTimeout(()=>{ if(!done) btn.textContent='Still working - your bet is safe, please wait...'; },6000);
   // Start asking the server "is my bet placed?" after 2.5s (was 9s) so a bet that is already saved shows up at once,
   // even if the answer to the original request is slow to arrive. The button text only changes later.
   const t2=setTimeout(()=>{ if(!done) poll(); },2500);
@@ -3734,6 +3757,7 @@ async function placeBet(){
     if(!done) failure('No connection. Your bet was not confirmed - check My Bets before trying again.');
   }finally{
     clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); if(pollTimer) clearTimeout(pollTimer);
+    window.__sbPlacing=0;
   }
   done=true;
   btn.disabled=false; btn.textContent='PLACE BET';

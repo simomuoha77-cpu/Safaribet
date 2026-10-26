@@ -223,3 +223,17 @@ The place-bet path itself already limits provider lookups to ~2 s, so a 30-60 s 
 
 ## Addendum - Live health page (v29)
 `GET /api/perf` (no secrets): process CPU % (last 5 s), memory, event-loop lag p50/p99/max, database ping time, and the last 10 bet placements with the time of each step (`validated`, `wallet`, `betSaved`, `done`). Open it on the phone while the site feels slow to see whether the server is CPU-starved, blocked, or waiting on the database. Measured separately: the crest additions cost ~0.16 s of CPU for 12,000 fixtures, so they are not a load source.
+
+## Addendum - Place-bet in under 5 s (v30)
+Most likely cause of the 30-60 s waits seen while testing: Render's free plan puts the server to sleep after ~15 min without traffic, and the first request after that waits for the wake-up (the match list behind the slip was still loading in the same screenshot). Changes:
+- `GET /api/ping`: no database, no login, no rate limit. Point a free uptime monitor (UptimeRobot, HTTP, every 5 min) at `https://safaribet.top/api/ping` so the server never sleeps. The app also calls it when the Bet Slip opens.
+- While a bet is being placed, the server's own background refreshes (football feed, live cache, search index, crawler, live scores, settlement pass) skip their tick, and the phone's own page refreshes wait (max 8 s) so the bet is answered first (`window.__sbPlacing` gate in index.html). The bet request, its status check, balance, ping and version calls are never held.
+- If a placement is still running after 6 s the button says it is still working and the bet is safe.
+
+### Measurement (v31): the bet route itself is fast and my changes did not slow it
+The real `/api/bets/place` route was run with stand-in database models that cost a fixed time per query (warm odds cache, 1 provider selection, 4 database trips):
+| query latency | v12 (before admin work) | now |
+|---|---|---|
+| 150 ms | 465 ms | 469 ms |
+| 400 ms | 1215 ms | 1217 ms |
+With the odds provider answering after 3 s or never, the route returns a clear "provider is slow" error in about 2.2 s (never a long wait). A wait of 30-60 s therefore comes from outside the bet logic: server CPU/event-loop starvation, database throttling, or the phone's connection. `GET /api/perf` and the `[bets/place] SLOW-TOTAL` / `[loop-lag]` log lines show which.

@@ -41,6 +41,9 @@ try {
   const lagT = setInterval(() => { const max = h.max / 1e6, p99 = h.percentile(99) / 1e6; if (max > 500) console.warn(`[loop-lag] max=${Math.round(max)}ms p99=${Math.round(p99)}ms (server was too busy to answer for that long)`); h.reset(); }, 30000);
   if (lagT.unref) lagT.unref();
 } catch (_) {}
+// Ultra-light "are you awake?" endpoint: no database, no login, no rate limit. Point an uptime monitor (UptimeRobot, free) at
+// https://<site>/api/ping every 5 minutes so the free Render server never goes to sleep, and the app calls it as soon as it opens.
+app.get('/api/ping', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ ok: true, t: Date.now(), up: Math.round(process.uptime()) }); });
 app.use((req, res, next) => { if (global.__sbShuttingDown) res.set('Connection', 'close'); next(); });
 // Behind Render's proxy every request otherwise looks like it comes from the proxy's own address, so ALL players
 // shared one rate-limit bucket (e.g. 15 logins per 15 minutes for everybody together). With this, req.ip is the
