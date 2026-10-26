@@ -264,3 +264,6 @@ New public `GET /api/casino/juanai/available` -> `{configured}` (true only when 
 
 ## v40 - casino lobby appears when the JuanAI URI is set
 /available now reports `configured` as soon as the JuanAI address (JUANAI_CASINO_URL or JUANAI_URL) exists; launching a game needs the address plus either casino key+secret or the normal JUANAI_API_KEY (new requireLaunchReady). Before v40 all three casino variables were required just to list the games.
+
+## v41 - provider name removed from the casino screens
+Player-visible text no longer mentions JuanAI (casino lobby title/subtitle/section/cards, game page title, error messages). Internal API paths are unchanged.

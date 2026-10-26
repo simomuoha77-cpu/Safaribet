@@ -231,7 +231,7 @@ router.get('/available', async (req, res) => {
     const matches = await fixturesWithFallback();
     res.json({ success: true, data: deriveLeagues(matches) });
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Match feed unavailable: ' + e.message });
   }
 });
 
@@ -627,7 +627,7 @@ router.get('/featured', async (req, res) => {
     }
     res.type('application/json').send(payloadJson);
   } catch (e) {
-    res.status(502).json({ success: false, data: [], message: 'Juan Football API unavailable: ' + e.message });
+    res.status(502).json({ success: false, data: [], message: 'Match feed unavailable: ' + e.message });
   }
 });
 

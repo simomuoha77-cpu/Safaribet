@@ -43,11 +43,11 @@ router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); c
 function requireLaunchReady(req, res, next) {
   const c = juanai.cfg();
   if (juanai.configured() || (c.base && c.legacyKey)) return next();
-  return res.status(503).json({ success: false, message: 'JuanAI casino is not fully set up yet (missing API key).' });
+  return res.status(503).json({ success: false, message: 'Casino is not available right now. Please try again later.' });
 }
 
 function requireConfigured(req, res, next) {
-  if (!juanai.configured()) return res.status(503).json({ success: false, message: 'JuanAI casino is not configured yet.' });
+  if (!juanai.configured()) return res.status(503).json({ success: false, message: 'Casino is not available right now. Please try again later.' });
   next();
 }
 
@@ -113,7 +113,7 @@ router.get('/games', auth, requireConfigured, async (req, res) => {
   try {
     const data = await juanai.listGames();
     res.json({ success: true, count: data.length, data });
-  } catch (e) { fail(res, e, 'JuanAI casino games are unavailable right now.'); }
+  } catch (e) { fail(res, e, 'Casino games are unavailable right now.'); }
 });
 
 // Called by the lobby in the background: wakes JuanAI and creates the player's game session
@@ -136,7 +136,7 @@ router.post('/launch', auth, actionLimiter, requireLaunchReady, async (req, res)
       return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
     }
     const data = await launchFor(req.user, gameId);
-    if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'JuanAI did not return a playable game URL.' });
+    if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'The game could not be started. Please try again.' });
     res.json({
       success: true,
       gameId,
