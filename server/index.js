@@ -41,6 +41,8 @@ try {
   const lagT = setInterval(() => { const max = h.max / 1e6, p99 = h.percentile(99) / 1e6; if (max > 500) console.warn(`[loop-lag] max=${Math.round(max)}ms p99=${Math.round(p99)}ms (server was too busy to answer for that long)`); h.reset(); }, 30000);
   if (lagT.unref) lagT.unref();
 } catch (_) {}
+// Names the code behind any freeze longer than 1.5 s: look for "[stall]" in the logs (or "stalls" in /api/perf).
+try { require('./utils/stallProfiler').start(); } catch (_) {}
 // Ultra-light "are you awake?" endpoint: no database, no login, no rate limit. Point an uptime monitor (UptimeRobot, free) at
 // https://<site>/api/ping every 5 minutes so the free Render server never goes to sleep, and the app calls it as soon as it opens.
 app.get('/api/ping', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ ok: true, t: Date.now(), up: Math.round(process.uptime()) }); });
@@ -175,7 +177,7 @@ try {
 } catch (_) {}
 let __lagH = null; try { __lagH = require('perf_hooks').monitorEventLoopDelay({ resolution: 20 }); __lagH.enable(); } catch (_) {}
 app.get('/api/perf', async (req, res) => {
-  const out = { success: true, uptimeSec: Math.round(process.uptime()), cpuPercentLast5s: __cpu.pct, memoryMB: Math.round(process.memoryUsage().rss / 1048576), node: process.version };
+  const out = { success: true, uptimeSec: Math.round(process.uptime()), cpuPercentLast5s: __cpu.pct, memoryMB: Math.round(process.memoryUsage().rss / 1048576), node: process.version, stalls: (global.__sbStalls || []).slice(-8) };
   try { if (__lagH) { out.eventLoopLagMs = { p50: Math.round(__lagH.percentile(50) / 1e6), p99: Math.round(__lagH.percentile(99) / 1e6), max: Math.round(__lagH.max / 1e6) }; __lagH.reset(); } } catch (_) {}
   try {
     const mongoose = require('mongoose'); out.db = { state: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] };

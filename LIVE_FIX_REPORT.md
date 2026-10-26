@@ -243,3 +243,6 @@ v30 wrapped `window.fetch` inside the home page script. router.js deletes every 
 
 ## v33 - instant home list
 The saved home list/odds cache is now usable for 72h (was 6h), so after a long break the games still appear at once (started games are dropped, fresh list replaces it in ~1s) instead of grey skeleton rows. Includes the v32 fetch fix - this must be applied for lists to load at all.
+
+## v34 - freeze finder
+/api/perf showed the bet itself takes ~1.7s but the server event loop froze up to 62s at a time (that is the 30-60s bet delay). `server/utils/stallProfiler.js` runs a helper thread that, whenever the server is stuck >1.5s, logs `[stall] <ms> <% fn (file:line)>` for the busiest code, and lists them in /api/perf `stalls`. Disable with STALL_PROFILER=0.
