@@ -23,7 +23,7 @@ const MEM = new Map();            // key -> { url, missing, at }
 const RETRY = new Map();          // key -> next allowed attempt (ms)
 const QUEUE = [];
 const QUEUED = new Set();
-const GAP_MS = 300, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 4000;
+const GAP_MS = 500, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 4000;
 
 function norm(s) {
   return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
@@ -107,9 +107,12 @@ async function fetchOne(name) {
   return '';
 }
 
-const WORKERS = 3;
+const WORKERS = 1;
 let active = 0;
+function betPlacing() { try { return require('../providers/sofaBetsProvider').betIsPlacing(); } catch (e) { return false; } }
 async function runOne() {
+  // a customer placing a bet always goes first: wait while one is being placed
+  for (let i = 0; i < 20 && betPlacing(); i++) await new Promise(r => setTimeout(r, 500));
   const { key, name } = QUEUE.shift(); QUEUED.delete(key);
   try {
     const url = await fetchOne(name);
@@ -131,8 +134,10 @@ function enqueue(key, name) {
 
 // ---- ahead-of-time: every team the server loads is looked up before any player asks ----
 const SEEN = new Set(), PENDING = new Set(); let flushT = null;
+const RAW = new Set();
 function warm(names) {
   for (const n of names || []) {
+    if (RAW.has(n)) continue; RAW.add(n); if (RAW.size > 60000) RAW.clear();
     const k = norm(n); if (!k || SEEN.has(k)) continue;
     SEEN.add(k); if (SEEN.size > 30000) SEEN.delete(SEEN.values().next().value);
     if (MEM.has(k)) continue; PENDING.add(JSON.stringify([k, String(n).trim()]));

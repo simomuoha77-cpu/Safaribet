@@ -526,7 +526,11 @@ async function placeBetHandler(req, res) {
 // also stored on the bet itself, so this still works after a restart or once the in-memory entry
 // has expired. GET /place-status/:key lets the app ask "was my bet placed?" while it waits.
 const placeInflight = new Map(); // userId:key -> { done, result, p }
-router.post('/place', auth, adminControls.bettingGuard, betLimiter, async (req, res) => {
+router.post('/place', (req, res, next) => {
+  // Total time from the moment the request reached the server (includes login check, guards, queueing): logged when slow.
+  const t = Date.now(); res.on('finish', () => { const ms = Date.now() - t; if (ms > 3000) console.warn(`[bets/place] SLOW-TOTAL ${ms}ms status=${res.statusCode}`); });
+  next();
+}, auth, adminControls.bettingGuard, betLimiter, async (req, res) => {
   const key = String(req.headers['x-idempotency-key'] || '').trim().slice(0, 80);
   if (!key) return placeBetHandler(req, res);
   req.idemKey = key;

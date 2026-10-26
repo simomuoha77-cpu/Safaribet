@@ -103,6 +103,7 @@ betSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterE
 betSchema.index({ status: 1, createdAt: -1 });
 betSchema.index({ createdAt: -1 });
 betSchema.index({ status: 1, settledAt: -1 });
+betSchema.index({ status: 1, createdAt: 1 });
 betSchema.index({ 'selections.matchId': 1, status: 1 });
 
 module.exports = mongoose.model('Bet', betSchema);

@@ -35,6 +35,12 @@ const server = http.createServer(app);
 server.keepAliveTimeout = 65 * 1000;
 server.headersTimeout   = 66 * 1000;
 // While the server is stopping (a deploy / restart) tell clients not to reuse connections.
+// Event-loop lag watch: if the server is so busy that every request has to wait, this prints it (look for "[loop-lag]" in the logs).
+try {
+  const { monitorEventLoopDelay } = require('perf_hooks'); const h = monitorEventLoopDelay({ resolution: 20 }); h.enable();
+  const lagT = setInterval(() => { const max = h.max / 1e6, p99 = h.percentile(99) / 1e6; if (max > 500) console.warn(`[loop-lag] max=${Math.round(max)}ms p99=${Math.round(p99)}ms (server was too busy to answer for that long)`); h.reset(); }, 30000);
+  if (lagT.unref) lagT.unref();
+} catch (_) {}
 app.use((req, res, next) => { if (global.__sbShuttingDown) res.set('Connection', 'close'); next(); });
 // Behind Render's proxy every request otherwise looks like it comes from the proxy's own address, so ALL players
 // shared one rate-limit bucket (e.g. 15 logins per 15 minutes for everybody together). With this, req.ip is the

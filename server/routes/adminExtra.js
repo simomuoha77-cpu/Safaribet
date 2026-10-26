@@ -421,6 +421,7 @@ async function raise(type, severity, message, ref, data, userId) {
 }
 
 let alertCursor = new Date(Date.now() - 5 * 60000), feedBadSince = 0, feedAlerted = 0;
+let lastStuckCheck = 0;
 async function scanAlerts() {
   const a = ctl.get().alerts, from = alertCursor, now = new Date();
   alertCursor = now;
@@ -432,8 +433,12 @@ async function scanAlerts() {
     const bad = (live.lastOkAt && now - live.lastOkAt > 180000) || (live.failedSports && live.failedSports.length >= 3);
     if (bad) { if (!feedBadSince) feedBadSince = Date.now(); if (Date.now() - feedBadSince > 120000 && Date.now() - feedAlerted > 30 * 60000) { feedAlerted = Date.now(); await raise('feed_down', 'critical', 'Live odds feed has been failing for over 2 minutes', 'feed-' + Math.floor(Date.now() / 1800000), live); } } else feedBadSince = 0;
   } catch (_) {}
-  const stuck = await Bet.countDocuments({ status: 'pending', selections: { $not: { $elemMatch: { commenceTime: { $gte: new Date(Date.now() - 6 * 3600000) } } } } });
-  if (stuck >= 5) await raise('stuck_bets', 'warn', stuck + ' pending bets whose matches ended 6+ hours ago', 'stuck-' + new Date().toISOString().slice(0, 13), { stuck });
+  // Cheap, indexed check (status + createdAt) and only every 10 minutes: the old $not/$elemMatch version scanned every pending bet each minute.
+  if (Date.now() - lastStuckCheck > 600000) {
+    lastStuckCheck = Date.now();
+    const stuck = await Bet.countDocuments({ status: 'pending', createdAt: { $lt: new Date(Date.now() - 36 * 3600000) } });
+    if (stuck >= 5) await raise('stuck_bets', 'warn', stuck + ' bets still pending after 36+ hours', 'stuck-' + new Date().toISOString().slice(0, 13), { stuck });
+  }
 }
 
 // ───────────────────────── daily report ─────────────────────────

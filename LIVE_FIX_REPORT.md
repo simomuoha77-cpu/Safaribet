@@ -214,3 +214,9 @@ The v25 script re-scanned every `.tname` on the page after any DOM change; on a 
 
 ## Addendum - Bottom tabs on the match page (v27)
 `public/pages/match.html` now shows the same bottom tab bar as the home page (Home, Bet Slip, Casino, My Bets, Account) at all times. The green "N selections / View Slip" bar is removed; the Bet Slip tab carries a red count badge and opens the slip (`/?openSlip=1`). The Bet Builder bar sits just above the tabs and the page has extra bottom padding so nothing is hidden behind them.
+
+## Addendum - Place-bet speed (v28)
+The place-bet path itself already limits provider lookups to ~2 s, so a 30-60 s wait means the server was busy or waiting somewhere else. Changes:
+- `scanAlerts` no longer runs the unindexed `$not/$elemMatch` pending-bet scan every minute; it is an indexed check (`Bet {status, createdAt}`) every 10 minutes.
+- Crest lookups: 1 worker (was 3), 500 ms gap, and they pause (up to 10 s) while a bet is being placed. Feed-logo harvesting stops after 300 fixtures when the feed has no logos. `warm()` skips already-seen raw names before normalising.
+- Diagnostics in the server log: `[bets/place] SLOW-TOTAL <ms>` (whole request incl. login check and guards) and `[bets/place] SLOW ...` (per-step marks, already there) when a placement takes > 3 s / 1.5 s; `[loop-lag] max=...` every 30 s when the event loop was blocked for > 500 ms.
