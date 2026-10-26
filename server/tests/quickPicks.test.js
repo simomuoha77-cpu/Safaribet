@@ -35,3 +35,11 @@ test('applyOddsPipeline attaches compact quick picks only where the feed has no 
 });
 
 test.after(() => setTimeout(() => process.exit(process.exitCode || 0), 100));   // the odds route starts background timers
+
+test('quick picks survive a thin refresh of the market list', () => {
+  sb.__setMarketsForTest('football:888', { markets, full: true });
+  assert.ok(sb.quickPicks('888', 'football', 'Alpha FC', 'Beta FC').dc_1x);
+  sb.__setMarketsForTest('football:888', { markets: [], full: false });          // provider hiccup: empty list replaces the good one
+  const q = sb.quickPicks('888', 'football', 'Alpha FC', 'Beta FC');
+  assert.ok(q && q.dc_1x && q.btts, 'still served from the last good list');
+});

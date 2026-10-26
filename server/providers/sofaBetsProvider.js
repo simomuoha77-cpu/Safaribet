@@ -777,7 +777,11 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
     let pending = tasks.length, done = false, graceTimer = null;
     const finish = () => {
       if (done) return; done = true; if (graceTimer) clearTimeout(graceTimer);
-      matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });
+      // A refresh that came back thin (provider hiccup) must never replace a good market list already in memory.
+      const prev = matchMarketsCache.get(cacheKey);
+      if (!(prev && prev.data && Array.isArray(prev.data.markets) && prev.data.markets.length > 1 && result.markets.length <= 1 && Date.now() - prev.ts < 3 * 3600000)) {
+        matchMarketsCache.set(cacheKey, { ts: Date.now(), data: result });
+      }
       console.log(`[sofaBetsProvider] final rich markets ${id}: ${result.markets.length}`);
       if (result.markets.length <= 1) console.warn(`[sofaBetsProvider] NO rich markets ${id} (${name}${ignoreSkip ? ', all endpoints asked' : ''}): ${tasks.length} requests, ${skipped} skipped; errors: ${Array.from(new Set(errs)).slice(0, 5).join(' | ') || 'none (endpoints answered but nothing matched this fixture)'}`);
       resolve(result);
@@ -1791,8 +1795,22 @@ module.exports.feedLogoStats = function () { return { teamsWithFeedLogo: FEED_LO
 // (the same prices the More Markets page shows) once that list is in memory. Nothing is calculated or guessed: a game
 // whose list is not in memory (or has no such market) simply returns nothing. Each pick carries the provider market and
 // selection ids, so a bet placed from the list is checked exactly like one placed from More Markets.
+const QUICK_MEMO = new Map();            // last good quick picks per game: survives a thin refresh or a cache clean-up
+const QUICK_MEMO_MS = 12 * 3600000;
 module.exports.quickPicks = function quickPicks(providerMatchId, sportName, home, away) {
-  const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
+  const key = String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim();
+  const fresh = quickPicksFromCache(key, home, away);
+  if (fresh && Object.keys(fresh).length) {
+    QUICK_MEMO.set(key, { at: Date.now(), q: fresh });
+    if (QUICK_MEMO.size > 6000) QUICK_MEMO.delete(QUICK_MEMO.keys().next().value);
+    return fresh;
+  }
+  const m = QUICK_MEMO.get(key);
+  if (m && Date.now() - m.at < QUICK_MEMO_MS) return m.q;
+  return fresh;
+};
+function quickPicksFromCache(key, home, away) {
+  const c = matchMarketsCache.get(key);
   if (!c || !c.data || !Array.isArray(c.data.markets) || c.data.markets.length < 2) return null;
   if (c.__quick && c.__quickFor === home + '|' + away) return c.__quick;
   const rules = require('../services/marketRules');
@@ -1840,5 +1858,5 @@ module.exports.quickPicks = function quickPicks(providerMatchId, sportName, home
   }
   c.__quick = out; c.__quickFor = home + '|' + away;
   return out;
-};
+}
 module.exports.__setMarketsForTest = function (key, data) { matchMarketsCache.set(key, { ts: Date.now(), data }); };

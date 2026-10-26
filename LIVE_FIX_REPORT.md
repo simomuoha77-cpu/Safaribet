@@ -273,3 +273,6 @@ Each leg shows the home and away crest (same bundled/Wikipedia crests as the mat
 
 ## v43 - Double Chance / Both Teams / Over-Under 2.5 chips show odds
 The list feed only carries 1X2, so these chips were empty. The server now reads their prices from the game's REAL market list when it is in memory (`sofaBets.quickPicks`, same prices as More Markets; nothing calculated), sends them compactly as `quick` on each list match (only where the feed has no price), and the chip adds the pick to the slip with the provider market/selection ids exactly like a More Markets pick, so placement checks it the same way. Games whose market list is not loaded yet keep "-" until it is (the crawler fills them in). Tests: server/tests/quickPicks.test.js.
+
+## v44 - list chip prices no longer disappear
+Cause: a thin/failed refresh of a game's market list replaced the good list in server memory, so Double Chance / Both Teams / Over-Under prices vanished until the next successful fetch. Now (1) a thin refresh never overwrites a good list younger than 3 h, (2) the server remembers each game's last good quick prices for 12 h, (3) the phone keeps a game's chip prices when a refresh arrives without them.

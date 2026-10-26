@@ -1888,7 +1888,8 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // intermittently vanish, or the feed collapse to live-only, even though
     // the previous good list was still perfectly valid.
     if(d.success && d.data && (d.data.length || !hasExistingData)){
-      featuredMatches = d.data;
+      featuredMatches = keepQuick(d.data, featuredMatches.length ? featuredMatches : (allMatches||[]));
+      d.data = featuredMatches;
       try { const ls = document.getElementById('leagueSelect'); if (ls && ls.options.length <= 1) fillLeagueOptions(leaguesFromMatches(featuredMatches)); } catch(e) {}
       seedFootballFromFeatured(featuredMatches);
       // Seed Live from the already-fetched Highlights payload so switching
@@ -2439,6 +2440,7 @@ function refreshFootballTab(silent=false, attempt=0){
       const d = await r.json();
       const rows = (d.success && Array.isArray(d.data)) ? d.data.filter(isFootballItem) : [];       // never anything but football
       if (rows.length) {
+        keepQuick(rows, footballTabCache.data || []);
         footballTabCache.data = rows;
         footballTabCache.ts = Date.now();
         try { localStorage.setItem('sb_football_cache', JSON.stringify({data:rows, ts:Date.now()})); } catch(e) {}
@@ -3473,6 +3475,16 @@ function openMatchDetail(matchId){
 
 // ── TOGGLE ODD ──
 const ALL_PICKS=['home','draw','away','dc_1x','dc_12','dc_x2','btts','btts_no','over25','under25'];
+// A refresh that arrives without the Double Chance / Both Teams / Over-Under prices (market list not loaded on the server yet)
+// must not blank chips that were showing them a moment ago.
+function keepQuick(fresh, old){
+  try{
+    if(!Array.isArray(fresh)||!Array.isArray(old)||!old.length) return fresh;
+    const had={}; old.forEach(m=>{ if(m&&m.quick) had[m.matchId]=m.quick; });
+    fresh.forEach(m=>{ if(m&&!m.quick&&had[m.matchId]) m.quick=had[m.matchId]; });
+  }catch(e){}
+  return fresh;
+}
 function findMatchAny(id){
   const L=[allMatches,featuredMatches,(typeof footballTabCache!=='undefined'&&footballTabCache&&footballTabCache.data)||[]];
   for(let i=0;i<L.length;i++){ const f=(L[i]||[]).find(x=>x.matchId===id); if(f) return f; }
