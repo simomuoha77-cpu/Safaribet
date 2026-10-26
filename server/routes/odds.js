@@ -195,6 +195,26 @@ function applyOddsPipeline(match) {
   }
   if (Object.keys(suspendedPicks).length) clone.suspendedPicks = suspendedPicks;
   if (match.status === 'live' && isMarketSuspended(match, '1x2')) clone.wholeMarketSuspended = true;
+  // Double Chance / Both Teams / Over-Under 2.5 chips: when the feed row carries no price for them, use the game's REAL market
+  // list (same prices as More Markets) if it is in memory. Compact: pick -> [odds, marketId, marketKey, selId, selKey, marketName, pickName].
+  try {
+    if (match.status !== 'finished' && /^sofabets_/.test(String(match.matchId))) {
+      const pid = parseSofaMatchId(match.matchId);
+      if (pid && pid.providerId && pid.sport === 'football') {
+        const q = sofaBets.quickPicks(pid.providerId, 'football', match.homeTeam, match.awayTeam);
+        if (q) {
+          const o = clone.odds || {}, ai = clone.aiOdds || {};
+          const have = { dc_1x: ai.dc_home_draw ?? o.homeDraw, dc_12: ai.dc_home_away ?? o.homeAway, dc_x2: ai.dc_draw_away ?? o.drawAway, btts: ai.btts ?? o.btts, btts_no: ai.bttsNo ?? o.bttsNo, over25: ai.over25 ?? o.over25, under25: ai.under25 ?? o.under25 };
+          const qq = {};
+          for (const k of Object.keys(q)) {
+            if (have[k] != null || (suspendedPicks['dc:' + k] || suspendedPicks['btts:' + k] || suspendedPicks['ou25:' + k])) continue;
+            const e = q[k]; qq[k] = [e.o, e.mid, e.mk, e.sid, e.sk, e.ml, e.pl];
+          }
+          if (Object.keys(qq).length) clone.quick = qq;
+        }
+      }
+    }
+  } catch (_) {}
   return clone;
 }
 

@@ -270,3 +270,6 @@ Player-visible text no longer mentions JuanAI (casino lobby title/subtitle/secti
 
 ## v42 - team crests on My Bets
 Each leg shows the home and away crest (same bundled/Wikipedia crests as the match list; initials shield when none is known). Settlement rules were NOT changed: a game is graded only from a confirmed final result, and a leg that cannot be confirmed after 24 h is refunded automatically.
+
+## v43 - Double Chance / Both Teams / Over-Under 2.5 chips show odds
+The list feed only carries 1X2, so these chips were empty. The server now reads their prices from the game's REAL market list when it is in memory (`sofaBets.quickPicks`, same prices as More Markets; nothing calculated), sends them compactly as `quick` on each list match (only where the feed has no price), and the chip adds the pick to the slip with the provider market/selection ids exactly like a More Markets pick, so placement checks it the same way. Games whose market list is not loaded yet keep "-" until it is (the crawler fills them in). Tests: server/tests/quickPicks.test.js.

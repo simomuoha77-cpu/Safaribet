@@ -3187,7 +3187,7 @@ function renderMatches(matches, silent=false){
 
   // Restore selections
   slip.forEach(s=>{
-    const btn=document.getElementById(`odd_${s.matchId}_${s.pick}`);
+    const btn=document.getElementById(`odd_${s.matchId}_${s.uiPick||s.pick}`);
     if(btn) btn.classList.add('sel');
   });
 
@@ -3333,6 +3333,12 @@ const PICK_MARKET = {
 function oddBtn(matchId, pick, label, odds, homeTeam, awayTeam, league, sport, commenceTime, pickLabel, m){
   const suspended = m && m.suspendedPicks && m.suspendedPicks[`${PICK_MARKET[pick]}:${pick}`];
   if(suspended) return `<div class="odd disabled" title="Selection suspended — recalculating or effectively decided"><span class="ol">${label}</span><span class="ov">🔒</span></div>`;
+  if(!odds && m && m.quick && m.quick[pick]){            // real price from the game's market list (Double Chance / Both Teams / Over-Under)
+    const qo=Number(m.quick[pick][0]).toFixed(2);
+    return `<div class="odd" id="odd_${matchId}_${pick}" data-odds="${qo}" onclick="togQuick('${matchId}','${pick}')">
+    <span class="ol">${label}</span><span class="ov">${qo}</span>
+  </div>`;
+  }
   if(!odds) return `<div class="odd disabled"><span class="ol">${label}</span><span class="ov">-</span></div>`;
   const o=parseFloat(odds).toFixed(2);
   const args=`'${matchId}','${esc(homeTeam)}','${esc(awayTeam)}','${esc(league)}','${sport}','${pick}','${esc(pickLabel)}',${odds},'${commenceTime}'`;
@@ -3466,12 +3472,36 @@ function openMatchDetail(matchId){
 }
 
 // ── TOGGLE ODD ──
+const ALL_PICKS=['home','draw','away','dc_1x','dc_12','dc_x2','btts','btts_no','over25','under25'];
+function findMatchAny(id){
+  const L=[allMatches,featuredMatches,(typeof footballTabCache!=='undefined'&&footballTabCache&&footballTabCache.data)||[]];
+  for(let i=0;i<L.length;i++){ const f=(L[i]||[]).find(x=>x.matchId===id); if(f) return f; }
+  return null;
+}
+// A Double Chance / Both Teams / Over-Under 2.5 pick priced from the game's real market list: it goes into the slip exactly like a
+// More Markets pick (provider market + selection ids), so placing it is checked the same way.
+function togQuick(matchId, pick){
+  const m=findMatchAny(matchId), q=m&&m.quick&&m.quick[pick];
+  if(!q){ showT('Price not available','err'); return; }
+  const existIdx=slip.findIndex(s=>s.matchId===matchId);
+  const same=existIdx!==-1&&(slip[existIdx].uiPick||slip[existIdx].pick)===pick;
+  ALL_PICKS.forEach(p=>document.getElementById(`odd_${matchId}_${p}`)?.classList.remove('sel'));
+  if(same){ slip.splice(existIdx,1); }
+  else {
+    if(existIdx!==-1) slip.splice(existIdx,1);
+    slip.push({matchId, homeTeam:m.homeTeam, awayTeam:m.awayTeam, league:m.league, sport:m.sport, commenceTime:m.commenceTime, isLive:m.status==='live',
+      market:'sb:'+(q[2]||''), pick:q[4], uiPick:pick, pickLabel:q[6]||q[4], marketLabel:q[5]||'', odds:Number(q[0]),
+      provider:'sofabets', providerMarketId:q[1]||null, providerMarketKey:q[2]||null, providerSelectionId:q[3]||null, providerSelectionKey:q[4]||null});
+    document.getElementById(`odd_${matchId}_${pick}`)?.classList.add('sel');
+  }
+  updateSlip();
+}
 function togOdd(matchId, homeTeam, awayTeam, league, sport, pick, pickLabel, odds, commenceTime){
   const existIdx=slip.findIndex(s=>s.matchId===matchId);
-  const same=existIdx!==-1&&slip[existIdx].pick===pick;
+  const same=existIdx!==-1&&(slip[existIdx].uiPick||slip[existIdx].pick)===pick;
 
   // Deselect all for this match
-  ['home','draw','away'].forEach(p=>{
+  ALL_PICKS.forEach(p=>{
     const b=document.getElementById(`odd_${matchId}_${p}`);
     if(b) b.classList.remove('sel');
   });
@@ -3533,7 +3563,7 @@ function updateSlip(){
 
 function removeSlip(i){
   const s=slip[i];
-  ['home','draw','away'].forEach(p=>{
+  ALL_PICKS.forEach(p=>{
     document.getElementById(`odd_${s.matchId}_${p}`)?.classList.remove('sel');
   });
   slip.splice(i,1);
@@ -3542,7 +3572,7 @@ function removeSlip(i){
 }
 
 function clearSlip(){
-  slip.forEach(s=>['home','draw','away'].forEach(p=>{
+  slip.forEach(s=>ALL_PICKS.forEach(p=>{
     document.getElementById(`odd_${s.matchId}_${p}`)?.classList.remove('sel');
   }));
   slip=[];

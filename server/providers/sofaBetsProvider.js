@@ -1785,3 +1785,60 @@ function harvestTeamLogos(raw, source, nestedTeams, home, away) {
 }
 module.exports.feedLogoFor = function (name) { return FEED_LOGOS.get(require('../services/teamLogos').norm(name)) || ''; };
 module.exports.feedLogoStats = function () { return { teamsWithFeedLogo: FEED_LOGOS.size, sample: FEED_SAMPLE }; };
+
+// ── LIST QUICK PICKS ──
+// Double Chance, Both Teams To Score and Over/Under 2.5 prices for the home list, taken from the game's REAL market list
+// (the same prices the More Markets page shows) once that list is in memory. Nothing is calculated or guessed: a game
+// whose list is not in memory (or has no such market) simply returns nothing. Each pick carries the provider market and
+// selection ids, so a bet placed from the list is checked exactly like one placed from More Markets.
+module.exports.quickPicks = function quickPicks(providerMatchId, sportName, home, away) {
+  const c = matchMarketsCache.get(String(sportName || 'football').toLowerCase() + ':' + String(providerMatchId || '').trim());
+  if (!c || !c.data || !Array.isArray(c.data.markets) || c.data.markets.length < 2) return null;
+  if (c.__quick && c.__quickFor === home + '|' + away) return c.__quick;
+  const rules = require('../services/marketRules');
+  const offer = require('../services/marketOffer');
+  const hn = String(home || '').toLowerCase().trim(), an = String(away || '').toLowerCase().trim();
+  const out = {};
+  const put = (pick, mk, o) => {
+    if (out[pick]) return;
+    out[pick] = { o: Number(o.odds), mid: mk.id != null ? String(mk.id) : null, mk: mk.key != null ? String(mk.key) : null,
+      sid: o.id != null ? String(o.id) : null, sk: o.key != null ? String(o.key) : String(o.name || ''), ml: String(mk.name || mk.label || ''), pl: String(o.name || o.key || '') };
+  };
+  for (const mk of c.data.markets) {
+    try {
+      if (!mk || mk.suspended) continue;
+      const name = String(mk.name || mk.label || '');
+      if (!offer.canOffer(name)) continue;
+      const pm = rules.parseMarket(name);
+      if (!pm || pm.period !== 'FULL_MATCH') continue;
+      const lower = name.toLowerCase();
+      const sels = (mk.selections || []).filter(o => o && !o.suspended && Number.isFinite(Number(o.odds)) && Number(o.odds) > 1);
+      if (!sels.length) continue;
+      if (pm.type === 'DOUBLE_CHANCE') {
+        for (const o of sels) {
+          const lab = String(o.name || o.key || '').replace(/\s+/g, '').toUpperCase();
+          const set = lab === '1X' ? new Set(['home', 'draw']) : lab === 'X2' ? new Set(['draw', 'away']) : lab === '12' ? new Set(['home', 'away']) : rules.outcomeSet(String(o.name || o.key || ''), home, away);
+          if (!set || set.size !== 2) continue;
+          if (set.has('home') && set.has('draw')) put('dc_1x', mk, o);
+          else if (set.has('draw') && set.has('away')) put('dc_x2', mk, o);
+          else if (set.has('home') && set.has('away')) put('dc_12', mk, o);
+        }
+      } else if (pm.type === 'BTTS') {
+        for (const o of sels) {
+          const lab = String(o.name || o.key || '').trim().toLowerCase();
+          if (/^(yes|gg)$/.test(lab)) put('btts', mk, o); else if (/^(no|ng)$/.test(lab)) put('btts_no', mk, o);
+        }
+      } else if (pm.type === 'OVER_UNDER') {
+        if (/home|away|team|exact|range|odd|even|corner|card/.test(lower) || (hn && lower.includes(hn)) || (an && lower.includes(an))) continue;
+        for (const o of sels) {
+          const m = String(o.name || o.key || '').trim().match(/^(over|under)\s*(\d+(?:\.\d+)?)$/i) || (pm.line === 2.5 ? String(o.name || o.key || '').trim().match(/^(over|under)$/i) && [null, String(o.name || o.key).trim(), '2.5'] : null);
+          if (!m || Number(m[2]) !== 2.5) continue;
+          put(/^over/i.test(m[1]) ? 'over25' : 'under25', mk, o);
+        }
+      }
+    } catch (_) {}
+  }
+  c.__quick = out; c.__quickFor = home + '|' + away;
+  return out;
+};
+module.exports.__setMarketsForTest = function (key, data) { matchMarketsCache.set(key, { ts: Date.now(), data }); };
