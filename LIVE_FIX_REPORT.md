@@ -246,3 +246,6 @@ The saved home list/odds cache is now usable for 72h (was 6h), so after a long b
 
 ## v34 - freeze finder
 /api/perf showed the bet itself takes ~1.7s but the server event loop froze up to 62s at a time (that is the 30-60s bet delay). `server/utils/stallProfiler.js` runs a helper thread that, whenever the server is stuck >1.5s, logs `[stall] <ms> <% fn (file:line)>` for the busiest code, and lists them in /api/perf `stalls`. Disable with STALL_PROFILER=0.
+
+## v35 - THE 30-60s bet delay: found and fixed
+The stall profiler named it: `dateInTimeZone` (sofaBetsProvider.js) built a new Intl.DateTimeFormat for every match on every date request, freezing the server 10-50 s at a time (93% of each freeze). Nairobi (UTC+3, no DST) is now plain arithmetic, other zones use one cached formatter; output verified identical on 20,000 timestamps. finalResultService.nairobiDate got the same treatment.

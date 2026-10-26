@@ -92,7 +92,7 @@ async function memoized(key, ttlMs, fn) {
   memo.set(key, { ts: Date.now(), data });
   return data;
 }
-const nairobiDate = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+const nairobiDate = d => new Date(new Date(d).getTime() + 3 * 3600000).toISOString().slice(0, 10);   // Nairobi is always UTC+3 (no Intl object per call: that was slow)
 const toMap = list => { const m = new Map(); (list || []).forEach(x => { const k = String(x && x.providerMatchId || '').trim(); if (k) m.set(k, x); }); return m; };
 const liveFeed = sport => memoized('live:' + sport, 15 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
 const catalogue = (sport, date) => memoized('cat:' + sport + ':' + date, 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));

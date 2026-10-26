@@ -1286,16 +1286,21 @@ function safeNormalizeMatch(raw) {
   }
 }
 
+// PERFORMANCE: building an Intl.DateTimeFormat is very slow (milliseconds). This used to run once per match per date on every
+// request, which froze the whole server for up to 50 s (it is what made bets take 30-60 s). Nairobi has no daylight saving
+// (always UTC+3) so it is plain arithmetic; any other zone reuses ONE cached formatter.
+const __dtf = new Map();
 function dateInTimeZone(iso, timeZone) {
   if (!iso) return null;
   try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit'
-    }).formatToParts(new Date(iso));
-    const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return String(iso).slice(0, 10);
+    if (timeZone === 'Africa/Nairobi') return new Date(ms + 3 * 3600000).toISOString().slice(0, 10);
+    let f = __dtf.get(timeZone);
+    if (!f) { f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); __dtf.set(timeZone, f); }
+    const p = Object.fromEntries(f.formatToParts(new Date(ms)).map(x => [x.type, x.value]));
     return `${p.year}-${p.month}-${p.day}`;
-  } catch (_) { return iso.slice(0, 10); }
+  } catch (_) { return String(iso).slice(0, 10); }
 }
 
 function sameRequestedDate(iso, dateStr) {
