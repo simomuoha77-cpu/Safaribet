@@ -983,6 +983,19 @@ function toggleFaq(i){
     <button class="slip-codebtn" onclick="openLoadCode()">📥 Load Code</button>
   </div>
   <div class="slip-body" id="slipBody"></div>
+<script type="text/sb-page">
+/* Arriving from the Bet Slip tab of another page (?openSlip=1): show the slip the moment this markup exists - straight from
+   the saved picks, no animation wait - instead of after the whole home page has started. The full slip logic takes over later. */
+(function(){try{
+  if(new URLSearchParams(location.search).get('openSlip')!=='1') return;
+  var sl=document.getElementById('slip'), ov=document.getElementById('overlay'), b=document.getElementById('slipBody'); if(!sl||!ov||!b) return;
+  var q=JSON.parse(localStorage.getItem('betslip')||'[]'); if(!q.length) return;
+  var e=function(x){return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  b.innerHTML=q.map(function(x){return '<div class="si"><div class="si-lg">'+e(x.league)+'</div><div class="si-match">'+e(x.homeTeam)+' vs '+e(x.awayTeam)+'</div><div class="si-bottom"><div><span class="si-pick">'+e(x.marketLabel||x.pick)+' \u2014 <strong>'+e(x.pickLabel)+'</strong></span></div><span class="si-odd">'+(Number(x.odds)||0).toFixed(2)+'</span></div></div>';}).join('');
+  sl.style.transition='none'; sl.classList.add('open'); ov.classList.add('on');
+  setTimeout(function(){ sl.style.transition=''; },400);
+}catch(_){}})();
+</script>
   <div class="slip-foot">
     <div class="odds-row">
       <span class="odds-lbl">Total Odds</span>
@@ -3550,7 +3563,6 @@ function addStake(v){
 }
 
 function openSlip(){
-  try { fetch('/api/ping',{cache:'no-store'}).catch(()=>{}); } catch(e) {}   // wakes a sleeping server / warms the connection before PLACE BET is pressed
   document.getElementById('slip').classList.add('open');
   document.getElementById('overlay').classList.add('on');
   document.getElementById('bni-slip')?.classList.add('on');

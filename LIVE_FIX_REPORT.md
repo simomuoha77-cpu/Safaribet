@@ -255,3 +255,6 @@ The phone now makes the code itself and shows it the same instant the button is 
 
 ## v37 - Highlights stuck on grey rows
 Highlights asked the server "has it changed?" (ETag) even when the phone had NO list to show; the server answered "unchanged (304)" and the page drew nothing, forever (other tabs use another request, so they were fine). Now the ETag is only sent/trusted together with a list; a 304 with an empty screen asks again for the full list; and if Highlights still cannot get its own list it shows the football list (with a Retry button as a last resort).
+
+## v38 - Bet Slip tab opens at once
+From the match page the Bet Slip tab loaded the whole home page first and only then opened the slip. A small early script (runs right after the new page's markup is placed, before the heavy page script) now opens the slip from the saved picks immediately, with no slide wait; the full slip logic takes over afterwards. The useless /api/ping on every slip open was removed.
