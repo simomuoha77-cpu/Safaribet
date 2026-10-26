@@ -240,3 +240,6 @@ With the odds provider answering after 3 s or never, the route returns a clear "
 
 ## v32 - home list "Failed to load" regression fixed
 v30 wrapped `window.fetch` inside the home page script. router.js deletes every `window.X =` a page script wrote when that page is left, so after navigating, fetch was removed/replaced and lists failed. The wrapper now lives in the external `js/bet-gate.js` (never touched by the router) and the page only sets a flag (`window['__sbPlacing']`). Verified: gate holds only GET /api/ calls while a bet is placing (max 8s), never place-status/ping/wallet/version.
+
+## v33 - instant home list
+The saved home list/odds cache is now usable for 72h (was 6h), so after a long break the games still appear at once (started games are dropped, fresh list replaces it in ~1s) instead of grey skeleton rows. Includes the v32 fetch fix - this must be applied for lists to load at all.

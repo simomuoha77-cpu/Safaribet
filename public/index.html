@@ -813,7 +813,7 @@ header{
       // The saved list is shown AT ONCE (like before), but every game that has since kicked off or was marked live is
       // removed first, so nothing old can claim to be live or upcoming. The fresh list replaces the rest within a second.
       var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
-      if (html && html.indexOf('data-ko=') !== -1 && Date.now() - hts < 6 * 3600000) {
+      if (html && html.indexOf('data-ko=') !== -1 && Date.now() - hts < 72 * 3600000) {
         ml.innerHTML = html;
         var now = Date.now(), cs = ml.querySelectorAll('.mc');
         for (var ci = 0; ci < cs.length; ci++) {
@@ -1122,7 +1122,7 @@ try {
   // odds/fixtures aren't sensitive, so localStorage (per-origin, survives
   // tab kills and full app restarts) is the right scope for this cache.
   const cached = JSON.parse(localStorage.getItem('matchesCache') || 'null');
-  const cachedFresh = cached && cached.ts && (Date.now() - cached.ts) < 6 * 3600000;     // drawn through the normal filters (games that have started are dropped); the fresh list replaces it at once
+  const cachedFresh = cached && cached.ts && (Date.now() - cached.ts) < 72 * 3600000;     // drawn through the normal filters (games that have started are dropped); the fresh list replaces it at once
   if (cachedFresh && cached.data && cached.data.length) {
     allMatches = cached.data;
     featuredMatches = cached.data;
