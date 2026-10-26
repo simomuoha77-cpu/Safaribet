@@ -37,7 +37,14 @@ if (juanai.configured()) {
 }
 
 // Public, no secrets: lets the lobby show games only once JuanAI is connected.
-router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ success: true, configured: !!juanai.configured() }); });
+// The lobby lists the games as soon as JuanAI's address is set (JUANAI_CASINO_URL or JUANAI_URL).
+router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); const c = juanai.cfg(); res.json({ success: true, configured: !!c.base, ready: !!(juanai.configured() || (c.base && c.legacyKey)) }); });
+// Playing Aviator/JetX needs the address plus either the casino key+secret or the normal JUANAI_API_KEY.
+function requireLaunchReady(req, res, next) {
+  const c = juanai.cfg();
+  if (juanai.configured() || (c.base && c.legacyKey)) return next();
+  return res.status(503).json({ success: false, message: 'JuanAI casino is not fully set up yet (missing API key).' });
+}
 
 function requireConfigured(req, res, next) {
   if (!juanai.configured()) return res.status(503).json({ success: false, message: 'JuanAI casino is not configured yet.' });
@@ -111,13 +118,13 @@ router.get('/games', auth, requireConfigured, async (req, res) => {
 
 // Called by the lobby in the background: wakes JuanAI and creates the player's game session
 // ahead of time, so the tap on Aviator/JetX opens instantly. Always answers at once.
-router.post('/prelaunch', auth, requireConfigured, (req, res) => {
+router.post('/prelaunch', auth, requireLaunchReady, (req, res) => {
   ['aviator', 'jetx'].forEach(id => launchFor(req.user, id).catch(() => {}));
   res.json({ success: true });
 });
 
 // Return the actual JuanAI game URL. SafariBet never recreates the provider game.
-router.post('/launch', auth, actionLimiter, requireConfigured, async (req, res) => {
+router.post('/launch', auth, actionLimiter, requireLaunchReady, async (req, res) => {
   try {
     const gameId = gameIdFrom(req);
     if (!gameId) return res.status(400).json({ success: false, message: 'gameId is required.' });
