@@ -1127,7 +1127,7 @@ try {
     allMatches = cached.data;
     featuredMatches = cached.data;
   }
-  if (cachedFresh && cached.etag) matchesEtag = cached.etag;
+  if (cachedFresh && cached.etag && cached.data && cached.data.length) matchesEtag = cached.etag;   // an ETag is only trusted together with a list to show (else a 304 would leave the loader up forever)
 } catch(e) {}
 
 // ── SCROLL POSITION ──
@@ -1802,6 +1802,15 @@ async function loadLeagueOptions(attempt=0){
 }
 window.addEventListener('sb:resume',()=>{ loadLeagueOptions(); });
 
+// Highlights could not get its own list: show the football list instead of sitting on grey rows (football loads from another feed).
+function highlightsFallback(){
+  try{
+    var rows = (footballTabCache.data && footballTabCache.data.length) ? footballTabCache.data : ((JSON.parse(localStorage.getItem('sb_football_cache') || 'null') || {}).data || []);
+    if (rows.length && currentCat === 'featured') { featuredMatches = rows; allMatches = rows; applyFilters(true); return true; }
+  }catch(e){}
+  try{ if (currentCat === 'featured' && !window.__sbHlTry) { window.__sbHlTry = 1; refreshFootballTab(true).then(function(){ window.__sbHlTry = 0; highlightsFallback(); }, function(){ window.__sbHlTry = 0; }); } }catch(e){}
+  return false;
+}
 async function loadAllMatches(silent=false, retryAttempt=0){
   if(currentSport==='live'){ loadMatches('live',silent); return; }
   // Another tab is open: keep THAT tab's own data fresh, and keep the Highlights feed warm below without drawing it.
@@ -1827,7 +1836,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     // fetch, this comes back as a 304 with no body at all, instead of
     // re-downloading the full ~400+ match list every 20s just to find nothing
     // moved.
-    const headers = matchesEtag ? { 'If-None-Match': matchesEtag } : {};
+    const headers = (matchesEtag && hasExistingData) ? { 'If-None-Match': matchesEtag } : {};
     // Hard timeout per attempt — the free-tier host can cold-start on the very
     // first request after a period of inactivity, which alone can take
     // 20-40s+. 12s used to be a hard cutoff after which we just gave up and
@@ -1843,6 +1852,10 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
     } finally {
       clearTimeout(timeoutId);
+    }
+    if (r.status === 304 && !hasExistingData) {      // "unchanged" but there is nothing on screen: ask again for the full list
+      matchesEtag = null;
+      if (retryAttempt < 3) return loadAllMatches(false, retryAttempt + 1);
     }
     if (r.status === 304) {
       markFresh(false);
@@ -1879,7 +1892,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
         applyFilters(silent);
       }
     } else if(!hasExistingData && currentCat === 'featured') {
-      el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
+      if (!highlightsFallback()) el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
     }
     // else: server returned success but an empty list while we already have a
     // populated feed on screen — most likely a transient upstream blip, not a
@@ -1900,7 +1913,8 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       setTimeout(() => loadAllMatches(false, retryAttempt+1), delay);
       return;
     }
-    if(!silent && !hasExistingData && currentCat === 'featured') el.innerHTML='<div class="empty">Failed to load. Check connection.</div>';
+    if(!hasExistingData && currentCat === 'featured' && highlightsFallback()) { setUpdatingIndicator(false); return; }
+    if(!silent && !hasExistingData && currentCat === 'featured') el.innerHTML='<div class="empty" style="padding:40px 20px;text-align:center"><div style="margin:0 0 14px;color:var(--mt)">Could not load matches.</div><button onclick="loadAllMatches(false)" style="background:var(--gn,#00c853);color:#000;border:0;border-radius:8px;padding:10px 22px;font-weight:700">Retry</button></div>';
     setUpdatingIndicator(false);
   }
 }

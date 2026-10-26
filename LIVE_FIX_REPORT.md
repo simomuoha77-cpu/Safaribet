@@ -252,3 +252,6 @@ The stall profiler named it: `dateInTimeZone` (sofaBetsProvider.js) built a new 
 
 ## v36 - instant Share Code
 The phone now makes the code itself and shows it the same instant the button is tapped; the server stores it in the background (POST /bets/slip/share accepts a well-formed proposed code `SC` + 7 chars, and draws a new one only if it is taken - the screen then updates). "Copy Code" waits for the save to finish, so a copied code always works. If saving fails the window closes with the error.
+
+## v37 - Highlights stuck on grey rows
+Highlights asked the server "has it changed?" (ETag) even when the phone had NO list to show; the server answered "unchanged (304)" and the page drew nothing, forever (other tabs use another request, so they were fine). Now the ETag is only sent/trusted together with a list; a 304 with an empty screen asks again for the full list; and if Highlights still cannot get its own list it shows the football list (with a Retry button as a last resort).
