@@ -3551,39 +3551,34 @@ function closeSlip(){
 // Snapshots the current picks under a code anyone can load — no money moves,
 // the loader still picks their own stake and places their own bet.
 let lastShareCode=null;
+let shareSaving=null;
+function newShareCode(){ var c='SC', ch='ABCDEFGHJKLMNPQRSTUVWXYZ23456789', i; try{ var r=new Uint8Array(7); crypto.getRandomValues(r); for(i=0;i<7;i++) c+=ch[r[i]%ch.length]; }catch(e){ for(i=0;i<7;i++) c+=ch[Math.floor(Math.random()*ch.length)]; } return c; }
 async function shareSlipCode(){
   if(!USER){ showT('Login to share a slip','err'); return; }
   if(!slip.length){ showT('Add selections first','err'); return; }
-  const btn = document.getElementById('shareSlipBtn');
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Generating...';
-  // The code window opens at once (the tap reacts immediately); the code fills in the moment the server has it.
-  const ttl = document.querySelector('#shareCodeModal .modal-ttl');
-  lastShareCode = null;
-  document.getElementById('shareCodeVal').textContent = '• • • • • • •';
-  if(ttl) ttl.textContent = 'Generating your code…';
+  // The code is made on the phone and shown AT ONCE; the server stores it in the background (copying waits for that).
+  var code=newShareCode(); lastShareCode=code;
+  var ttl=document.querySelector('#shareCodeModal .modal-ttl');
+  document.getElementById('shareCodeVal').textContent=code;
+  if(ttl) ttl.textContent='Slip Shared!';
   openModal('shareCodeModal');
-  try{
-    const r=await fetch('/api/bets/slip/share',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
-      body:JSON.stringify({selections:slip})
-    });
-    const d=await r.json();
-    if(d.success){
-      lastShareCode=d.code;
-      document.getElementById('shareCodeVal').textContent=d.code;
-      if(ttl) ttl.textContent = 'Slip Shared!';
-    } else {
-      closeModal('shareCodeModal');
-      showT(d.message||'Could not create slip code','err');
-    }
-  }catch(e){ closeModal('shareCodeModal'); showT('Network error — try again','err'); }
-  finally{ btn.disabled = false; btn.textContent = originalText; }
+  shareSaving=(async function(){
+    try{
+      const r=await fetch('/api/bets/slip/share',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
+        body:JSON.stringify({selections:slip, code:code})
+      });
+      const d=await r.json();
+      if(d.success){ if(d.code && d.code!==code){ lastShareCode=d.code; document.getElementById('shareCodeVal').textContent=d.code; } return true; }
+      closeModal('shareCodeModal'); lastShareCode=null; showT(d.message||'Could not create slip code','err'); return false;
+    }catch(e){ closeModal('shareCodeModal'); lastShareCode=null; showT('Network error - try again','err'); return false; }
+  })();
 }
-function copyShareCode(){
+async function copyShareCode(){
   if(!lastShareCode){ showT('Almost ready…'); return; }
+  var ok=true; try{ if(shareSaving) ok=await shareSaving; }catch(e){}
+  if(!ok||!lastShareCode) return;
   navigator.clipboard?.writeText(lastShareCode).then(()=>showT('Code copied!','ok')).catch(()=>{});
 }
 

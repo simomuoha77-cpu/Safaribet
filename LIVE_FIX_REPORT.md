@@ -249,3 +249,6 @@ The saved home list/odds cache is now usable for 72h (was 6h), so after a long b
 
 ## v35 - THE 30-60s bet delay: found and fixed
 The stall profiler named it: `dateInTimeZone` (sofaBetsProvider.js) built a new Intl.DateTimeFormat for every match on every date request, freezing the server 10-50 s at a time (93% of each freeze). Nairobi (UTC+3, no DST) is now plain arithmetic, other zones use one cached formatter; output verified identical on 20,000 timestamps. finalResultService.nairobiDate got the same treatment.
+
+## v36 - instant Share Code
+The phone now makes the code itself and shows it the same instant the button is tapped; the server stores it in the background (POST /bets/slip/share accepts a well-formed proposed code `SC` + 7 chars, and draws a new one only if it is taken - the screen then updates). "Copy Code" waits for the save to finish, so a copied code always works. If saving fails the window closes with the error.

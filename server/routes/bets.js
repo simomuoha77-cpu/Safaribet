@@ -982,6 +982,7 @@ function genSlipCode() {
 router.post('/slip/share', auth, slipLimiter, async (req, res) => {
   try {
     const { selections } = req.body;
+    const proposed = (typeof req.body.code === 'string' && /^SC[A-Z0-9]{7}$/.test(req.body.code)) ? req.body.code : null;   // the phone shows its own code at once; used if still free
     const adminRoutes = require('./admin');
     const limits = (adminRoutes.getStore ? adminRoutes.getStore().limits : null) || {};
     const err = validateSelections(selections, limits.maxSelections ?? 20);
@@ -1013,7 +1014,7 @@ router.post('/slip/share', auth, slipLimiter, async (req, res) => {
     for (let i = 0; i < 5 && !doc; i++) {
       try {
         doc = await SlipCode.create({
-          code: genSlipCode(),
+          code: (i === 0 && proposed) ? proposed : genSlipCode(),
           createdBy: req.user._id,
           selections: stored,
           expiresAt: new Date(Date.now() + 7*24*60*60*1000)
