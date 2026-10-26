@@ -267,3 +267,6 @@ New public `GET /api/casino/juanai/available` -> `{configured}` (true only when 
 
 ## v41 - provider name removed from the casino screens
 Player-visible text no longer mentions JuanAI (casino lobby title/subtitle/section/cards, game page title, error messages). Internal API paths are unchanged.
+
+## v42 - team crests on My Bets
+Each leg shows the home and away crest (same bundled/Wikipedia crests as the match list; initials shield when none is known). Settlement rules were NOT changed: a game is graded only from a confirmed final result, and a leg that cannot be confirmed after 24 h is refunded automatically.

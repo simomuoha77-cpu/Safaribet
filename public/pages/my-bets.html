@@ -71,6 +71,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 .sel-icon.pending{background:rgba(255,214,0,0.08);border:1.5px solid rgba(255,214,0,0.2)}
 .sel-icon.void{background:rgba(150,150,150,0.1);border:1.5px solid rgba(150,150,150,0.2)}
 .sel-body{flex:1;min-width:0}
+.sel-match .tname{display:inline-flex;align-items:center;max-width:46%;overflow:hidden;text-overflow:ellipsis;font:inherit;vertical-align:middle}.sel-match .sel-vs{opacity:.6;font-weight:500;margin:0 4px}
 .sel-match{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sel-detail{display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
 .sel-league{font-size:10px;color:var(--mt)}
@@ -270,7 +271,7 @@ function renderBets(bets){
       return `<div class="sel-row">
         <div class="sel-icon ${r}">${iconHtml}</div>
         <div class="sel-body">
-          <div class="sel-match">${s.homeTeam} vs ${s.awayTeam}</div>
+          <div class="sel-match"><span class="tname">${s.homeTeam}</span><span class="sel-vs"> vs </span><span class="tname">${s.awayTeam}</span></div>
           <div class="sel-detail">
             <span class="sel-pick-lbl ${r}">${
               r==='void' ? '↩ Void – Refunded' :
@@ -386,6 +387,7 @@ async function settleBets(){
   btn.textContent='🔄 Settle';btn.disabled=false;
 }
 </script>
+<script src="/js/team-logos.js" defer></script>
 <script>SB.run()</script>
 </body>
 </html>
