@@ -276,3 +276,6 @@ The list feed only carries 1X2, so these chips were empty. The server now reads 
 
 ## v44 - list chip prices no longer disappear
 Cause: a thin/failed refresh of a game's market list replaced the good list in server memory, so Double Chance / Both Teams / Over-Under prices vanished until the next successful fetch. Now (1) a thin refresh never overwrites a good list younger than 3 h, (2) the server remembers each game's last good quick prices for 12 h, (3) the phone keeps a game's chip prices when a refresh arrives without them.
+
+## v45 - OTP text limits per phone number
+Verification texts were limited per IP address only, so one number could be texted many times (each SMS costs money). New `services/otpThrottle.js`, used by register step 1 and resend: at least 60 s between texts to one number, max 4 per hour, max 8 per 24 h (env OTP_COOLDOWN_SEC / OTP_PER_HOUR / OTP_PER_DAY). Stored in MongoDB (collection otpthrottles, auto-cleaned after 25 h). Over the limit -> HTTP 429 with a plain message and Retry-After. If the limiter itself fails, signup is not blocked. Tests: server/tests/otpThrottle.test.js.

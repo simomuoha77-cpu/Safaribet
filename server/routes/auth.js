@@ -98,6 +98,9 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone already registered — please login' });
     }
 
+    // One number can only be texted so often (cost + abuse): cooldown, per hour, per day.
+    { const gate = await require('../services/otpThrottle').claim(normalPhone);
+      if (!gate.ok) return res.status(429).set('Retry-After', String(gate.waitSec)).json({ success: false, retryAfter: gate.waitSec, message: gate.message }); }
     const { generateOtp, sendSms, otpMessage } = require('../services/smsService');
     const otp = generateOtp();
     const PendingRegistration = require('../models/PendingRegistration');
@@ -154,6 +157,8 @@ router.post('/register/resend-otp', otpResendLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'No pending registration for this number — please start again' });
     }
 
+    { const gate = await require('../services/otpThrottle').claim(normalPhone);
+      if (!gate.ok) return res.status(429).set('Retry-After', String(gate.waitSec)).json({ success: false, retryAfter: gate.waitSec, message: gate.message }); }
     const { generateOtp, sendSms, otpMessage } = require('../services/smsService');
     const otp = generateOtp();
     // Every second "Resend" uses the alternate sender ID (if COMMSGRID_SENDER_ID_ALT is set), so a number whose
