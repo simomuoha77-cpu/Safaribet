@@ -160,7 +160,10 @@ async function openGame(id){
 document.getElementById('grid').addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(c)openGame(c.dataset.id)});
 document.getElementById('grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openGame(e.target.dataset.id)}});
 try{const og=sessionStorage.getItem('sb_open_game');if(og){sessionStorage.removeItem('sb_open_game');if(og==='aviator'||og==='jetx')setTimeout(()=>openGame(og),400)}}catch(_){}
-renderGames(); // paint both cards before any network request
+let gamesStarted=false;
+function startGames(){
+  if(gamesStarted) return; gamesStarted=true;
+  renderGames(); // paint both cards before any network request
 // Wake JuanAI and prepare the player's game sessions NOW, so a tap opens the game instantly.
 try{ fetch('/api/casino/juanai/prelaunch',{method:'POST',headers:headers(),cache:'no-store'}).catch(()=>{}); }catch(_){}
 // Keep each game's launch link ready on this phone so the game page opens with no waiting.
@@ -173,6 +176,23 @@ try{ fetch('/api/casino/juanai/prelaunch',{method:'POST',headers:headers(),cache
     .then(r=>r.json()).then(d=>{ if(d&&d.success&&d.launchUrl){ try{localStorage.setItem('sb_launch_'+id,JSON.stringify({at:Date.now(),url:d.launchUrl}));}catch(_){} } }).catch(()=>{});
 });
 loadCasinoImages(); // artwork sync is background-only and never blocks the lobby
+}
+// The games come from JuanAI. Until the JuanAI address/keys are set on the server nothing is shown (no placeholder games);
+// the moment they are set, the real games appear. The last answer is remembered so a connected lobby never flashes empty.
+function showNoCasino(){
+  gamesStarted=false;
+  document.getElementById('grid').innerHTML='';
+  const m=document.getElementById('message'); m.style.display='block'; m.textContent='Casino games are coming soon. Check back shortly.';
+}
+(function(){
+  let cached=null; try{cached=localStorage.getItem('sb_juanai_cfg');}catch(_){}
+  if(cached==='1') startGames();
+  fetch('/api/casino/juanai/available',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const ok=!!(d&&d.configured);
+    try{localStorage.setItem('sb_juanai_cfg',ok?'1':'0');}catch(_){}
+    if(ok) startGames(); else showNoCasino();
+  }).catch(()=>{ if(cached!=='1') showNoCasino(); });
+})();
 loadBalance();
 setInterval(loadBalance,5000);
 </script><script>SB.run()</script>

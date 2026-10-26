@@ -258,3 +258,6 @@ Highlights asked the server "has it changed?" (ETag) even when the phone had NO 
 
 ## v38 - Bet Slip tab opens at once
 From the match page the Bet Slip tab loaded the whole home page first and only then opened the slip. A small early script (runs right after the new page's markup is placed, before the heavy page script) now opens the slip from the saved picks immediately, with no slide wait; the full slip logic takes over afterwards. The useless /api/ping on every slip open was removed.
+
+## v39 - Casino shows JuanAI games only when JuanAI is connected
+New public `GET /api/casino/juanai/available` -> `{configured}` (true only when JUANAI_CASINO_URL, _API_KEY and _API_SECRET are all set). The casino lobby no longer paints Aviator/JetX placeholders (and no longer fires launch/prelaunch requests) while it is false; it shows "Casino games are coming soon". As soon as the three settings are added on Render, the real games appear (answer remembered in localStorage so a connected lobby never flashes empty).

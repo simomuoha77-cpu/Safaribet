@@ -36,6 +36,9 @@ if (juanai.configured()) {
   const t1 = setInterval(() => juanai.warm(), 9 * 60 * 1000); if (t1.unref) t1.unref();
 }
 
+// Public, no secrets: lets the lobby show games only once JuanAI is connected.
+router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ success: true, configured: !!juanai.configured() }); });
+
 function requireConfigured(req, res, next) {
   if (!juanai.configured()) return res.status(503).json({ success: false, message: 'JuanAI casino is not configured yet.' });
   next();
