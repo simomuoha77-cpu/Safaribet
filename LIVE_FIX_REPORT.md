@@ -237,3 +237,6 @@ The real `/api/bets/place` route was run with stand-in database models that cost
 | 150 ms | 465 ms | 469 ms |
 | 400 ms | 1215 ms | 1217 ms |
 With the odds provider answering after 3 s or never, the route returns a clear "provider is slow" error in about 2.2 s (never a long wait). A wait of 30-60 s therefore comes from outside the bet logic: server CPU/event-loop starvation, database throttling, or the phone's connection. `GET /api/perf` and the `[bets/place] SLOW-TOTAL` / `[loop-lag]` log lines show which.
+
+## v32 - home list "Failed to load" regression fixed
+v30 wrapped `window.fetch` inside the home page script. router.js deletes every `window.X =` a page script wrote when that page is left, so after navigating, fetch was removed/replaced and lists failed. The wrapper now lives in the external `js/bet-gate.js` (never touched by the router) and the page only sets a flag (`window['__sbPlacing']`). Verified: gate holds only GET /api/ calls while a bet is placing (max 8s), never place-status/ping/wallet/version.
