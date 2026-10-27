@@ -300,3 +300,7 @@ Added `id`, `lang`, `orientation`, `categories` and a maskable 512 icon (`icon-m
 
 ## v51 - Digital Asset Links for the new PWABuilder app
 /.well-known/assetlinks.json now lists BOTH apps: the older Median app and the new `top.safaribet.app` (SHA-256 30:98:12:4A:...:C8:30:D2, from the signed PWABuilder package), so the new app opens full-screen without the address bar.
+
+## v52 – no empty dark screen on app start
+The page now paints the SafariBet logo on the app colour from the very first frame (pure CSS in the head, no network needed).
+It sits behind the page, so as soon as the real page draws it is covered. The splash and the first screen now look like one continuous screen.
