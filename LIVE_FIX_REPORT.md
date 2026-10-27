@@ -294,3 +294,6 @@ Login, sign-up verification, /auth/me and /auth/balance returned the old `user.b
 
 ## v49 - casino game no longer triggers the app's "No internet connection" screen
 The game runs in a frame served by the casino game server. When that frame cannot load (server asleep/unreachable, or an http:// address inside the https page) the phone app treats it as the whole app being offline. The game page now asks the new `GET /api/casino/juanai/ready` (server checks the game server, which also wakes it; flags an insecure http:// address) and only opens the frame once it answers, showing the normal "loading" screen meanwhile (up to ~70 s), then a clear message with Try again. The app wrapper's own source is not in this project, so this is a guard from our side.
+
+## v50 - manifest ready for PWABuilder / Android app
+Added `id`, `lang`, `orientation`, `categories` and a maskable 512 icon (`icon-maskable-512.png`) to manifest.json, so the Android package gets a proper round/adaptive icon and PWABuilder's recommendations are met.
