@@ -31,20 +31,40 @@
   const token=localStorage.getItem('token');
   function back(){location.href='/casino';}
   document.getElementById('back').addEventListener('click',back);
+  const authH={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  // The game is only put on screen once the game server answers. A frame that cannot load is reported by the phone app
+  // as "No internet connection", so we check first and show our own message while the game server wakes up.
+  async function gameServerReady(){
+    for(let i=0;i<14;i++){                                   // up to ~70 s (a sleeping server needs 30-50 s)
+      try{
+        const r=await fetch('/api/casino/juanai/ready',{cache:'no-store',headers:authH});
+        const d=await r.json();
+        if(d&&d.ready) return true;
+        if(d&&d.reason==='insecure') throw new Error(d.message||'Casino server address is not secure.');
+        if(d&&d.reason==='not_configured') throw new Error('Casino is not available right now.');
+      }catch(e){ if(e&&e.message&&!/fetch|network|load failed/i.test(e.message)) throw e; }
+      errText.textContent='';
+      document.getElementById('errText').parentNode.style.display='none';
+      await wait(5000);
+    }
+    return false;
+  }
   async function start(){
     if(!token){location.href='/login';return;}
     loading.style.display='flex';loading.classList.remove('hasErr');err.style.display='none';
-    // Open instantly from the link the casino lobby already prepared on this phone.
     try{
-      const c=JSON.parse(localStorage.getItem('sb_launch_'+id)||'null');
-      if(c&&c.url&&Date.now()-c.at<20*60*1000&&!frame.src.startsWith('http')){
-        frame.src=c.url; frame.onload=()=>{loading.style.display='none';};
-        setTimeout(()=>{loading.style.display='none';},1500);
-        return;
-      }
-    }catch(_){}
-    try{
-      const r=await fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({gameId:id})});
+      if(!(await gameServerReady())) throw new Error('The game server is not answering yet. Please try again in a moment.');
+      // Open instantly from the link the casino lobby already prepared on this phone.
+      try{
+        const c=JSON.parse(localStorage.getItem('sb_launch_'+id)||'null');
+        if(c&&c.url&&Date.now()-c.at<20*60*1000&&!frame.src.startsWith('http')){
+          frame.src=c.url; frame.onload=()=>{loading.style.display='none';};
+          setTimeout(()=>{loading.style.display='none';},1500);
+          return;
+        }
+      }catch(_){}
+      const r=await fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:authH,body:JSON.stringify({gameId:id})});
       let d={};try{d=await r.json()}catch(_){ }
       if(!r.ok||!d.success||!d.launchUrl) throw new Error(d.message||'Could not start the game.');
       frame.src=d.launchUrl;

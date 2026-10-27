@@ -291,3 +291,6 @@ Login, sign-up verification, /auth/me and /auth/balance returned the old `user.b
 ## v48 - bottom tabs switch faster
 - Service worker (v22): an in-app page change with a saved copy of the page now waits 0.3 s for the network (was 3 s) before showing the saved copy, which is refreshed in the background. A slow server no longer holds a tab switch.
 - Router: the five bottom-bar pages (My Bets, Account, Casino, Home, then Deposit/Withdraw) are pre-fetched first and 150 ms apart, starting 0.6 s after load (was Deposit/Withdraw/Match first, 400 ms apart, from 1.5 s). Finger-down on a My Bets / Account / Casino tab also starts the fetch at once.
+
+## v49 - casino game no longer triggers the app's "No internet connection" screen
+The game runs in a frame served by the casino game server. When that frame cannot load (server asleep/unreachable, or an http:// address inside the https page) the phone app treats it as the whole app being offline. The game page now asks the new `GET /api/casino/juanai/ready` (server checks the game server, which also wakes it; flags an insecure http:// address) and only opens the frame once it answers, showing the normal "loading" screen meanwhile (up to ~70 s), then a clear message with Try again. The app wrapper's own source is not in this project, so this is a guard from our side.

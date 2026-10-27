@@ -40,6 +40,20 @@ if (juanai.configured()) {
 // The lobby lists the games as soon as JuanAI's address is set (JUANAI_CASINO_URL or JUANAI_URL).
 router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); const c = juanai.cfg(); res.json({ success: true, configured: !!c.base, ready: !!(juanai.configured() || (c.base && c.legacyKey)) }); });
 // Playing Aviator/JetX needs the address plus either the casino key+secret or the normal JUANAI_API_KEY.
+// Is the casino game server answering right now? (the game page asks this BEFORE it opens the game, so a sleeping or
+// unreachable game server shows our own "starting..." screen instead of a failed frame, which the phone app reports as
+// "No internet connection"). Also wakes the game server.
+router.get('/ready', auth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const c = juanai.cfg();
+    if (!c.base) return res.json({ success: true, ready: false, reason: 'not_configured' });
+    if (!/^https:\/\//i.test(c.base) && !/^http:\/\/(localhost|127\.)/i.test(c.base)) return res.json({ success: true, ready: false, reason: 'insecure', message: 'The casino server address must start with https://' });
+    const r = await require('axios').get(c.base + '/', { timeout: 8000, validateStatus: () => true, maxRedirects: 3 });
+    return res.json({ success: true, ready: r.status > 0 && r.status < 500 });
+  } catch (e) { return res.json({ success: true, ready: false, reason: 'unreachable' }); }
+});
+
 function requireLaunchReady(req, res, next) {
   const c = juanai.cfg();
   if (juanai.configured() || (c.base && c.legacyKey)) return next();
