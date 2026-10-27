@@ -279,3 +279,11 @@ Cause: a thin/failed refresh of a game's market list replaced the good list in s
 
 ## v45 - OTP text limits per phone number
 Verification texts were limited per IP address only, so one number could be texted many times (each SMS costs money). New `services/otpThrottle.js`, used by register step 1 and resend: at least 60 s between texts to one number, max 4 per hour, max 8 per 24 h (env OTP_COOLDOWN_SEC / OTP_PER_HOUR / OTP_PER_DAY). Stored in MongoDB (collection otpthrottles, auto-cleaned after 25 h). Over the limit -> HTTP 429 with a plain message and Retry-After. If the limiter itself fails, signup is not blocked. Tests: server/tests/otpThrottle.test.js.
+
+## v46 - correct balance right after login
+Login, sign-up verification, /auth/me and /auth/balance returned the old `user.balance` field, while the app everywhere else shows the wallet's spendable money (main + bonus). The first screen after logging in therefore showed that older figure until the live refresh corrected it. They now return the wallet's spendable balance (falls back to the old field only if the wallet lookup fails).
+
+## v47 - My Bets shows at once
+- The saved bets are painted the moment the My Bets script runs (previously after DOMContentLoaded).
+- The background fetch that keeps that saved list fresh now starts sooner (0.7 s after load, 0.4 s after a page change) and right at login, so even a first visit right after logging in has the list ready.
+- `/api/bets/my` looks up the totals at the same time as the match states (one database round trip less).

@@ -143,6 +143,7 @@ async function doLogin(){
     if(data.success){
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      try{ SB.prefetchBets(); }catch(e){}   // start fetching My Bets right now, so it is ready when it is opened
       okEl.textContent = '✅ Welcome back! Redirecting...';
       okEl.style.display = 'block';
       SB.go('/');   // straight away (was: an extra 1 second pause)

@@ -642,8 +642,8 @@
   }
   _docAdd.call(document, 'touchstart', betsIntent, { passive: true });
   _docAdd.call(document, 'mousedown', betsIntent, true);
-  _winAdd.call(window, 'load', function () { _st.call(window, SB.prefetchBets, 2500); });
-  _winAdd.call(window, 'sb:navigated', function () { _st.call(window, SB.prefetchBets, 1500); });
+  _winAdd.call(window, 'load', function () { _st.call(window, SB.prefetchBets, 700); });
+  _winAdd.call(window, 'sb:navigated', function () { _st.call(window, SB.prefetchBets, 400); });
 
 
   // ── Service worker + auto-update (a deploy shows up on the next load / refresh / page change) ──

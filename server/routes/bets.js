@@ -610,7 +610,8 @@ router.get('/my', auth, async (req, res) => {
     // Aggregate stats across ALL of the user's bets (not just this page) — used by
     // the account summary cards. Computed here rather than a separate endpoint to
     // avoid an extra round trip on every account page load.
-    const stats = await betStatsFor(req.user._id);
+    const statsP = betStatsFor(req.user._id);    // runs while the fixture states below are looked up (was one after the other)
+    statsP.catch(() => {});
 
     // Where is each still-pending game right now? (live / not started / finished, awaiting result)
     try {
@@ -651,6 +652,7 @@ router.get('/my', auth, async (req, res) => {
       }
     } catch (e) { /* purely informational - never block the bet list */ }
 
+    const stats = await statsP;
     res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Failed to load bets' });
