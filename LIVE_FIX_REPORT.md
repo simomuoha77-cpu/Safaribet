@@ -287,3 +287,7 @@ Login, sign-up verification, /auth/me and /auth/balance returned the old `user.b
 - The saved bets are painted the moment the My Bets script runs (previously after DOMContentLoaded).
 - The background fetch that keeps that saved list fresh now starts sooner (0.7 s after load, 0.4 s after a page change) and right at login, so even a first visit right after logging in has the list ready.
 - `/api/bets/my` looks up the totals at the same time as the match states (one database round trip less).
+
+## v48 - bottom tabs switch faster
+- Service worker (v22): an in-app page change with a saved copy of the page now waits 0.3 s for the network (was 3 s) before showing the saved copy, which is refreshed in the background. A slow server no longer holds a tab switch.
+- Router: the five bottom-bar pages (My Bets, Account, Casino, Home, then Deposit/Withdraw) are pre-fetched first and 150 ms apart, starting 0.6 s after load (was Deposit/Withdraw/Match first, 400 ms apart, from 1.5 s). Finger-down on a My Bets / Account / Casino tab also starts the fetch at once.

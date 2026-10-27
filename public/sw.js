@@ -17,7 +17,7 @@
 // Betting data (fixtures, live scores, event status, markets) is only ever served under /api/*, which is in NEVER below:
 // the worker does not touch it, so it can never be frozen by static-asset caching. Static files keep their caching.
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v21-livefresh';
+const VERSION = 'sb-v22-fasttabs';
 const SHELL = ['/', '/login', '/register', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
@@ -83,7 +83,7 @@ async function networkFirst(req, url) {
   // A page the user taps open (link, app icon) must never sit on a black screen waiting for a sleeping server:
   // when a cached copy exists, give the network only 0.3s, then show the cached page at once (an app opened from the icon must never sit on a black screen). The network
   // request keeps going and refreshes the cache, so the next open is up to date.
-  return Promise.race([net.catch(() => hit), wait(nav ? 300 : spa ? 3000 : 15000, res => res(hit))]);
+  return Promise.race([net.catch(() => hit), wait((nav || spa) ? 300 : 15000, res => res(hit))]);
 }
 
 self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
