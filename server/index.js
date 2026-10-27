@@ -139,6 +139,17 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
           '2F:B3:62:4F:20:26:22:6E:95:52:42:F1:CE:B2:A1:0B:14:AA:AF:EB:65:4B:67:22:72:23:47:80:C8:D5:F6:C0'
         ]
       }
+    },
+    // The new Trusted Web Activity app built with PWABuilder (hides the address bar). The older Median app above stays valid.
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'top.safaribet.app',
+        sha256_cert_fingerprints: [
+          '30:98:12:4A:6F:EF:96:D0:67:8B:00:88:5E:8A:24:A8:0F:CA:7C:27:F7:84:18:B9:1C:FB:EC:56:B6:C8:30:D2'
+        ]
+      }
     }
   ]);
 });

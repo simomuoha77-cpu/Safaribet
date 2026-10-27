@@ -297,3 +297,6 @@ The game runs in a frame served by the casino game server. When that frame canno
 
 ## v50 - manifest ready for PWABuilder / Android app
 Added `id`, `lang`, `orientation`, `categories` and a maskable 512 icon (`icon-maskable-512.png`) to manifest.json, so the Android package gets a proper round/adaptive icon and PWABuilder's recommendations are met.
+
+## v51 - Digital Asset Links for the new PWABuilder app
+/.well-known/assetlinks.json now lists BOTH apps: the older Median app and the new `top.safaribet.app` (SHA-256 30:98:12:4A:...:C8:30:D2, from the signed PWABuilder package), so the new app opens full-screen without the address bar.
