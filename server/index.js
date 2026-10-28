@@ -121,6 +121,8 @@ app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.origi
 // Parse cookies — needed for casino game launcher auth
 app.use(require('cookie-parser')());
 app.use(mongoSanitize()); // prevent NoSQL injection
+// The odds supplier's name never reaches the browser: ids/labels are renamed on the way out and back on the way in.
+app.use(require('./utils/edgeAlias').middleware);
 // ── ANDROID APP LINKS VERIFICATION ──
 // Lets tapping a safaribet.top link (from SMS, WhatsApp, etc.) open the
 // Median-built app directly instead of the browser, once the app is
@@ -205,6 +207,7 @@ app.get('/api/version', (req, res) => {
   res.json({ success: true, build: __build.id });
 });
 
+app.use(require('./utils/edgeAlias').blockLeftovers);   // never serve .bak / .map / editor leftovers
 app.use(express.static(path.join(__dirname, '../public'), {
   // Disable directory listing
   index: false,

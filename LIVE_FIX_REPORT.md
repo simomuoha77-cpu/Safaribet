@@ -317,3 +317,10 @@ A multi-bet with one lost leg is lost at once. Its other legs (matches the serve
 
 ## v55 – "Was this game watched live?" check
 New read-only page `/api/odds/captured?team=<name>`: for a game (last 3 days) it shows whether it was seen live, when it was last seen, its last minute and score, when it left the live feed, whether the final result is confirmed and why not. Without `?team=` it lists the games seen live in the last 3 hours. No prices, no personal data. File: server/routes/odds.js.
+
+## v56 – the odds supplier's name is hidden from the browser
+- New edge layer `server/utils/edgeAlias.js` (wired in server/index.js): every API answer is renamed on the way OUT (match ids `<name>_123` -> `sbm_123`, provider `<name>` -> `sb`, source labels -> `SB`, the duplicate `_...ProviderOdds` field dropped) and renamed back on the way IN (URL path, query and JSON body). Database, settlement and all server code keep the real ids, so nothing stored changes. Old ids still sent by an old saved slip or old app copy are still accepted. Casino and M-Pesa callbacks are untouched.
+- Frontend: all mentions removed from public/index.html and public/pages/match.html (comments and code); bets are sent with provider `sb`.
+- js/theme.js: one-time clean of saved match lists / slip / open-match memo that still hold old-style ids (flag `sb_idv`), so customers do not see mismatched selections after the update. A saved slip is dropped once.
+- The static file server no longer serves `.bak`, `.map`, `.orig`, `.old`, `.swp`, `.tmp`, `.backup` files (the old `public/index.html.bak-*` copies were downloadable by anyone, with all the source). Delete them from the repo too.
+- Tests: server/tests/edgeAlias.test.js (5 tests, including a real express round trip).

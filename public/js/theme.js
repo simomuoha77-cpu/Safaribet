@@ -57,3 +57,19 @@ window.goHome = function(){
   } catch(e) {}
   location.href = '/';
 };
+
+
+// One-time clean-up after match ids were renamed in the API: saved match lists, a saved slip and the open-match memo
+// from an older version still hold the old ids, so they are dropped once (they refill within seconds).
+(function(){
+  try {
+    if (localStorage.getItem('sb_idv') === '2') return;
+    var re = /cache|matchListHTML|betslip|sb_mkt|sb_mm_|currentMatch|sb_home_state|sb_football|sb_live_count|sb_sport/i;
+    [localStorage, sessionStorage].forEach(function(st){
+      var del = [];
+      for (var i = 0; i < st.length; i++) { var k = st.key(i); if (k && re.test(k)) del.push(k); }
+      del.forEach(function(k){ try { st.removeItem(k); } catch(e){} });
+    });
+    localStorage.setItem('sb_idv', '2');
+  } catch(e) {}
+})();

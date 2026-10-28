@@ -281,7 +281,7 @@ function isStaleResponse(d){
 async function loadMatch(){
   // Instant paint: if we already know roughly what this match looks like
   // from the page the user just came from, render it immediately — no
-  // network wait, no loading screen. The full SofaBets market catalogue is
+  // network wait, no loading screen. The full market catalogue is
   // then fetched below and merged in silently the moment it arrives.
   let paintedFromCache = false;
   try {
@@ -670,8 +670,8 @@ function num(v, fallback){
 
 function renderOneMarket(mk){
     const options = Array.isArray(mk.options) ? mk.options : [];
-    // SofaBets-native markets are real provider prices. They are displayed
-    // exactly as supplied by SofaBets; unsupported provider markets remain
+    // Native markets are real provider prices. They are displayed
+    // exactly as supplied; unsupported provider markets remain
     // view-only so SafariBet never accepts a bet it cannot settle safely.
     if (mk.providerMarket) {
       return `
@@ -806,7 +806,7 @@ function toggleMarketPick(market, pick, odds, pickLabelText, providerMarketId, p
       ...(String(market).startsWith('sb:') ? {
         marketLabel: ((matchData.markets || []).find(m => m.market === market) || {}).label || '',
         isLive: matchData.status === 'live',
-        provider: 'sofabets',
+        provider: 'sb',
         providerMarketId: providerMarketId || null,
         providerMarketKey: providerMarketKey || String(market).slice(3),
         providerSelectionId: providerSelectionId || null,

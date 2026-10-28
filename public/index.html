@@ -2066,10 +2066,10 @@ function applyFilters(silent=false){
       if(!m.commenceTime || new Date(m.commenceTime)<=now) return false;
       const home=m.odds?.home ?? m.aiOdds?.homeWin ?? m.providerOdds?.homeWin;
       const away=m.odds?.away ?? m.aiOdds?.awayWin ?? m.providerOdds?.awayWin;
-      // Direct SofaBets is the source of truth. If the odds pipeline temporarily
+      // The live feed is the source of truth. If the odds pipeline temporarily
       // strips a display copy, keep the fixture visible rather than hiding the
       // whole game; renderMatch can still show the provider prices.
-      return (home!=null && away!=null) || m.providerSource==='sofabets';
+      return (home!=null && away!=null) || m.providerSource==='sb';
     });
     filtered.sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
   } else if(currentFilter==='popular'){
@@ -2345,7 +2345,7 @@ async function loadCat(cat) {
     return;
   }
 
-  // Non-football sports come directly from SofaBets. First use the in-memory
+  // Non-football sports come directly from the feed. First use the in-memory
   // cache, then localStorage, then the network. Never blank the current list
   // just because a new tab needs a refresh.
   let cachedSport = sportTabCache.get(cat) || null;
@@ -2406,7 +2406,7 @@ function refreshSportTab(cat) {
   sportTabRequests.set(cat, request);
 }
 
-// Football uses the exact same direct SofaBets-powered feed as Highlights.
+// Football uses the exact same direct feed as Highlights.
 // Keep it separately cached so Football is also a zero-wait tab after the
 // first Highlights load.
 // As soon as the Highlights feed lands, its football games fill the Football tab if that tab has nothing yet
@@ -2470,7 +2470,7 @@ function refreshFootballTab(silent=false, attempt=0){
   return footballRefreshing;
 }
 
-// Render non-football matches from the direct SofaBets feed.
+// Render non-football matches from the direct feed.
 function renderNonFootball(matches) {
   const el = document.getElementById('matchList');
   // This list is not tracked by renderMatches: make sure no half-streamed Highlights/Football batch is appended to it,
@@ -3359,7 +3359,7 @@ function renderMatch(m){
   const scoreStr = isLive && hs != null && as != null ? `${hs} - ${as}` : '';
   const homeLosing= isLive&&hs!=null&&as!=null&&hs<as;
   const awayLosing= isLive&&hs!=null&&as!=null&&as<hs;
-  const ao=m.aiOdds||m.odds||m.providerOdds||{}; // Direct SofaBets is the football source
+  const ao=m.aiOdds||m.odds||m.providerOdds||{}; // The direct feed is the football source
 
   const isAiOdds = !m.odds?.home && (ao.homeWin || ao.home);
   const homeIsFav = window.__favTeams && window.__favTeams.includes(m.homeTeam);
@@ -3503,7 +3503,7 @@ function togQuick(matchId, pick){
     if(existIdx!==-1) slip.splice(existIdx,1);
     slip.push({matchId, homeTeam:m.homeTeam, awayTeam:m.awayTeam, league:m.league, sport:m.sport, commenceTime:m.commenceTime, isLive:m.status==='live',
       market:'sb:'+(q[2]||''), pick:q[4], uiPick:pick, pickLabel:q[6]||q[4], marketLabel:q[5]||'', odds:Number(q[0]),
-      provider:'sofabets', providerMarketId:q[1]||null, providerMarketKey:q[2]||null, providerSelectionId:q[3]||null, providerSelectionKey:q[4]||null});
+      provider:'sb', providerMarketId:q[1]||null, providerMarketKey:q[2]||null, providerSelectionId:q[3]||null, providerSelectionKey:q[4]||null});
     document.getElementById(`odd_${matchId}_${pick}`)?.classList.add('sel');
   }
   updateSlip();
@@ -3974,7 +3974,7 @@ function showT(msg,type=''){
       var id = idOf(cards[i]); if(!id) continue;
       var n = counts[id];
       if(n >= 1){ var sp = moreSpan(cards[i]); if(sp){ var t = label(n); if(sp.dataset) sp.dataset.sbn = '1'; if(sp.textContent !== t){ if(Date.now() - wt > 1000){ wt = Date.now(); wn = 0; } if(++wn > 300) continue; sp.textContent = t; } } }
-      else if(id.indexOf('sofabets_') === 0 && (nextAt[id] || 0) <= Date.now()){ need.push({ id: id, top: cards[i].getBoundingClientRect().top }); }
+      else if(id.indexOf('sbm_') === 0 && (nextAt[id] || 0) <= Date.now()){ need.push({ id: id, top: cards[i].getBoundingClientRect().top }); }
     }
     need.sort(function(a, b){ return Math.abs(a.top) - Math.abs(b.top); });     // games on screen first
     return need.map(function(x){ return x.id; });
