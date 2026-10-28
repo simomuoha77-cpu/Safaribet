@@ -311,3 +311,6 @@ It sits behind the page, so as soon as the real page draws it is covered. The sp
 - A background sweeper runs every minute: deposits pending longer than 90 s are checked with Safaricom. Paid ones are credited (lost callback), cancelled or declined ones are marked failed, and any deposit Safaricom cannot answer for after 30 minutes is marked failed. Old pending deposits (up to 7 days) are cleaned up the same way after the deploy.
 - Safety: if a deposit was marked failed by a timeout but the money really arrived, the real success callback still credits it, exactly once.
 - Files: server/routes/mpesa.js, server/tests/mpesaDepositFail.test.js (6 tests).
+
+## v54 – My Bets: legs of an already-decided bet no longer say "awaiting result"
+A multi-bet with one lost leg is lost at once. Its other legs (matches the server never saw live, so their score is unknown) kept showing "Match over - awaiting result", which looked as if the bet was unsettled. Those legs now show "Not needed - this bet is already lost" (or won/settled). Only public/pages/my-bets.html changed.
