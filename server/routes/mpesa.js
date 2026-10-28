@@ -130,6 +130,16 @@ router.post('/deposit', auth, mpesaLimiter, async (req, res, next) => {
 
 const { isFromSafaricom } = require('../utils/safaricomCallback');
 
+// Plain-language reason shown to the customer and in the admin panel.
+function failReason(code, desc) {
+  const c = String(code);
+  if (c === '1032') return 'Deposit cancelled - the customer cancelled the M-Pesa request';
+  if (c === '1') return 'Deposit failed - insufficient M-Pesa balance';
+  if (c === '2001') return 'Deposit failed - wrong M-Pesa PIN';
+  if (c === '1037') return 'Deposit failed - no response to the M-Pesa request (timed out)';
+  return 'Deposit failed - ' + (String(desc || '').trim() || ('M-Pesa code ' + c));
+}
+
 // ── CALLBACK ──
 router.post('/callback', async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
@@ -147,6 +157,17 @@ router.post('/callback', async (req, res) => {
     }
 
     const cb   = req.body?.Body?.stkCallback;
+    if (cb && cb.ResultCode !== 0 && cb.CheckoutRequestID) {
+      // Safaricom only calls back when the request is finished, so any non-zero code is final: the customer cancelled,
+      // had too little money, typed the wrong PIN or never answered. Mark it failed NOW (it used to stay "pending" in the
+      // admin panel forever unless the customer kept the app open).
+      await Transaction.findOneAndUpdate(
+        { reference: cb.CheckoutRequestID, type: 'deposit', status: 'pending' },
+        { $set: { status: 'failed', description: failReason(cb.ResultCode, cb.ResultDesc) } }
+      ).catch(() => {});
+      console.log(`[mpesa/callback] deposit ${cb.CheckoutRequestID} failed: ${cb.ResultCode} ${cb.ResultDesc}`);
+      return;
+    }
     if (cb?.ResultCode !== 0) return;
     const meta = cb?.CallbackMetadata?.Item || [];
     const get  = key => meta.find(i => i.Name === key)?.Value;
@@ -163,7 +184,7 @@ router.post('/callback', async (req, res) => {
     // A plain read-then-later-write here would NOT be safe: both requests
     // could read 'pending' before either finished writing 'completed'.
     const tx = await Transaction.findOneAndUpdate(
-      { reference: ref, status: 'pending' },
+      { reference: ref, status: { $in: ['pending', 'failed'] } },   // 'failed' too: if a timeout guess was wrong and the money did arrive, it is still credited (once)
       { $set: { status: 'processing' } },
       { new: false }
     );
@@ -173,7 +194,7 @@ router.post('/callback', async (req, res) => {
     // Prevents a forged/replayed callback from crediting a different (larger) amount.
     if (Number(tx.amount) !== amount) {
       console.warn(`[mpesa/callback] AMOUNT MISMATCH — tx ${tx._id} requested ${tx.amount}, callback claimed ${amount}. Rejected.`);
-      await Transaction.findByIdAndUpdate(tx._id, { $set: { status: 'pending' } }); // release the claim — nothing was credited
+      await Transaction.findByIdAndUpdate(tx._id, { $set: { status: tx.status } }); // release the claim — nothing was credited
       return;
     }
 
@@ -242,23 +263,15 @@ async function queryStkStatus(checkoutId) {
   return r.data;
 }
 
-router.get('/check/:checkoutId', auth, async (req, res) => {
-  try {
-    let tx = await Transaction.findOne({ reference: req.params.checkoutId, userId: req.user._id });
-    if (!tx) return res.json({ success: false, message: 'Transaction not found' });
-
-    // Client polls every 3s — querying Safaricom that often would be ~30 calls
-    // per deposit for no benefit (a payment doesn't resolve faster because we
-    // ask more often). Throttle actual outbound queries to roughly every 6s;
-    // polls in between just re-read whatever we already know.
-    const lastQueried = queryThrottle.get(tx.reference) || 0;
-    const shouldQuery = tx.status === 'pending' && (Date.now() - lastQueried > 6000);
-
-    if (shouldQuery) {
+// Asks Safaricom what happened to one pending deposit and settles it: credited once if paid, failed with a plain reason if
+// cancelled / declined, left pending while it is still in flight. Used by the customer's status polling AND by the
+// background sweeper below. Returns { tx, q } (q = Safaricom's answer, or null when the query itself failed).
+async function resolveByQuery(tx) {
+  let q = null;
       queryThrottle.set(tx.reference, Date.now());
       console.log(`[mpesa/check] querying Safaricom for ${tx.reference} (tx status: ${tx.status})`);
       try {
-        const q = await queryStkStatus(tx.reference);
+        q = await queryStkStatus(tx.reference);
         console.log(`[mpesa/check] Safaricom query response for ${tx.reference}:`, JSON.stringify(q));
         if (String(q.ResultCode) === '0') {
           // Payment succeeded on Safaricom's side. Same atomic claim pattern as
@@ -339,7 +352,7 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
           console.log(`[mpesa/check] ${tx.reference} definitively failed per Safaricom: ResultCode=${q.ResultCode} ${q.ResultDesc}`);
           await Transaction.findOneAndUpdate(
             { _id: tx._id, status: 'pending' },
-            { $set: { status: 'failed', description: `Deposit failed: ${q.ResultDesc || 'declined'}` } }
+            { $set: { status: 'failed', description: failReason(q.ResultCode, q.ResultDesc) } }
           );
           tx = await Transaction.findById(tx._id);
         } else {
@@ -352,7 +365,23 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
         // still has a full chance to resolve this correctly.
         console.warn(`[mpesa/check] query call FAILED for ${tx.reference}:`, qErr?.response?.status, qErr?.response?.data ? JSON.stringify(qErr.response.data) : qErr.message);
       }
-    }
+    
+  return { tx, q };
+}
+
+router.get('/check/:checkoutId', auth, async (req, res) => {
+  try {
+    let tx = await Transaction.findOne({ reference: req.params.checkoutId, userId: req.user._id });
+    if (!tx) return res.json({ success: false, message: 'Transaction not found' });
+
+    // Client polls every 3s — querying Safaricom that often would be ~30 calls
+    // per deposit for no benefit (a payment doesn't resolve faster because we
+    // ask more often). Throttle actual outbound queries to roughly every 6s;
+    // polls in between just re-read whatever we already know.
+    const lastQueried = queryThrottle.get(tx.reference) || 0;
+    const shouldQuery = tx.status === 'pending' && (Date.now() - lastQueried > 6000);
+
+    if (shouldQuery) { tx = (await resolveByQuery(tx)).tx; }
 
     const balance = await require('../services/walletService').getBalance(req.user._id);
     res.json({
@@ -370,5 +399,43 @@ router.get('/check/:checkoutId', auth, async (req, res) => {
     res.status(500).json({ success: false, message: 'Check failed' });
   }
 });
+
+// ── SWEEPER: no deposit stays "pending" for ever ──
+// A customer who cancels the prompt, has too little money, or just closes the app used to leave the deposit "pending" in
+// the admin panel (the failure was only noticed while the app polled). Every minute, deposits still pending after 90
+// seconds are checked with Safaricom: paid ones are credited (callback lost), cancelled / declined ones are marked
+// failed with the reason, and one Safaricom still cannot answer for after 30 minutes is marked failed too (a late
+// real payment is still credited by the callback, which also accepts failed deposits).
+let sweepBusy = false;
+async function sweepPendingDeposits() {
+  if (sweepBusy || !SHORTCODE) return;
+  sweepBusy = true;
+  try {
+    const now = Date.now();
+    const rows = await Transaction.find({
+      type: 'deposit', status: 'pending',
+      createdAt: { $lte: new Date(now - 90 * 1000), $gte: new Date(now - 7 * 24 * 3600 * 1000) }
+    }).sort({ createdAt: 1 }).limit(12);
+    for (const row of rows) {
+      let tx = row, q = null;
+      try { ({ tx, q } = await resolveByQuery(row)); } catch (e) { continue; }
+      if (!tx || tx.status !== 'pending') continue;                      // paid, or already failed by the query
+      const age = now - new Date(tx.createdAt).getTime();
+      let reason = null;
+      if (q && q.ResultCode !== undefined && String(q.ResultCode) !== '0' && age > 5 * 60 * 1000) reason = failReason(q.ResultCode, q.ResultDesc);   // the prompt is long expired: final
+      else if (age > 30 * 60 * 1000) reason = 'Deposit failed - no confirmation from M-Pesa (timed out)';
+      if (reason) {
+        await Transaction.findOneAndUpdate({ _id: tx._id, status: 'pending' }, { $set: { status: 'failed', description: reason } }).catch(() => {});
+        console.log(`[mpesa/sweep] ${tx.reference} -> failed: ${reason}`);
+      }
+    }
+  } catch (e) { console.warn('[mpesa/sweep]', e.message); }
+  finally { sweepBusy = false; }
+}
+if (!process.env.SB_NO_SWEEP) {
+  const sweepTimer = setInterval(sweepPendingDeposits, 60 * 1000);
+  if (sweepTimer.unref) sweepTimer.unref();
+}
+router.sweepPendingDeposits = sweepPendingDeposits;
 
 module.exports = router;

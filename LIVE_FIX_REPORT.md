@@ -304,3 +304,10 @@ Added `id`, `lang`, `orientation`, `categories` and a maskable 512 icon (`icon-m
 ## v52 – no empty dark screen on app start
 The page now paints the SafariBet logo on the app colour from the very first frame (pure CSS in the head, no network needed).
 It sits behind the page, so as soon as the real page draws it is covered. The splash and the first screen now look like one continuous screen.
+
+## v53 – cancelled / failed deposits no longer stay "pending"
+- Cause: when a customer cancelled the M-Pesa prompt, had too little money or typed a wrong PIN, Safaricom sent a "failed" callback that the server ignored. The deposit only became "failed" if the customer kept the app open polling, so otherwise it stayed "pending" in the admin panel for ever.
+- Now: the failed callback marks the deposit failed immediately, with a plain reason (cancelled by the customer / insufficient M-Pesa balance / wrong PIN / no response).
+- A background sweeper runs every minute: deposits pending longer than 90 s are checked with Safaricom. Paid ones are credited (lost callback), cancelled or declined ones are marked failed, and any deposit Safaricom cannot answer for after 30 minutes is marked failed. Old pending deposits (up to 7 days) are cleaned up the same way after the deploy.
+- Safety: if a deposit was marked failed by a timeout but the money really arrived, the real success callback still credits it, exactly once.
+- Files: server/routes/mpesa.js, server/tests/mpesaDepositFail.test.js (6 tests).
