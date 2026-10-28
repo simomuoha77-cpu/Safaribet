@@ -314,3 +314,6 @@ It sits behind the page, so as soon as the real page draws it is covered. The sp
 
 ## v54 – My Bets: legs of an already-decided bet no longer say "awaiting result"
 A multi-bet with one lost leg is lost at once. Its other legs (matches the server never saw live, so their score is unknown) kept showing "Match over - awaiting result", which looked as if the bet was unsettled. Those legs now show "Not needed - this bet is already lost" (or won/settled). Only public/pages/my-bets.html changed.
+
+## v55 – "Was this game watched live?" check
+New read-only page `/api/odds/captured?team=<name>`: for a game (last 3 days) it shows whether it was seen live, when it was last seen, its last minute and score, when it left the live feed, whether the final result is confirmed and why not. Without `?team=` it lists the games seen live in the last 3 hours. No prices, no personal data. File: server/routes/odds.js.

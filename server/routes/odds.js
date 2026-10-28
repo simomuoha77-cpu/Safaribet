@@ -558,6 +558,34 @@ router.get('/all-counts', (req, res) => {
   if (t.unref) t.unref();
 })();
 
+// GET /api/odds/captured?team=Dresden  (read-only, no prices, no personal data)
+// Was this game watched while it was live? Shows, for every stored row of a game (last 3 days), when it was last seen
+// live, its last score/minute, when it left the live feed, whether the final result is confirmed, and why not.
+// Without ?team= it lists the games seen live in the last 3 hours, newest first.
+router.get('/captured', async (req, res) => {
+  try {
+    const team = String(req.query.team || '').trim().slice(0, 40);
+    const since = new Date(Date.now() - 3 * 86400000);
+    const iso = d => d ? new Date(d).toISOString() : null;
+    const pick = r => ({
+      matchId: r.matchId, game: `${r.homeTeam} vs ${r.awayTeam}`, league: r.league, kickoff: iso(r.commenceTime), status: r.status,
+      seenLive: !!r.lastLiveSeenAt, lastSeenLive: iso(r.lastLiveSeenAt), lastMinute: r.lastLiveMinute != null ? r.lastLiveMinute : null,
+      lastScore: r.score && r.score.home != null ? `${r.score.home}-${r.score.away}` : null,
+      leftLiveFeed: iso(r.liveAbsentSince), finalConfirmed: r.finalVerified === true, finalSource: r.finalSource || null,
+      halfTime: r.periodScores && r.periodScores.ht ? `${r.periodScores.ht.home}-${r.periodScores.ht.away}` : null,
+      waitingBecause: r.trackerNote || null
+    });
+    let rows;
+    if (team) {
+      const rx = new RegExp(team.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      rows = await Match.find({ commenceTime: { $gte: since }, $or: [{ homeTeam: rx }, { awayTeam: rx }] }).sort({ commenceTime: -1 }).limit(12).lean();
+    } else {
+      rows = await Match.find({ lastLiveSeenAt: { $gte: new Date(Date.now() - 3 * 3600000) } }).sort({ lastLiveSeenAt: -1 }).limit(40).lean();
+    }
+    res.json({ success: true, count: rows.length, now: new Date().toISOString(), games: rows.map(pick) });
+  } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
+});
+
 // GET /api/odds/stats-probe/<matchId> : which SofaBets endpoints carry corners / cards / events for one game (read-only, 1 run per 20s).
 let probeBusyUntil = 0;
 router.get('/stats-probe/:matchId', async (req, res) => {
