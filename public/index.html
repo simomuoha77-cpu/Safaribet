@@ -778,7 +778,7 @@ header{
         '.sbsk .l i:nth-child(1){width:40%}.sbsk .l i:nth-child(2){width:75%}.sbsk .l i:nth-child(3){width:60%}' +
         '.sbsk .o{display:flex;gap:7px}.sbsk .o b{display:block;width:52px;height:46px;border-radius:8px;background:rgba(255,255,255,.07);animation:sbsh 1.2s ease-in-out infinite}' +
         '@keyframes sbsh{0%,100%{opacity:.55}50%{opacity:1}}' +
-        '#matchList.sb-stale{opacity:.7;transition:opacity .15s}';
+        '#matchList.sb-stale{opacity:.7;transition:opacity .15s;pointer-events:none}';
       document.head.appendChild(st);
       var ml = document.getElementById('matchList');
       if (ml && ml.querySelector('.loading')) ml.innerHTML = window.sbSkel(7);
@@ -810,17 +810,15 @@ header{
         window.__sbSnapActive = true;
         return;
       }
-      // The saved list is shown AT ONCE (like before), but every game that has since kicked off or was marked live is
-      // removed first, so nothing old can claim to be live or upcoming. The fresh list replaces the rest within a second.
+      // The last list the user saw is shown AT ONCE, whatever its age, dimmed and not tappable (old odds must never be
+      // bet on). The fresh list is fetched behind it and replaces it as soon as it arrives (normally under a second);
+      // games that have started since simply leave the list at that moment. Nothing is removed here, so the list can
+      // never come up empty and fall back to grey loading rows.
       var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
-      if (html && html.indexOf('data-ko=') !== -1 && Date.now() - hts < 72 * 3600000) {
+      if (html && html.indexOf('data-ko=') !== -1 && html.indexOf('id="mc_') !== -1 && Date.now() - hts < 72 * 3600000) {
         ml.innerHTML = html;
-        var now = Date.now(), cs = ml.querySelectorAll('.mc');
-        for (var ci = 0; ci < cs.length; ci++) {
-          var ko = Number(cs[ci].getAttribute('data-ko') || 0), st = cs[ci].getAttribute('data-st');
-          if (st === 'live' || st === 'finished' || !ko || ko <= now) cs[ci].remove();
-        }
-        if (!ml.querySelector('.mc')) ml.innerHTML = window.sbSkel(7);
+        ml.classList.add('sb-stale');
+        window.__sbStalePainted = true;
       }
     } catch(e) {}
   })();
@@ -1514,6 +1512,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
   restoreHomeCat();
   try { if (sessionStorage.getItem('sb_home_scroll')) restoreHomeScrollOnce(); } catch(e) {}
+  if (window.__sbStalePainted) markStale(true);        // dimmed saved list: un-dims itself when fresh data lands (failsafe 8s)
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
@@ -1836,9 +1835,9 @@ async function loadAllMatches(silent=false, retryAttempt=0){
   // already sitting in memory. Only show the spinner on a genuine first load.
   const hasExistingData = featuredMatches && featuredMatches.length > 0;
   if(!silent && hasExistingData){
-    if (currentCat === 'featured') { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash
+    if (currentCat === 'featured' && !window.__sbStalePainted) { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash (skipped while the saved list is already on screen)
     silent = true; // still fetch fresh data below, just don't block the UI for it
-  } else if(!silent && retryAttempt===0 && currentCat === 'featured'){
+  } else if(!silent && retryAttempt===0 && currentCat === 'featured' && !window.__sbStalePainted){
     el.innerHTML=window.sbSkel(7);
   }
   // Only the small pill shows for a background refresh — never a full-page
@@ -1869,6 +1868,10 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     if (r.status === 304 && !hasExistingData) {      // "unchanged" but there is nothing on screen: ask again for the full list
       matchesEtag = null;
       if (retryAttempt < 3) return loadAllMatches(false, retryAttempt + 1);
+    }
+    if (r.status === 304 && window.__sbStalePainted && retryAttempt < 3) {      // old saved list on screen: get the full current list so started games leave it
+      matchesEtag = null;
+      return loadAllMatches(true, retryAttempt + 1);
     }
     if (r.status === 304) {
       markFresh(false);
@@ -1902,6 +1905,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
       // (Highlights is football only: it is NEVER used to seed the Live list - that produced a one-match Live tab.)
       matchesEtag = newEtag || matchesEtag;
       try { localStorage.setItem('matchesCache', JSON.stringify({ data: d.data, ts: Date.now(), etag: matchesEtag })); } catch(e) {}
+      window.__sbStalePainted = false;
       if (currentCat === 'featured') {          // draw it only if Highlights is the tab on screen RIGHT NOW
         allMatches = d.data;
         updateTodayCount();
