@@ -49,13 +49,18 @@
     im.onload = function () {
       var row = sh.parentNode; if (!row || sh.__done) return; sh.__done = 1;
       if (!(im.naturalWidth > 1 && im.naturalHeight > 1)) { BAD[url] = 1; return; }          // loaded but empty: keep the shield
-      var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.width = 18; n.height = 18; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
-      n.style.cssText = BASE + 'object-fit:contain;border-radius:0;background:transparent;';
-      n.onerror = function () { BAD[url] = 1; var r2 = n.parentNode; if (r2) r2.replaceChild(shield(name), n); };
-      n.src = url; if (sh.parentNode === row) row.replaceChild(n, sh);
+      var n = real(name, url); if (sh.parentNode === row) row.replaceChild(n, sh);
     };
     im.onerror = function () { BAD[url] = 1; };                                              // shield stays
-    im.src = url; return sh;
+    im.src = url;
+    if (im.complete && im.naturalWidth > 1) return real(name, url);                       // already in the phone's cache: show the crest at once, no badge flash
+    return sh;
+  }
+  function real(name, url) {
+    var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.width = 18; n.height = 18; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
+    n.style.cssText = BASE + 'object-fit:contain;border-radius:0;background:transparent;';
+    n.onerror = function () { BAD[url] = 1; var r2 = n.parentNode; if (r2) r2.replaceChild(shield(name), n); };
+    n.src = url; return n;
   }
   function nameOf(el) { var t = ''; for (var i = 0; i < el.childNodes.length; i++) if (el.childNodes[i].nodeType === 3) t += el.childNodes[i].nodeValue; return t.trim(); }
 
