@@ -1880,6 +1880,8 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     }
     const newEtag = r.headers.get('ETag');
     const d=await r.json();
+    // A 502 / "feed unavailable" answer is a FAILED load, not "zero matches": send it down the retry + cached-fallback path.
+    if (!r.ok || (d && d.success === false)) throw new Error('featured feed answered ' + r.status);
     if (d && d.success) markFresh(false);
     // Only replace what's on screen if this response actually has matches, OR
     // this is a genuine first load with nothing shown yet. A background poll
@@ -3056,8 +3058,15 @@ function updateLiveCountBar(list){
 function renderMatches(matches, silent=false){
   try{ updateLiveCountBar(matches); }catch(e){}
   const el=document.getElementById('matchList');
+  // Are real game cards actually on screen right now? The "same games / patch in place" shortcuts below are only valid
+  // when they are. After a placeholder, an error box or a swapped page the remembered ids are stale, and trusting them
+  // left the list stuck on placeholders ("failing to load") or blank.
+  const domHasCards = !!document.querySelector('#matchList [id^="mc_"]');
 
   if(!matches.length){
+    // A BACKGROUND refresh that comes back empty (a feed blip, or every game momentarily filtered out) must never wipe
+    // the games already on screen - that is "it loads, then disappears". Only a deliberate action (filter/tab) clears it.
+    if (silent && domHasCards && lastRenderedViewKey === currentViewKey()) return;
     stopProgressiveRender();
     if (currentFilter === 'favorites') {
       const hasFavs = (window.__favTeams||[]).length > 0;
@@ -3089,9 +3098,9 @@ function renderMatches(matches, silent=false){
   const snapMode = !!window.__sbSnapActive; window.__sbSnapActive = false;   // only the first render after a snapshot paint
   const viewKey = currentViewKey();
   const sameView = lastRenderedViewKey === viewKey;
-  const sameMatchSet = (silent || snapMode) && lastRenderedMatchIds === newIds && (sameView || snapMode);
+  const sameMatchSet = (silent || snapMode) && lastRenderedMatchIds === newIds && (sameView || snapMode) && domHasCards;
 
-  if(silent && !sameMatchSet && lastRenderedMatchIds && sameView){
+  if(silent && !sameMatchSet && lastRenderedMatchIds && sameView && domHasCards){
     // Background refreshes must NEVER destroy the list the user is currently
     // scrolling. Keep every already-rendered match, update matching records with
     // fresh odds/scores, and append only genuinely new matches. A temporary feed
