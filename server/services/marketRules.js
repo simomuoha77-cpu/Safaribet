@@ -94,6 +94,14 @@ function parseMarket(label) {
   if (parts) {
     const comps = parts.map(p => ({ type: detectSimpleType(p), text: p }));
     if (comps.every(c => c.type)) return { type: 'COMBINED', period, components: comps, label: raw };
+    // A team name that contains "&" (e.g. "Brighton & Hove Albion total") is not a combined market: when the part BEFORE the "&"
+    // is not a market at all, read the whole text as ONE market with the "&" removed. A real combination such as "1x2 & <unknown>"
+    // (first part IS a market) is still refused, so the unknown half can never be ignored.
+    if (!comps[0].type) {
+      const whole = bare.replace(/\s*&\s*/g, ' ');
+      const wt = detectSimpleType(whole);
+      if (wt) { const wl = (whole.match(/(-?\d+(?:\.\d+)?)/) || [])[1]; return { type: wt, period, line: wl != null ? Number(wl) : null, label: raw, text: whole }; }
+    }
     return { type: null, period, label: raw };
   }
   const type = detectSimpleType(bare);
