@@ -778,7 +778,7 @@ header{
         '.sbsk .l i:nth-child(1){width:40%}.sbsk .l i:nth-child(2){width:75%}.sbsk .l i:nth-child(3){width:60%}' +
         '.sbsk .o{display:flex;gap:7px}.sbsk .o b{display:block;width:52px;height:46px;border-radius:8px;background:rgba(255,255,255,.07);animation:sbsh 1.2s ease-in-out infinite}' +
         '@keyframes sbsh{0%,100%{opacity:.55}50%{opacity:1}}' +
-        '#matchList.sb-stale{opacity:.7;transition:opacity .15s;pointer-events:none}';
+        '#matchList.sb-stale{opacity:.7;transition:opacity .15s}';
       document.head.appendChild(st);
       var ml = document.getElementById('matchList');
       if (ml && ml.querySelector('.loading')) ml.innerHTML = window.sbSkel(7);
@@ -810,14 +810,12 @@ header{
         window.__sbSnapActive = true;
         return;
       }
-      // The last list the user saw is shown AT ONCE, whatever its age, dimmed and not tappable (old odds must never be
-      // bet on). The fresh list is fetched behind it and replaces it as soon as it arrives (normally under a second);
+      // The last list the user saw is shown AT ONCE, whatever its age. The fresh list is fetched behind it and replaces it as soon as it arrives (normally under a second);
       // games that have started since simply leave the list at that moment. Nothing is removed here, so the list can
       // never come up empty and fall back to grey loading rows.
       var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
       if (html && html.indexOf('data-ko=') !== -1 && html.indexOf('id="mc_') !== -1 && Date.now() - hts < 72 * 3600000) {
         ml.innerHTML = html;
-        ml.classList.add('sb-stale');
         window.__sbStalePainted = true;
       }
     } catch(e) {}
@@ -1512,7 +1510,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
   restoreHomeCat();
   try { if (sessionStorage.getItem('sb_home_scroll')) restoreHomeScrollOnce(); } catch(e) {}
-  if (window.__sbStalePainted) markStale(true);        // dimmed saved list: un-dims itself when fresh data lands (failsafe 8s)
   loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
