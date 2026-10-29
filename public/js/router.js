@@ -490,8 +490,8 @@
 
   function load(u, o) {
     var my = ++navSeq, key = normPath(u.pathname) + u.search;
-    // Home snapshot (used so Back from a match repaints the list instantly) is only valid for Back/Forward
-    if (o.mode === 'push' && normPath(u.pathname) !== '/match') { try { window.__sbHomeSnap = null; sessionStorage.removeItem('sb_home_scroll'); } catch (e) {} }
+    // Leaving Home for any page: Home keeps what is on screen so coming back is instant (data refreshes quietly in the background).
+    try { if (cur.split('?')[0] === '/' && typeof window.__sbLeaveHome === 'function') window.__sbLeaveHome(); } catch (e) {}
     if (!htmlCache[key]) navBar(true);
     return fetchPage(u).then(function (html) {
       navBar(false);

@@ -801,7 +801,7 @@ header{
   (function(){
     try {
       var snap = window.__sbHomeSnap, ml = document.getElementById('matchList');
-      if (snap && snap.html && (Date.now() - snap.ts) < 90000 && sessionStorage.getItem('sb_home_scroll')) {
+      if (snap && snap.html && (Date.now() - snap.ts) < 30 * 60000 && sessionStorage.getItem('sb_home_scroll')) {
         // Back from a match: put back exactly the list the user left (same tab/filter/cards), instantly.
         ml.innerHTML = snap.html;
         if (snap.bar) { var tmp = document.createElement('div'); tmp.innerHTML = snap.bar; if (tmp.firstChild) ml.parentNode.insertBefore(tmp.firstChild, ml); }
@@ -3467,6 +3467,20 @@ function findKnownMatch(matchId){
   }
   return null;
 }
+// Called by the router the moment the user leaves Home for ANY page (My Bets, Casino, Account, a match...).
+// It keeps exactly what is on screen (list, tab, filter, scroll) so coming back paints it at once and the fresh
+// data is only swapped in quietly in the background - no grey loading rows, no list rebuilding from zero.
+window.__sbLeaveHome = function(){
+  try { sessionStorage.setItem('homeScrollY', String(window.scrollY||0)); sessionStorage.setItem('sb_home_scroll', JSON.stringify({ y: window.scrollY||0, ts: Date.now() })); } catch(e) {}
+  try { saveHomeState(); } catch(e) {}
+  try {
+    const ml = document.getElementById('matchList');
+    if (ml && ml.querySelector('[id^="mc_"]')) {
+      const bar = document.getElementById('liveCountBar'), st = document.getElementById('secTtl'), mh = document.getElementById('mthHeader');
+      window.__sbHomeSnap = { html: ml.innerHTML, bar: bar ? bar.outerHTML : '', ttl: st ? st.textContent : '', mth: mh ? mh.innerHTML : '', ids: lastRenderedMatchIds, ts: Date.now() };
+    }
+  } catch(e) {}
+};
 function openMatchDetail(matchId){
   sessionStorage.setItem('currentMatchId', matchId);
   try { sessionStorage.setItem('sb_click_ts', String(Date.now())); } catch(e) {}                 // for the click -> markets timing
