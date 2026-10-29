@@ -324,3 +324,8 @@ New read-only page `/api/odds/captured?team=<name>`: for a game (last 3 days) it
 - js/theme.js: one-time clean of saved match lists / slip / open-match memo that still hold old-style ids (flag `sb_idv`), so customers do not see mismatched selections after the update. A saved slip is dropped once.
 - The static file server no longer serves `.bak`, `.map`, `.orig`, `.old`, `.swp`, `.tmp`, `.backup` files (the old `public/index.html.bak-*` copies were downloadable by anyone, with all the source). Delete them from the repo too.
 - Tests: server/tests/edgeAlias.test.js (5 tests, including a real express round trip).
+
+## v57 – settlement safety: statistics markets can never be graded from goals + a read-only market audit
+- FOUND with the new audit tool: the settlement rules had no word list entry for free kicks, goal kicks, tackles, saves, possession, passes, crosses, set pieces, sending-offs, red/yellow, on-target, hat-trick, goalkeeper. A market such as "Free Kicks Over/Under 20.5" was therefore understood as a plain "Over/Under" and could have been graded from the GOALS score. These names now fall into the "needs data the feed does not give" group (never graded, never guessed). services/marketRules.js.
+- New tests: server/tests/marketNoData.test.js (3 tests).
+- New read-only tool: `node server/tools/marketAudit.js [fixtures]` reads the feed (prices/names only), classifies every distinct market name with the SAME rules that settle bets, reports whether the feed carries any result/settlement field, and saves ~/market-audit.json. It changes nothing.

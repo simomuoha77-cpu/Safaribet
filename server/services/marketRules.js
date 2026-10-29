@@ -53,7 +53,7 @@ function detectSimpleType(bare) {
   const n = norm(bare);
   // Markets decided by data the feed does not give us (corners, cards, players,
   // goal timing...). They must NEVER be graded from the goals score.
-  if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b/.test(n)) return 'NO_DATA';
+  if (/corner|card|booking|offside|throw[\s-]*in|foul|shot|penalt|own\s*goal|scorer|player|assist|next\s*goal|goal\s*(time|minute)|minute|\d+\s*[-\u2013]\s*\d+\s*min|time\s*of|injury|substitut|var\b|free[\s-]*kicks?|goal[\s-]*kicks?|set[\s-]*pieces?|tackles?|\bsaves?\b|possession|\bpass(es)?\b|\bcross(es)?\b|dribbl|clearance|sending[\s-]*off|dismissal|\bred\b|\byellow\b|caution|on\s*target|woodwork|hat[\s-]*trick|goalkeeper|captain|line[\s-]*up|attendance/.test(n)) return 'NO_DATA';
   if (/(first|1st)\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*first|to\s*score\s*first/.test(n)) return 'FIRST_SCORER';
   if (/(last|final)\s*(team\s*to\s*score|goal(\s*(team|scorer))?|team)\b|team\s*to\s*score\s*last|to\s*score\s*last/.test(n)) return 'LAST_SCORER';
   if (/clean\s*sheet/.test(n)) return 'CLEAN_SHEET';
