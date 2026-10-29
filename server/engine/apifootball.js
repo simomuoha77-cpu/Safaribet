@@ -199,7 +199,14 @@ function normalizeDirectSofaMatch(m) {
   const home = String(m.homeTeam);
   const away = String(m.awayTeam);
   const matchId = `sofabets_${m.providerMatchId}`;
-  const status = directStatusToInternal(m.status);
+  let status = directStatusToInternal(m.status);
+  // A game cannot be live before it kicks off. When the feed flags a game "live" but it has NO running clock / minute and its
+  // kickoff is still in the future, it is not in play ("fake live"): treat it as upcoming. A game that really is in play always
+  // carries a clock or minute, so a real live game is never touched by this.
+  if (status === 'live' && m.utcDate) {
+    const ko = new Date(m.utcDate).getTime();
+    if (Number.isFinite(ko) && ko > Date.now() + 5 * 60000 && !(Number(m.liveClockSec) > 0) && !(Number(m.minute) > 0)) status = 'upcoming';
+  }
   const rawOdds = m.odds || m.providerOdds || m._sofaProviderOdds || null;
   const homeWin = Number(rawOdds?.homeWin);
   const draw = Number(rawOdds?.draw);

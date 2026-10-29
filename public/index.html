@@ -2023,6 +2023,15 @@ function applyFilters(silent=false){
     return;
   }
 
+  // A game cannot be live before it kicks off: one flagged live with NO clock/minute and a kickoff still in the future is not in
+  // play (also cleans lists saved on the phone before this fix). Real live games always carry a clock/minute, so they are untouched.
+  try {
+    const koLimit = Date.now() + 5 * 60000;
+    allMatches.forEach(m => {
+      if (m && m.status === 'live' && m.commenceTime && new Date(m.commenceTime).getTime() > koLimit &&
+          !(Number(m.score && m.score.minute) > 0) && !(Number(m.score && m.score.clockSec) > 0)) m.status = 'upcoming';
+    });
+  } catch(e) {}
   let filtered=[...allMatches];
   const now=new Date();
 
