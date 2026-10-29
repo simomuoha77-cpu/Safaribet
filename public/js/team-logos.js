@@ -41,11 +41,21 @@
       'text-shadow:0 1px 1px rgba(0,0,0,.35);background:linear-gradient(145deg,hsl(' + hue(name) + ',55%,42%),hsl(' + ((hue(name) + 40) % 360) + ',55%,28%))';
     return s;
   }
+  // The initials shield is shown at once; the crest replaces it only after it has really loaded (and has a size).
+  // This is what keeps a slow or failed crest from leaving an empty box beside the team name.
   function crest(name, url) {
-    var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.width = 18; n.height = 18; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
-    n.style.cssText = BASE + 'object-fit:contain;border-radius:0;background:transparent;';
-    n.onerror = function () { BAD[url] = 1; var row = n.parentNode; if (row) { var s = shield(name); row.__tk = name + '|'; row.replaceChild(s, n); } };
-    n.src = url; return n;
+    var sh = shield(name), im = new Image();
+    im.referrerPolicy = 'no-referrer'; im.decoding = 'async';
+    im.onload = function () {
+      var row = sh.parentNode; if (!row || sh.__done) return; sh.__done = 1;
+      if (!(im.naturalWidth > 1 && im.naturalHeight > 1)) { BAD[url] = 1; return; }          // loaded but empty: keep the shield
+      var n = document.createElement('img'); n.className = 'tlg'; n.alt = ''; n.width = 18; n.height = 18; n.decoding = 'async'; n.referrerPolicy = 'no-referrer';
+      n.style.cssText = BASE + 'object-fit:contain;border-radius:0;background:transparent;';
+      n.onerror = function () { BAD[url] = 1; var r2 = n.parentNode; if (r2) r2.replaceChild(shield(name), n); };
+      n.src = url; if (sh.parentNode === row) row.replaceChild(n, sh);
+    };
+    im.onerror = function () { BAD[url] = 1; };                                              // shield stays
+    im.src = url; return sh;
   }
   function nameOf(el) { var t = ''; for (var i = 0; i < el.childNodes.length; i++) if (el.childNodes[i].nodeType === 3) t += el.childNodes[i].nodeValue; return t.trim(); }
 
