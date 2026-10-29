@@ -625,7 +625,7 @@ router.get('/my', auth, async (req, res) => {
         if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
       });
       if (ids.size) {
-        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1 }).lean();
+        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
         const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
         const now = Date.now();
         pend.forEach(s => {
@@ -634,18 +634,12 @@ router.get('/my', auth, async (req, res) => {
           const rs = sib.map(i => byId[i]).filter(Boolean);
           const kick = new Date(s.commenceTime || (rs[0] && rs[0].commenceTime) || 0).getTime();
           const seen = Math.max(0, ...rs.map(r => r.lastLiveSeenAt ? new Date(r.lastLiveSeenAt).getTime() : 0));
-          // A game can be live without being in OUR live feed (not every competition is), so the clock
-          // decides too: kicked off and still inside the normal length of that sport = LIVE.
+          // A game can be live without being in OUR live feed (not every competition is, and the feed skips games at
+          // half-time), so the clock decides too - see fin.fixtureLiveState.
           const sportName = ((p && p.sport) || s.sport || 'football').toLowerCase();
-          const LEN = { football: 125, basketball: 160, tennis: 240, hockey: 165, ice_hockey: 165, cricket: 600, rugby: 120, volleyball: 150, handball: 110, baseball: 200, table_tennis: 120 };
-          const lenMin = LEN[sportName] || (/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sportName) ? 180 : 125);
-          let state;
-          if (rs.some(r => r.finalVerified)) state = 'finished';
-          else if (kick && kick > now) state = 'not_started';
-          else if (seen && now - seen < 3 * 60 * 1000) state = 'live';        // in the live feed right now
-          else if (seen) state = 'awaiting';                                   // it WAS in the live feed and has left it: the game is over
-          else if (kick && now - kick < lenMin * 60000) state = 'live';        // never in our feed (not every competition is): the clock decides
-          else state = 'awaiting';                                             // past its normal length, result not confirmed yet
+          const state = fin.fixtureLiveState({ kick, seen, finalVerified: rs.some(r => r.finalVerified), sport: sportName, now });
+          const note = (rs.find(r => r.trackerNote) || {}).trackerNote;
+          if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
           s.kickoffAt = kick || null;
         });

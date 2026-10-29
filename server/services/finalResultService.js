@@ -84,6 +84,8 @@ const ABSENT_MS = Number(process.env.SETTLE_ABSENT_MS) || 15 * 60 * 1000;       
 const FAST_ABSENT_MS = Number(process.env.SETTLE_FAST_ABSENT_MS) || 100 * 1000;
 const FOOTBALL_LAST_MIN = 80;
 const memo = new Map(); // key -> { ts, data }
+const exactChecked = new Map();                       // matchId -> last time the exact-fixture lookup ran (throttle)
+const EXACT_CHECK_GAP_MS = 3 * 60 * 1000;
 async function memoized(key, ttlMs, fn) {
   const hit = memo.get(key);
   if (hit && Date.now() - hit.ts < ttlMs) return hit.data;
@@ -129,6 +131,26 @@ function inferEnded(row, sport, now) {
   return { ok: true, home: Number(h), away: Number(a) };
 }
 
+
+// Where a still-unsettled game is right now, for the My Bets badge (live / not started / awaiting result / finished).
+// A game that has dropped out of OUR live feed is NOT automatically over: the feed skips games at half-time, drops
+// some competitions, and has hiccups. So "Match over" is only shown once the sport's minimum game length has passed
+// since kick-off; before that it is still treated as LIVE (this is what made a game that was still being played
+// show "Match over - awaiting result" next to a leg of the same slip that had already finished).
+const CLOCK_LEN_MIN = { football: 125, basketball: 160, tennis: 240, hockey: 165, ice_hockey: 165, cricket: 600, rugby: 120, volleyball: 150, handball: 110, baseball: 200, table_tennis: 120 };
+function fixtureLiveState({ kick, seen, finalVerified, sport, now }) {
+  now = now || Date.now();
+  if (finalVerified) return 'finished';
+  if (kick && kick > now) return 'not_started';
+  if (seen && now - seen < 3 * 60 * 1000) return 'live';                        // in the live feed right now
+  const sp = String(sport || 'football').toLowerCase();
+  const minDur = (MIN_DURATION_MIN[sp] || 0) * 60000;
+  if (kick && minDur && now - kick < minDur) return 'live';                      // left the feed too early to be over: feed gap / half-time
+  if (seen) return 'awaiting';                                                   // was live, has left the feed, game length has passed
+  const lenMin = CLOCK_LEN_MIN[sp] || (/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sp) ? 180 : 125);
+  if (kick && now - kick < lenMin * 60000) return 'live';                        // never in our feed: the clock decides
+  return 'awaiting';
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PERIOD SCORES (half-time capture)
@@ -318,6 +340,17 @@ async function trackFixtures(fixtures, Match) {
       }
       const inf = inferEnded(eff, p.sport, now);
       if (inf.ok) { await finish({ home: inf.home, away: inf.away }, 'feed-ended'); continue; }
+      // Safety net: the feed-based check cannot confirm this game (never seen live, or the feed dropped it early).
+      // Once it is past the sport's minimum game length, ask the provider for this EXACT fixture. Only an explicit
+      // FINISHED status with a full-time score is accepted (verifyFinalResult), so nothing is guessed.
+      if (kickoff.getTime() && now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000) {
+        const last = exactChecked.get(fx.matchId) || 0;
+        if (now - last >= EXACT_CHECK_GAP_MS) {
+          exactChecked.set(fx.matchId, now);
+          const fin = await verifyFinalResult(fx.matchId);
+          if (fin) { await finish({ home: fin.homeScore, away: fin.awayScore }, 'provider-exact'); continue; }
+        }
+      }
       if (row.trackerNote !== inf.why) await Match.updateOne({ matchId: fx.matchId }, { $set: { trackerNote: inf.why } });
       out.waiting.push({ matchId: fx.matchId, why: inf.why });
     } catch (e) { out.waiting.push({ matchId: fx.matchId, why: 'tracker error: ' + e.message }); }
@@ -325,6 +358,6 @@ async function trackFixtures(fixtures, Match) {
   return out;
 }
 
-function _resetCache() { memo.clear(); }
+function _resetCache() { memo.clear(); exactChecked.clear(); }
 
-module.exports = { inferEnded, observePeriods, classifyPeriod, _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };
+module.exports = { fixtureLiveState, inferEnded, observePeriods, classifyPeriod, _resetCache, isFinalStatus, isInProgressStatus, parseSofaMatchId, fixtureKey, resultFromScore, verifyFinalResult, trackFixtures };
