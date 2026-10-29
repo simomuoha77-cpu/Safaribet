@@ -84,19 +84,25 @@ function category(name) {
       if (fx.sr_id) out.srIds++;
       const home = String(fx.home_team || (String(fx.fixture_name || '').split(' v ')[0]) || '').trim();
       const away = String(fx.away_team || (String(fx.fixture_name || '').split(' v ')[1]) || '').trim();
+      const hcRows = { game: home + ' v ' + away, mr: null, hc: {} };
       for (const m of (fx.markets || [])) {
+        { const nm0 = String(m.market_name || m.name || '').trim(); const role = n => { const t = String(n || '').toLowerCase(); return /^draw/.test(t) ? 'draw' : (home && t.startsWith(home.toLowerCase())) ? 'home' : (away && t.startsWith(away.toLowerCase())) ? 'away' : null; };
+          const pickOdds = () => { const o = {}; for (const s of (m.selections || [])) { const r = role(s.selection_name || s.outcome_name); if (r) o[r] = s.odds; } return o; };
+          if (/^match result$/i.test(nm0)) hcRows.mr = pickOdds(); else if (/^handicap \d:\d$/i.test(nm0)) hcRows.hc[nm0] = pickOdds(); }
         Object.keys(m).forEach(k => { out.marketKeys.add(k); if (RESULT_KEY.test(k) && k !== 'trading_status' && m[k] != null) out.resultKeys['market.' + k] = (out.resultKeys['market.' + k] || 0) + 1; });
         const nm = String(m.market_name || m.name || '').trim(); if (!nm) continue;
         const tpl = template(nm, [home, away]);
-        const e = out.fam[tpl] || (out.fam[tpl] = { fixtures: 0, names: new Set(), example: nm, home, away, picks: new Set() });
+        const e = out.fam[tpl] || (out.fam[tpl] = { fixtures: 0, names: new Set(), example: nm, home, away, picks: new Set(), fx: [] });
+        const ent = { name: nm, home, away, picks: [] }; if (e.fx.length < 60) e.fx.push(ent);
         if (!seenNames.has(fx.fixture_id + '|' + nm)) { seenNames.add(fx.fixture_id + '|' + nm); e.fixtures++; }
         e.names.add(nm);
         for (const s of (m.selections || [])) {
           Object.keys(s).forEach(k => { out.selectionKeys.add(k); if (RESULT_KEY.test(k) && k !== 'trading_status' && s[k] != null) { const kk = 'selection.' + k + '=' + String(s[k]).slice(0, 12); out.resultKeys[kk] = (out.resultKeys[kk] || 0) + 1; } });
           const pk = String(s.selection_name || s.outcome_name || '').trim();
-          if (pk && e.picks.size < 60) e.picks.add(pk);
+          if (pk) { if (e.picks.size < 60) e.picks.add(pk); if (ent.picks.length < 80) ent.picks.push(pk); }
         }
       }
+      if (hcRows.mr && Object.keys(hcRows.hc).length) (out.hcRows = out.hcRows || []).push(hcRows);
     } catch (e) { out.errors++; }
     await sleep(250);
   }
@@ -106,12 +112,17 @@ function category(name) {
     out.names += e.names.size;
     const c = category(e.example);
     if (c.cat !== 'CLAIMED') { (groups[c.cat] = groups[c.cat] || []).push({ family: tpl, example: e.example, fixtures: e.fixtures, variants: e.names.size, detail: c.detail, examples: c.cat.startsWith('3.') ? ['picks: ' + Array.from(e.picks).slice(0, 8).join(' | ')] : null }); continue; }
-    const picks = Array.from(e.picks);
-    const g = gradeAll(e.example, picks, e.home || 'Home', e.away || 'Away');
-    const row = { family: tpl, example: e.example, fixtures: e.fixtures, variants: e.names.size, picks: picks.length, type: `${c.pm.type}/${c.pm.period}` };
-    if (!g.bad.size) verified.push(row);
-    else if (g.orderOnly) orderOnly.push({ ...row, unreadable: g.bad.size });
-    else partial.push({ ...row, unreadable: g.bad.size, examples: Array.from(g.bad.entries()).slice(0, 4).map(([k, v]) => `"${k}" -> ${v}`) });
+    // every fixture is graded with ITS OWN team names (a pick "ACF Fiorentina" is only meaningful in that fixture)
+    const bad = new Map(); let orderOnlyAll = true, badFix = 0;
+    for (const f of e.fx) {
+      const g = gradeAll(f.name, f.picks, f.home || 'Home', f.away || 'Away');
+      if (g.bad.size) { badFix++; if (!g.orderOnly) orderOnlyAll = false; }
+      for (const [k, v] of g.bad) { const kk = template(k, [f.home, f.away]); if (!bad.has(kk)) bad.set(kk, v); }
+    }
+    const row = { family: tpl, example: e.example, fixtures: e.fixtures, variants: e.names.size, picks: e.picks.size, type: `${c.pm.type}/${c.pm.period}` };
+    if (!bad.size) verified.push(row);
+    else if (orderOnlyAll) orderOnly.push({ ...row, unreadable: bad.size, badFixtures: badFix });
+    else partial.push({ ...row, unreadable: bad.size, badFixtures: badFix, examples: Array.from(bad.entries()).slice(0, 4).map(([k, v]) => `"${k}" -> ${v}   (fails in ${badFix}/${e.fx.length} fixtures)`) });
   }
   console.log(`\nRead ${out.fixtures} fixtures (${out.errors} failed). ${out.names} distinct market names = ${Object.keys(out.fam).length} families. Fixtures with a Sportradar id (sr_id): ${out.srIds}/${out.fixtures}.`);
   const show = (title, arr, extra) => {
@@ -123,6 +134,10 @@ function category(name) {
   show('1B. SETTLEABLE ONLY WITH OUR LIVE GOAL-ORDER CAPTURE (first/last goal ...): graded from what the server saw live; unknown order stays pending/void', orderOnly);
   show('1C. CLAIMED SETTLEABLE BUT SOME PICKS CANNOT BE READ (would end in a refund)  <-- check these', partial, true);
   for (const cat of Object.keys(groups).sort()) show(cat, groups[cat], cat.startsWith('3.'));
+  if (out.hcRows && out.hcRows.length) {
+    console.log('\n=== HANDICAP DIRECTION CHECK (does "Handicap 0:1" give the AWAY team the extra goal?)  home / draw / away odds');
+    out.hcRows.slice(0, 6).forEach(r => { console.log('  ' + r.game); console.log('     plain 1x2      : ' + JSON.stringify(r.mr)); for (const k of ['Handicap 0:1', 'Handicap 1:0', 'Handicap 0:2', 'Handicap 2:0']) if (r.hc[k]) console.log('     ' + k.padEnd(15) + ': ' + JSON.stringify(r.hc[k])); });
+  }
   console.log('\n=== DOES THE FEED CARRY RESULTS?');
   console.log('  market fields   :', Array.from(out.marketKeys).join(', '));
   console.log('  selection fields:', Array.from(out.selectionKeys).join(', '));
