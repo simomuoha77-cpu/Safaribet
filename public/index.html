@@ -2166,7 +2166,7 @@ const sportTabRequests = new Map();
 const footballTabCache = { data:null, ts:0 };
 const liveTabCache = { data:null, ts:0 };
 // The last COMPLETE live list is shown at once when the tab opens (then replaced by the fresh answer, normally < 1s).
-const LIVE_PAINT_MAX_MS = 60000;
+const LIVE_PAINT_MAX_MS = 6 * 3600000;   // the last live list is drawn at once whatever its age; the live feed replaces it within a second
 
 function pickCat(el) {
   const previousCat = currentCat;
