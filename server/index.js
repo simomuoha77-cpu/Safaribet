@@ -334,32 +334,8 @@ app.get('/api/content/image/:key', async (req, res) => {
 });
 
 // ── APK DOWNLOAD (public — no auth, anyone installing the app needs this) ──
-app.get('/download/app.apk', async (req, res) => {
-  try {
-    const apkStorage = require('./utils/apkStorage');
-    const info = await apkStorage.getApkInfoCached();
-    if (!info) return res.status(404).send('App download is not available yet.');
-
-    res.set('Content-Type', 'application/vnd.android.package-archive');
-    res.set('Content-Disposition', 'attachment; filename="SafariBet.apk"');
-    res.set('Content-Length', info.length);
-    res.set('Cache-Control', 'no-cache');
-    // Kept in memory: the bytes start flowing at once (no wait for MongoDB).
-    const mem = apkStorage.cachedApk();
-    if (mem && mem.buf.length === info.length) return res.end(mem.buf);
-    apkStorage.warmApk().catch(() => {});      // not in memory yet: read it from MongoDB this time, keep it for the next tap
-
-    const downloadStream = apkStorage.streamApk(res);
-    downloadStream.on('error', (e) => {
-      console.error('[apk-download]', e.message);
-      if (!res.headersSent) res.status(500).send('Download failed');
-    });
-    downloadStream.pipe(res);
-  } catch (e) {
-    console.error('[apk-download]', e.message);
-    res.status(500).send('Download failed');
-  }
-});
+app.get(['/download/app.apk'], require('./utils/apkDownload').make(require('./utils/apkStorage'), { log: m => console.error(m) }));
+app.head('/download/app.apk', require('./utils/apkDownload').make(require('./utils/apkStorage'), { log: m => console.error(m) }));
 
 setTimeout(() => { try { require('./utils/apkStorage').warmApk().catch(() => {}); } catch (e) {} }, 20000).unref();   // ready before the first visitor taps Download
 
