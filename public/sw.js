@@ -18,7 +18,7 @@
 // the worker does not touch it, so it can never be frozen by static-asset caching. Static files keep their caching.
 // Bump VERSION to throw every cached copy away on the next visit.
 const VERSION = 'sb-v24-nosms';
-const SHELL = ['/', '/login', '/register', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];
+const SHELL = ['/', '/login', '/register', '/account', '/my-bets', '/casino', '/deposit', '/withdraw', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];   // the main pages are saved on the first visit, so they open at once afterwards
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
 self.addEventListener('install', e => {
@@ -76,8 +76,10 @@ async function networkFirst(req, url) {
   const hit = await cache.match(key);
   const wait = (ms, fn) => new Promise((resolve, reject) => setTimeout(() => fn(resolve, reject), ms));
   if (!hit) {
-    // nothing cached for this page: give the server 2.5s, then show the branded reconnect page (never a black screen) instead of a dead screen
-    return nav ? Promise.race([net, wait(2500, (_, rej) => rej(new Error('slow')))]) : net;
+    // nothing cached for this page: wait for the server, and only on a real failure show the branded reconnect page (never a black screen)
+    // (v24) 2.5s was too short: any page that is not saved yet and answers in 3s showed the "server is waking up" screen even though the
+    // server was fine. Now the real page is waited for (up to 20s); the reconnect screen only appears when the network really fails.
+    return nav ? Promise.race([net, wait(20000, (_, rej) => rej(new Error('slow')))]) : net;
   }
   // cached copy is ONLY a safety net: network error / 5xx, or a server that does not answer (8s for pages, 15s otherwise)
   // A page the user taps open (link, app icon) must never sit on a black screen waiting for a sleeping server:
