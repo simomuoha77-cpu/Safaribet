@@ -1337,6 +1337,7 @@ async function loadDownloadAppBanner(){
     if (!d.success) return;
     render(d);
     try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
+    if (d.available) { try { fetch('/download/app.apk', { method: 'HEAD' }).catch(function(){}); } catch(e) {} }   // wakes the connection + loads the file on the server, so the tap on Download is answered at once
   }catch(e){ /* optional feature — fail silently */ }
 }
 

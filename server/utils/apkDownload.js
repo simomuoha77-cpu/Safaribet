@@ -24,11 +24,16 @@ function make(apkStorage, opts) {
 
   return async function apkHandler(req, res) {
     try {
-      const info = await apkStorage.getApkInfoCached();
-      if (!info) return text(res, 404, 'App download is not available yet.');
-
+      // Fastest path first: the file is already in memory -> answer at once, without touching the database at all.
+      // (The file details are refreshed in the background, so a newly uploaded build is picked up on a later tap.)
       let mem = apkStorage.cachedApk();
-      if (!mem) { try { apkStorage.warmApk().catch(() => {}); } catch (_) {} }      // not in memory yet: load it for the NEXT tap, and start sending right now
+      let info;
+      if (mem) { info = mem.info; try { apkStorage.getApkInfoCached().catch(() => {}); } catch (_) {} }
+      else {
+        info = await apkStorage.getApkInfoCached();
+        if (!info) return text(res, 404, 'App download is not available yet.');
+        try { apkStorage.warmApk().catch(() => {}); } catch (_) {}     // not in memory yet: load it for the NEXT tap, and start sending right now
+      }
       head(res);
 
       if (mem) {

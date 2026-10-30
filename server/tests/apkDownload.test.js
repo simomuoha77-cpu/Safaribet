@@ -20,7 +20,11 @@ const info = { id: 1, length: 5000 };
   check('range past the end -> 416', r.status === 416);
   r = await run({ getApkInfoCached: async () => info, cachedApk: () => mem }, { method: 'HEAD' });
   check('HEAD: size only, no body', r.status === 200 && r.h['content-length'] === '5000' && r.body.length === 0);
-  r = await run({ getApkInfoCached: async () => null });
+  // already in memory: answers instantly even if the database is slow/unreachable
+  let t1 = Date.now();
+  r = await run({ getApkInfoCached: () => new Promise(() => {}), cachedApk: () => mem });
+  check('in memory: instant answer, never waits for the database', r.status === 200 && r.body.equals(APK) && Date.now() - t1 < 500);
+  r = await run({ getApkInfoCached: async () => null, cachedApk: () => null });
   check('no APK uploaded -> 404 text (not a broken file)', r.status === 404 && /not available/.test(r.body.toString()));
   // first tap after restart: nothing in memory -> bytes start at once from the database (never waits), memory loads for next time
   let warmed = false, t0 = Date.now();
@@ -30,7 +34,7 @@ const info = { id: 1, length: 5000 };
   // memory impossible: streamed with FRESH size, not a stale one
   r = await run({ getApkInfoCached: async () => ({ id: 1, length: 111 }), cachedApk: () => null, warmApk: async () => null, getApkInfo: async () => info, streamApk: () => Readable.from([APK.subarray(0, 2500), APK.subarray(2500)]) });
   check('stream fallback: fresh Content-Length and complete bytes', r.status === 200 && r.h['content-length'] === '5000' && r.body.equals(APK));
-  r = await run({ getApkInfoCached: async () => { throw new Error('mongo down'); } });
+  r = await run({ getApkInfoCached: async () => { throw new Error('mongo down'); }, cachedApk: () => null });
   check('database error -> clean 500 message', r.status === 500 && /try again/.test(r.body.toString()));
   check('parseRange: suffix range', JSON.stringify(parseRange('bytes=-500', 5000)) === '{"start":4500,"end":4999}');
   console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);
