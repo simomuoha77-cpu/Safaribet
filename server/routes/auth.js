@@ -41,10 +41,73 @@ function makeToken(user) {
 // (so a blocked number is rejected instantly, with no server round trip) and it wakes a sleeping server
 // while the player is still filling in the form.
 router.get('/otp-config', (req, res) => {
-  const list = String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  const smsOn = String(process.env.REGISTER_SMS_VERIFY || '').toLowerCase() === 'true';
+  const list = smsOn ? String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean) : ['all'];
   res.set('Cache-Control', 'public, max-age=60');
-  res.json({ success: true, allowed: list, message: require('../services/smsService').CARRIER_BLOCK_MESSAGE });
+  res.json({ success: true, smsVerify: smsOn, allowed: list, message: require('../services/smsService').CARRIER_BLOCK_MESSAGE });
 });
+
+// Creates the account (wallet, referral bonus, fraud signal, login tokens) and answers with the logged-in session.
+// Shared by the direct sign-up and by the old SMS-code step.
+async function completeRegistration(req, res, { username, phone, passwordHash, refCode, phoneVerified }) {
+  let referredBy = null;
+  if (refCode) {
+    const referrer = await User.findOne({ referralCode: refCode }).select('_id');
+    if (referrer) referredBy = referrer._id;
+  }
+  const user = new User({ username: username, phone: phone, passwordHash: passwordHash, referredBy, phoneVerified: !!phoneVerified });
+  await user.save();
+
+  // Ensure wallet exists from day one
+  await require('../services/walletService').getOrCreateWallet(user._id).catch(() => {});
+
+  // KES referral bonus — amount and enabled flag are set by admin in /api/admin/referral/config
+  if (referredBy) {
+    try {
+      const settingsService = require('../models/Settings');
+      const enabled = await settingsService.get('referral_enabled');
+      const amount  = await settingsService.get('referral_amount');
+      if (enabled && amount > 0) {
+        await require('../services/walletService').credit(referredBy, 'main', amount, 'referral_bonus', `referral_${user._id}`, { referredUser: user._id });
+        await User.findByIdAndUpdate(referredBy, { $inc: { balance: amount } }).catch(() => {});
+        await require('../models/Transaction').create({
+          userId:      referredBy,
+          type:        'referral_bonus',
+          amount,
+          reference:   user.username,
+          description: `Referral bonus — ${user.username} signed up with your link`
+        });
+        require('../services/notificationService').notify(referredBy, 'system', {
+          title: '🎉 Referral Bonus!',
+          message: `${user.username} joined using your referral link. KES ${amount} added to your balance!`
+        }).catch(() => {});
+        console.log(`[referral] KES ${amount} paid to referrer for new user: ${user.username}`);
+      } else {
+        console.log(`[referral] Referral bonus skipped — enabled:${enabled}, amount:${amount}`);
+      }
+    } catch (e) {
+      console.error('[referral] bonus failed:', e.message);
+    }
+  }
+
+  const { deviceId } = req.body || {};
+
+  // Lightweight fraud signal — logged only, never blocks registration
+  require('../services/fraudService').assessRegistration({ ip: req.ip, deviceId })
+    .then(result => { if (result.risk !== 'normal') console.warn(`[FRAUD] New registration flagged: ${user.username} — ${result.flags.join('; ')}`); })
+    .catch(() => {});
+
+  const tokens = await authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId });
+  if (deviceId) authService.trackDevice(user._id, { deviceId, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(()=>{});
+
+  return res.json({
+    success: true,
+    token: makeToken(user), // legacy field — kept for backward compatibility
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    user: { id: user._id, username: user.username, phone: user.phone, balance: user.balance, referralCode: user.referralCode }
+  });
+}
 
 // ── REGISTER: STEP 1 — validate + send OTP (no account created yet) ──
 router.post('/register', registerLimiter, async (req, res) => {
@@ -84,8 +147,9 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Enter a valid Kenyan number e.g. 0712345678' });
     }
 
-    // Verification codes only reach the networks we can deliver to (default: Safaricom).
-    { const { carrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
+    const smsVerify = String(process.env.REGISTER_SMS_VERIFY || '').toLowerCase() === 'true';   // OFF by default: no SMS code at sign-up
+    // Verification codes only reach the networks we can deliver to (default: Safaricom). Not needed without SMS.
+    if (smsVerify) { const { carrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
       if (!carrierAllowed(normalPhone)) return res.status(400).json({ success: false, code: 'CARRIER_NOT_SUPPORTED', message: CARRIER_BLOCK_MESSAGE }); }
 
     // Check username taken
@@ -96,6 +160,11 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
     if (byPhone) {
       return res.status(400).json({ success: false, message: 'Phone already registered — please login' });
+    }
+
+    if (!smsVerify) {                                    // sign up straight away: no SMS, nothing that can fail on the way
+      const passwordHash = await bcrypt.hash(password, 10);
+      return await completeRegistration(req, res, { username, phone: normalPhone, passwordHash, refCode: (refCode && typeof refCode === 'string') ? refCode.trim().toUpperCase() : null, phoneVerified: false });
     }
 
     // One number can only be texted so often (cost + abuse): cooldown, per hour, per day.
@@ -136,6 +205,10 @@ router.post('/register', registerLimiter, async (req, res) => {
 
   } catch (e) {
     console.error('[register]', e.message, e.code);
+    if (e.code === 11000) {
+      const isPhone = JSON.stringify(e.keyPattern||{}).includes('phone');
+      return res.status(400).json({ success: false, message: isPhone ? 'Phone already registered — please login' : 'Username already taken — try another' });
+    }
     return res.status(500).json({ success: false, message: 'Server error — please try again' });
   }
 });
@@ -235,64 +308,8 @@ router.post('/register/verify-otp', otpVerifyLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: byPhone ? 'Phone already registered — please login' : 'Username already taken — try another' });
     }
 
-    let referredBy = null;
-    if (pending.refCode) {
-      const referrer = await User.findOne({ referralCode: pending.refCode }).select('_id');
-      if (referrer) referredBy = referrer._id;
-    }
-    const user = new User({ username: pending.username, phone: pending.phone, passwordHash: pending.passwordHash, referredBy, phoneVerified: true });
-    await user.save();
     await pending.deleteOne();
-
-    // Ensure wallet exists from day one
-    await require('../services/walletService').getOrCreateWallet(user._id).catch(() => {});
-
-    // KES referral bonus — amount and enabled flag are set by admin in /api/admin/referral/config
-    if (referredBy) {
-      try {
-        const settingsService = require('../models/Settings');
-        const enabled = await settingsService.get('referral_enabled');
-        const amount  = await settingsService.get('referral_amount');
-        if (enabled && amount > 0) {
-          await require('../services/walletService').credit(referredBy, 'main', amount, 'referral_bonus', `referral_${user._id}`, { referredUser: user._id });
-          await User.findByIdAndUpdate(referredBy, { $inc: { balance: amount } }).catch(() => {});
-          await require('../models/Transaction').create({
-            userId:      referredBy,
-            type:        'referral_bonus',
-            amount,
-            reference:   user.username,
-            description: `Referral bonus — ${user.username} signed up with your link`
-          });
-          require('../services/notificationService').notify(referredBy, 'system', {
-            title: '🎉 Referral Bonus!',
-            message: `${user.username} joined using your referral link. KES ${amount} added to your balance!`
-          }).catch(() => {});
-          console.log(`[referral] KES ${amount} paid to referrer for new user: ${user.username}`);
-        } else {
-          console.log(`[referral] Referral bonus skipped — enabled:${enabled}, amount:${amount}`);
-        }
-      } catch (e) {
-        console.error('[referral] bonus failed:', e.message);
-      }
-    }
-
-    const { deviceId } = req.body;
-
-    // Lightweight fraud signal — logged only, never blocks registration
-    require('../services/fraudService').assessRegistration({ ip: req.ip, deviceId })
-      .then(result => { if (result.risk !== 'normal') console.warn(`[FRAUD] New registration flagged: ${user.username} — ${result.flags.join('; ')}`); })
-      .catch(() => {});
-
-    const tokens = await authService.issueTokenPair(user, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId });
-    if (deviceId) authService.trackDevice(user._id, { deviceId, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(()=>{});
-
-    return res.json({
-      success: true,
-      token: makeToken(user), // legacy field — kept for backward compatibility
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      user: { id: user._id, username: user.username, phone: user.phone, balance: user.balance, referralCode: user.referralCode }
-    });
+    return await completeRegistration(req, res, { username: pending.username, phone: pending.phone, passwordHash: pending.passwordHash, refCode: pending.refCode, phoneVerified: true });
 
   } catch (e) {
     console.error('[register/verify-otp]', e.message, e.code);

@@ -274,7 +274,7 @@ async function doRegister(){
   if (otpAllowed && !otpAllowed.includes('all') && !otpAllowed.includes(carrierOfPhone(cleanPhone))) return showErr(otpBlockMsg);
 
   btn.disabled = true;
-  btn.textContent = 'Sending code...';
+  btn.textContent = 'Creating account...';
 
   try {
     const res = await fetch('/api/auth/register', {
@@ -285,6 +285,15 @@ async function doRegister(){
 
     const data = await res.json();
 
+    if(data.success && !data.requiresOtp && data.token){
+      // No SMS step: the account exists and the player is already logged in.
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      okEl.textContent = '✅ Account created! Redirecting...';
+      okEl.style.display = 'block';
+      setTimeout(() => SB.go('/'), 600);
+      return;
+    }
     if(data.success && data.requiresOtp){
       registeredPhone = data.phone;
       document.getElementById('otpPhoneDisplay').textContent = displayPhone(data.phone);
