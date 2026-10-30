@@ -1129,7 +1129,7 @@ function toggleFaq(i){
     <div class="modal-ttl">Slip Shared!</div>
     <div class="modal-sub">Anyone can load these picks with this code</div>
     <div class="modal-row" style="justify-content:center;padding:16px 0">
-      <span class="mr-r" id="shareCodeVal" style="font-size:24px;font-weight:800;letter-spacing:2px;color:var(--g)">—</span>
+      <span class="mr-r" id="shareCodeVal" style="font-size:24px;font-weight:800;letter-spacing:2px;color:var(--g);-webkit-user-select:all;user-select:all">—</span>
     </div>
     <button class="mbtn g" onclick="copyShareCode()">📋 Copy Code</button>
     <button class="mbtn o" onclick="closeModal('shareCodeModal')">Done</button>
@@ -3768,11 +3768,25 @@ async function shareSlipCode(){
     }catch(e){ closeModal('shareCodeModal'); lastShareCode=null; showT('Network error - try again','err'); return false; }
   })();
 }
-async function copyShareCode(){
-  if(!lastShareCode){ showT('Almost ready…'); return; }
-  var ok=true; try{ if(shareSaving) ok=await shareSaving; }catch(e){}
-  if(!ok||!lastShareCode) return;
-  navigator.clipboard?.writeText(lastShareCode).then(()=>showT('Code copied!','ok')).catch(()=>{});
+function copyShareCode(){
+  // Copies at the moment of the tap - nothing is awaited first (waiting for the server made the copy late, and a browser
+  // only allows copying right after a tap, so a late copy could silently fail).
+  var code=lastShareCode;
+  if(!code){ showT('Almost ready…'); return; }
+  var done=function(){ showT('Code copied!','ok'); };
+  var legacy=function(){
+    try{
+      var ta=document.createElement('textarea'); ta.value=code; ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0,code.length);
+      var ok=document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    }catch(e){ return false; }
+  };
+  var failed=function(){ if(legacy()) done(); else showT('Could not copy - touch and hold the code to copy it','err'); };
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(code).then(done,failed); }
+    else failed();
+  }catch(e){ failed(); }
 }
 
 // ── SLIP CODES: LOAD ──
