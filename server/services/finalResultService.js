@@ -138,15 +138,23 @@ function inferEnded(row, sport, now) {
 // since kick-off; before that it is still treated as LIVE (this is what made a game that was still being played
 // show "Match over - awaiting result" next to a leg of the same slip that had already finished).
 const CLOCK_LEN_MIN = { football: 125, basketball: 160, tennis: 240, hockey: 165, ice_hockey: 165, cricket: 600, rugby: 120, volleyball: 150, handball: 110, baseball: 200, table_tennis: 120 };
+// No game is ever called LIVE for longer than it can really last, and never on a clock alone once the feed has stopped listing it.
+const MAX_LIVE_MIN = { football: 170, basketball: 200, tennis: 330, hockey: 200, ice_hockey: 200, cricket: 720, rugby: 150, volleyball: 190, handball: 150, baseball: 260, table_tennis: 150 };
+const FEED_GAP_MAX_MS = 25 * 60 * 1000;      // a game really in play is listed every few seconds; half-time is ~15 min; 25 min unlisted = not live
 function fixtureLiveState({ kick, seen, finalVerified, sport, now }) {
   now = now || Date.now();
   if (finalVerified) return 'finished';
   if (kick && kick > now) return 'not_started';
-  if (seen && now - seen < 3 * 60 * 1000) return 'live';                        // in the live feed right now
   const sp = String(sport || 'football').toLowerCase();
+  const cap = (MAX_LIVE_MIN[sp] || 200) * 60000;
+  if (kick && now - kick > cap) return 'awaiting';                               // longer than any game can last: over, whatever the feed says
+  if (seen && now - seen < 3 * 60 * 1000) return 'live';                        // in the live feed right now
   const minDur = (MIN_DURATION_MIN[sp] || 0) * 60000;
-  if (kick && minDur && now - kick < minDur) return 'live';                      // left the feed too early to be over: feed gap / half-time
-  if (seen) return 'awaiting';                                                   // was live, has left the feed, game length has passed
+  if (seen) {
+    if (now - seen > FEED_GAP_MAX_MS) return 'awaiting';                         // gone from the feed for 25+ min: not live any more
+    if (kick && minDur && now - kick < minDur) return 'live';                    // short gap early in the game: feed hiccup / half-time
+    return 'awaiting';                                                           // was live, has left the feed, game length has passed
+  }
   const lenMin = CLOCK_LEN_MIN[sp] || (/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sp) ? 180 : 125);
   if (kick && now - kick < lenMin * 60000) return 'live';                        // never in our feed: the clock decides
   return 'awaiting';

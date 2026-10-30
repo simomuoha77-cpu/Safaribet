@@ -28,6 +28,9 @@ const MIN = 60000, now = Date.now();
   check('never in feed, inside normal length -> live', st({ kick: now - 80 * MIN, seen: 0 }) === 'live');
   check('never in feed, long over -> awaiting', st({ kick: now - 300 * MIN, seen: 0 }) === 'awaiting');
   check('future kick-off -> not_started', st({ kick: now + 60 * MIN, seen: 0 }) === 'not_started');
+  check('unlisted for 40 min -> NOT live any more (even if the clock says the game could still be on)', st({ kick: now - 70 * MIN, seen: now - 40 * MIN }) === 'awaiting');
+  check('still listed but kicked off 4h ago -> NOT live (nothing lasts that long)', st({ kick: now - 240 * MIN, seen: now - 30 * 1000 }) === 'awaiting');
+  check('half-time gap (unlisted 12 min at 60 min) -> still live', st({ kick: now - 60 * MIN, seen: now - 12 * MIN }) === 'live');
   check('verified final -> finished', st({ kick: now - 300 * MIN, seen: 0, finalVerified: true }) === 'finished');
 
   // ---- tracker: game never captured live, 3h past kick-off ----
