@@ -13,7 +13,7 @@
   if (window.__sbCrests) return; window.__sbCrests = 1;
   var K_LOCAL = 'sb_crest_idx_v2', K_ALL = 'sb_crest_all_v2', K_ONE = 'sb_team_logos_v1', MAXN = 6000;
   var LOCAL = ls(K_LOCAL), ALL = ls(K_ALL) || {}, ONE = ls(K_ONE) || {}, BAD = {}, asked = {}, rounds = {}, lastAll = 0, ver = 1;
-  var STOP = { fc: 1, cf: 1, afc: 1, sc: 1, ac: 1, fk: 1, sk: 1, bk: 1, 'if': 1, ud: 1, cd: 1, sd: 1, club: 1, de: 1, the: 1 };
+  var STOP = { fc: 1, cf: 1, afc: 1, sc: 1, ac: 1, fk: 1, sk: 1, bk: 1, 'if': 1, ud: 1, cd: 1, sd: 1, club: 1, de: 1, the: 1, srl: 1 };
   var BASE = 'display:inline-block;width:18px;height:18px;min-width:18px;max-width:18px;max-height:18px;margin:0 7px 0 0;vertical-align:-4px;flex-shrink:0;box-sizing:border-box;';
   var NCACHE = {};                                                  // name -> normalised key (normalising is the costly part)
 

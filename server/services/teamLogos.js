@@ -23,11 +23,11 @@ const MEM = new Map();            // key -> { url, missing, at }
 const RETRY = new Map();          // key -> next allowed attempt (ms)
 const QUEUE = [];
 const QUEUED = new Set();
-const GAP_MS = 500, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 4000;
+const GAP_MS = 400, MISSING_TTL = 3 * 24 * 3600e3, FAIL_TTL = 10 * 60e3, MAX_QUEUE = 4000;
 
 function norm(s) {
   return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
-    .replace(/&/g, ' and ').replace(/\b(fc|cf|afc|sc|ac|fk|sk|bk|if|ud|cd|sd|club|de|the)\b/g, ' ')
+    .replace(/&/g, ' and ').replace(/\b(fc|cf|afc|sc|ac|fk|sk|bk|if|ud|cd|sd|club|de|the|srl)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ').trim();
 }
 const ALIAS = { 'man united': 'Manchester United', 'man utd': 'Manchester United', 'manchester utd': 'Manchester United', 'man city': 'Manchester City',
@@ -39,6 +39,8 @@ const STATS = { source: 'wikipedia', ok: 0, fail: 0, found: 0, notFound: 0, bySo
 function variants(name) {
   const out = [], add = v => { v = String(v || '').trim(); if (v && !out.includes(v)) out.push(v); };
   const a = ALIAS[norm(name)]; if (a) add(a);
+  // "... SRL" are simulated games between REAL clubs: look up the real club (e.g. "Ajax Amsterdam SRL" -> "Ajax Amsterdam") and use its crest.
+  const real = String(name).replace(/\s+srl\b\.?/gi, '').trim(); if (real && real !== String(name).trim()) add(real);
   add(name); add(String(name).replace(/\b(FC|CF|AFC|SC|AC|FK|SK|BK|IF|UD|CD|SD|CA|CS|SS|US|AS|AD)\b\.?/gi, ' ').replace(/\s+/g, ' '));
   return out.slice(0, 3);
 }
@@ -107,7 +109,7 @@ async function fetchOne(name) {
   return '';
 }
 
-const WORKERS = 1;
+const WORKERS = 3;      // 3 lookups at a time (was 1): new teams get their crest about 3x sooner
 let active = 0;
 function betPlacing() { try { return require('../providers/sofaBetsProvider').betIsPlacing(); } catch (e) { return false; } }
 async function runOne() {
