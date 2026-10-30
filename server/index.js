@@ -337,7 +337,9 @@ app.get('/api/content/image/:key', async (req, res) => {
 app.get(['/download/app.apk'], require('./utils/apkDownload').make(require('./utils/apkStorage'), { log: m => console.error(m) }));
 app.head('/download/app.apk', require('./utils/apkDownload').make(require('./utils/apkStorage'), { log: m => console.error(m) }));
 
-setTimeout(() => { try { require('./utils/apkStorage').warmApk().catch(() => {}); } catch (e) {} }, 20000).unref();   // ready before the first visitor taps Download
+{ const warm = () => { try { require('./utils/apkStorage').warmApk().catch(() => {}); } catch (e) {} };
+  setTimeout(warm, 3000).unref(); setTimeout(warm, 20000).unref();             // in memory soon after start, so even the first tap is instant
+  try { require('mongoose').connection.once('connected', () => setTimeout(warm, 500).unref()); } catch (e) {} }   // ready before the first visitor taps Download
 
 // Public info about the current app build (version, size) — for the download page
 app.get('/api/app-info', async (req, res) => {

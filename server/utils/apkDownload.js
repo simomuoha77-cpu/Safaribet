@@ -28,10 +28,7 @@ function make(apkStorage, opts) {
       if (!info) return text(res, 404, 'App download is not available yet.');
 
       let mem = apkStorage.cachedApk();
-      if (!mem) {                                           // first tap after a restart: load it into memory once, then serve
-        await Promise.race([apkStorage.warmApk(), new Promise(r => setTimeout(r, waitMs))]);
-        mem = apkStorage.cachedApk();
-      }
+      if (!mem) { try { apkStorage.warmApk().catch(() => {}); } catch (_) {} }      // not in memory yet: load it for the NEXT tap, and start sending right now
       head(res);
 
       if (mem) {
@@ -49,7 +46,7 @@ function make(apkStorage, opts) {
         return req.method === 'HEAD' ? res.end() : res.end(buf);
       }
 
-      // Could not be held in memory: stream it, with the size read fresh (never a stale one).
+      // Not in memory (first tap after a restart): the bytes start flowing at once, straight from the database, with the size read fresh.
       const fresh = (await apkStorage.getApkInfo()) || info;
       res.statusCode = 200;
       res.setHeader('Content-Length', fresh.length);

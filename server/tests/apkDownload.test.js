@@ -22,10 +22,11 @@ const info = { id: 1, length: 5000 };
   check('HEAD: size only, no body', r.status === 200 && r.h['content-length'] === '5000' && r.body.length === 0);
   r = await run({ getApkInfoCached: async () => null });
   check('no APK uploaded -> 404 text (not a broken file)', r.status === 404 && /not available/.test(r.body.toString()));
-  // first tap after restart: memory empty, loads while the request waits
-  let loaded = false;
-  r = await run({ getApkInfoCached: async () => info, cachedApk: () => loaded ? mem : null, warmApk: async () => { await new Promise(x => setTimeout(x, 50)); loaded = true; } });
-  check('cold start: waits for memory load, then serves full file', r.status === 200 && r.body.equals(APK));
+  // first tap after restart: nothing in memory -> bytes start at once from the database (never waits), memory loads for next time
+  let warmed = false, t0 = Date.now();
+  r = await run({ getApkInfoCached: async () => info, cachedApk: () => null, warmApk: () => { warmed = true; return new Promise(() => {}); }, getApkInfo: async () => info, streamApk: () => Readable.from([APK]) });
+  check('cold start: does NOT wait for memory load (answers fast, full file)', r.status === 200 && r.body.equals(APK) && Date.now() - t0 < 1500);
+  check('cold start: memory load started for the next tap', warmed === true);
   // memory impossible: streamed with FRESH size, not a stale one
   r = await run({ getApkInfoCached: async () => ({ id: 1, length: 111 }), cachedApk: () => null, warmApk: async () => null, getApkInfo: async () => info, streamApk: () => Readable.from([APK.subarray(0, 2500), APK.subarray(2500)]) });
   check('stream fallback: fresh Content-Length and complete bytes', r.status === 200 && r.h['content-length'] === '5000' && r.body.equals(APK));
