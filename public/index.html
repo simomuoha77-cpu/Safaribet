@@ -2,33 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<script>
-// Start fetching the games the instant the page begins to load - before the ~200 KB of page and scripts below are parsed.
-// The page picks these answers up when it is ready (saves the whole parse time on a first visit). Used once, and only if
-// still fresh and valid; otherwise the page asks again as usual, so this can never leave the list empty.
-(function(){
-  try {
-    var E = window.__sbEarly = { ts: Date.now(), used: {} };
-    function go(url, opts){
-      return fetch(url, opts).then(function(r){
-        return r.text().then(function(t){ return { status: r.status, etag: r.headers.get('ETag'), text: t }; });
-      }).catch(function(){ return null; });
-    }
-    E.featured = go('/api/odds/featured');
-    E.live = go('/api/sports/live', { cache: 'no-store' });
-  } catch(e) {}
-})();
-window.__sbTakeEarly = function(kind){
-  try {
-    var E = window.__sbEarly; if (!E || E.used[kind] || !E[kind] || Date.now() - E.ts > 25000) return null;
-    E.used[kind] = true;
-    return E[kind].then(function(x){
-      if (!x || x.status !== 200 || x.text.indexOf('"success":true') === -1) return null;
-      return new Response(x.text, { status: 200, headers: x.etag ? { 'ETag': x.etag, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' } });
-    });
-  } catch(e) { return null; }
-};
-</script>
 <style>html,body{background:#0a0e0a}html::before{content:"";position:fixed;inset:0;z-index:-1;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='80' viewBox='0 0 320 80'%3E%3Ctext x='160' y='52' text-anchor='middle' font-family='Arial,sans-serif' font-weight='800' font-size='44'%3E%3Ctspan fill='%2300c853'%3ESafari%3C/tspan%3E%3Ctspan fill='%23ffd600'%3EBet%3C/tspan%3E%3C/text%3E%3C/svg%3E") center 42%/240px auto no-repeat}html[data-theme="light"],html[data-theme="light"] body{background:#f4f7f4}</style><!-- first paint is the app colour, never black/white -->
 <link rel="icon" type="image/png" href="/favicon.png"/>
 <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
@@ -75,6 +48,33 @@ window.__sbTakeEarly = function(kind){
 </script>
 <script src="/js/theme.js"></script>
 <script src="/js/router.js"></script>
+<script>
+// Start fetching the games the instant the page begins to load - before the ~200 KB of page and scripts below are parsed.
+// The page picks these answers up when it is ready (saves the whole parse time on a first visit). Used once, and only if
+// still fresh and valid; otherwise the page asks again as usual, so this can never leave the list empty.
+(function(){
+  try {
+    var E = window.__sbEarly = { ts: Date.now(), used: {} };
+    function go(url, opts){
+      return fetch(url, opts).then(function(r){
+        return r.text().then(function(t){ return { status: r.status, etag: r.headers.get('ETag'), text: t }; });
+      }).catch(function(){ return null; });
+    }
+    E.featured = go('/api/odds/featured');
+    E.live = go('/api/sports/live', { cache: 'no-store' });
+  } catch(e) {}
+})();
+window.__sbTakeEarly = function(kind){
+  try {
+    var E = window.__sbEarly; if (!E || E.used[kind] || !E[kind] || Date.now() - E.ts > 25000) return null;
+    E.used[kind] = true;
+    return E[kind].then(function(x){
+      if (!x || x.status !== 200 || x.text.indexOf('"success":true') === -1) return null;
+      return new Response(x.text, { status: 200, headers: x.etag ? { 'ETag': x.etag, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' } });
+    });
+  } catch(e) { return null; }
+};
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/><noscript><link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/></noscript>
 <style>
 /* no navigation progress line, ever (also hides the old one if an old router.js is still cached) */
