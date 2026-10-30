@@ -1420,25 +1420,22 @@ function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e
 // On page load: if a token is already saved, silently verify it instead of
 // showing the login form again — this is what makes refreshing the page NOT
 // force a fresh login every time, as long as the 12-hour session is still valid.
-(async function boot(){
+(function boot(){
+  // Nothing waits on the network any more: the right screen is shown the instant the page opens, and the checks run behind it.
   if (ADMIN_TOKEN) {
-    try{
-      const d = await fetch('/api/admin-auth/verify',{headers:{'Authorization':'Bearer '+ADMIN_TOKEN}}).then(r=>r.json());
-      if (d.success) { enterDashboard(); return; }
-    }catch(e){ /* fall through to login screen */ }
-    localStorage.removeItem('sb_admin_token');
-    ADMIN_TOKEN='';
+    enterDashboard();                                   // saved session: straight into the dashboard
+    fetch('/api/admin-auth/verify',{headers:{'Authorization':'Bearer '+ADMIN_TOKEN}}).then(r=>r.json()).then(d=>{
+      if (d && d.success === false) doLogout();         // only a clear "no" logs out; a slow or failed check never does
+    }).catch(()=>{});
+    return;
   }
-  // No valid session — check whether an admin account exists yet at all
-  try{
-    const s = await fetch('/api/admin-auth/status').then(r=>r.json());
-    if (s.success && !s.hasAdmin) {
+  showLogin();                                          // no session: the login form is there at once
+  fetch('/api/admin-auth/status').then(r=>r.json()).then(s=>{
+    if (s.success && !s.hasAdmin) {                     // no admin account exists yet: switch to first-time setup
       document.getElementById('setupLinkRow').style.display='block';
       showSetup();
-    } else {
-      showLogin(); // setupLinkRow stays hidden by default — nothing to do
     }
-  }catch(e){ showLogin(); }
+  }).catch(()=>{});
 })();
 
 // ══ API ══
