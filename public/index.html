@@ -843,7 +843,10 @@ header{
       var html = localStorage.getItem('matchListHTML'), hts = Number(localStorage.getItem('matchListHTMLts') || 0);
       if (html && html.indexOf('data-ko=') !== -1 && html.indexOf('id="mc_') !== -1 && Date.now() - hts < 72 * 3600000) {
         ml.innerHTML = html;
-        window.__sbStalePainted = true;
+        // Live and finished games never belong on this list (Live has its own tab): take them out of the saved copy first.
+        var cs = ml.querySelectorAll('.mc');
+        for (var ci = 0; ci < cs.length; ci++) { var st = cs[ci].getAttribute('data-st'); if (st === 'live' || st === 'finished') cs[ci].remove(); }
+        if (ml.querySelector('.mc')) window.__sbStalePainted = true; else ml.innerHTML = window.sbSkel(7);
       }
     } catch(e) {}
   })();
@@ -3227,7 +3230,7 @@ function renderMatches(matches, silent=false){
   // first. That parse-time gap is invisible on a slow network (masked by
   // the request itself taking longer) but very visible on localhost/fast
   // connections, which is exactly what was still showing a spinner flash.
-  if (currentFilter === 'highlights' && !currentLeague) {
+  if (currentFilter === 'highlights' && !currentLeague && currentCat === 'featured') {   // never save the Live tab's cards as the Highlights list
     try { localStorage.setItem('matchListHTML', el.innerHTML); localStorage.setItem('matchListHTMLts', String(Date.now())); } catch(e) {}
   }
 
