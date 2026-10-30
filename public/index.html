@@ -62,6 +62,8 @@
     }
     E.featured = go('/api/odds/featured');
     E.live = go('/api/sports/live', { cache: 'no-store' });
+    E.content = go('/api/content', { cache: 'no-store' });      // banners + popup ad
+    E.appinfo = go('/api/app-info');                           // app download banner
   } catch(e) {}
 })();
 window.__sbTakeEarly = function(kind){
@@ -812,7 +814,58 @@ header{
     } catch(e) {}
   })();
   </script>
-  <script>SB.run()</script>
+  <script>
+// Banner, popup ad and app-download banner are painted from what the phone saved last time the moment the page is read,
+// and again from the fresh answer that was requested at the very start. No waiting for the rest of the page to load.
+(function(){
+  function $(id){ return document.getElementById(id); }
+  function paintContent(d){
+    try {
+      var list = (d && Array.isArray(d.banners)) ? d.banners.filter(function(b){ return b && b.image; }) : [];
+      var ab = $('adminBanner'), tr = $('bannerTrack');
+      if (ab && tr) {
+        if (list.length) {
+          tr.innerHTML = list.map(function(b){ return '<a href="' + (b.link || '#') + '" onclick="' + (b.link ? '' : 'return false;') + '" style="flex:0 0 100%;display:block"><img src="' + b.image + '" alt="Promotion" style="width:100%;display:block;object-fit:cover;max-height:160px" onerror="this.closest(\'a\').style.display=\'none\'"/></a>'; }).join('');
+          ab.style.display = 'block';
+        } else { ab.style.display = 'none'; }
+      }
+      var ov = $('popupAdOverlay'), im = $('popupAdImg');
+      if (ov && im) {
+        if (d && d.popupEnabled && d.popupImage) {
+          if (sessionStorage.getItem('popupAdSeen') !== d.popupImage) {
+            im.src = d.popupImage; im.onerror = function(){ ov.style.display = 'none'; };
+            im.onclick = function(){ if (d.popupLink && window.SB) SB.go(d.popupLink); };
+            ov.style.display = 'flex'; sessionStorage.setItem('popupAdSeen', d.popupImage);
+          }
+        } else if (ov.style.display === 'flex' && !(d && d.popupEnabled)) { ov.style.display = 'none'; }   // switched off since it was saved
+      }
+    } catch(e) {}
+  }
+  function paintApp(d){
+    try {
+      if (!d || !d.available) return;
+      var b = $('downloadAppBanner'), sub = $('downloadAppSub'); if (!b) return;
+      b.style.display = 'flex';
+      if (sub) sub.textContent = (d.version ? 'v' + d.version + ' \u00b7 ' : '') + (d.sizeBytes / 1024 / 1024).toFixed(1) + ' MB \u00b7 Faster on slow data \u00b7 b65';
+    } catch(e) {}
+  }
+  try { var c = JSON.parse(localStorage.getItem('sb_content_cache') || 'null'); if (c && Date.now() - c.ts < 7 * 864e5) paintContent(c.data); } catch(e) {}
+  try { var a = JSON.parse(localStorage.getItem('sb_appinfo_cache') || 'null'); if (a && Date.now() - a.ts < 7 * 864e5) paintApp(a.data); } catch(e) {}
+  var E = window.__sbEarly;
+  function fromEarly(p, cacheKey, paint){
+    if (!p) return;
+    p.then(function(x){
+      if (!x || x.status !== 200) return;
+      var d; try { d = JSON.parse(x.text); } catch(e) { return; }
+      if (!d || !d.success) return;
+      paint(d);
+      try { localStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); } catch(e) {}
+    }).catch(function(){});
+  }
+  if (E && Date.now() - E.ts < 25000) { fromEarly(E.content, 'sb_content_cache', paintContent); fromEarly(E.appinfo, 'sb_appinfo_cache', paintApp); }
+})();
+</script>
+<script>SB.run()</script>
   <script type="text/sb-page">
   // ── EARLY MATCH-LIST PAINT ──
   // Same idea as the header's early-paint script: this runs the instant the
@@ -1429,6 +1482,7 @@ async function loadAdminBanner(){
     render(d);
     try{ localStorage.setItem(cacheKey, JSON.stringify({ data: d, ts: Date.now() })); }catch(e){}
 
+    if (!d.popupEnabled || !d.popupImage) { const po = document.getElementById('popupAdOverlay'); if (po) po.style.display = 'none'; }   // switched off since it was saved
     // Full-screen popup ad — shows once per browser session, not on every page nav
     if (d.popupEnabled && d.popupImage && sessionStorage.getItem('popupAdSeen') !== d.popupImage) {
       const overlay = document.getElementById('popupAdOverlay');
@@ -1941,6 +1995,9 @@ async function loadAllMatches(silent=false, retryAttempt=0){
         updateTodayCount();
         applyFilters(silent);
       }
+    } else if(!hasExistingData && currentCat === 'featured' && retryAttempt < 4) {
+      await new Promise(r => setTimeout(r, 2500));          // empty first answer = the server is still filling its list: keep the loading rows, ask again
+      return loadAllMatches(false, retryAttempt + 1);
     } else if(!hasExistingData && currentCat === 'featured') {
       if (!highlightsFallback()) el.innerHTML=noMatchesHTML('⚽','No matches right now','Check back soon — new fixtures are added regularly.');
     }
