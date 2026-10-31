@@ -13,13 +13,21 @@ const Settings = mongoose.model('Settings', settingsSchema);
 
 // Default config — only written if the key doesn't exist yet
 const DEFAULTS = {
-  referral_enabled: true,   // boolean — if false, no bonus is paid and link shows "paused"
-  referral_amount:  5       // number — KES amount paid per referral
+  referral_enabled: true,
+  referral_amount:  5, // legacy setting retained for backward compatibility
+  referral_new_user_amount: 0,
+  referral_referrer_amount: 5
 };
 
 async function get(key) {
   const doc = await Settings.findOne({ key }).lean();
   if (doc) return doc.value;
+  // Preserve the previously configured single referral amount as the initial
+  // referrer amount when upgrading to separate bonus settings.
+  if (key === 'referral_referrer_amount') {
+    const legacy = await Settings.findOne({ key: 'referral_amount' }).lean();
+    if (legacy) return legacy.value;
+  }
   return DEFAULTS[key] !== undefined ? DEFAULTS[key] : null;
 }
 
@@ -35,6 +43,10 @@ async function getAll() {
   const docs = await Settings.find().lean();
   const result = { ...DEFAULTS };
   docs.forEach(d => { result[d.key] = d.value; });
+  if (!docs.some(d => d.key === 'referral_referrer_amount')) {
+    const legacy = docs.find(d => d.key === 'referral_amount');
+    if (legacy) result.referral_referrer_amount = legacy.value;
+  }
   return result;
 }
 

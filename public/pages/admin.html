@@ -505,16 +505,23 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
         </label>
       </div>
 
-      <!-- Amount -->
-      <div style="margin-bottom:16px">
-        <label style="font-size:12px;color:var(--mt);font-weight:600;display:block;margin-bottom:6px">Bonus Amount per Referral (KES)</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="number" id="refAmountInp" min="0" step="1" placeholder="e.g. 5"
-            style="flex:1;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
-          <button class="btn btn-g btn-sm" onclick="saveRefAmount()">Save</button>
+      <!-- Independent bonus amounts -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:16px">
+        <div>
+          <label style="font-size:12px;color:var(--mt);font-weight:600;display:block;margin-bottom:6px">New User Bonus (KES)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" id="refNewUserAmountInp" min="0" step="0.01" placeholder="e.g. 20" style="width:100%;min-width:0;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--mt);margin-top:5px">Set to 0 to disable the bonus while keeping referral tracking active</div>
+        <div>
+          <label style="font-size:12px;color:var(--mt);font-weight:600;display:block;margin-bottom:6px">Referrer Bonus (KES)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" id="refReferrerAmountInp" min="0" step="0.01" placeholder="e.g. 10" style="width:100%;min-width:0;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
+          </div>
+        </div>
       </div>
+      <button class="btn btn-g btn-sm" onclick="saveRefAmounts()">Save Bonus Amounts</button>
+      <div style="font-size:11px;color:var(--mt);margin-top:5px">Set either amount to 0 to disable that person's bonus. Both bonuses are paid only after phone OTP verification.</div>
 
       <!-- Live status -->
       <div id="refConfigStatus" style="font-size:12px;padding:8px 12px;border-radius:8px;background:var(--s3);color:var(--mt)">Loading...</div>
@@ -3236,60 +3243,49 @@ async function loadRefConfig(){
   try {
     const d = await api(`/api/admin/referral/config`);
     if (!d.success) return;
-    const { enabled, amount } = d.data;
-
+    const { enabled, newUserAmount, referrerAmount } = d.data;
     const toggle = document.getElementById('refEnabledToggle');
     const track  = document.getElementById('refToggleTrack');
     const thumb  = document.getElementById('refToggleThumb');
     toggle.checked = enabled;
     track.style.background = enabled ? 'var(--g)' : '#333';
     thumb.style.transform  = enabled ? 'translateX(22px)' : 'translateX(0)';
-
-    document.getElementById('refAmountInp').value = amount;
-    updateRefStatusBadge(enabled, amount);
+    document.getElementById('refNewUserAmountInp').value = newUserAmount;
+    document.getElementById('refReferrerAmountInp').value = referrerAmount;
+    updateRefStatusBadge(enabled, newUserAmount, referrerAmount);
   } catch(e) {
     document.getElementById('refConfigStatus').textContent = 'Failed to load config';
   }
 }
 
-function updateRefStatusBadge(enabled, amount){
+function updateRefStatusBadge(enabled, newUserAmount, referrerAmount){
   const el = document.getElementById('refConfigStatus');
-  if (!enabled) {
-    el.style.color = 'var(--r)';
-    el.textContent = '🔴 Referral program is DISABLED — no bonuses will be paid';
-  } else if (amount === 0) {
-    el.style.color = 'var(--y)';
-    el.textContent = '🟡 Referral program is ON but bonus is KES 0 — tracking only, no cash paid';
-  } else {
-    el.style.color = 'var(--g)';
-    el.textContent = `🟢 Referral program is ACTIVE — paying KES ${amount} per referral`;
-  }
+  if (!enabled) { el.style.color = 'var(--r)'; el.textContent = '🔴 Referral program is DISABLED — no bonuses will be paid'; }
+  else if (newUserAmount === 0 && referrerAmount === 0) { el.style.color = 'var(--y)'; el.textContent = '🟡 Referral tracking is ON, but both bonuses are KES 0'; }
+  else { el.style.color = 'var(--g)'; el.textContent = `🟢 ACTIVE — new user: KES ${newUserAmount}; referrer: KES ${referrerAmount}`; }
 }
 
 async function updateRefConfig(){
   const enabled = document.getElementById('refEnabledToggle').checked;
-  const track   = document.getElementById('refToggleTrack');
-  const thumb   = document.getElementById('refToggleThumb');
+  const track = document.getElementById('refToggleTrack');
+  const thumb = document.getElementById('refToggleThumb');
   track.style.background = enabled ? 'var(--g)' : '#333';
-  thumb.style.transform  = enabled ? 'translateX(22px)' : 'translateX(0)';
+  thumb.style.transform = enabled ? 'translateX(22px)' : 'translateX(0)';
   try {
     const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ enabled }) });
-    if (d.success) {
-      updateRefStatusBadge(d.data.enabled, d.data.amount);
-      toast(enabled ? '✅ Referral program enabled' : '🔴 Referral program disabled');
-    } else toast(d.message || 'Update failed', 'err');
+    if (d.success) { updateRefStatusBadge(d.data.enabled, d.data.newUserAmount, d.data.referrerAmount); toast(enabled ? '✅ Referral program enabled' : '🔴 Referral program disabled'); }
+    else toast(d.message || 'Update failed', 'err');
   } catch(e) { toast('Network error', 'err'); }
 }
 
-async function saveRefAmount(){
-  const amount = parseFloat(document.getElementById('refAmountInp').value);
-  if (isNaN(amount) || amount < 0) { toast('Enter a valid amount (0 or more)', 'err'); return; }
+async function saveRefAmounts(){
+  const newUserAmount = Number(document.getElementById('refNewUserAmountInp').value);
+  const referrerAmount = Number(document.getElementById('refReferrerAmountInp').value);
+  if (!Number.isFinite(newUserAmount) || newUserAmount < 0 || !Number.isFinite(referrerAmount) || referrerAmount < 0) { toast('Enter valid bonus amounts (0 or more)', 'err'); return; }
   try {
-    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ amount }) });
-    if (d.success) {
-      updateRefStatusBadge(d.data.enabled, d.data.amount);
-      toast(`✅ Bonus updated to KES ${amount}`);
-    } else toast(d.message || 'Update failed', 'err');
+    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ newUserAmount, referrerAmount }) });
+    if (d.success) { updateRefStatusBadge(d.data.enabled, d.data.newUserAmount, d.data.referrerAmount); toast('✅ New user and referrer bonuses saved'); }
+    else toast(d.message || 'Update failed', 'err');
   } catch(e) { toast('Network error', 'err'); }
 }
 

@@ -1475,33 +1475,37 @@ router.post('/force-settle', async (req, res) => {
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
-// ── REFERRAL CONFIG (admin can set amount or disable entirely) ──
+// ── REFERRAL CONFIG ──
 router.get('/referral/config', async (req, res) => {
   try {
     const cfg = await require('../models/Settings').getAll();
-    res.json({
-      success: true,
-      data: {
-        enabled: cfg.referral_enabled !== false,
-        amount:  Number(cfg.referral_amount) || 0
-      }
-    });
+    res.json({ success: true, data: {
+      enabled: cfg.referral_enabled !== false,
+      newUserAmount: Number(cfg.referral_new_user_amount) || 0,
+      referrerAmount: Number(cfg.referral_referrer_amount ?? cfg.referral_amount) || 0
+    }});
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
 router.post('/referral/config', async (req, res) => {
   try {
-    const { enabled, amount } = req.body;
+    const { enabled, newUserAmount, referrerAmount } = req.body || {};
     const s = require('../models/Settings');
     if (enabled !== undefined) await s.set('referral_enabled', Boolean(enabled));
-    if (amount  !== undefined) {
-      const n = parseFloat(amount);
-      if (isNaN(n) || n < 0) return res.status(400).json({ success:false, message:'Amount must be a positive number or 0' });
-      await s.set('referral_amount', n);
+    for (const [field, key] of [['newUserAmount', 'referral_new_user_amount'], ['referrerAmount', 'referral_referrer_amount']]) {
+      if (req.body[field] !== undefined) {
+        const n = Number(req.body[field]);
+        if (!Number.isFinite(n) || n < 0) return res.status(400).json({ success:false, message:'Bonus amounts must be valid numbers (0 or more)' });
+        await s.set(key, n);
+      }
     }
-    audit('UPDATE_REFERRAL_CONFIG', { enabled, amount });
+    audit('UPDATE_REFERRAL_CONFIG', { enabled, newUserAmount, referrerAmount });
     const updated = await s.getAll();
-    res.json({ success:true, message:'Referral config updated', data: { enabled: updated.referral_enabled, amount: updated.referral_amount } });
+    res.json({ success:true, message:'Referral config updated', data: {
+      enabled: updated.referral_enabled !== false,
+      newUserAmount: Number(updated.referral_new_user_amount) || 0,
+      referrerAmount: Number(updated.referral_referrer_amount ?? updated.referral_amount) || 0
+    }});
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 

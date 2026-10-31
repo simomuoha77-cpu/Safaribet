@@ -61,61 +61,34 @@ async function completeRegistration(req, res, { username, phone, passwordHash, r
   // Ensure wallet exists from day one
   await require('../services/walletService').getOrCreateWallet(user._id).catch(() => {});
 
-  // Referral rewards are paid ONLY after successful phone OTP verification.
-  // The admin controls the single per-person amount in /api/admin/referral/config.
-  // Both the new player and their referrer receive that amount; stable references
-  // plus the wallet ledger check prevent a repeated completion from paying twice.
+  // Referral bonuses are paid only after successful phone OTP verification.
+  // Each recipient has an independent admin-configured amount.
   if (phoneVerified && referredBy) {
     try {
-      const settingsService = require('../models/Settings');
-      const enabled = await settingsService.get('referral_enabled');
-      const amount = Number(await settingsService.get('referral_amount')) || 0;
-      if (enabled !== false && amount > 0) {
+      const settings = require('../models/Settings');
+      const enabled = await settings.get('referral_enabled');
+      if (enabled !== false) {
+        const newUserAmount = Math.max(0, Number(await settings.get('referral_new_user_amount')) || 0);
+        const referrerAmount = Math.max(0, Number(await settings.get('referral_referrer_amount')) || 0);
         const walletService = require('../services/walletService');
         const WalletHistory = require('../models/WalletHistory');
         const Transaction = require('../models/Transaction');
-
         const rewards = [
-          { userId: user._id, reference: `referral_new_${user._id}`, description: 'Referral welcome bonus' },
-          { userId: referredBy, reference: `referral_referrer_${user._id}`, description: `Referral bonus — ${user.username} verified their phone` }
+          { userId: user._id, amount: newUserAmount, reference: `referral_new_${user._id}`, description: 'New user referral welcome bonus' },
+          { userId: referredBy, amount: referrerAmount, reference: `referral_referrer_${user._id}`, description: `Referral bonus — ${user.username} verified their phone` }
         ];
-
         for (const reward of rewards) {
-          const alreadyPaid = await WalletHistory.findOne({
-            userId: reward.userId,
-            bucket: 'main',
-            reason: 'referral_bonus',
-            reference: reward.reference
-          }).lean();
-          if (alreadyPaid) continue;
-
-          const wallet = await walletService.credit(
-            reward.userId, 'main', amount, 'referral_bonus', reward.reference,
-            { referredUser: user._id, trigger: 'phone_otp_verified' }
-          );
-          // Keep the legacy User.balance field in sync for older screens/services.
-          await User.findByIdAndUpdate(reward.userId, { $inc: { balance: amount } });
-          await Transaction.create({
-            userId: reward.userId,
-            type: 'referral_bonus',
-            amount,
-            balance: wallet?.main ?? 0,
-            reference: reward.reference,
-            description: reward.description
-          });
-          require('../services/notificationService').notify(reward.userId, 'system', {
-            title: '🎉 Referral Bonus!',
-            message: `KES ${amount} has been added to your wallet after phone verification.`
-          }).catch(() => {});
-          console.log(`[referral] KES ${amount} credited to ${String(reward.userId)} after OTP verification`);
+          if (reward.amount <= 0) continue;
+          const paid = await WalletHistory.findOne({ userId: reward.userId, bucket: 'main', reason: 'referral_bonus', reference: reward.reference }).lean();
+          if (paid) continue;
+          const wallet = await walletService.credit(reward.userId, 'main', reward.amount, 'referral_bonus', reward.reference, { referredUser: user._id, trigger: 'phone_otp_verified' });
+          await User.findByIdAndUpdate(reward.userId, { $inc: { balance: reward.amount } });
+          await Transaction.create({ userId: reward.userId, type: 'referral_bonus', amount: reward.amount, balance: wallet.main, reference: reward.reference, description: reward.description });
+          require('../services/notificationService').notify(reward.userId, 'system', { title: '🎉 Referral Bonus!', message: `KES ${reward.amount} has been added to your wallet after phone verification.` }).catch(() => {});
+          console.log(`[referral] KES ${reward.amount} credited to ${String(reward.userId)} after OTP verification`);
         }
-      } else {
-        console.log(`[referral] bonuses skipped — enabled:${enabled}, amount:${amount}`);
       }
-    } catch (e) {
-      // Do not fail an otherwise valid registration because a reward subsystem failed.
-      console.error('[referral] verified-registration bonus failed:', e.message);
-    }
+    } catch (e) { console.error('[referral] verified-registration bonus failed:', e.message); }
   }
 
   const { deviceId } = req.body || {};

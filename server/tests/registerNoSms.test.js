@@ -25,7 +25,7 @@ Module._load = function (r, parent) {
       const c = /^254(73\d|78\d|75[0-6]|10[0-2])/.test(n) ? 'airtel' : /^254(77\d)/.test(n) ? 'telkom' : 'safaricom'; return l.includes('all') || l.includes(c); }, sendSms: async () => { sms.sent++; return sms.ok ? { success: true } : { success: false, error: 'provider down' }; }, generateOtp: () => '123456', otpMessage: () => 'x', carrierAllowed: () => false, CARRIER_BLOCK_MESSAGE: 'Only Safaricom' };
   if (r.endsWith('services/otpThrottle')) return { claim: async () => ({ ok: true }) };
   if (r.endsWith('models/PendingRegistration')) return { deleteMany: async () => {}, create: async (o) => { pendings.push(o); }, findOne: async () => sms.pendingDoc || null };
-  if (r.endsWith('models/Settings')) return { get: async (k) => k === 'referral_enabled' ? true : 50 };
+  if (r.endsWith('models/Settings')) return { get: async (k) => ({ referral_enabled: true, referral_new_user_amount: 20, referral_referrer_amount: 10 }[k]) };
   if (r.endsWith('models/Transaction')) return { create: async () => {} };
   if (r.endsWith('models/WalletHistory')) return { findOne: () => ({ lean: async () => null }) };
   if (r.endsWith('services/notificationService')) return { notify: () => Promise.resolve() };
@@ -84,8 +84,8 @@ let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.l
     sms.pendingDoc = null;
     const nu = users.find(u => u.username === 'refguy');
     check('after the correct code: logged-in, account made, referrer linked, phone verified', vo.body && vo.body.success === true && !!vo.body.token && nu && nu.referredBy === 'u1' && nu.phoneVerified === true);
-    check('new verified player receives admin-configured referral bonus in wallet', credits.some(c => c[0] === nu._id && c[1] === 'main' && c[2] === 50 && c[3] === 'referral_bonus'));
-    check('referrer receives the same admin-configured bonus after OTP verification', credits.some(c => c[0] === 'u1' && c[1] === 'main' && c[2] === 50 && c[3] === 'referral_bonus')); }
+    check('new verified player receives the independent KES 20 welcome bonus', credits.some(c => c[0] === nu._id && c[2] === 20 && c[3] === 'referral_bonus'));
+    check('referrer receives the independent KES 10 referral bonus', credits.some(c => c[0] === 'u1' && c[2] === 10 && c[3] === 'referral_bonus')); }
   const s2 = sms.sent;
   r = await call({ username: 'noref', phone: '0722555333', password: 'secret1' });
   check('no referral: registers directly, no SMS', r.body.success === true && !r.body.requiresOtp && !!r.body.token && sms.sent === s2);
