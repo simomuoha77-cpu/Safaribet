@@ -75,7 +75,35 @@ function otpMessage(code) {
 /**
  * Sends an SMS via CommsGrid. Returns { success, messageId, error }.
  */
+/** WASMS (wasms.co.ke) is used when WASMS_API_KEY is set (force the old provider with SMS_PROVIDER=commsgrid). */
+const useWasms = () => !!process.env.WASMS_API_KEY && String(process.env.SMS_PROVIDER || '').toLowerCase() !== 'commsgrid';
+async function sendViaWasms(phone, message) {
+  const url = process.env.WASMS_API_URL || 'https://www.wasms.co.ke/api/v2/send';
+  const to = String(phone).replace(/[^\d]/g, '');
+  let extra = {}; try { extra = JSON.parse(process.env.WASMS_EXTRA_JSON || '{}'); } catch (e) { console.error('[sms] WASMS_EXTRA_JSON is not valid JSON - ignored'); }
+  const body = Object.assign({ to, message, channel: 'sms' }, process.env.WASMS_SENDER_ID ? { sender_id: process.env.WASMS_SENDER_ID } : {}, extra);
+  try {
+    const r = await axios.post(url, body, { headers: { 'X-API-Key': process.env.WASMS_API_KEY, 'Accept': 'application/json', 'Content-Type': 'application/json' }, timeout: 15000, family: 4 });
+    const d = r.data;
+    const st = String((d && (d.status || d.state)) || '').toLowerCase();
+    const failed = !d || d.success === false || d.error || /^(error|fail|failed|rejected|invalid)/.test(st) || (typeof d === 'string' && /error|fail/i.test(d));
+    if (failed) {
+      const reason = (d && (d.message || d.error || d.reason)) || JSON.stringify(d);
+      console.error('[sms] WASMS reported failure:', reason, '| full response:', JSON.stringify(d));
+      return { success: false, error: String(reason).slice(0, 200), raw: d };
+    }
+    console.log(`[sms] WASMS accepted ${to}: ${JSON.stringify(d).slice(0, 200)}`);
+    return { success: true, messageId: (d && (d.message_id || d.id || (d.data && (d.data.id || d.data.message_id)))) || null, raw: d };
+  } catch (e) {
+    console.error('[sms] WASMS send failed:', e.response ? JSON.stringify(e.response.data) : e.message);
+    const status = e.response && e.response.status;
+    const retryable = (!e.response && /^(ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EPIPE)$/.test(e.code || '')) || [429, 502, 503, 504].includes(status);
+    return { success: false, error: (e.response && e.response.data && (e.response.data.message || e.response.data.error)) || e.message, retryable };
+  }
+}
+
 async function sendSmsOnce(phoneE164, message, opts) {
+  if (useWasms()) return sendViaWasms(phoneE164, message);
   const key = COMMSGRID_KEY();
   if (!key) {
     console.error('[sms] COMMSGRID_API_KEY not set — cannot send SMS');
@@ -174,6 +202,17 @@ function normalizeKePhone(raw) {
  * onProgress(doneCount) is called after each batch.
  */
 async function sendBulkSms(phones, message, onProgress) {
+  if (useWasms()) {
+    const list0 = Array.from(new Set((phones || []).map(String)));
+    const o = { total: list0.length, accepted: 0, failed: 0, unconfirmed: 0, failedNumbers: [], error: null, ms: 0 };
+    const t00 = Date.now();
+    for (let i = 0; i < list0.length; i += 5) {
+      const rs = await Promise.all(list0.slice(i, i + 5).map(p => sendViaWasms(p, message).then(r => ({ p, r }))));
+      for (const x of rs) { if (x.r.success) o.accepted++; else { o.failed++; o.failedNumbers.push({ phone: x.p, reason: x.r.error }); } }
+      if (onProgress) try { onProgress(Math.min(i + 5, list0.length)); } catch (e) {}
+    }
+    o.ms = Date.now() - t00; return o;
+  }
   const key = COMMSGRID_KEY();
   const list = Array.from(new Set((phones || []).map(String)));
   const out = { total: list.length, accepted: 0, failed: 0, unconfirmed: 0, failedNumbers: [], error: null, ms: 0 };

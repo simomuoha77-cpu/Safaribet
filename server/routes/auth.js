@@ -160,7 +160,13 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone already registered — please login' });
     }
 
-    if (!smsVerify) {                                    // sign up straight away: no SMS, nothing that can fail on the way
+    // Who has to verify the phone with an SMS code: players who sign up through a (valid) referral link - that is where fake
+    // numbers were collecting the referral bonus. Everyone else registers straight away. REGISTER_SMS_VERIFY=true = everyone.
+    const refCodeNorm = (refCode && typeof refCode === 'string') ? refCode.trim().toUpperCase() : '';
+    let needOtp = smsVerify;
+    if (!needOtp && refCodeNorm) { const refOwner = await User.findOne({ referralCode: refCodeNorm }).select('_id'); needOtp = !!refOwner; }
+
+    if (!needOtp) {                                      // sign up straight away: no SMS, nothing that can fail on the way
       const passwordHash = await bcrypt.hash(password, 10);
       return await completeRegistration(req, res, { username, phone: normalPhone, passwordHash, refCode: (refCode && typeof refCode === 'string') ? refCode.trim().toUpperCase() : null, phoneVerified: false });
     }
