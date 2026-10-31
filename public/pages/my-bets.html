@@ -289,7 +289,7 @@ function renderBets(bets){
               r==='pending' ? (s.pickLabel||s.pick) + (moot ? '' : ' ⏳') :
               (s.pickLabel||s.pick)
             }</span>
-            ${scoreStr ? `<span class="sel-score">${s.periodLabel || 'FT'}: ${scoreStr}</span>` : ''}
+            ${scoreStr ? `<span class="sel-score">${s.periodLabel || (s.fixtureState==='live' ? 'LIVE' : 'FT')}: ${scoreStr}</span>` : ''}
             ${s.league ? `<span class="sel-league">${s.league}</span>` : ''}
           </div>
           ${r==='pending' && !moot ? fixtureBadge(s) : ''}

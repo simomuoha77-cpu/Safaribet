@@ -627,6 +627,21 @@ router.get('/my', auth, async (req, res) => {
       if (ids.size) {
         const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
         const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
+
+        // Pull the current SofaBets live scoreboard once for this My Bets request.
+        // Saved selections contain fixture identity, but their score can be stale.
+        const liveByProviderId = new Map();
+        try {
+          const liveFixtures = await sofaBets.getLiveFixtures('football');
+          for (const fixture of (Array.isArray(liveFixtures) ? liveFixtures : [])) {
+            if (fixture && fixture.providerMatchId != null) {
+              liveByProviderId.set(String(fixture.providerMatchId), fixture);
+            }
+          }
+        } catch (liveErr) {
+          console.warn('[bets/my] SofaBets live scoreboard unavailable:', liveErr.message);
+        }
+
         const now = Date.now();
         pend.forEach(s => {
           const p = fin.parseSofaMatchId(s.matchId);
@@ -642,6 +657,22 @@ router.get('/my', auth, async (req, res) => {
           if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
           s.kickoffAt = kick || null;
+
+          // Overlay only the exact fixture's current SofaBets live score.
+          if (p) {
+            const liveFixture = liveByProviderId.get(String(p.providerId));
+            const liveScore = liveFixture && liveFixture.score && liveFixture.score.fullTime;
+            if (liveFixture && liveScore &&
+                Number.isInteger(Number(liveScore.home)) &&
+                Number.isInteger(Number(liveScore.away))) {
+              s.score = { home: Number(liveScore.home), away: Number(liveScore.away) };
+              s.minute = Number.isFinite(Number(liveFixture.minute)) ? Number(liveFixture.minute) : null;
+              s.periodLabel = s.minute != null ? `${s.minute}′` : (liveFixture.periodText || 'LIVE');
+              s.fixtureState = 'live';
+            } else if (liveFixture) {
+              s.fixtureState = 'live';
+            }
+          }
         });
       }
     } catch (e) { /* purely informational - never block the bet list */ }
