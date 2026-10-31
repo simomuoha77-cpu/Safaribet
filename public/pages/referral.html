@@ -207,7 +207,7 @@ async function loadStats() {
             <div class="ref-user">👤 ${r.username}</div>
             <div class="ref-date">${new Date(r.joinedAt).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</div>
           </div>
-          <div class="ref-earn">+KES 5</div>
+          <div class="ref-earn">+KES ${bonusPerReferral}</div>
         </div>`).join('');
     }
   } catch (e) {

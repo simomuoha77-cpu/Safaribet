@@ -15,7 +15,7 @@ router.get('/stats', auth, async (req, res) => {
     ]);
 
     const enabled  = cfg.referral_enabled !== false;
-    const amount   = Number(cfg.referral_amount) || 0;
+    const amount   = Number(cfg.referral_referrer_amount ?? cfg.referral_amount) || 0;
     const totalEarned = totalReferrals * amount;
 
     const recentReferrals = await User.find({ referredBy: req.user._id })
