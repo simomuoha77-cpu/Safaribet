@@ -61,32 +61,60 @@ async function completeRegistration(req, res, { username, phone, passwordHash, r
   // Ensure wallet exists from day one
   await require('../services/walletService').getOrCreateWallet(user._id).catch(() => {});
 
-  // KES referral bonus — amount and enabled flag are set by admin in /api/admin/referral/config
-  if (referredBy) {
+  // Referral rewards are paid ONLY after successful phone OTP verification.
+  // The admin controls the single per-person amount in /api/admin/referral/config.
+  // Both the new player and their referrer receive that amount; stable references
+  // plus the wallet ledger check prevent a repeated completion from paying twice.
+  if (phoneVerified && referredBy) {
     try {
       const settingsService = require('../models/Settings');
       const enabled = await settingsService.get('referral_enabled');
-      const amount  = await settingsService.get('referral_amount');
-      if (enabled && amount > 0) {
-        await require('../services/walletService').credit(referredBy, 'main', amount, 'referral_bonus', `referral_${user._id}`, { referredUser: user._id });
-        await User.findByIdAndUpdate(referredBy, { $inc: { balance: amount } }).catch(() => {});
-        await require('../models/Transaction').create({
-          userId:      referredBy,
-          type:        'referral_bonus',
-          amount,
-          reference:   user.username,
-          description: `Referral bonus — ${user.username} signed up with your link`
-        });
-        require('../services/notificationService').notify(referredBy, 'system', {
-          title: '🎉 Referral Bonus!',
-          message: `${user.username} joined using your referral link. KES ${amount} added to your balance!`
-        }).catch(() => {});
-        console.log(`[referral] KES ${amount} paid to referrer for new user: ${user.username}`);
+      const amount = Number(await settingsService.get('referral_amount')) || 0;
+      if (enabled !== false && amount > 0) {
+        const walletService = require('../services/walletService');
+        const WalletHistory = require('../models/WalletHistory');
+        const Transaction = require('../models/Transaction');
+
+        const rewards = [
+          { userId: user._id, reference: `referral_new_${user._id}`, description: 'Referral welcome bonus' },
+          { userId: referredBy, reference: `referral_referrer_${user._id}`, description: `Referral bonus — ${user.username} verified their phone` }
+        ];
+
+        for (const reward of rewards) {
+          const alreadyPaid = await WalletHistory.findOne({
+            userId: reward.userId,
+            bucket: 'main',
+            reason: 'referral_bonus',
+            reference: reward.reference
+          }).lean();
+          if (alreadyPaid) continue;
+
+          const wallet = await walletService.credit(
+            reward.userId, 'main', amount, 'referral_bonus', reward.reference,
+            { referredUser: user._id, trigger: 'phone_otp_verified' }
+          );
+          // Keep the legacy User.balance field in sync for older screens/services.
+          await User.findByIdAndUpdate(reward.userId, { $inc: { balance: amount } });
+          await Transaction.create({
+            userId: reward.userId,
+            type: 'referral_bonus',
+            amount,
+            balance: wallet?.main ?? 0,
+            reference: reward.reference,
+            description: reward.description
+          });
+          require('../services/notificationService').notify(reward.userId, 'system', {
+            title: '🎉 Referral Bonus!',
+            message: `KES ${amount} has been added to your wallet after phone verification.`
+          }).catch(() => {});
+          console.log(`[referral] KES ${amount} credited to ${String(reward.userId)} after OTP verification`);
+        }
       } else {
-        console.log(`[referral] Referral bonus skipped — enabled:${enabled}, amount:${amount}`);
+        console.log(`[referral] bonuses skipped — enabled:${enabled}, amount:${amount}`);
       }
     } catch (e) {
-      console.error('[referral] bonus failed:', e.message);
+      // Do not fail an otherwise valid registration because a reward subsystem failed.
+      console.error('[referral] verified-registration bonus failed:', e.message);
     }
   }
 

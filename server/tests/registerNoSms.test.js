@@ -1,6 +1,6 @@
 // Run: node server/tests/registerNoSms.test.js   (all models/services simulated; no database, no SMS)
 const Module = require('module'); const orig = Module._load; const path = require('path');
-const routes = {}; const users = []; const sms = { sent: 0, ok: false, pendingDoc: null }; const wallets = []; const pendings = [];
+const routes = {}; const users = []; const sms = { sent: 0, ok: false, pendingDoc: null }; const wallets = []; const credits = []; const pendings = [];
 const router = { post: (p, ...h) => { routes['POST ' + p] = h[h.length - 1]; }, get: (p, ...h) => { routes['GET ' + p] = h[h.length - 1]; } };
 class User { constructor(o) { Object.assign(this, o); this._id = 'u' + (users.length + 1); this.balance = 0; this.referralCode = 'REF' + this._id.toUpperCase(); }
   async save() { if (users.find(u => u.username === this.username || u.phone === this.phone)) { const e = new Error('dup'); e.code = 11000; e.keyPattern = { phone: 1 }; throw e; } users.push(this); }
@@ -17,7 +17,7 @@ Module._load = function (r, parent) {
   if (r.endsWith('services/authService')) return { issueTokenPair: async () => ({ accessToken: 'a', refreshToken: 'r' }), trackDevice: async () => {} };
   if (r.endsWith('services/captchaService')) return { verifyCaptcha: async () => ({ success: true }) };
   if (r.endsWith('services/fraudService')) return { assessRegistration: async () => ({ risk: 'normal', flags: [] }) };
-  if (r.endsWith('services/walletService')) return { getOrCreateWallet: async (id) => { wallets.push(id); }, credit: async () => {} };
+  if (r.endsWith('services/walletService')) return { getOrCreateWallet: async (id) => { wallets.push(id); }, credit: async (...args) => { credits.push(args); return { main: 50 }; } };
   if (r.endsWith('services/smsService')) { const real = (() => { const orig2 = Module._load; return null; })(); }
   if (r.endsWith('services/smsService')) return {
     registerCarriers: () => String(process.env.REGISTER_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean),
@@ -27,6 +27,7 @@ Module._load = function (r, parent) {
   if (r.endsWith('models/PendingRegistration')) return { deleteMany: async () => {}, create: async (o) => { pendings.push(o); }, findOne: async () => sms.pendingDoc || null };
   if (r.endsWith('models/Settings')) return { get: async (k) => k === 'referral_enabled' ? true : 50 };
   if (r.endsWith('models/Transaction')) return { create: async () => {} };
+  if (r.endsWith('models/WalletHistory')) return { findOne: () => ({ lean: async () => null }) };
   if (r.endsWith('services/notificationService')) return { notify: () => Promise.resolve() };
   if (/^\.\.?\//.test(r) || path.isAbsolute(r)) { try { return orig.apply(this, arguments); } catch (e) { return new Proxy(function () {}, { get: () => () => ({}) }); } }
   return orig.apply(this, arguments);
@@ -82,7 +83,9 @@ let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.l
     let vo = { code: 200 }; await verify({ body: { phone: '0722555111', otp: '123456' }, ip: '1.1.1.1', headers: {} }, { status(c) { vo.code = c; return this; }, set() { return this; }, json(j) { vo.body = j; return this; } });
     sms.pendingDoc = null;
     const nu = users.find(u => u.username === 'refguy');
-    check('after the correct code: logged-in, account made, referrer linked, phone verified', vo.body && vo.body.success === true && !!vo.body.token && nu && nu.referredBy === 'u1' && nu.phoneVerified === true); }
+    check('after the correct code: logged-in, account made, referrer linked, phone verified', vo.body && vo.body.success === true && !!vo.body.token && nu && nu.referredBy === 'u1' && nu.phoneVerified === true);
+    check('new verified player receives admin-configured referral bonus in wallet', credits.some(c => c[0] === nu._id && c[1] === 'main' && c[2] === 50 && c[3] === 'referral_bonus'));
+    check('referrer receives the same admin-configured bonus after OTP verification', credits.some(c => c[0] === 'u1' && c[1] === 'main' && c[2] === 50 && c[3] === 'referral_bonus')); }
   const s2 = sms.sent;
   r = await call({ username: 'noref', phone: '0722555333', password: 'secret1' });
   check('no referral: registers directly, no SMS', r.body.success === true && !r.body.requiresOtp && !!r.body.token && sms.sent === s2);
