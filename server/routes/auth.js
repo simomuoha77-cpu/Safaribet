@@ -91,6 +91,16 @@ async function completeRegistration(req, res, { username, phone, passwordHash, r
     } catch (e) { console.error('[referral] verified-registration bonus failed:', e.message); }
   }
 
+  // Return the authoritative wallet balance after any OTP referral credits.
+  // The User document was created before the credits, so its in-memory
+  // balance can otherwise remain stale (0.00) in the login response.
+  try {
+    const latestWallet = await require('../services/walletService').getBalance(user._id);
+    user.balance = latestWallet.spendable;
+  } catch (e) {
+    console.error('[register] Could not refresh wallet balance after registration:', e.message);
+  }
+
   const { deviceId } = req.body || {};
 
   // Lightweight fraud signal — logged only, never blocks registration

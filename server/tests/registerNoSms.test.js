@@ -17,7 +17,11 @@ Module._load = function (r, parent) {
   if (r.endsWith('services/authService')) return { issueTokenPair: async () => ({ accessToken: 'a', refreshToken: 'r' }), trackDevice: async () => {} };
   if (r.endsWith('services/captchaService')) return { verifyCaptcha: async () => ({ success: true }) };
   if (r.endsWith('services/fraudService')) return { assessRegistration: async () => ({ risk: 'normal', flags: [] }) };
-  if (r.endsWith('services/walletService')) return { getOrCreateWallet: async (id) => { wallets.push(id); }, credit: async (...args) => { credits.push(args); return { main: 50 }; } };
+  if (r.endsWith('services/walletService')) return {
+     getOrCreateWallet: async (id) => { wallets.push(id); },
+     credit: async (...args) => { credits.push(args); return { main: 50 }; },
+     getBalance: async (id) => { const total = credits.filter(c => c[0] === id).reduce((sum, c) => sum + c[2], 0); return { main: total, bonus: 0, locked: 0, pending: 0, spendable: total, withdrawable: total }; }
+   };
   if (r.endsWith('services/smsService')) { const real = (() => { const orig2 = Module._load; return null; })(); }
   if (r.endsWith('services/smsService')) return {
     registerCarriers: () => String(process.env.REGISTER_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean),
@@ -84,6 +88,7 @@ let pass = 0, fail = 0; const check = (n, c) => { c ? pass++ : fail++; console.l
     sms.pendingDoc = null;
     const nu = users.find(u => u.username === 'refguy');
     check('after the correct code: logged-in, account made, referrer linked, phone verified', vo.body && vo.body.success === true && !!vo.body.token && nu && nu.referredBy === 'u1' && nu.phoneVerified === true);
+     check('registration response returns the credited new-user wallet balance immediately', Number(vo.body.user.balance) === 20);
     check('new verified player receives the independent KES 20 welcome bonus', credits.some(c => c[0] === nu._id && c[2] === 20 && c[3] === 'referral_bonus'));
     check('referrer receives the independent KES 10 referral bonus', credits.some(c => c[0] === 'u1' && c[2] === 10 && c[3] === 'referral_bonus')); }
   const s2 = sms.sent;

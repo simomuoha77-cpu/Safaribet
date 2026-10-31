@@ -1583,6 +1583,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
     // caused the header and Account page to show two different numbers even
     // though they're supposed to be the same value.
     refreshBalance();
+    // Keep the home header synchronized when wallet credits arrive while this
+    // session is already open (for example, a referral bonus paid to the referrer).
+    setInterval(refreshBalance, 10000);
     loadNotifications();
     loadFavorites();
     setInterval(loadNotifications, 45000);

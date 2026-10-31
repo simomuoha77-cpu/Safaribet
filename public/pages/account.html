@@ -477,6 +477,11 @@ window.addEventListener('DOMContentLoaded',async()=>{
   syncThemeUI();
   paintCached(); // balances + stats appear instantly from the last known values; the fetches below refresh them
   await Promise.all([loadWallet(),loadStats(),loadTx(),loadKycStatus(),loadLoyaltyStatus()]);
+  // Refresh wallet balances while this page stays open so referral credits and
+  // other wallet changes appear without logout, navigation, or manual reload.
+  setInterval(loadWallet, 10000);
+  window.addEventListener('focus', loadWallet);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) loadWallet(); });
 });
 
 function authHeaders(){return {Authorization:'Bearer '+localStorage.getItem('token')}}
