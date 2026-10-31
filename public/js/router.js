@@ -626,10 +626,10 @@
   // refreshed in the background when idle and as soon as the My Bets button is touched.
   function betsKey() { try { var u = JSON.parse(localStorage.getItem('user') || 'null'); return 'sb_mybets_cache_' + ((u && (u._id || u.id)) || 'u'); } catch (e) { return null; } }
   var betsInflight = null;
-  SB.prefetchBets = function () {
+  SB.prefetchBets = function (force) {
     var tok = null; try { tok = localStorage.getItem('token'); } catch (e) {}
     var key = betsKey();
-    if (!tok || !key || !_fetch || betsInflight) return;
+    if (!tok || !key || !_fetch || (betsInflight && !force)) return;     // force: right after a bet is placed, always ask again
     betsInflight = _fetch('/api/bets/my', { headers: { Authorization: 'Bearer ' + tok }, cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d && d.success && Array.isArray(d.data)) { try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: d.data.slice(0, 20) })); } catch (e) {} } })
@@ -701,7 +701,7 @@
     var now = Date.now();
     if (now - lastResume < 3000) return;
     lastResume = now;
-    if (awayMs < 15000) { checkBuild(false); return; }     // quick glance
+    if (awayMs < 5000) { checkBuild(false); return; }      // quick glance (under 5s)
     checkBuild(awayMs > 120000);                             // new deploy? (reloads only when the build changed)
     try { window.dispatchEvent(new Event('sb:resume')); } catch (e) {}
     // Pages with no refresh logic of their own (casino lobby, jackpot, virtual, referral): after a long absence reload them

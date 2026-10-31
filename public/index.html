@@ -1733,7 +1733,7 @@ document.addEventListener('visibilitychange', function(){
     // Skip if we already synced very recently (e.g. a quick screen tap) —
     // no need to hit the network for a sub-2-second glance.
     if(awayMs < 2000) return;
-    freshSync(awayMs > 60000);
+    freshSync(awayMs > 20000);
     // Re-apply the current filter immediately too — even before the network
     // call above resolves, this alone clears out anything that quietly
     // expired (e.g. a Highlights match whose kickoff time passed) while the
@@ -3857,6 +3857,18 @@ async function submitLoadCode(){
 }
 
 // ── PLACE BET ──
+// The moment a bet is placed it is put at the top of the saved My Bets list, so My Bets already shows it when it opens
+// (the real list is fetched right after and replaces this copy within a second).
+function addBetToMyBetsCache(bet){
+  try{
+    const key='sb_mybets_cache_'+((USER&&(USER._id||USER.id))||'u');
+    let cur=[]; try{ const r=JSON.parse(localStorage.getItem(key)||'null'); if(r&&Array.isArray(r.data)) cur=r.data; }catch(e){}
+    cur=cur.filter(b=>b&&b.betCode!==bet.betCode);
+    cur.unshift(bet);
+    localStorage.setItem(key, JSON.stringify({ts:Date.now(),data:cur.slice(0,20)}));
+  }catch(e){}
+}
+
 async function placeBet(){
   if(!USER){ SB.go('/login'); return; }
   if(!slip.length) return showT('Add selections first','err');
@@ -3890,8 +3902,14 @@ async function placeBet(){
     document.getElementById('mPayout').textContent='KES '+Number(d.potentialWin).toFixed(2);
     document.getElementById('mBal').textContent='KES '+parseFloat(d.newBalance).toFixed(2);
     document.getElementById('successModal').classList.add('on');
+    addBetToMyBetsCache({
+      _id:'local_'+d.betCode, betCode:d.betCode, status:'pending', betType: slip.length>1?'multi':'single',
+      stake:stake, totalOdds:Number(d.totalOdds), potentialWin:Number(d.potentialWin), netPayout:Number(d.netPayout||0),
+      createdAt:new Date().toISOString(),
+      selections:slip.map(x=>Object.assign({},x,{result:'pending'}))
+    });
     closeSlip(); clearSlip();
-    if(window.SB&&SB.prefetchBets) SB.prefetchBets(); // refresh the cached My Bets list so the new bet is already there
+    if(window.SB&&SB.prefetchBets) SB.prefetchBets(true); // refresh the cached My Bets list so the new bet is already there
   };
   const failure=(msg)=>{ if(done) return; done=true; release(); showT(msg||'Failed','err'); };
 
