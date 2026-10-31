@@ -42,7 +42,7 @@ function makeToken(user) {
 // while the player is still filling in the form.
 router.get('/otp-config', (req, res) => {
   const smsOn = String(process.env.REGISTER_SMS_VERIFY || '').toLowerCase() === 'true';
-  const list = smsOn ? String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean) : ['all'];
+  const list = require('../services/smsService').registerCarriers();      // who may register: Safaricom only by default (REGISTER_ALLOWED_CARRIERS)
   res.set('Cache-Control', 'public, max-age=60');
   res.json({ success: true, smsVerify: smsOn, allowed: list, message: require('../services/smsService').CARRIER_BLOCK_MESSAGE });
 });
@@ -148,12 +148,10 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     const smsVerify = String(process.env.REGISTER_SMS_VERIFY || '').toLowerCase() === 'true';   // OFF by default: no SMS code at sign-up
-    // Verification codes only reach the networks we can deliver to (default: Safaricom). Not needed without SMS.
-    if (smsVerify) { const { carrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
-      if (!carrierAllowed(normalPhone)) return res.status(400).json({ success: false, code: 'CARRIER_NOT_SUPPORTED', message: CARRIER_BLOCK_MESSAGE }); }
-
-    // Check username taken
-    // Both uniqueness checks at the same time (same messages, same order of priority as before)
+    // Only Safaricom numbers may register (REGISTER_ALLOWED_CARRIERS=safaricom,airtel,... or all to reopen). Applies with or without an SMS code.
+    { const { registerCarrierAllowed, CARRIER_BLOCK_MESSAGE } = require('../services/smsService');
+      if (!registerCarrierAllowed(normalPhone)) return res.status(400).json({ success: false, code: 'CARRIER_NOT_SUPPORTED', message: CARRIER_BLOCK_MESSAGE }); }
+    // Username / phone already used (both looked up at the same time)
     const [byUsername, byPhone] = await Promise.all([User.findOne({ username }).select('_id'), User.findOne({ phone: normalPhone }).select('_id')]);
     if (byUsername) {
       return res.status(400).json({ success: false, message: 'Username already taken — try another' });

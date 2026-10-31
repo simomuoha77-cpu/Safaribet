@@ -59,6 +59,10 @@ function carrierAllowed(phone) {
   const list = String(process.env.SMS_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean);
   return list.includes('all') || list.includes(carrierOf(phone));
 }
+/** Which networks may REGISTER (separate from SMS delivery, so it still applies with no SMS code). Default: Safaricom only.
+ *  Reopen without a redeploy:  REGISTER_ALLOWED_CARRIERS=safaricom,airtel,telkom   (or "all") */
+function registerCarriers() { return String(process.env.REGISTER_ALLOWED_CARRIERS || 'safaricom').toLowerCase().split(/[\s,]+/).filter(Boolean); }
+function registerCarrierAllowed(phone) { const l = registerCarriers(); return l.includes('all') || l.includes(carrierOf(phone)); }
 const CARRIER_BLOCK_MESSAGE = 'Only Safaricom numbers can register right now. Please use a Safaricom number (e.g. 0712 345 678).';
 
 /** The verification text. Override without a redeploy with SMS_OTP_TEMPLATE, e.g. "{code} is your SafariBet code." */
@@ -243,4 +247,4 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-module.exports = { otpMessage, carrierOf, carrierAllowed, CARRIER_BLOCK_MESSAGE, sendSms, sendBulkSms, normalizeKePhone, generateOtp };
+module.exports = { otpMessage, carrierOf, carrierAllowed, registerCarrierAllowed, registerCarriers, CARRIER_BLOCK_MESSAGE, sendSms, sendBulkSms, normalizeKePhone, generateOtp };
