@@ -625,7 +625,7 @@ router.get('/my', auth, async (req, res) => {
         if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
       });
       if (ids.size) {
-        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, result: 1, score: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
+        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
         const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
         const now = Date.now();
         pend.forEach(s => {
@@ -642,34 +642,48 @@ router.get('/my', auth, async (req, res) => {
           if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
           s.kickoffAt = kick || null;
-
-          // A bet slip can be LOST as soon as one leg loses. Continue showing
-          // the outcome of every other leg independently once its own fixture
-          // has an explicitly verified full-time result. This is display-only:
-          // it never changes the bet, wallet, or settlement state.
-          const finalRow = rs.find(r => r.finalVerified === true && r.score &&
-            r.score.home !== null && r.score.home !== undefined &&
-            r.score.away !== null && r.score.away !== undefined);
-          if (finalRow) {
-            const homeScore = Number(finalRow.score.home);
-            const awayScore = Number(finalRow.score.away);
-            const result = homeScore > awayScore ? 'home' : awayScore > homeScore ? 'away' : 'draw';
-            let displayResult = null;
-            try {
-              const grader = require('../engine/settlementEngine');
-              if (s.provider === 'sofabets' || String(s.market || '').startsWith('sb:')) {
-                displayResult = grader.gradeProviderSelection(s, homeScore, awayScore);
-              } else {
-                displayResult = grader.gradeSelection(s.pick, result, homeScore, awayScore);
-              }
-            } catch (_) {}
-            s.score = { home: homeScore, away: awayScore };
-            s.periodLabel = 'FT';
-            if (displayResult) s.displayResult = displayResult;
-          }
         });
       }
     } catch (e) { /* purely informational - never block the bet list */ }
+
+    // Attach the latest score/clock to EVERY selection, including the other
+    // legs of an accumulator that has already been marked lost or won.
+    // This is display-only: it never changes selection.result or bet.status.
+    try {
+      const lookupIndexedMatch = require('./sports').lookupIndexedMatch;
+      if (typeof lookupIndexedMatch === 'function') {
+        for (const bt of bets) {
+          for (const selection of (bt.selections || [])) {
+            let liveMatch = null;
+            try { liveMatch = lookupIndexedMatch(selection.matchId); } catch (_) {}
+            if (!liveMatch) continue;
+
+            const rawScore = liveMatch.score || {};
+            const homeScore = rawScore.home ?? rawScore.fullTime?.home ?? null;
+            const awayScore = rawScore.away ?? rawScore.fullTime?.away ?? null;
+            if (homeScore !== null && homeScore !== undefined &&
+                awayScore !== null && awayScore !== undefined &&
+                Number.isFinite(Number(homeScore)) && Number.isFinite(Number(awayScore))) {
+              selection.score = { home: Number(homeScore), away: Number(awayScore) };
+            }
+
+            const rawMinute = rawScore.minute ?? liveMatch.minute ?? null;
+            if (rawMinute !== null && rawMinute !== undefined && Number.isFinite(Number(rawMinute))) {
+              selection.minute = Number(rawMinute);
+              selection.periodLabel = `${Number(rawMinute)}′`;
+            } else if (liveMatch.status === 'finished') {
+              selection.periodLabel = 'FT';
+            } else {
+              const period = rawScore.periodLabel || rawScore.period || liveMatch.periodText || null;
+              if (period) selection.periodLabel = String(period);
+            }
+
+            if (liveMatch.status === 'live') selection.fixtureState = 'live';
+            else if (liveMatch.status === 'finished' && (selection.score || rawScore.fullTime)) selection.fixtureState = 'finished';
+          }
+        }
+      }
+    } catch (e) { /* score display is informational; never block the bet list */ }
 
     const stats = await statsP;
     res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });

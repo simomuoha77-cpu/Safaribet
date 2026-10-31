@@ -270,9 +270,7 @@ function renderBets(bets){
       const r = s.result || 'pending';
       // The bet is already decided (e.g. one leg lost, so the whole bet is lost): its other legs no longer matter, so they must
       // not keep saying "awaiting result" - that made a finished bet look unsettled.
-      const moot = r==='pending' && bet.status && bet.status!=='pending';
       const iconHtml =
-        moot ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(150,150,150,0.08)" stroke="#667" stroke-width="1.5"/><path d="M8 12h8" stroke="#889" stroke-width="2.2" stroke-linecap="round"/></svg>' :
         r==='won'    ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(0,200,83,0.2)" stroke="#00c853" stroke-width="1.5"/><path d="M7 12.5l3.5 3.5 6.5-7" stroke="#00c853" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' :
         r==='lost'   ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(255,59,59,0.12)" stroke="#ff3b3b" stroke-width="1.5"/><path d="M8 8l8 8M16 8l-8 8" stroke="#ff3b3b" stroke-width="2.2" stroke-linecap="round"/></svg>' :
         r==='void'   ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(150,150,150,0.1)" stroke="#666" stroke-width="1.5"/><path d="M8 12h8" stroke="#999" stroke-width="2.2" stroke-linecap="round"/></svg>' :
@@ -286,17 +284,16 @@ function renderBets(bets){
           <div class="sel-detail">
             <span class="sel-pick-lbl ${r}">${
               r==='void' ? '↩ Void – Refunded' :
-              r==='pending' ? (s.pickLabel||s.pick) + (moot ? '' : ' ⏳') :
+              r==='pending' ? (s.pickLabel||s.pick) + ' ⏳' :
               (s.pickLabel||s.pick)
             }</span>
-            ${scoreStr ? `<span class="sel-score">${s.periodLabel || 'FT'}: ${scoreStr}</span>` : ''}
+            ${scoreStr ? `<span class="sel-score">${s.fixtureState==='live' && s.minute!=null ? `${s.minute}′` : (s.periodLabel || (s.fixtureState==='live' ? 'LIVE' : 'FT'))}: ${scoreStr}</span>` : ''}
             ${s.league ? `<span class="sel-league">${s.league}</span>` : ''}
           </div>
-          ${r==='pending' && !moot ? fixtureBadge(s) : ''}
-          ${moot ? `<div class="sel-why" style="font-size:11px;color:var(--mt);margin-top:3px">Not needed &mdash; this bet is already ${bet.status==='lost'?'lost':bet.status==='won'?'won':'settled'}</div>` : ''}
+          ${r==='pending' ? fixtureBadge(s) : ''}
           ${s.marketLabel ? `<div class="sel-mkt" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.marketLabel).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
           ${r==='void' && s.voidReason ? `<div class="sel-why" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.voidReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
-          ${r==='pending' && !moot && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
+          ${r==='pending' && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
         </div>
         <div class="sel-odds">${(s.odds||0).toFixed(2)}</div>
       </div>`;
@@ -307,7 +304,7 @@ function renderBets(bets){
         <span class="pill ${pClass}">${bet.status==='void'?'Refunded':bet.status==='pending'?'Accepted':bet.status.charAt(0).toUpperCase()+bet.status.slice(1)}</span>
       </div>
       <div class="sels">${sels}</div>
-      ${bet.status==='pending' && bet.selections.some(s=>(s.result||'pending')==='pending') ? `<div style="font-size:11px;color:var(--yl);padding:6px 12px;background:rgba(255,214,0,0.06);border-top:1px solid var(--bd)">✓ Accepted — awaiting official results. Bets are settled after the games have finished.</div>` : ''}
+      ${bet.status==='pending' && bet.selections.some(s=>(s.result||'pending')==='pending') ? `<div style="font-size:11px;color:var(--yl);padding:6px 12px;background:rgba(255,214,0,0.06);border-top:1px solid var(--bd)">✓ Accepted — awaiting official results. Bets are settled only after the game has officially finished.</div>` : ''}
       ${bet.selections.some(s=>s.result==='void') ? `<div style="font-size:11px;color:#999;padding:6px 12px;background:rgba(150,150,150,0.06);border-top:1px solid var(--bd)">↩ One or more games were voided (result unavailable) — those legs do not count against your bet</div>` : ''}
       <div class="bcard-foot">
         <div class="bf"><div class="bf-lbl">Picks</div><div class="bf-val">${bet.selections.length}</div></div>
