@@ -76,7 +76,9 @@ function otpMessage(code) {
  * Sends an SMS via CommsGrid. Returns { success, messageId, error }.
  */
 /** WASMS (wasms.co.ke) is used when WASMS_API_KEY is set (force the old provider with SMS_PROVIDER=commsgrid). */
-const useWasms = () => !!process.env.WASMS_API_KEY && String(process.env.SMS_PROVIDER || '').toLowerCase() !== 'commsgrid';
+// SafariBet registration OTPs must always use CommsGrid (SMS Grid / PayGrid).
+// Ignore any legacy WASMS_API_KEY or SMS_PROVIDER environment values.
+const useWasms = () => false;
 async function sendViaWasms(phone, message) {
   const url = process.env.WASMS_API_URL || 'https://www.wasms.co.ke/api/v2/send';
   const to = String(phone).replace(/[^\d]/g, '');
