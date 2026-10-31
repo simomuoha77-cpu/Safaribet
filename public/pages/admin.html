@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>SafariBet Admin</title>
 <meta name="robots" content="noindex,nofollow,noarchive"/>
+<link rel="preload" as="script" href="/js/admin-extra.js"/>
+<script>try{if(localStorage.getItem('sb_admin_token'))document.documentElement.className='has-session';}catch(e){}</script>
+<style>
+html.has-session #loginScreen{display:none!important}
+html.has-session #dashboard{display:block}
+</style>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{

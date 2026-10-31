@@ -210,7 +210,8 @@ header{
   margin:0 10px 3px;
   background:linear-gradient(135deg,var(--s2),var(--s1));
   border:1px solid var(--bd);border-radius:10px;overflow:hidden;
-  transition:all 0.2s;
+  transition:border-color 0.2s,transform 0.15s;
+  content-visibility:auto;contain-intrinsic-size:auto 148px;   /* cards off screen are not drawn at all: smooth scrolling with hundreds of games */
 }
 .mc:hover{border-color:rgba(0,200,83,0.2);background:linear-gradient(135deg,var(--s3),var(--s2))}
 .mc:active{transform:scale(0.99)}
