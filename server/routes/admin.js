@@ -275,10 +275,17 @@ router.delete('/user/:id', async (req, res) => {
     let q = req.params.id.trim();
     let phone = q.replace(/\D/g,'');
     if (phone.startsWith('0')) phone = '254'+phone.slice(1);
-    const user = await User.findOneAndDelete({ $or:[{phone},{username:q.toLowerCase()}] });
+    const user = await User.findOne({ $or:[{phone},{username:q.toLowerCase()}] });
     if (!user) return res.status(404).json({ success:false, message:'User not found' });
-    audit('DELETE_USER', { username:user.username, phone:user.phone });
-    res.json({ success:true, message:`Deleted: ${user.username}` });
+
+    // Revoke every refresh session before deleting the account. Access-token
+    // requests are also rejected immediately by middleware because the user
+    // record is removed below; this prevents all devices from renewing login.
+    await require('../services/authService').revokeAllSessions(user._id);
+    await User.deleteOne({ _id: user._id });
+
+    audit('DELETE_USER', { username:user.username, phone:user.phone, sessionsRevoked:true });
+    res.json({ success:true, message:`Deleted: ${user.username}. All device sessions have been logged out.` });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
