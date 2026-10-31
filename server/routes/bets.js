@@ -625,23 +625,8 @@ router.get('/my', auth, async (req, res) => {
         if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
       });
       if (ids.size) {
-        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
+        const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, result: 1, score: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
         const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
-
-        // Pull the current SofaBets live scoreboard once for this My Bets request.
-        // Saved selections contain fixture identity, but their score can be stale.
-        const liveByProviderId = new Map();
-        try {
-          const liveFixtures = await sofaBets.getLiveFixtures('football');
-          for (const fixture of (Array.isArray(liveFixtures) ? liveFixtures : [])) {
-            if (fixture && fixture.providerMatchId != null) {
-              liveByProviderId.set(String(fixture.providerMatchId), fixture);
-            }
-          }
-        } catch (liveErr) {
-          console.warn('[bets/my] SofaBets live scoreboard unavailable:', liveErr.message);
-        }
-
         const now = Date.now();
         pend.forEach(s => {
           const p = fin.parseSofaMatchId(s.matchId);
@@ -658,20 +643,29 @@ router.get('/my', auth, async (req, res) => {
           s.fixtureState = state;
           s.kickoffAt = kick || null;
 
-          // Overlay only the exact fixture's current SofaBets live score.
-          if (p) {
-            const liveFixture = liveByProviderId.get(String(p.providerId));
-            const liveScore = liveFixture && liveFixture.score && liveFixture.score.fullTime;
-            if (liveFixture && liveScore &&
-                Number.isInteger(Number(liveScore.home)) &&
-                Number.isInteger(Number(liveScore.away))) {
-              s.score = { home: Number(liveScore.home), away: Number(liveScore.away) };
-              s.minute = Number.isFinite(Number(liveFixture.minute)) ? Number(liveFixture.minute) : null;
-              s.periodLabel = s.minute != null ? `${s.minute}′` : (liveFixture.periodText || 'LIVE');
-              s.fixtureState = 'live';
-            } else if (liveFixture) {
-              s.fixtureState = 'live';
-            }
+          // A bet slip can be LOST as soon as one leg loses. Continue showing
+          // the outcome of every other leg independently once its own fixture
+          // has an explicitly verified full-time result. This is display-only:
+          // it never changes the bet, wallet, or settlement state.
+          const finalRow = rs.find(r => r.finalVerified === true && r.score &&
+            r.score.home !== null && r.score.home !== undefined &&
+            r.score.away !== null && r.score.away !== undefined);
+          if (finalRow) {
+            const homeScore = Number(finalRow.score.home);
+            const awayScore = Number(finalRow.score.away);
+            const result = homeScore > awayScore ? 'home' : awayScore > homeScore ? 'away' : 'draw';
+            let displayResult = null;
+            try {
+              const grader = require('../engine/settlementEngine');
+              if (s.provider === 'sofabets' || String(s.market || '').startsWith('sb:')) {
+                displayResult = grader.gradeProviderSelection(s, homeScore, awayScore);
+              } else {
+                displayResult = grader.gradeSelection(s.pick, result, homeScore, awayScore);
+              }
+            } catch (_) {}
+            s.score = { home: homeScore, away: awayScore };
+            s.periodLabel = 'FT';
+            if (displayResult) s.displayResult = displayResult;
           }
         });
       }

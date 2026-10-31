@@ -775,4 +775,4 @@ function settleSoon(delayMs = 1500) {
   if (settleSoonTimer.unref) settleSoonTimer.unref();
 }
 
-module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts } };
+module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, gradeSelection, gradeProviderSelection, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts } };
