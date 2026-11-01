@@ -834,9 +834,14 @@ header{
       if (ov && im) {
         if (d && d.popupEnabled && d.popupImage) {
           if (sessionStorage.getItem('popupAdSeen') !== d.popupImage) {
-            im.src = d.popupImage; im.onerror = function(){ ov.style.display = 'none'; };
-            im.onclick = function(){ if (d.popupLink && window.SB) SB.go(d.popupLink); };
-            ov.style.display = 'flex'; sessionStorage.setItem('popupAdSeen', d.popupImage);
+            var pre = new Image();                       // load the picture first: the page is only dimmed once there is something to show
+            pre.onload = function(){
+              if (sessionStorage.getItem('popupAdSeen') === d.popupImage) return;
+              im.src = d.popupImage; im.onerror = function(){ ov.style.display = 'none'; };
+              im.onclick = function(){ if (d.popupLink && window.SB) SB.go(d.popupLink); };
+              ov.style.display = 'flex'; sessionStorage.setItem('popupAdSeen', d.popupImage);
+            };
+            pre.src = d.popupImage;
           }
         } else if (ov.style.display === 'flex' && !(d && d.popupEnabled)) { ov.style.display = 'none'; }   // switched off since it was saved
       }
@@ -885,6 +890,10 @@ header{
       if (snap && snap.html && (Date.now() - snap.ts) < 30 * 60000 && sessionStorage.getItem('sb_home_scroll')) {
         // Back from a match: put back exactly the list the user left (same tab/filter/cards), instantly.
         ml.innerHTML = snap.html;
+        if (!/live/i.test(String(snap.ttl || ''))) {                 // Upcoming lists: games that have kicked off since are removed at once
+          var nowS = Date.now(), cs2 = ml.querySelectorAll('.mc');
+          for (var cj = 0; cj < cs2.length; cj++) { var st2 = cs2[cj].getAttribute('data-st'), ko2 = Number(cs2[cj].getAttribute('data-ko') || 0); if (st2 === 'live' || st2 === 'finished' || (ko2 && ko2 <= nowS && st2 !== 'live')) cs2[cj].remove(); }
+        }
         if (snap.bar) { var tmp = document.createElement('div'); tmp.innerHTML = snap.bar; if (tmp.firstChild) ml.parentNode.insertBefore(tmp.firstChild, ml); }
         var tt = document.getElementById('secTtl'); if (tt && snap.ttl) tt.textContent = snap.ttl;
         var mh = document.getElementById('mthHeader'); if (mh && snap.mth) mh.innerHTML = snap.mth;
@@ -899,7 +908,11 @@ header{
         ml.innerHTML = html;
         // Live and finished games never belong on this list (Live has its own tab): take them out of the saved copy first.
         var cs = ml.querySelectorAll('.mc');
-        for (var ci = 0; ci < cs.length; ci++) { var st = cs[ci].getAttribute('data-st'); if (st === 'live' || st === 'finished') cs[ci].remove(); }
+        var nowMs = Date.now();
+        for (var ci = 0; ci < cs.length; ci++) {      // a game that has already kicked off is never shown as upcoming, not even for a second
+          var st = cs[ci].getAttribute('data-st'), ko = Number(cs[ci].getAttribute('data-ko') || 0);
+          if (st === 'live' || st === 'finished' || !ko || ko <= nowMs) cs[ci].remove();
+        }
         if (ml.querySelector('.mc')) window.__sbStalePainted = true; else ml.innerHTML = window.sbSkel(7);
       }
     } catch(e) {}
@@ -1488,11 +1501,16 @@ async function loadAdminBanner(){
     if (d.popupEnabled && d.popupImage && sessionStorage.getItem('popupAdSeen') !== d.popupImage) {
       const overlay = document.getElementById('popupAdOverlay');
       const pimg = document.getElementById('popupAdImg');
-      pimg.src = d.popupImage;
-      pimg.onerror = () => { overlay.style.display = 'none'; };
-      pimg.onclick = () => { if (d.popupLink) SB.go(d.popupLink); };
-      overlay.style.display = 'flex';
-      sessionStorage.setItem('popupAdSeen', d.popupImage);   // a NEW popup image shows again even within the same session
+      const pre = new Image();                                // picture first, then the overlay: never a dimmed page with a broken image
+      pre.onload = () => {
+        if (sessionStorage.getItem('popupAdSeen') === d.popupImage) return;
+        pimg.src = d.popupImage;
+        pimg.onerror = () => { overlay.style.display = 'none'; };
+        pimg.onclick = () => { if (d.popupLink) SB.go(d.popupLink); };
+        overlay.style.display = 'flex';
+        sessionStorage.setItem('popupAdSeen', d.popupImage);   // a NEW popup image shows again even within the same session
+      };
+      pre.src = d.popupImage;
     }
   }catch(e){ /* banner/popup are optional — fail silently */ }
 }
@@ -1921,7 +1939,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
   // already sitting in memory. Only show the spinner on a genuine first load.
   const hasExistingData = featuredMatches && featuredMatches.length > 0;
   if(!silent && hasExistingData){
-    if (currentCat === 'featured' && !window.__sbStalePainted) { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash (skipped while the saved list is already on screen)
+    if (currentCat === 'featured' && (!window.__sbStalePainted || featuredMatches.some(function(m){ var k = m && m.commenceTime ? new Date(m.commenceTime).getTime() : 0; return k > Date.now() && m.status !== 'live' && m.status !== 'finished'; }))) { allMatches = featuredMatches; applyFilters(true); } // repaint instantly from memory, no spinner, no blank flash (skipped while the saved list is already on screen)
     silent = true; // still fetch fresh data below, just don't block the UI for it
   } else if(!silent && retryAttempt===0 && currentCat === 'featured' && !window.__sbStalePainted){
     el.innerHTML=window.sbSkel(7);

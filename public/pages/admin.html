@@ -3293,16 +3293,14 @@ async function loadRefStats(){
   try {
     const d = await api(`/api/admin/referrals`);
     if (!d.success) return;
+    const kes = n => 'KES ' + (Number(n) || 0).toLocaleString();
+    document.getElementById('ref-total').textContent = (d.totalReferred != null ? d.totalReferred : (Array.isArray(d.data) ? d.data.length : 0));
+    // Bonus really paid out (referrers + new players), taken from the wallet records - not "count x amount"
+    document.getElementById('ref-bonus').textContent = kes(d.totalPaid);
+    const sub = document.querySelector('#ref-bonus + .sl');
+    if (sub) sub.textContent = 'Bonus Paid (KES) \u00b7 referrers ' + kes(d.referrerPaid) + ' \u00b7 new players ' + kes(d.newUserPaid);
 
-    // Get current amount from config to calculate total bonus paid
-    const cfgD = await api(`/api/admin/referral/config`);
-    const amount = cfgD.data?.amount || 0;
-
-    const total = d.data?.totalReferrals || d.data?.length || 0;
-    document.getElementById('ref-total').textContent = total;
-    document.getElementById('ref-bonus').textContent = `KES ${(total * amount).toLocaleString()}`;
-
-    const top = d.data?.topReferrers || d.data || [];
+    const top = Array.isArray(d.data) ? d.data : [];
     if (!top.length) {
       document.getElementById('refList').innerHTML = '<div class="empty">No referrals yet</div>';
       return;
@@ -3314,8 +3312,8 @@ async function loadRefStats(){
           <div class="lr-sub">${u.phone || ''}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-weight:700;color:var(--g)">${u.count || u.referredCount || 0} referrals</div>
-          <div style="font-size:11px;color:var(--mt)">KES ${((u.count || u.referredCount || 0) * amount).toLocaleString()} earned</div>
+          <div style="font-weight:700;color:var(--g)">${u.count || 0} referrals</div>
+          <div style="font-size:11px;color:var(--mt)">${u.paidCount || 0} verified \u00b7 ${kes(u.earned)} earned</div>
         </div>
       </div>`).join('');
   } catch(e) {

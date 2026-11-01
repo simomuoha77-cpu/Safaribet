@@ -1519,16 +1519,8 @@ router.post('/referral/config', async (req, res) => {
 // ── REFERRAL MANAGEMENT ──
 router.get('/referrals', async (req, res) => {
   try {
-    const topReferrers = await User.aggregate([
-      { $match: { referredBy: { $ne: null } } },
-      { $group: { _id: '$referredBy', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }, { $limit: 20 },
-      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'referrer' } },
-      { $unwind: '$referrer' },
-      { $project: { username: '$referrer.username', phone: '$referrer.phone', referralCode: '$referrer.referralCode', count: 1 } }
-    ]);
-    const totalReferred = await User.countDocuments({ referredBy: { $ne: null } });
-    res.json({ success:true, data: topReferrers, totalReferred });
+    const out = await require('../utils/referralStats').build(User, require('../models/Transaction'));
+    res.json(Object.assign({ success: true }, out));
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
