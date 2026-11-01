@@ -1587,6 +1587,13 @@ function restoreHomeCat(){
 }
 
 window.addEventListener('DOMContentLoaded', ()=>{
+  // Match loading is fully independent of auth state — runs regardless of
+  // whether the user is logged in, and never touches the header. If this
+  // takes 10s or fails outright, the header above is completely unaffected.
+  // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
+  restoreHomeCat();
+  try { if (sessionStorage.getItem('sb_home_scroll')) restoreHomeScrollOnce(); } catch(e) {}
+  loadAllMatches();      // FIRST: the games are requested before anything else (banners, balance, notifications ... follow)
   loadAdminBanner();
   loadDownloadAppBanner();
   // Auth header state (Login/Join vs Balance/Logout) was already applied
@@ -1611,13 +1618,6 @@ window.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('slipAction').innerHTML=
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
   }
-  // Match loading is fully independent of auth state — runs regardless of
-  // whether the user is logged in, and never touches the header. If this
-  // takes 10s or fails outright, the header above is completely unaffected.
-  // Coming back from a match (Back button): stay on the tab the user was on (e.g. LIVE), not Highlights.
-  restoreHomeCat();
-  try { if (sessionStorage.getItem('sb_home_scroll')) restoreHomeScrollOnce(); } catch(e) {}
-  loadAllMatches();
   loadLeagueOptions();
   loadSportTabs();
 
@@ -1965,7 +1965,7 @@ async function loadAllMatches(silent=false, retryAttempt=0){
     const timeoutId = setTimeout(() => ctrl.abort(), 15000);
     let r;
     try {
-      const early = (!hasExistingData && retryAttempt === 0 && window.__sbTakeEarly) ? window.__sbTakeEarly('featured') : null;
+      const early = (retryAttempt === 0 && window.__sbTakeEarly) ? window.__sbTakeEarly('featured') : null;      // everyone: the answer is usually already here by the time the page is ready
       if (early) { try { r = await early; } catch(e) { r = null; } }
       if (!r) r = await fetch('/api/odds/featured', { headers, signal: ctrl.signal });
     } finally {
