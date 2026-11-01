@@ -154,6 +154,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
   <div class="stat"><div class="stat-val" style="color:var(--yl)" id="sWin">0.00</div><div class="stat-lbl">Winnings</div></div>
 </div>
 
+<div id="updBar" style="display:none;font-size:11px;color:var(--mt);padding:6px 16px 0;text-align:center"></div>
+
 <div class="bets" id="betsList">
   <div class="loading"><div class="spin"></div>Loading your bets...</div>
 </div>
@@ -166,7 +168,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);min-hei
 </nav>
 
 <script type="text/sb-page">
-let allBets=[], USER=null;
+let allBets=[], USER=null, lastSig='', lastApplyAt=0;
 
 // Paint the saved bets the moment this page's script runs (not after DOMContentLoaded), so the list is there on the first frame.
 (function(){ try{
@@ -184,7 +186,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
   const cached=readBetsCache();
   if(cached){ applyBets(cached); }
   refreshBalance();
-  await loadBets(!!cached);
+  await openRefresh(!!cached);
 });
 
 function betsCacheKey(){ return 'sb_mybets_cache_'+((USER&&(USER._id||USER.id))||'u'); }
@@ -192,7 +194,13 @@ function readBetsCache(){
   try{ const r=JSON.parse(localStorage.getItem(betsCacheKey())||'null'); return r&&Array.isArray(r.data)?r.data:null; }catch(e){ return null; }
 }
 function writeBetsCache(list){ try{ localStorage.setItem(betsCacheKey(), JSON.stringify({ts:Date.now(),data:list.slice(0,20)})); }catch(e){} }
-function applyBets(list){
+function applyBets(list, force){
+  // Background refreshes must not rebuild the list (flicker, closing an open cash-out quote) when nothing changed.
+  const sig=JSON.stringify(list);
+  const quoteOpen=!!document.querySelector('.cashout-quote');
+  if(!force && sig===lastSig && Date.now()-lastApplyAt<60000) return;
+  if(!force && quoteOpen && sig!==lastSig){ allBets=list; lastSig=sig; return; }   // keep the quote on screen; the new data shows after it is closed
+  lastSig=sig; lastApplyAt=Date.now();
   allBets=list;
   const won=allBets.filter(b=>b.status==='won');
   const totalWin=won.reduce((a,b)=>a+(b.netPayout||0),0);
@@ -216,19 +224,57 @@ async function refreshBalance(){
     }
   }catch(e){}
 }
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshBalance(); loadBets(true); } });
-window.addEventListener('sb:resume', ()=>{ try{ refreshBalance(); loadBets(true); }catch(e){} });
-setInterval(()=>{ if(!document.hidden){ loadBets(true); } }, 30000);
+// ── KEEPING GAMES CURRENT ──
+// loadBets(hadCache, refresh):
+//   refresh=false  fast read of what the server already knows (instant)
+//   refresh=true   the server first asks the provider about this customer's started games RIGHT NOW (live / finished),
+//                  settles anything decided, and then returns the list - this is what stops a live game saying "awaiting".
+// openRefresh() = both, in that order: the list is current on the first frame, then corrected a moment later.
+let reqSeq=0, appliedSeq=0, lastForce=0;
+function setUpd(msg){ const el=document.getElementById('updBar'); if(!el) return; if(!msg){ el.style.display='none'; return; } el.style.display='block'; el.innerHTML=msg; }
+function hasPending(){ return allBets.some(b=>b.status==='pending' || (b.selections||[]).some(s=>(s.result||'pending')==='pending')); }
+function clockStr(){ return new Date().toLocaleTimeString('en-KE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
-async function loadBets(hadCache){
+async function openRefresh(hadCache){
+  await loadBets(hadCache,false);
+  if(hasPending()) await loadBets(true,true); else schedulePoll();
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshBalance(); openRefresh(true); } });
+window.addEventListener('sb:resume', ()=>{ try{ refreshBalance(); openRefresh(true); }catch(e){} });
+window.addEventListener('pageshow', e=>{ if(e.persisted){ try{ refreshBalance(); openRefresh(true); }catch(_){} } });
+
+// While anything is unsettled: quick read every 8 s, provider check every 25 s. Nothing runs when all bets are settled.
+function schedulePoll(){
+  clearTimeout(window.__sbBetsTimer);
+  if(!hasPending()) return;
+  window.__sbBetsTimer=setTimeout(async()=>{
+    if(!document.getElementById('betsList')) return;              // the page has been left: stop
+    if(!document.hidden){ await loadBets(true, Date.now()-lastForce>25000); }
+    schedulePoll();
+  }, 8000);
+}
+
+async function loadBets(hadCache, refresh){
+  const seq=++reqSeq;
+  const forced=refresh===true;
+  if(forced){ lastForce=Date.now(); if(hasPending()) setUpd('<span class="spin" style="width:10px;height:10px;display:inline-block;vertical-align:-1px;margin-right:6px"></span>Updating live games…'); }
   try{
-    const r=await fetch('/api/bets/my',{headers:{'Authorization':'Bearer '+localStorage.getItem('token')}});
+    const r=await fetch('/api/bets/my'+(forced?'?refresh=1':''),{headers:{'Authorization':'Bearer '+localStorage.getItem('token')}});
     if(r.status===401||r.status===403){ try{localStorage.removeItem('token');localStorage.removeItem('user');localStorage.removeItem(betsCacheKey());}catch(e){} SB.go('/login'); return; }
     const d=await r.json();
-    if(!d.success){ if(!hadCache) renderEmpty(); return; }
+    if(!d.success){ setUpd(''); if(!hadCache) renderEmpty(); return; }
+    if(seq<appliedSeq){ return; }                                  // an older answer must never overwrite a newer one
+    appliedSeq=seq;
     writeBetsCache(d.data);
-    applyBets(d.data);
-  }catch{ if(!hadCache) document.getElementById('betsList').innerHTML='<div class="loading">Failed to load bets. Pull to refresh.</div>'; }
+    // explicit calls (no arguments, e.g. the cash-out Cancel button) always redraw; background ones only when something changed
+    applyBets(d.data, arguments.length===0);
+    if(forced){
+      const rf=d.refreshed||{};
+      setUpd(rf.timedOut ? 'Games are still being checked — updating again shortly…' : 'Updated '+clockStr());
+      if(rf.settled>0){ refreshBalance(); }
+    }
+  }catch{ setUpd(''); if(!hadCache) document.getElementById('betsList').innerHTML='<div class="loading">Failed to load bets. Pull to refresh.</div>'; }
+  schedulePoll();
 }
 
 function filter(f,el){
@@ -388,7 +434,8 @@ async function settleBets(){
         ? `✅ ${d.settled} bets settled!`
         : '✅ No pending bets to settle right now';
       showToast(msg,'ok');
-      setTimeout(()=>SB.reload(),1500);
+      await loadBets(true,true);
+      refreshBalance();
     } else {
       showToast('Could not settle: '+d.message,'err');
     }

@@ -86,6 +86,7 @@ const FOOTBALL_LAST_MIN = 80;
 const memo = new Map(); // key -> { ts, data }
 const exactChecked = new Map();                       // matchId -> last time the exact-fixture lookup ran (throttle)
 const EXACT_CHECK_GAP_MS = 3 * 60 * 1000;
+const FORCE_EXACT_GAP_MS = 20 * 1000;           // on-demand checks (My Bets opened) may ask the provider for the exact fixture this often
 async function memoized(key, ttlMs, fn) {
   const hit = memo.get(key);
   if (hit && Date.now() - hit.ts < ttlMs) return hit.data;
@@ -96,8 +97,9 @@ async function memoized(key, ttlMs, fn) {
 }
 const nairobiDate = d => new Date(new Date(d).getTime() + 3 * 3600000).toISOString().slice(0, 10);   // Nairobi is always UTC+3 (no Intl object per call: that was slow)
 const toMap = list => { const m = new Map(); (list || []).forEach(x => { const k = String(x && x.providerMatchId || '').trim(); if (k) m.set(k, x); }); return m; };
-const liveFeed = sport => memoized('live:' + sport, 15 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
-const catalogue = (sport, date) => memoized('cat:' + sport + ':' + date, 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));
+// fresh = an on-demand check (the customer just opened My Bets): use a much shorter cache so the answer is current.
+const liveFeed = (sport, fresh) => memoized('live:' + sport, fresh ? 2 * 1000 : 15 * 1000, async () => toMap(await sofaBets.getLiveFixtures(sport)));
+const catalogue = (sport, date, fresh) => memoized('cat:' + sport + ':' + date, fresh ? 10 * 1000 : 60 * 1000, async () => toMap(await sofaBets.getMatchesForDate(date, { sport })));
 
 function finalScoreOf(fx) {
   const ft = fx && fx.score && fx.score.fullTime;
@@ -276,7 +278,12 @@ function observePeriods(prev, item, sport, now = new Date(), kickoff) {
 }
 
 // fixtures: [{ matchId, homeTeam, awayTeam, league, commenceTime }]
-async function trackFixtures(fixtures, Match) {
+// opts.force: an on-demand check (the customer opened My Bets). Same evidence rules as the scheduled run - a final result
+// still needs an explicit provider FINISHED - but nothing is served from a stale cache and the exact-fixture question is
+// not held back by the minimum-game-length gate or the 3-minute throttle, so a game the scheduled poller missed (or a
+// server that was asleep) is picked up immediately instead of staying "awaiting result".
+async function trackFixtures(fixtures, Match, opts) {
+  const force = !!(opts && opts.force);
   const now = Date.now();
   const out = { finalized: 0, waiting: [] };
   for (const fx of fixtures) {
@@ -311,8 +318,8 @@ async function trackFixtures(fixtures, Match) {
       } : {});
 
       // exact-id sources only
-      let item = (await liveFeed(p.sport) || new Map()).get(id) || null;
-      if (!item) item = ((await catalogue(p.sport, nairobiDate(kickoff))) || new Map()).get(id) || null;
+      let item = (await liveFeed(p.sport, force) || new Map()).get(id) || null;
+      if (!item) item = ((await catalogue(p.sport, nairobiDate(kickoff), force)) || new Map()).get(id) || null;
 
       const finish = async (sc, source) => {
         await Match.updateMany({ matchId: { $in: sibIds } }, { $set: {
@@ -351,9 +358,9 @@ async function trackFixtures(fixtures, Match) {
       // Safety net: the feed-based check cannot confirm this game (never seen live, or the feed dropped it early).
       // Once it is past the sport's minimum game length, ask the provider for this EXACT fixture. Only an explicit
       // FINISHED status with a full-time score is accepted (verifyFinalResult), so nothing is guessed.
-      if (kickoff.getTime() && now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000) {
+      if (kickoff.getTime() && (force || now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000)) {
         const last = exactChecked.get(fx.matchId) || 0;
-        if (now - last >= EXACT_CHECK_GAP_MS) {
+        if (now - last >= (force ? FORCE_EXACT_GAP_MS : EXACT_CHECK_GAP_MS)) {
           exactChecked.set(fx.matchId, now);
           const fin = await verifyFinalResult(fx.matchId);
           if (fin) { await finish({ home: fin.homeScore, away: fin.awayScore }, 'provider-exact'); continue; }

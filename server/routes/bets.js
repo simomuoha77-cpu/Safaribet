@@ -602,6 +602,15 @@ router.get('/my', auth, async (req, res) => {
       if (to) filter.createdAt.$lte = new Date(to);
     }
 
+    // refresh=1 (the customer just opened My Bets / pulled to refresh): ask the provider about this customer's started games
+    // RIGHT NOW and settle anything decided, so the list below is current instead of whatever the last timer pass saved.
+    // Bounded wait: on a slow provider the list is returned as it is and the work finishes in the background.
+    let refreshInfo = null;
+    if (req.query.refresh === '1' && parseInt(page) === 1 && !status) {
+      try { refreshInfo = await require('../services/betRefresh').refreshUserBets(req.user._id, { budgetMs: 7000 }); }
+      catch (e) { refreshInfo = { error: true }; }
+    }
+
     const [bets, total] = await Promise.all([
       Bet.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Bet.countDocuments(filter)
@@ -642,6 +651,9 @@ router.get('/my', auth, async (req, res) => {
           if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
           s.kickoffAt = kick || null;
+          // A saved "waiting because the match was not captured while live" note belongs to an older check: while the game is
+          // live (or has not started) it would contradict the badge, so it is not shown.
+          if (state === 'live' || state === 'not_started') { delete s.pendingReason; delete s.waitingBecause; }
         });
       }
     } catch (e) { /* purely informational - never block the bet list */ }
@@ -678,7 +690,7 @@ router.get('/my', auth, async (req, res) => {
               if (period) selection.periodLabel = String(period);
             }
 
-            if (liveMatch.status === 'live') selection.fixtureState = 'live';
+            if (liveMatch.status === 'live') { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
             else if (liveMatch.status === 'finished' && (selection.score || rawScore.fullTime)) selection.fixtureState = 'finished';
           }
         }
@@ -686,7 +698,7 @@ router.get('/my', auth, async (req, res) => {
     } catch (e) { /* score display is informational; never block the bet list */ }
 
     const stats = await statsP;
-    res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });
+    res.json({ success: true, data: bets, total, page: parseInt(page), pages: Math.ceil(total / limit), stats, refreshed: refreshInfo, serverTime: Date.now() });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Failed to load bets' });
   }
@@ -755,9 +767,14 @@ router.get('/:code', auth, async (req, res) => {
 // ── USER-TRIGGERED SETTLE (checks their own pending bets) ──
 router.post('/settle', auth, async (req, res) => {
   try {
-    const { runSettlement } = require('../engine/settlementEngine');
-    const result = await runSettlement();
-    res.json({ success: true, settled: result.settled, paid: result.paid });
+    const { runSettlement, whenIdle } = require('../engine/settlementEngine');
+    // First look at this customer's games right now (live / finished), then settle - so the button really checks results.
+    let refreshed = null;
+    try { refreshed = await require('../services/betRefresh').refreshUserBets(req.user._id, { budgetMs: 8000 }); } catch (e) {}
+    let result = await runSettlement();
+    if (result && result.skipped) { await whenIdle(8000); result = await runSettlement(); }
+    result = result || { settled: 0, paid: 0 };
+    res.json({ success: true, settled: Math.max(result.settled || 0, (refreshed && refreshed.settled) || 0), paid: result.paid, refreshed });
   } catch (e) {
     console.error('[bets/settle]', e.message);
     res.status(500).json({ success: false, message: 'Settlement failed' });

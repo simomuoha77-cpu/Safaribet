@@ -17,7 +17,7 @@
 // Betting data (fixtures, live scores, event status, markets) is only ever served under /api/*, which is in NEVER below:
 // the worker does not touch it, so it can never be frozen by static-asset caching. Static files keep their caching.
 // Bump VERSION to throw every cached copy away on the next visit.
-const VERSION = 'sb-v24-nosms';
+const VERSION = 'sb-v25-mybets-refresh';
 const SHELL = ['/', '/login', '/register', '/account', '/my-bets', '/casino', '/deposit', '/withdraw', '/offline.html', '/js/theme.js', '/js/router.js', '/logo.png'];   // the main pages are saved on the first visit, so they open at once afterwards
 const NEVER = [/^\/api\//, /^\/casino\/play/, /^\/download/, /^\/internal/, /admin/i, /x9/i, /^\/sw\.js$/];
 
