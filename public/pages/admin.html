@@ -537,9 +537,21 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
     </div>
   </div>
 
+  <!-- LATEST REFERRALS: who referred whom -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>🆕 Latest Referrals (who referred whom)</h3></div>
+    <div id="refRecent"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- TOP EARNERS (money really paid) -->
+  <div class="sec">
+    <div class="sec-hdr"><h3>💰 Top Earners (verified referrals)</h3></div>
+    <div id="refEarners"><div class="loading">Loading...</div></div>
+  </div>
+
   <!-- TOP REFERRERS -->
   <div class="sec">
-    <div class="sec-hdr"><h3>🏆 Top Referrers</h3></div>
+    <div class="sec-hdr"><h3>🏆 Most Sign-ups (verified or not)</h3></div>
     <div id="refList"><div class="loading">Loading...</div></div>
   </div>
 </div>
@@ -3299,6 +3311,30 @@ async function loadRefStats(){
     document.getElementById('ref-bonus').textContent = kes(d.totalPaid);
     const sub = document.querySelector('#ref-bonus + .sl');
     if (sub) sub.textContent = 'Bonus Paid (KES) \u00b7 referrers ' + kes(d.referrerPaid) + ' \u00b7 new players ' + kes(d.newUserPaid);
+
+    const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const when = t => { try { return new Date(t).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+    const recent = Array.isArray(d.recent) ? d.recent : [];
+    document.getElementById('refRecent').innerHTML = recent.length ? recent.map(r => `
+      <div class="list-row">
+        <div class="lr-info">
+          <div class="lr-name">👤 ${esc(r.username)} <span style="color:var(--mt);font-weight:400">← referred by</span> ${esc(r.referrer)}</div>
+          <div class="lr-sub">${esc(r.phone)} · joined ${when(r.joinedAt)}${r.referrerPhone ? ' · referrer ' + esc(r.referrerPhone) : ''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:${r.verified ? 'var(--g)' : 'var(--y)'}">${r.verified ? '✅ verified' : '⏳ not verified'}</div>
+          <div style="font-size:11px;color:var(--mt)">${r.paid ? 'referrer paid ' + kes(r.paid) : 'no bonus paid'}</div>
+        </div>
+      </div>`).join('') : '<div class="empty">No referrals yet</div>';
+    const earners = Array.isArray(d.earners) ? d.earners : [];
+    document.getElementById('refEarners').innerHTML = earners.length ? earners.map(u => `
+      <div class="list-row">
+        <div class="lr-info"><div class="lr-name">👤 ${esc(u.username)}</div><div class="lr-sub">${esc(u.phone)}${u.last ? ' · last paid ' + when(u.last) : ''}</div></div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--g)">${kes(u.earned)} earned</div>
+          <div style="font-size:11px;color:var(--mt)">${u.paidCount || 0} verified of ${u.count || 0} sign-ups</div>
+        </div>
+      </div>`).join('') : '<div class="empty">No bonuses paid yet</div>';
 
     const top = Array.isArray(d.data) ? d.data : [];
     if (!top.length) {
