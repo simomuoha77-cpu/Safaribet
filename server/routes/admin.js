@@ -613,11 +613,15 @@ router.delete('/blacklist/:id', async (req, res) => {
 router.get('/bets', async (req, res) => {
   try {
     const filter = {};
-    if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
-    if (req.query.search) filter.betCode = new RegExp(req.query.search, 'i');
-    const bets = await Bet.find(filter).sort({ createdAt:-1 }).limit(100)
+    if (req.query.status && req.query.status !== 'all') filter.status = String(req.query.status);
+    const search = String(req.query.search || '').trim().slice(0, 40);
+    if (search) filter.betCode = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');   // typed text is searched literally
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 30, 1), 100);                         // first page is small = fast
+    const skip = Math.max(parseInt(req.query.skip) || 0, 0);
+    const rows = await Bet.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit + 1)
       .populate('userId', 'username phone').lean();
-    res.json({ success:true, data:bets });
+    const hasMore = rows.length > limit;
+    res.json({ success: true, data: hasMore ? rows.slice(0, limit) : rows, hasMore });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 

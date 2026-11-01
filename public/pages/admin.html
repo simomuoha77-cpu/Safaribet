@@ -1989,14 +1989,11 @@ async function openOverrideSelection(betId, matchId, homeTeam, awayTeam, current
   }
 }
 
-async function loadBets(){
-  const status=document.getElementById('betFilter').value;
-  const search=document.getElementById('betSearch').value.trim();
-  const d=await api(`/api/admin/bets?status=${status}&search=${search}`);
-  const el=document.getElementById('betList');
-  if(!d.success||!d.data?.length){el.innerHTML='<div class="empty">No bets found</div>';return;}
-  d.data.forEach(b => { betSelectionsMap[b._id] = new Set((b.selections||[]).map(s => s.matchId)); betMetaMap[b._id] = { totalOdds: b.totalOdds, stake: b.stake }; });
-  el.innerHTML=d.data.map(b=>`
+// Bets list: the last list for this filter is shown at once, the fresh one replaces it; pages of 30 with "Load more".
+let betsSkip = 0, betsLoadingMore = false;
+function betRowsHtml(list){
+  list.forEach(b => { betSelectionsMap[b._id] = new Set((b.selections||[]).map(s => s.matchId)); betMetaMap[b._id] = { totalOdds: b.totalOdds, stake: b.stake }; });
+  return list.map(b=>`
     <div class="b-row ${b.status}">
       <div class="b-top"><span class="b-code">${b.betCode}</span><span class="badge bg-${b.status==='won'?'g':b.status==='lost'?'r':'y'}">${b.status}</span></div>
       <div style="font-size:11px;color:var(--mt);margin-bottom:4px">👤 ${b.userId?.username || 'unknown'} (${fmtPhone(b.userId?.phone||'')})</div>
@@ -2014,6 +2011,45 @@ async function loadBets(){
           <div class="res" id="addSelMsg-${b._id}" style="display:none;margin-top:6px"></div>
         </div>` : ''}
     </div>`).join('');
+}
+function betsMoreHtml(hasMore){ return hasMore ? '<div id="betsMore" style="text-align:center;padding:12px"><button class="btn btn-g" onclick="loadMoreBets()">Load more bets</button></div>' : ''; }
+
+async function loadBets(){
+  const status=document.getElementById('betFilter').value;
+  const search=document.getElementById('betSearch').value.trim();
+  const el=document.getElementById('betList');
+  const ckey='sb_admin_bets_'+status;
+  betsSkip = 0;
+  let shown = false;
+  if (!search) {                                           // saved list for this filter: on screen immediately
+    try { const c = JSON.parse(localStorage.getItem(ckey) || 'null');
+      if (c && Array.isArray(c.data) && c.data.length) { el.innerHTML = betRowsHtml(c.data) + betsMoreHtml(c.hasMore); shown = true; } } catch(e) {}
+  }
+  if (!shown) el.innerHTML = '<div class="empty">⏳ Loading bets...</div>';
+  let d;
+  try { d = await api(`/api/admin/bets?status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}&limit=30`); }
+  catch(e) { if (!shown) el.innerHTML = '<div class="empty">❌ Could not load bets: ' + (e.message || 'network error') + ' <button class="btn btn-g" onclick="loadBets()">Try again</button></div>'; return; }
+  if (!d.success) { if (!shown) el.innerHTML = '<div class="empty">❌ ' + (d.message || 'Could not load bets') + ' <button class="btn btn-g" onclick="loadBets()">Try again</button></div>'; return; }
+  if (!d.data?.length) { el.innerHTML = '<div class="empty">No bets found</div>'; if (!search) try { localStorage.removeItem(ckey); } catch(e) {} return; }
+  el.innerHTML = betRowsHtml(d.data) + betsMoreHtml(d.hasMore);
+  betsSkip = d.data.length;
+  if (!search) try { localStorage.setItem(ckey, JSON.stringify({ data: d.data, hasMore: !!d.hasMore })); } catch(e) {}
+}
+async function loadMoreBets(){
+  if (betsLoadingMore) return; betsLoadingMore = true;
+  const status=document.getElementById('betFilter').value;
+  const search=document.getElementById('betSearch').value.trim();
+  const holder=document.getElementById('betsMore');
+  if (holder) holder.innerHTML = '<span style="color:var(--mt)">⏳ Loading...</span>';
+  try {
+    const d = await api(`/api/admin/bets?status=${encodeURIComponent(status)}&search=${encodeURIComponent(search)}&limit=30&skip=${betsSkip}`);
+    if (d.success && d.data?.length) {
+      if (holder) holder.remove();
+      document.getElementById('betList').insertAdjacentHTML('beforeend', betRowsHtml(d.data) + betsMoreHtml(d.hasMore));
+      betsSkip += d.data.length;
+    } else if (holder) holder.innerHTML = '<span style="color:var(--mt)">No more bets</span>';
+  } catch(e) { if (holder) holder.innerHTML = '<button class="btn btn-g" onclick="loadMoreBets()">Try again</button>'; }
+  betsLoadingMore = false;
 }
 
 async function runSettle(){

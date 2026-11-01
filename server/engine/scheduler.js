@@ -10,6 +10,16 @@ function start() {
   const { settleJackpots } = require('./jackpotSettlement');
   const { deduplicateMatches } = require('../routes/odds');
 
+  // Old "live" records the feed never closed are closed here (nothing waiting on them), so they stop stacking up in the admin panel.
+  const sweepStale = () => { try {
+    const { closeStuckLive } = require('./staleLive');
+    closeStuckLive(require('../models/Match'), require('../models/Bet'), require('../models/Jackpot'))
+      .then(r => { if (r && r.closed) console.log(`[stale-live] closed ${r.closed} old live record(s); kept ${r.kept} that a bet is still waiting on`); })
+      .catch(e => console.error('[stale-live]', e.message));
+  } catch (e) { console.error('[stale-live]', e.message); } };
+  setTimeout(sweepStale, 45 * 1000).unref();
+  cron.schedule('*/30 * * * *', sweepStale);
+
   // Sync fixtures every 5 minutes
   cron.schedule('*/5 * * * *', () => { syncFixtures().catch(console.error); });
 
