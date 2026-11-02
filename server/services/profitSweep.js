@@ -87,19 +87,27 @@ function nairobiDayStart() {
 }
 
 async function sendPayout(doc) {
-  if (!CK() || !CS()) throw new Error('M-Pesa credentials are not configured');
-  if (!CRED()) throw new Error('MPESA_SECURITY_CREDENTIAL is not set');
-  if (!SHORTCODE()) throw new Error('Shortcode is not set');
-  const common = { InitiatorName: INITIATOR(), SecurityCredential: CRED(), Amount: Math.round(doc.amount), PartyA: SHORTCODE(),
+  const bank = doc.destination === 'bank';
+  // Paybill -> bank (B2B) is a different Daraja product from B2C. If it was granted to a different app / API user / paybill,
+  // set the MPESA_B2B_* variables; each one falls back to the B2C value when not set.
+  const ck = bank ? (process.env.MPESA_B2B_CONSUMER_KEY || CK()) : CK();
+  const cs = bank ? (process.env.MPESA_B2B_CONSUMER_SECRET || CS()) : CS();
+  const initiator = bank ? (process.env.MPESA_B2B_INITIATOR_NAME || INITIATOR()).trim() : INITIATOR();
+  const cred = bank ? (process.env.MPESA_B2B_SECURITY_CREDENTIAL || CRED()).trim() : CRED();
+  const partyA = bank ? (process.env.MPESA_B2B_SHORTCODE || process.env.MPESA_SHORTCODE || SHORTCODE()) : SHORTCODE();
+  if (!ck || !cs) throw new Error('M-Pesa credentials are not configured');
+  if (!cred) throw new Error('Security credential is not set');
+  if (!partyA) throw new Error('Shortcode is not set');
+  const common = { InitiatorName: initiator, SecurityCredential: cred, Amount: Math.round(doc.amount), PartyA: partyA,
     Remarks: 'Operations transfer', QueueTimeOutURL: TIMEOUT_URL(), ResultURL: RESULT_URL() };
-  if (doc.destination === 'bank') {
+  if (bank) {
     // Paybill -> bank account, through the bank's own paybill number (Daraja Business PayBill / B2B)
-    return mpesaClient.authedPost(CK(), CS(), '/mpesa/b2b/v1/paymentrequest', Object.assign({}, common, {
+    return mpesaClient.authedPost(ck, cs, '/mpesa/b2b/v1/paymentrequest', Object.assign({}, common, {
       CommandID: 'BusinessPayBill', SenderIdentifierType: '4', RecieverIdentifierType: '4',
-      PartyB: doc.bankPaybill, AccountReference: doc.bankAccount, Requester: undefined
+      PartyB: doc.bankPaybill, AccountReference: doc.bankAccount
     }), 15000);
   }
-  return mpesaClient.authedPost(CK(), CS(), '/mpesa/b2c/v1/paymentrequest', Object.assign({}, common, {
+  return mpesaClient.authedPost(ck, cs, '/mpesa/b2c/v1/paymentrequest', Object.assign({}, common, {
     CommandID: 'BusinessPayment', PartyB: doc.phone, Occasion: String(doc.depositRef).slice(0, 100)
   }), 15000);
 }

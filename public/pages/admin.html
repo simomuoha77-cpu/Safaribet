@@ -3587,9 +3587,19 @@ document.addEventListener('keydown',e=>{
     };
     function state(on,txt){return on?('ON - '+txt):'OFF';}
     var banner=h('div',{style:'padding:8px 0;font-weight:700'},[h('div',{},'PHONE channel: '+state(d.phone.enabled,d.phone.percent+'% to '+(d.phone.masked||'no number'))),h('div',{},'BANK channel: '+state(d.bank.enabled,d.bank.percent+'% to paybill '+(d.bank.paybill||'?')+' / '+(d.bank.accountMasked||'?'))),h('div',{style:'font-size:11px;font-weight:400'},'Server version: '+(d.version||'old - not updated'))]);
-    var sum=(l.summary||[]).map(function(s){return s._id+': '+s.n+' (KES '+s.t+')';}).join('  |  ')||'No sweeps yet';
+    var S={sent:{n:0,t:0},pending:{n:0,t:0},failed:{n:0,t:0}}; (l.summary||[]).forEach(function(x){if(S[x._id])S[x._id]={n:x.n,t:x.t};});
+    function tile(label,v,color){return h('div',{style:'flex:1;min-width:90px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px;text-align:center'},[h('div',{style:'font-size:18px;font-weight:800;color:'+color},'KES '+v.t),h('div',{style:'font-size:11px;opacity:.7'},label+' ('+v.n+')')]);}
+    var tiles=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin:8px 0'},[tile('Sent',S.sent,'#00c853'),tile('Pending',S.pending,'#ffd600'),tile('Failed',S.failed,'#ff5252')]);
+    function pill(st){var m={sent:['#00c853','Sent'],pending:['#ffd600','Pending'],failed:['#ff5252','Failed'],capped:['#ff9800','Capped'],skipped:['#9fb3a5','Skipped']}[st]||['#9fb3a5',st];return h('span',{style:'display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;color:'+m[0]+';background:'+m[0]+'22'},m[1]);}
+    function hint(t){t=String(t||'');
+      if(/Invalid Initiator/i.test(t))return 'Your M-Pesa API user is not allowed to make this kind of payment. Ask Safaricom to enable "Business Pay Bill" (B2B) for it, or set the MPESA_B2B_* settings if it lives on another app.';
+      if(/Invalid ResultURL/i.test(t))return 'The callback address was refused. Update to the latest version.';
+      if(/insufficient|balance/i.test(t))return 'Not enough money in the paybill account to pay this out.';
+      if(/Invalid Access Token|credentials/i.test(t))return 'M-Pesa credentials problem. Check the keys on the server.';
+      return '';}
+    var sum='';
     var rows=(l.items||[]).map(function(i){
-      var tr=h('tr',{},[h('td',{},new Date(i.createdAt).toLocaleString('en-KE')),h('td',{},'KES '+i.depositAmount),h('td',{},'KES '+i.amount+' → '+(i.destination==='bank'?'BANK':'PHONE')),h('td',{},i.status),h('td',{},i.lastError||i.mpesaReceipt||'')]);
+      var tr=h('tr',{},[h('td',{},new Date(i.createdAt).toLocaleString('en-KE')),h('td',{},'KES '+i.depositAmount),h('td',{},'KES '+i.amount+' → '+(i.destination==='bank'?'🏦 BANK':'📱 PHONE')),h('td',{},pill(i.status)),h('td',{style:'font-size:12px'},[i.lastError||i.mpesaReceipt||'',hint(i.lastError)?h('div',{style:'opacity:.75;margin-top:4px'},'💡 '+hint(i.lastError)):''])]);
       if(i.status==='failed'||i.status==='capped'){var b=h('button',{class:'btn'},'Retry');b.onclick=async function(){var code=prompt('Authenticator code');if(!code)return;var r=await call('POST','/api/sweep/admin/retry/'+i._id,{totp:code});alert(r.success?('Status: '+r.status+(r.error?(' - '+r.error):'')):(r.message||'Failed'));window.loadSweep();};tr.appendChild(h('td',{},b));}
       return tr;});
     var ev=(l.events||[]).length?(l.events||[]).slice(0,15).map(function(e){return h('p',{style:'font-size:12px'},new Date(e.at).toLocaleString('en-KE')+' - '+e.msg);}):[h('p',{},'Nothing yet.')];
@@ -3599,7 +3609,7 @@ document.addEventListener('keydown',e=>{
       h('div',{class:'card'},[h('h2',{},'🏦 Bank channel'),h('label',{},[bkOn,' Switched on']),h('div',{},'Bank paybill number'),bkPb,h('div',{},'Bank account number'),bkAc,h('div',{},'Share of each deposit (%)'),bkPct]),
       h('div',{class:'card'},[h('div',{},'Daily cap in KES, both channels together (0 = no cap)'),cap,totp,save,msg,h('p',{style:'font-size:12px'},'Phone % + bank % together can be at most 90.')]),
       h('div',{class:'card'},[h('h2',{},'Recent deposit checks')].concat(ev)),
-      h('div',{class:'card'},[h('h2',{},'Sweeps'),h('p',{},sum),
+      h('div',{class:'card'},[h('h2',{},'Sweeps'),tiles,
         h('table',{},[h('thead',{},h('tr',{},['When','Deposit','Sent to you','Status','Note',''].map(function(x){return h('th',{},x);}))),h('tbody',{},rows)])]));
   };
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
