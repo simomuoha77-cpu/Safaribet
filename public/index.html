@@ -1610,10 +1610,11 @@ window.addEventListener('DOMContentLoaded', ()=>{
     refreshBalance();
     // Keep the home header synchronized when wallet credits arrive while this
     // session is already open (for example, a referral bonus paid to the referrer).
-    setInterval(refreshBalance, 10000);
+    setInterval(function(){ if (!document.hidden) refreshBalance(); }, 10000);        // not while the app is in the background...
     loadNotifications();
     loadFavorites();
-    setInterval(loadNotifications, 45000);
+    setInterval(function(){ if (!document.hidden) loadNotifications(); }, 45000);
+    document.addEventListener('visibilitychange', function(){ if (!document.hidden) { refreshBalance(); loadNotifications(); } });   // ...but at once when it comes back
     // Show place bet button
     document.getElementById('slipAction').innerHTML=
       '<button class="place-btn" id="placeBtn" onclick="placeBet()">PLACE BET</button>';
@@ -1663,6 +1664,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // stay close to real-time — the displayed minute is always the server's real value,
   // not a client-side guess, so frequent resync is what keeps it accurate.
   oddsRefresh=setInterval(()=>{
+    if (document.hidden) return;      // nobody is looking: the visibility handler below refreshes at once when the app comes back
     loadAllMatches(true);
     if (currentCat !== 'live' && !document.hidden) loadMatches('live', true).catch(() => {});   // keep the full live list warm so the LIVE tab opens instantly
   }, 20000);
@@ -4189,7 +4191,7 @@ function showT(msg,type=''){
   }
   window.addEventListener('sb:resume', function(){ tries = {}; nextAt = {}; pullAll(); schedule(100); });
   document.addEventListener('visibilitychange', function(){ if(!document.hidden) pullAll(); });
-  pullAll(); setInterval(pullAll, 15000);
+  pullAll(); setInterval(function(){ if (!document.hidden) pullAll(); }, 15000);      // the visibilitychange handler above refreshes at once on return
   attach();
   setInterval(attach, 1500);
   setInterval(function(){ schedule(100); }, 8000);

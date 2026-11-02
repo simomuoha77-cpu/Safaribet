@@ -341,6 +341,11 @@ async function getLive() {
 // ── DB sync ──
 
 const BetModel = require('../models/Bet');
+const { createGate, touchSet } = require('../utils/writeGate');
+const bandwidthMeter = require('../utils/bandwidthMeter');
+// Remember what was last written for each game: only changed games are re-sent in full (see utils/writeGate.js).
+const syncGate = createGate({ fullEveryMs: 60 * 60 * 1000 });   // fixture sync: every game is also re-written in full at least once an hour
+const liveGate = createGate({ fullEveryMs: 10 * 60 * 1000 });   // live poll: at least every 10 minutes
 
 async function syncFixtures() {
   console.log('\n📡 [SofaBets Direct] Syncing fixtures...');
@@ -353,15 +358,45 @@ async function syncFixtures() {
     const seen = new Set();
     // Never overwrite a fixture that already has a verified final result.
     const verified = new Set((await Match.find({ finalVerified: true }, { matchId: 1 }).lean()).map(x => x.matchId));
+    // Only games whose content changed are sent in full (one batched call); an unchanged game gets a tiny update that keeps
+    // fetchedAt / odds.updatedAt fresh. Same data ends up in the database as before, with far less sent to MongoDB.
+    const nowMs = Date.now(), nowDate = new Date(nowMs);
+    const ops = [], meta = [], exp = [], commonIds = [];
+    let fullBytes = 0, touchCount = 0;
     for (const m of matches) {
       seen.add(m.matchId);
       if (verified.has(m.matchId)) continue;
-      await Match.findOneAndUpdate(
-        { matchId: m.matchId },
-        { $set: m },
-        { upsert: true }
-      ).catch(e => console.error(`  [sofabets] save failed for ${m.matchId}:`, e.message));
+      const d = syncGate.decide(m, nowMs);
+      if (d.kind === 'touch') {
+        touchCount++;
+        const hasClock = m.score && (m.score.clockSec != null || m.score.clockAt != null);
+        if (!hasClock) { commonIds.push(m.matchId); continue; }           // most unchanged games: one shared update below
+        ops.push({ updateOne: { filter: { matchId: m.matchId }, update: { $set: touchSet(m, nowDate) } } });   // no upsert: never creates a partial row
+        meta.push(null); exp.push(1);
+      } else {
+        ops.push({ updateOne: { filter: { matchId: m.matchId }, update: { $set: m }, upsert: true, setDefaultsOnInsert: true } });
+        meta.push({ id: m.matchId, fp: d.fp }); exp.push(1); fullBytes += d.bytes + 120;
+      }
     }
+    for (let i = 0; i < commonIds.length; i += 500) {
+      const ids = commonIds.slice(i, i + 500);
+      ops.push({ updateMany: { filter: { matchId: { $in: ids } }, update: { $set: { fetchedAt: nowDate, 'odds.updatedAt': nowDate } } } });
+      meta.push(null); exp.push(ids.length);
+    }
+    for (let i = 0; i < ops.length; i += 200) {
+      const chunk = ops.slice(i, i + 200), cm = meta.slice(i, i + 200);
+      const expected = exp.slice(i, i + 200).reduce((a, b) => a + b, 0);
+      try {
+        const r = await Match.bulkWrite(chunk, { ordered: false });
+        for (const x of cm) if (x) syncGate.recordFull(x.id, x.fp, nowMs);
+        const ok = (r && r.matchedCount !== undefined) ? (r.matchedCount + (r.upsertedCount || 0)) : expected;
+        if (ok < expected) syncGate.clear();       // a small update found no row (deleted meanwhile): start over, next sync writes everything in full
+      } catch (e) {
+        console.error(`  [sofabets] batched save failed (${chunk.length} operations, retried next sync):`, e.message);
+      }
+    }
+    bandwidthMeter.addDb('sync_full', fullBytes); bandwidthMeter.addDb('sync_touch', commonIds.length * 30 + (touchCount - commonIds.length) * 200);
+    syncGate.forgetAllExcept(seen);
     // Remove stale records that no longer appear in the API, BUT never a fixture
     // a pending bet still depends on, and keep recent live/finished rows for
     // 3 days so results survive until every bet on them has been graded.
@@ -425,11 +460,24 @@ async function updateLive() {
         if (newPs) m.periodScores = newPs;
       } catch (e) { /* never block the live poll */ }
       delete m._statusRaw; delete m._halfTime;
-      await Match.findOneAndUpdate(
-        { matchId: m.matchId },
-        { $set: m },
-        { upsert: true }
-      ).catch(() => {});
+      // Unchanged since the last write (only the clock / time-stamps moved): send just those; otherwise the full row as before.
+      const gate = liveGate.decide(m);
+      let wrote = false;
+      if (gate.kind === 'touch') {
+        try {
+          const r = await Match.updateOne({ matchId: m.matchId }, { $set: touchSet(m) });
+          wrote = !(r && r.matchedCount === 0);
+          if (wrote) bandwidthMeter.addDb('live_touch', 260);
+        } catch (e) { wrote = false; }
+        if (!wrote) liveGate.forget(m.matchId);
+      }
+      if (!wrote) {
+        await Match.findOneAndUpdate(
+          { matchId: m.matchId },
+          { $set: m },
+          { upsert: true }
+        ).then(() => { liveGate.recordFull(m.matchId, gate.fp); bandwidthMeter.addDb('live_full', gate.bytes + 120); }).catch(() => {});
+      }
       if (m.finalVerified === true) { try { require('./settlementEngine').settleSoon(); } catch (e) {} }
     }
 

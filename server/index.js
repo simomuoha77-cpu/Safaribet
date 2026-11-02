@@ -115,6 +115,10 @@ app.use('/api', (req, res, next) => {
 
 // ── MIDDLEWARE ──
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
+// Bandwidth meter (counts what is really sent, after compression; logs a summary every 10 min; admin read-out at /api/odds/bandwidth)
+const bandwidthMeter = require('./utils/bandwidthMeter');
+app.use(bandwidthMeter.middleware);
+bandwidthMeter.start();
 app.use(compression());
 // rawBody is kept ONLY for the JuanAI casino callbacks: their HMAC signature is over the exact bytes sent.
 app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.originalUrl && (req.originalUrl.startsWith('/api/casino/juanai/') || req.originalUrl.startsWith('/api/v1/casino/'))) req.rawBody = buf.toString('utf8'); } })); // limit body size

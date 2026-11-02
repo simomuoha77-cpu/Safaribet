@@ -1,6 +1,7 @@
 const express = require('express');
 const { getFixtures, getLastFixtures } = require('../engine/apifootball');
 const sofaBets = require('../providers/sofaBetsProvider');
+const { slimList } = require('../utils/listSlim');
 const router = express.Router();
 // While a customer is placing a bet, background refreshes stand aside (they only skip one tick; the next one catches up).
 const betBusy = () => { try { return sofaBets.betIsPlacing(); } catch (e) { return false; } };
@@ -54,7 +55,7 @@ function footballForClient(list) {
   let pipe = null;
   try { pipe = require('./odds').applyOddsPipeline; } catch (_) {}
   // Same odds rules (margin, suspended picks) as the Highlights feed, so Football never shows a different price.
-  return pipe ? list.map(pipe) : list;
+  return slimList(pipe ? list.map(pipe) : list);
 }
 router.get('/football', async (req, res) => {
   try {
@@ -343,7 +344,7 @@ router.get('/live', async (req, res) => {
     if (Array.isArray(cached)) {
       res.json({
         success: true,
-        data: cached,
+        data: slimList(cached),
         count: cached.length,
         bySport: liveStatus.bySport,
         updatedAt: C.ts(LIVE_CACHE_KEY),
@@ -476,7 +477,7 @@ router.get('/all-categories', (req, res) => {
   const data = {};
   for (const sport of Object.keys(SPORT_CONFIG)) {
     const list = sportCategoryCache.get(sport)?.data || [];
-    data[sport] = list.filter(m => m.status !== 'finished').slice(0, 150);
+    data[sport] = slimList(list.filter(m => m.status !== 'finished').slice(0, 150));
   }
   const warming = !Object.values(data).some(l => l.length);
   if (warming) buildSearchIndex().catch(() => {});
@@ -501,7 +502,7 @@ router.get('/category/:sport', async (req, res) => {
         refreshSportCategory(sport, dates, true).catch(() => {});
       }
       res.set('Cache-Control', 'no-store');
-      return res.json({ success:true, data:cached.data, count:cached.data.length, sport, source:'SofaBets', cached:true });
+      return res.json({ success:true, data:slimList(cached.data), count:cached.data.length, sport, source:'SofaBets', cached:true });
     }
 
     // Cold tab: wait only for today's fixtures. Future dates are merged after
@@ -509,7 +510,7 @@ router.get('/category/:sport', async (req, res) => {
     // ready instead of waiting for every date.
     const data = await refreshSportCategory(sport, dates, false);
     res.set('Cache-Control', 'no-store');
-    res.json({ success:true, data, count:data.length, sport, source:'SofaBets', cached:false });
+    res.json({ success:true, data:slimList(data), count:data.length, sport, source:'SofaBets', cached:false });
   } catch(e) {
     console.error(`[sports/sofabets/${sport}]`, e.message);
     res.status(502).json({ success:false, data:[], message:'SofaBets sport feed unavailable' });

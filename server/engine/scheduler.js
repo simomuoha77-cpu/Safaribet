@@ -20,13 +20,18 @@ function start() {
   setTimeout(sweepStale, 45 * 1000).unref();
   cron.schedule('*/30 * * * *', sweepStale);
 
+  // A job never starts while its previous run is still going (a slow provider / database used to stack runs on top of each
+  // other, each repeating the same downloads and writes). See utils/noOverlap.js.
+  const { noOverlap: guard } = require('../utils/noOverlap');
+
   // Sync fixtures every 5 minutes
-  cron.schedule('*/5 * * * *', () => { syncFixtures().catch(console.error); });
+  cron.schedule('*/5 * * * *', guard(() => syncFixtures(), 8 * 60000));
 
   // Live scores — interval via env, default 20s
   const liveMs = parseInt(process.env.LIVE_POLL_MS) || 10000; // 10s — catch score changes before match disappears
   const betBusy = () => { try { return require('../providers/sofaBetsProvider').betIsPlacing(); } catch (e) { return false; } };   // a customer placing a bet goes first
-  setInterval(() => { if (betBusy()) return; updateLive().catch(console.error); }, liveMs);
+  const liveTick = guard(() => updateLive(), 2 * 60000);
+  setInterval(() => { if (betBusy()) return; liveTick(); }, liveMs);
 
   // Settlement: fast DB-only pass every minute (cheap — matches are already
   // polled every 10s by updateLive above, so this alone delivers near-instant
@@ -38,7 +43,7 @@ function start() {
   cron.schedule('*/5 * * * *', () => { runSettlement(true).catch(console.error); });
 
   // Jackpot settlement — same cadence, checks if all fixtures in any open round finished
-  cron.schedule('*/5 * * * *', () => { settleJackpots().catch(console.error); });
+  cron.schedule('*/5 * * * *', guard(() => settleJackpots(), 8 * 60000));
 
   // Loyalty cashback — weekly, Sunday midnight
   const { runWeeklyCashback } = require('./loyaltyCashback');
