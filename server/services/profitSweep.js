@@ -14,7 +14,10 @@ const mpesaClient = require('./mpesaClient');
 const audit = require('./auditService');
 
 const KEY = 'sweep_config';
-const VERSION = 'sweep-v6-two-channels';
+const VERSION = 'sweep-v8-hardened';
+const PAUSE_AFTER_CHANGE_MS = 30 * 60000;   // sweeps are held for 30 min after the destination changes
+const MAX_SHARE_OF_DEPOSITS = 0.9;          // never pay out more than 90% of all recorded deposits, in total
+const AUTO_OFF_AFTER_FAILURES = 3;          // a channel switches itself off after this many failures in a row
 const MIN_B2C = 10;                         // Safaricom minimum
 const DEFAULT_CFG = {
   phone: { enabled: false, number: '', percent: 50 },
@@ -47,7 +50,8 @@ async function getConfig() {
     return {
       phone: Object.assign({}, DEFAULT_CFG.phone, v.phone || {}),
       bank: Object.assign({}, DEFAULT_CFG.bank, v.bank || {}),
-      dailyCap: v.dailyCap !== undefined ? v.dailyCap : DEFAULT_CFG.dailyCap
+      dailyCap: v.dailyCap !== undefined ? v.dailyCap : DEFAULT_CFG.dailyCap,
+      pausedUntil: v.pausedUntil || null
     };
   }
   const bank = v.destination === 'bank';
@@ -133,6 +137,41 @@ async function dispatch(doc) {
   return doc;
 }
 
+// ── Safety guards ──
+// 1) The deposit is re-checked with Safaricom itself, so a forged "payment received" message can never trigger a payout.
+async function verifyDeposit(reference) {
+  if (!['production', 'live'].includes(String(process.env.MPESA_ENV || '').toLowerCase())) return { ok: true, skipped: 'not production' };
+  try {
+    const q = await require('../routes/mpesa').queryStkStatus(reference);
+    return String(q && q.ResultCode) === '0' ? { ok: true } : { ok: false, reason: `Safaricom says this payment is not successful (${q && (q.ResultDesc || q.ResultCode)})` };
+  } catch (e) {
+    return { ok: false, retryable: true, reason: 'could not verify with Safaricom right now (' + ((e && e.response && e.response.status) || e.message) + ')' };
+  }
+}
+// 2) Total paid out can never exceed a fixed share of the deposits actually recorded in the database.
+async function withinDepositBudget(extra, excludeId) {
+  const Transaction = require('../models/Transaction');
+  const [dep, out] = await Promise.all([
+    Transaction.aggregate([{ $match: { type: 'deposit', status: 'completed' } }, { $group: { _id: null, t: { $sum: '$amount' } } }]),
+    Sweep.aggregate([{ $match: { status: { $in: ['pending', 'sent'] }, _id: { $ne: excludeId } } }, { $group: { _id: null, t: { $sum: '$amount' } } }])
+  ]);
+  const deposits = dep[0] ? dep[0].t : 0, paid = out[0] ? out[0].t : 0;
+  return { ok: paid + extra <= deposits * MAX_SHARE_OF_DEPOSITS, deposits, paid };
+}
+// 3) A channel that fails several times in a row switches itself off (so a broken or tampered setup cannot keep trying).
+async function autoOffIfFailing(ch) {
+  const last = await Sweep.find({ destination: ch }).sort({ createdAt: -1 }).limit(AUTO_OFF_AFTER_FAILURES).select('status').lean();
+  if (last.length === AUTO_OFF_AFTER_FAILURES && last.every(r => r.status === 'failed')) {
+    const cfg = await getConfig();
+    if (cfg[ch].enabled) {
+      cfg[ch].enabled = false; await saveConfig(cfg, 'system');
+      await note(`${ch.toUpperCase()} channel switched OFF automatically after ${AUTO_OFF_AFTER_FAILURES} failures in a row. Fix the cause, then switch it on again.`);
+      audit.log('sweep.auto_off', { actorRole: 'system', targetType: 'Settings', targetId: KEY, meta: { channel: ch } });
+      console.error(`🚨 [sweep] ${ch} channel switched OFF automatically after repeated failures`);
+    }
+  }
+}
+
 // Called ONLY after a deposit has been confirmed and credited. Never throws (must not affect the deposit).
 // Each switched-on channel (phone / bank) creates its own sweep row, so they never interfere with each other.
 async function onDepositCompleted({ reference, userId, amount }) {
@@ -145,6 +184,10 @@ async function onDepositCompleted({ reference, userId, amount }) {
 
     const since = nairobiDayStart();
     const out = [];
+    const pausedUntil = cfg.pausedUntil ? new Date(cfg.pausedUntil) : null;
+    const paused = !!(pausedUntil && pausedUntil.getTime() > Date.now());
+    const ver = paused ? { ok: true } : await verifyDeposit(reference);
+    if (!ver.ok) await note(`Deposit ${reference}: NOT swept - ${ver.reason}`);
     for (const ch of on) {
       const pct = Math.min(90, Math.max(1, Number(cfg[ch].percent) || 50));
       const amt = Math.floor(dep * pct / 100);
@@ -160,8 +203,20 @@ async function onDepositCompleted({ reference, userId, amount }) {
         if (e && e.code === 11000) { await note(`Deposit ${reference} -> ${ch}: already handled earlier`); continue; }
         throw e;
       }
+      if (paused || !ver.ok) {
+        doc.status = 'capped';
+        doc.lastError = paused ? `held: destination was changed recently, sweeps resume at ${pausedUntil.toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi' })} (press Retry then)` : ('held: ' + ver.reason);
+        await doc.save(); await note(`Deposit ${reference} -> ${label}: ${doc.lastError}`); continue;
+      }
       if (amt < MIN_B2C) { doc.status = 'skipped'; doc.lastError = `below the M-Pesa minimum of KES ${MIN_B2C}`; await doc.save(); await note(`Deposit ${reference} -> ${label}: skipped (KES ${amt} is below the minimum KES ${MIN_B2C})`); continue; }
 
+      const bud = await withinDepositBudget(amt, doc._id);
+      if (!bud.ok) {
+        doc.status = 'capped'; doc.lastError = `held: total payouts would exceed ${Math.round(MAX_SHARE_OF_DEPOSITS * 100)}% of recorded deposits (paid KES ${bud.paid} of KES ${bud.deposits} deposited)`;
+        await doc.save(); await note(`Deposit ${reference} -> ${label}: ${doc.lastError}`);
+        audit.log('sweep.budget_block', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { amt, paid: bud.paid, deposits: bud.deposits } });
+        continue;
+      }
       const agg = await Sweep.aggregate([{ $match: { createdAt: { $gte: since }, status: { $in: ['pending', 'sent'] }, _id: { $ne: doc._id } } }, { $group: { _id: null, t: { $sum: '$amount' } } }]);
       const today = agg[0] ? agg[0].t : 0, cap = Number(cfg.dailyCap);
       if (Number.isFinite(cap) && cap > 0 && today + amt > cap) {
@@ -174,6 +229,7 @@ async function onDepositCompleted({ reference, userId, amount }) {
       const done = await dispatch(doc);
       await note(`Deposit ${reference} -> ${label}: KES ${done.amount} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
       out.push(done);
+      if (done.status === 'failed') await autoOffIfFailing(ch);
     }
     return out;
   } catch (e) {
@@ -189,10 +245,16 @@ async function retry(id) {
   const cfg = await getConfig();
   const ch = doc.destination === 'bank' ? 'bank' : 'phone';
   if (!chReady(cfg, ch)) { doc.status = 'failed'; doc.lastError = `the ${ch} channel is switched off or incomplete`; await doc.save(); return doc; }
+  if (cfg.pausedUntil && new Date(cfg.pausedUntil).getTime() > Date.now()) { doc.status = 'capped'; doc.lastError = 'held: destination was changed recently, try again after the 30-minute safety pause'; await doc.save(); return doc; }
+  const baseRef = String(doc.depositRef).split(':')[0];
+  const ver = await verifyDeposit(baseRef);
+  if (!ver.ok) { doc.status = 'capped'; doc.lastError = 'held: ' + ver.reason; await doc.save(); return doc; }
+  const bud = await withinDepositBudget(doc.amount, doc._id);
+  if (!bud.ok) { doc.status = 'capped'; doc.lastError = 'held: payouts would exceed the safe share of recorded deposits'; await doc.save(); return doc; }
   if (ch === 'bank') { doc.bankPaybill = cfg.bank.paybill; doc.bankAccount = cfg.bank.account; } else { doc.phone = cfg.phone.number; }
   const done = await dispatch(doc);
   await note(`Retry ${doc.depositRef} -> ${ch.toUpperCase()}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
   return done;
 }
 
-module.exports = { VERSION, chReady, maskAcct, note, getEvents, getConfig, saveConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };
+module.exports = { PAUSE_AFTER_CHANGE_MS, VERSION, chReady, maskAcct, note, getEvents, getConfig, saveConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };

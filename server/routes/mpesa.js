@@ -441,4 +441,5 @@ if (!process.env.SB_NO_SWEEP) {
 }
 router.sweepPendingDeposits = sweepPendingDeposits;
 
+router.queryStkStatus = queryStkStatus;   // used by the profit sweep to re-verify a deposit with Safaricom before paying anything out
 module.exports = router;

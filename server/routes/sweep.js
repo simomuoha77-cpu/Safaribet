@@ -49,7 +49,7 @@ async function checkTotp(req) {
 
 function publicCfg(c) {
   return {
-    version: sweepSvc.VERSION, dailyCap: c.dailyCap,
+    version: sweepSvc.VERSION, dailyCap: c.dailyCap, pausedUntil: (c.pausedUntil && new Date(c.pausedUntil) > new Date()) ? c.pausedUntil : null,
     phone: { enabled: !!c.phone.enabled, masked: sweepSvc.maskPhone(c.phone.number), set: !!c.phone.number, percent: c.phone.percent },
     bank:  { enabled: !!c.bank.enabled, paybill: c.bank.paybill || '', accountMasked: sweepSvc.maskAcct(c.bank.account), set: !!(c.bank.paybill && c.bank.account), percent: c.bank.percent }
   };
@@ -91,6 +91,7 @@ router.post('/admin/config', requireAdmin, totpLimiter, async (req, res) => {
     if (cfg.bank.enabled && !(cfg.bank.paybill && cfg.bank.account)) return bad('Add the bank paybill and account number before switching the bank channel on.');
     const total = (cfg.phone.enabled ? cfg.phone.percent : 0) + (cfg.bank.enabled ? cfg.bank.percent : 0);
     if (total > 90) return bad('Phone % + bank % together cannot be more than 90.');
+    if (changed.some(k => ['phone.number', 'bank.paybill', 'bank.account'].includes(k))) cfg.pausedUntil = new Date(Date.now() + sweepSvc.PAUSE_AFTER_CHANGE_MS).toISOString();   // safety pause after a destination change
     await sweepSvc.saveConfig(cfg, req.admin.username);
     const pub = publicCfg(cfg);
     audit.log('sweep.config.change', { actorId: req.admin.sub, actorRole: 'admin', targetType: 'Settings', targetId: sweepSvc.KEY, ip: req.ip, meta: { changed, phone: { enabled: pub.phone.enabled, masked: pub.phone.masked, percent: pub.phone.percent }, bank: { enabled: pub.bank.enabled, paybill: pub.bank.paybill, accountMasked: pub.bank.accountMasked, percent: pub.bank.percent }, dailyCap: cfg.dailyCap } });
