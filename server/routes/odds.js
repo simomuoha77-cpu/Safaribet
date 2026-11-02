@@ -5,6 +5,7 @@
 const express = require('express');
 const crypto  = require('crypto');
 const { requireAdmin } = require('../utils/adminAuth');
+const { slimRow } = require('../utils/listSlim');
 const safeError = require('../utils/safeError');
 const Match   = require('../models/Match');
 const { getFixtures, getLive, competitionKey } = require('../engine/apifootball');
@@ -325,12 +326,20 @@ router.post('/market-counts', async (req, res) => {
 const SNAP_MAX_AGE_MS = 6 * 3600000;
 const snap = { json: null, etag: null, ts: 0, savedDb: 0 };
 function snapCol() { try { const m = require('mongoose'); return m.connection && m.connection.readyState === 1 ? m.connection.collection('feed_snapshots') : null; } catch (_) { return null; } }
+// The snapshot is the whole home feed (megabytes). It only has to survive a restart / sleep, and a server that slept was idle
+// for 15+ minutes anyway, so saving it every 5 minutes (was every minute) loses nothing - and an unchanged feed is not re-sent.
+const SNAP_DB_EVERY_MS = 5 * 60000;
 function snapSave(json, etag) {
-  snap.json = json; snap.etag = etag || ('W/"' + crypto.createHash('sha1').update(json).digest('hex') + '"'); snap.ts = Date.now();
-  if (Date.now() - snap.savedDb < 60000) return;
+  const newEtag = etag || ('W/"' + crypto.createHash('sha1').update(json).digest('hex') + '"');
+  const unchanged = snap.savedEtag === newEtag && Date.now() - (snap.savedAt || 0) < 3600000;   // unchanged feed: re-saved at most hourly (keeps it under the 6h age limit)
+  snap.json = json; snap.etag = newEtag; snap.ts = Date.now();
+  if (Date.now() - snap.savedDb < SNAP_DB_EVERY_MS) return;
   const col = snapCol(); if (!col) return;
   snap.savedDb = Date.now();
-  col.updateOne({ _id: 'featured' }, { $set: { json, etag: snap.etag, ts: new Date(snap.ts) } }, { upsert: true }).catch(() => {});
+  if (unchanged) return;
+  col.updateOne({ _id: 'featured' }, { $set: { json, etag: snap.etag, ts: new Date(snap.ts) } }, { upsert: true })
+    .then(() => { snap.savedEtag = newEtag; snap.savedAt = Date.now(); try { require('../utils/bandwidthMeter').addDb('feed_snapshot', json.length + 200); } catch (_) {} })
+    .catch(() => {});
 }
 (function snapBoot() {
   let tries = 0;
@@ -481,6 +490,10 @@ function mcKnown(id, p) {
   const o = marketCountStore.get(id); if (o && Date.now() - o.ts < COUNT_KEEP_MS && (best == null || o.n > best)) best = o.n;
   return best;
 }
+// A game whose market list keeps NOT coming back (404 / aborted / none published) used to be asked for again every 5 minutes
+// for ever - each ask fans out ~14 requests to SofaBets. Misses now back off (see utils/missBackoff.js); one success clears it.
+const { missBackoffMs } = require('../utils/missBackoff');
+const mcFails = new Map();   // matchId -> consecutive asks that produced no market count
 const mcRecheck = new Map();   // matchId -> { tries, last }  (thin football lists are asked again, a few times)
 const MC_THIN = 40;
 let mcMapCache = { ts: 0, json: '{}', etag: '' };
@@ -526,11 +539,12 @@ router.get('/all-counts', (req, res) => {
           cand.push({ id, p, t: tm + 1e11, force: true });          // after every game that has no count at all
           continue;
         }
-        if (now - (mcTried.get(id) || 0) < 5 * 60000) continue;
+        if (now - (mcTried.get(id) || 0) < missBackoffMs(mcFails.get(id), tm, now)) continue;
         cand.push({ id, p, t: tm });
       }
       cand.sort((a, b) => a.t - b.t);
-      for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); if (x.force) { const rc = mcRecheck.get(x.id) || { tries: 0, last: 0 }; mcRecheck.set(x.id, { tries: rc.tries + 1, last: now }); } mcFetchOne(x.id, x.p, !!x.force); }
+      for (const x of cand.slice(0, MC_CONC - mcActive)) { mcTried.set(x.id, now); if (x.force) { const rc = mcRecheck.get(x.id) || { tries: 0, last: 0 }; mcRecheck.set(x.id, { tries: rc.tries + 1, last: now }); } const job = mcFetchOne(x.id, x.p, !!x.force); if (!x.force) job.then(() => { if (mcKnown(x.id, x.p) == null) mcFails.set(x.id, (mcFails.get(x.id) || 0) + 1); else mcFails.delete(x.id); }).catch(() => {}); }
+      if (mcFails.size > 6000) mcFails.delete(mcFails.keys().next().value);
       if (mcTried.size > 6000) mcTried.delete(mcTried.keys().next().value);
       // Nothing else to do: pre-load the FULL market list of the games people open most (live now, or starting within 6h; at most
       // 40, a couple at a time), so opening them shows every market at once. Kept in memory and stored in MongoDB.
@@ -660,7 +674,7 @@ router.get('/featured', async (req, res) => {
     });
     live.forEach(m => { if (!merged.find(x => x.matchId === m.matchId)) merged.push(m); });
 
-    const sorted = smartSort(merged).map(applyOddsPipeline);
+    const sorted = smartSort(merged).map(applyOddsPipeline).map(slimRow);   // list rows without unused/volatile fields -> smaller body and a stable ETag
     const payload = { success: true, data: sorted, count: sorted.length };
     const payloadJson = JSON.stringify(payload);   // serialised once: used for the ETag AND as the response body
     const etag = 'W/"' + crypto.createHash('sha1').update(payloadJson).digest('hex') + '"';
@@ -1182,6 +1196,7 @@ router.get('/match/:matchId', async (req, res) => {
 });
 
 // ── CACHE CLEAR ──
+router.get('/bandwidth', requireAdmin, (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ success: true, data: require('../utils/bandwidthMeter').snapshot() }); });
 router.post('/cache/clear', requireAdmin, (req, res) => {
   Object.keys(cache).forEach(k => delete cache[k]);
   res.json({ success: true, message: 'Cache cleared' });
