@@ -14,8 +14,13 @@ const mpesaClient = require('./mpesaClient');
 const audit = require('./auditService');
 
 const KEY = 'sweep_config';
-const MIN_B2C = 10;                         // Safaricom B2C minimum
-const DEFAULT_CFG = { enabled: false, destination: 'phone', phone: '', bankPaybill: '', bankAccount: '', percent: 50, dailyCap: 50000 };
+const VERSION = 'sweep-v6-two-channels';
+const MIN_B2C = 10;                         // Safaricom minimum
+const DEFAULT_CFG = {
+  phone: { enabled: false, number: '', percent: 50 },
+  bank:  { enabled: false, paybill: '', account: '', percent: 50 },
+  dailyCap: 50000
+};
 
 const SHORTCODE = () => process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
 const INITIATOR = () => (process.env.MPESA_INITIATOR_NAME || 'testapi').trim();
@@ -35,9 +40,22 @@ function baseUrl() {
 const RESULT_URL  = () => process.env.MPESA_SWEEP_RESULT_URL  || `${baseUrl()}/api/sweep/b2c/result`;
 const TIMEOUT_URL = () => process.env.MPESA_SWEEP_TIMEOUT_URL || `${baseUrl()}/api/sweep/b2c/timeout`;
 
+// Two independent channels, each with its own switch and percentage. Old single-destination settings are converted on read.
 async function getConfig() {
-  const v = await Settings.get(KEY);
-  return Object.assign({}, DEFAULT_CFG, v && typeof v === 'object' ? v : {});
+  const v = (await Settings.get(KEY)) || {};
+  if (v.phone && typeof v.phone === 'object' || v.bank && typeof v.bank === 'object') {
+    return {
+      phone: Object.assign({}, DEFAULT_CFG.phone, v.phone || {}),
+      bank: Object.assign({}, DEFAULT_CFG.bank, v.bank || {}),
+      dailyCap: v.dailyCap !== undefined ? v.dailyCap : DEFAULT_CFG.dailyCap
+    };
+  }
+  const bank = v.destination === 'bank';
+  return {   // legacy format
+    phone: { enabled: !!v.enabled && !bank, number: typeof v.phone === 'string' ? v.phone : '', percent: Number(v.percent) || 50 },
+    bank:  { enabled: !!v.enabled && bank, paybill: v.bankPaybill || '', account: v.bankAccount || '', percent: Number(v.percent) || 50 },
+    dailyCap: v.dailyCap !== undefined ? v.dailyCap : DEFAULT_CFG.dailyCap
+  };
 }
 // Visible diagnostics: the last 30 sweep decisions, stored in the database and shown in the admin panel
 // (so you never need server logs to see why a deposit was or was not swept).
@@ -51,16 +69,16 @@ async function note(msg) {
   } catch (_) {}
 }
 async function getEvents() { const v = await Settings.get(EVENTS_KEY); return Array.isArray(v) ? v : []; }
-async function setConfig(patch, by) { const cur = await getConfig(); const next = Object.assign({}, cur, patch); await Settings.set(KEY, next, by || 'admin'); return next; }
+async function saveConfig(cfg, by) { await Settings.set(KEY, cfg, by || 'admin'); return cfg; }
 
+const chReady = (cfg, ch) => ch === 'bank' ? !!(cfg.bank.enabled && cfg.bank.paybill && cfg.bank.account) : !!(cfg.phone.enabled && cfg.phone.number);
+const maskAcct = a => a ? '*'.repeat(Math.max(0, String(a).length - 3)) + String(a).slice(-3) : '';
 function normalizePhone(raw) {
   const d = String(raw || '').replace(/[\s+\-]/g, '');
   let n = d;
   if (/^0[17]\d{8}$/.test(d)) n = '254' + d.slice(1);
   return /^254[17]\d{8}$/.test(n) ? n : null;
 }
-function destReady(c) { return c.destination === 'bank' ? !!(c.bankPaybill && c.bankAccount) : !!c.phone; }
-const maskAcct = a => a ? '*'.repeat(Math.max(0, String(a).length - 3)) + String(a).slice(-3) : '';
 const maskPhone = p => p ? p.slice(0, 5) + '****' + p.slice(-3) : '';
 
 function nairobiDayStart() {
@@ -108,41 +126,48 @@ async function dispatch(doc) {
 }
 
 // Called ONLY after a deposit has been confirmed and credited. Never throws (must not affect the deposit).
+// Each switched-on channel (phone / bank) creates its own sweep row, so they never interfere with each other.
 async function onDepositCompleted({ reference, userId, amount }) {
   try {
     const cfg = await getConfig();
-    await note(`Deposit ${reference} KES ${amount} confirmed | switched on: ${!!cfg.enabled} | destination (${cfg.destination}) saved: ${destReady(cfg)}`);
-    console.log(`[sweep] deposit ${reference} KES ${amount} seen | switched on: ${!!cfg.enabled} | number saved: ${!!cfg.phone} | percent: ${cfg.percent}`);
-    if (!cfg.enabled || !destReady(cfg) || !reference) { console.log('[sweep] not sweeping: ' + (!cfg.enabled ? 'the sweep is switched OFF in the admin panel' : 'no destination saved')); return null; }
     const dep = Number(amount);
-    if (!Number.isFinite(dep) || dep <= 0) return null;
-    const pct = Math.min(90, Math.max(1, Number(cfg.percent) || 50));
-    const amt = Math.floor(dep * pct / 100);
-
-    let doc;
-    try {
-      doc = await Sweep.create({ depositRef: String(reference), userId, depositAmount: dep, amount: amt, destination: cfg.destination === 'bank' ? 'bank' : 'phone', phone: cfg.phone, bankPaybill: cfg.bankPaybill, bankAccount: cfg.bankAccount, status: 'pending' });
-    } catch (e) {
-      if (e && e.code === 11000) { await note(`Deposit ${reference}: already handled earlier`); return null; }           // this deposit was already handled
-      throw e;
-    }
-    if (amt < MIN_B2C) { doc.status = 'skipped'; doc.lastError = `below the M-Pesa B2C minimum of KES ${MIN_B2C}`; await doc.save(); return doc; }
+    const on = ['phone', 'bank'].filter(ch => chReady(cfg, ch));
+    await note(`Deposit ${reference} KES ${amount} confirmed | phone channel: ${chReady(cfg, 'phone') ? 'ON' : 'off'} | bank channel: ${chReady(cfg, 'bank') ? 'ON' : 'off'} [${VERSION}]`);
+    if (!reference || !Number.isFinite(dep) || dep <= 0 || !on.length) return null;
 
     const since = nairobiDayStart();
-    const agg = await Sweep.aggregate([{ $match: { createdAt: { $gte: since }, status: { $in: ['pending', 'sent'] }, _id: { $ne: doc._id } } }, { $group: { _id: null, t: { $sum: '$amount' } } }]);
-    const today = agg[0] ? agg[0].t : 0;
-    const cap = Number(cfg.dailyCap);
-    if (Number.isFinite(cap) && cap > 0 && today + amt > cap) {
-      doc.status = 'capped'; doc.lastError = `daily cap KES ${cap} reached`; await doc.save();
-      console.warn(`⚠️ [sweep] daily cap reached — deposit ${doc.depositRef} not swept (KES ${amt})`);
-      audit.log('sweep.capped', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { amount: amt, cap } });
-      return doc;
+    const out = [];
+    for (const ch of on) {
+      const pct = Math.min(90, Math.max(1, Number(cfg[ch].percent) || 50));
+      const amt = Math.floor(dep * pct / 100);
+      const label = ch === 'bank' ? `BANK (paybill ${cfg.bank.paybill})` : `PHONE ${maskPhone(cfg.phone.number)}`;
+      let doc;
+      try {
+        doc = await Sweep.create({
+          depositRef: `${reference}:${ch}`, userId, depositAmount: dep, amount: amt, destination: ch,
+          phone: ch === 'phone' ? cfg.phone.number : undefined,
+          bankPaybill: ch === 'bank' ? cfg.bank.paybill : undefined, bankAccount: ch === 'bank' ? cfg.bank.account : undefined, status: 'pending'
+        });
+      } catch (e) {
+        if (e && e.code === 11000) { await note(`Deposit ${reference} -> ${ch}: already handled earlier`); continue; }
+        throw e;
+      }
+      if (amt < MIN_B2C) { doc.status = 'skipped'; doc.lastError = `below the M-Pesa minimum of KES ${MIN_B2C}`; await doc.save(); await note(`Deposit ${reference} -> ${label}: skipped (KES ${amt} is below the minimum KES ${MIN_B2C})`); continue; }
+
+      const agg = await Sweep.aggregate([{ $match: { createdAt: { $gte: since }, status: { $in: ['pending', 'sent'] }, _id: { $ne: doc._id } } }, { $group: { _id: null, t: { $sum: '$amount' } } }]);
+      const today = agg[0] ? agg[0].t : 0, cap = Number(cfg.dailyCap);
+      if (Number.isFinite(cap) && cap > 0 && today + amt > cap) {
+        doc.status = 'capped'; doc.lastError = `daily cap KES ${cap} reached`; await doc.save();
+        await note(`Deposit ${reference} -> ${label}: NOT sent, daily cap KES ${cap} reached`);
+        audit.log('sweep.capped', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { amount: amt, cap, channel: ch } });
+        continue;
+      }
+      console.log(`[sweep] sending KES ${doc.amount} to ${label} for deposit ${reference}`);
+      const done = await dispatch(doc);
+      await note(`Deposit ${reference} -> ${label}: KES ${done.amount} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
+      out.push(done);
     }
-    console.log(`[sweep] sending KES ${doc.amount} to ${doc.destination === 'bank' ? 'bank paybill ' + doc.bankPaybill : maskPhone(doc.phone)} for deposit ${doc.depositRef}`);
-    const done = await dispatch(doc);
-    await note(`Deposit ${doc.depositRef}: payout KES ${doc.amount} to ${doc.destination === 'bank' ? 'BANK (paybill ' + doc.bankPaybill + ')' : 'PHONE ' + maskPhone(doc.phone)} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
-    console.log(`[sweep] result for ${doc.depositRef}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
-    return done;
+    return out;
   } catch (e) {
     console.error('🚨 [sweep] error:', e.message);
     await note('ERROR: ' + e.message);
@@ -154,10 +179,12 @@ async function retry(id) {
   const doc = await Sweep.findOneAndUpdate({ _id: id, status: { $in: ['failed', 'capped'] } }, { $set: { status: 'pending' } }, { new: true });
   if (!doc) return null;
   const cfg = await getConfig();
-  if (!cfg.enabled || !destReady(cfg)) { doc.status = 'failed'; doc.lastError = 'sweep is switched off or has no destination'; await doc.save(); return doc; }
-  doc.destination = cfg.destination === 'bank' ? 'bank' : 'phone';   // always the CURRENT admin-set destination
-  doc.phone = cfg.phone; doc.bankPaybill = cfg.bankPaybill; doc.bankAccount = cfg.bankAccount;
-  return dispatch(doc);
+  const ch = doc.destination === 'bank' ? 'bank' : 'phone';
+  if (!chReady(cfg, ch)) { doc.status = 'failed'; doc.lastError = `the ${ch} channel is switched off or incomplete`; await doc.save(); return doc; }
+  if (ch === 'bank') { doc.bankPaybill = cfg.bank.paybill; doc.bankAccount = cfg.bank.account; } else { doc.phone = cfg.phone.number; }
+  const done = await dispatch(doc);
+  await note(`Retry ${doc.depositRef} -> ${ch.toUpperCase()}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
+  return done;
 }
 
-module.exports = { destReady, maskAcct, note, getEvents, getConfig, setConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };
+module.exports = { VERSION, chReady, maskAcct, note, getEvents, getConfig, saveConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };

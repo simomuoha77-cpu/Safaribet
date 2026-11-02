@@ -3568,38 +3568,37 @@ document.addEventListener('keydown',e=>{
     var p=document.getElementById('panel-sweep'); if(!p)return; p.replaceChildren(h('p',{},'Loading...'));
     var c=await call('GET','/api/sweep/admin/config'), l=await call('GET','/api/sweep/admin/list');
     if(!c.success){p.replaceChildren(h('p',{},c.message||'Failed to load'));return;}
-    var d=c.data, msg=h('p',{style:'margin-top:8px'},'');
-    var phone=h('input',{type:'tel',placeholder:d.hasPhone?('Current: '+d.phoneMasked+' (leave empty to keep)'):'07XXXXXXXX',style:'width:100%;margin:6px 0;padding:10px'});
-    var destVal=d.destination==='bank'?'bank':'phone';
-    var rPhone=h('input',{type:'radio',name:'sweepdest',value:'phone'}), rBank=h('input',{type:'radio',name:'sweepdest',value:'bank'});
-    (destVal==='bank'?rBank:rPhone).checked=true;
-    var bpb=h('input',{type:'text',inputmode:'numeric',placeholder:d.bankPaybill?('Current bank paybill: '+d.bankPaybill):'Bank paybill number, e.g. 247247',style:'width:100%;margin:6px 0;padding:10px'});
-    var bac=h('input',{type:'text',placeholder:d.bankAccountMasked?('Current account: '+d.bankAccountMasked+' (leave empty to keep)'):'Your bank account number',style:'width:100%;margin:6px 0;padding:10px'});
-    var bankBox=h('div',{style:'padding:8px 0'},[h('div',{},'Bank paybill number'),bpb,h('div',{},'Bank account number'),bac]);
-    var phoneBox=h('div',{style:'padding:8px 0'},[h('div',{},'Your M-Pesa phone number')]);
-    var pct=h('input',{type:'number',min:1,max:90,value:d.percent,style:'width:100%;margin:6px 0;padding:10px'});
-    var cap=h('input',{type:'number',min:0,value:d.dailyCap,style:'width:100%;margin:6px 0;padding:10px'});
-    var on=h('input',{type:'checkbox'}); on.checked=!!d.enabled;
-    phoneBox.appendChild(phone);
-    function showBox(){var bk=rBank.checked;bankBox.style.display=bk?'':'none';phoneBox.style.display=bk?'none':'';}
-    rPhone.onchange=showBox;rBank.onchange=showBox;showBox();
-    var banner=h('p',{style:'font-weight:700;padding:8px 0'},'Money currently goes to: '+(destVal==='bank'?('YOUR BANK ACCOUNT via paybill '+(d.bankPaybill||'?')+', account '+(d.bankAccountMasked||'?')):('YOUR PHONE '+(d.phoneMasked||'(not set)'))));
-    var totp=h('input',{type:'text',inputmode:'numeric',maxlength:6,placeholder:'6-digit authenticator code',style:'width:100%;margin:6px 0;padding:10px'});
-    var save=h('button',{class:'btn'},'Save (needs authenticator code)');
+    var d=c.data, msg=h('p',{style:'margin-top:8px;font-weight:700'},'');
+    function inp(ph,v,t){return h('input',{type:t||'text',placeholder:ph,value:v==null?'':v,style:'width:100%;margin:6px 0;padding:10px'});}
+    var phOn=h('input',{type:'checkbox'}); phOn.checked=!!d.phone.enabled;
+    var phNum=inp(d.phone.set?('Current: '+d.phone.masked+' (leave empty to keep)'):'07XXXXXXXX','','tel');
+    var phPct=inp('%',d.phone.percent,'number');
+    var bkOn=h('input',{type:'checkbox'}); bkOn.checked=!!d.bank.enabled;
+    var bkPb=inp(d.bank.paybill?('Current bank paybill: '+d.bank.paybill):'Bank paybill number, e.g. 247247','');
+    var bkAc=inp(d.bank.accountMasked?('Current account: '+d.bank.accountMasked+' (leave empty to keep)'):'Your bank account number','');
+    var bkPct=inp('%',d.bank.percent,'number');
+    var cap=inp('Daily cap KES',d.dailyCap,'number');
+    var totp=inp('6-digit authenticator code','');totp.setAttribute('inputmode','numeric');totp.setAttribute('maxlength','6');
+    var save=h('button',{class:'btn'},'Save both (needs authenticator code)');
     save.onclick=async function(){
-      var b={totp:totp.value,enabled:on.checked,destination:(rBank.checked?'bank':'phone'),percent:pct.value,dailyCap:cap.value}; if(phone.value.trim())b.phone=phone.value.trim(); if(bpb.value.trim())b.bankPaybill=bpb.value.trim(); if(bac.value.trim())b.bankAccount=bac.value.trim();
+      var b={totp:totp.value,dailyCap:cap.value,phone:{enabled:phOn.checked,percent:phPct.value},bank:{enabled:bkOn.checked,percent:bkPct.value}};
+      if(phNum.value.trim())b.phone.number=phNum.value.trim(); if(bkPb.value.trim())b.bank.paybill=bkPb.value.trim(); if(bkAc.value.trim())b.bank.account=bkAc.value.trim();
       var r=await call('POST','/api/sweep/admin/config',b); msg.textContent=r.success?'Saved.':(r.message||'Failed'); if(r.success){totp.value='';setTimeout(window.loadSweep,600);}
     };
+    function state(on,txt){return on?('ON - '+txt):'OFF';}
+    var banner=h('div',{style:'padding:8px 0;font-weight:700'},[h('div',{},'PHONE channel: '+state(d.phone.enabled,d.phone.percent+'% to '+(d.phone.masked||'no number'))),h('div',{},'BANK channel: '+state(d.bank.enabled,d.bank.percent+'% to paybill '+(d.bank.paybill||'?')+' / '+(d.bank.accountMasked||'?'))),h('div',{style:'font-size:11px;font-weight:400'},'Server version: '+(d.version||'old - not updated'))]);
     var sum=(l.summary||[]).map(function(s){return s._id+': '+s.n+' (KES '+s.t+')';}).join('  |  ')||'No sweeps yet';
     var rows=(l.items||[]).map(function(i){
       var tr=h('tr',{},[h('td',{},new Date(i.createdAt).toLocaleString('en-KE')),h('td',{},'KES '+i.depositAmount),h('td',{},'KES '+i.amount+' → '+(i.destination==='bank'?'BANK':'PHONE')),h('td',{},i.status),h('td',{},i.lastError||i.mpesaReceipt||'')]);
       if(i.status==='failed'||i.status==='capped'){var b=h('button',{class:'btn'},'Retry');b.onclick=async function(){var code=prompt('Authenticator code');if(!code)return;var r=await call('POST','/api/sweep/admin/retry/'+i._id,{totp:code});alert(r.success?('Status: '+r.status+(r.error?(' - '+r.error):'')):(r.message||'Failed'));window.loadSweep();};tr.appendChild(h('td',{},b));}
       return tr;});
+    var ev=(l.events||[]).length?(l.events||[]).slice(0,15).map(function(e){return h('p',{style:'font-size:12px'},new Date(e.at).toLocaleString('en-KE')+' - '+e.msg);}):[h('p',{},'Nothing yet.')];
     p.replaceChildren(
-      h('div',{class:'card'},[h('h2',{},'Profit Sweep'),
-        h('p',{},'When a deposit is confirmed the player gets the FULL amount in their wallet, and this share of the cash is sent to your phone by M-Pesa.'),
-        h('label',{},[on,' Switched on']),banner,h('div',{style:'font-weight:700;margin-top:8px'},'Choose where the money goes:'),h('label',{style:'display:block;padding:6px 0'},[rPhone,' To my M-Pesa PHONE']),h('label',{style:'display:block;padding:6px 0'},[rBank,' To my BANK ACCOUNT (through the bank paybill)']),phoneBox,bankBox,h('div',{},'Share of each deposit (%)'),pct,h('div',{},'Daily cap in KES (0 = no cap)'),cap,totp,save,msg]),
-      h('div',{class:'card'},[h('h2',{},'Recent deposit checks'),h('p',{},'Every confirmed deposit appears here with what the sweep did. If a new deposit does not appear here, the server is not running the new code.')].concat((l.events||[]).length?(l.events||[]).slice(0,15).map(function(e){return h('p',{style:'font-size:12px'},new Date(e.at).toLocaleString('en-KE')+' - '+e.msg);}):[h('p',{},'Nothing yet.')])),
+      h('div',{class:'card'},[h('h2',{},'Profit Sweep'),h('p',{},'Each confirmed deposit: the player gets the FULL amount. Then each channel that is ON sends its share of the cash. The two channels are independent, switch either one on or off.'),banner]),
+      h('div',{class:'card'},[h('h2',{},'📱 Phone channel'),h('label',{},[phOn,' Switched on']),h('div',{},'M-Pesa phone number'),phNum,h('div',{},'Share of each deposit (%)'),phPct]),
+      h('div',{class:'card'},[h('h2',{},'🏦 Bank channel'),h('label',{},[bkOn,' Switched on']),h('div',{},'Bank paybill number'),bkPb,h('div',{},'Bank account number'),bkAc,h('div',{},'Share of each deposit (%)'),bkPct]),
+      h('div',{class:'card'},[h('div',{},'Daily cap in KES, both channels together (0 = no cap)'),cap,totp,save,msg,h('p',{style:'font-size:12px'},'Phone % + bank % together can be at most 90.')]),
+      h('div',{class:'card'},[h('h2',{},'Recent deposit checks')].concat(ev)),
       h('div',{class:'card'},[h('h2',{},'Sweeps'),h('p',{},sum),
         h('table',{},[h('thead',{},h('tr',{},['When','Deposit','Sent to you','Status','Note',''].map(function(x){return h('th',{},x);}))),h('tbody',{},rows)])]));
   };
