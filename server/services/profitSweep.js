@@ -80,7 +80,8 @@ async function dispatch(doc) {
 async function onDepositCompleted({ reference, userId, amount }) {
   try {
     const cfg = await getConfig();
-    if (!cfg.enabled || !cfg.phone || !reference) return null;
+    console.log(`[sweep] deposit ${reference} KES ${amount} seen | switched on: ${!!cfg.enabled} | number saved: ${!!cfg.phone} | percent: ${cfg.percent}`);
+    if (!cfg.enabled || !cfg.phone || !reference) { console.log('[sweep] not sweeping: ' + (!cfg.enabled ? 'the sweep is switched OFF in the admin panel' : 'no phone number saved')); return null; }
     const dep = Number(amount);
     if (!Number.isFinite(dep) || dep <= 0) return null;
     const pct = Math.min(90, Math.max(1, Number(cfg.percent) || 50));
@@ -105,7 +106,10 @@ async function onDepositCompleted({ reference, userId, amount }) {
       audit.log('sweep.capped', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { amount: amt, cap } });
       return doc;
     }
-    return await dispatch(doc);
+    console.log(`[sweep] sending KES ${doc.amount} to ${maskPhone(doc.phone)} for deposit ${doc.depositRef}`);
+    const done = await dispatch(doc);
+    console.log(`[sweep] result for ${doc.depositRef}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
+    return done;
   } catch (e) {
     console.error('🚨 [sweep] error:', e.message);
     return null;
