@@ -49,13 +49,13 @@ async function checkTotp(req) {
 
 router.get('/admin/config', requireAdmin, async (req, res) => {
   const c = await sweepSvc.getConfig();
-  res.json({ success: true, data: { enabled: !!c.enabled, phoneMasked: sweepSvc.maskPhone(c.phone), hasPhone: !!c.phone, percent: c.percent, dailyCap: c.dailyCap } });
+  res.json({ success: true, data: { enabled: !!c.enabled, destination: c.destination, phoneMasked: sweepSvc.maskPhone(c.phone), hasPhone: !!c.phone, bankPaybill: c.bankPaybill || '', bankAccountMasked: sweepSvc.maskAcct(c.bankAccount), percent: c.percent, dailyCap: c.dailyCap } });
 });
 
 router.get('/admin/list', requireAdmin, async (req, res) => {
   const events = await sweepSvc.getEvents();
   const [items, sums] = await Promise.all([
-    Sweep.find().sort({ createdAt: -1 }).limit(100).select('-phone').lean(),
+    Sweep.find().sort({ createdAt: -1 }).limit(100).select('-phone -bankAccount -bankPaybill').lean(),
     Sweep.aggregate([{ $group: { _id: '$status', n: { $sum: 1 }, t: { $sum: '$amount' } } }])
   ]);
   res.json({ success: true, items, summary: sums, events });
@@ -70,6 +70,18 @@ router.post('/admin/config', requireAdmin, totpLimiter, async (req, res) => {
       if (!p) return res.status(400).json({ success: false, message: 'Enter a valid Safaricom number, e.g. 0712345678.' });
       patch.phone = p; changed.push('phone');
     }
+    if (b.destination !== undefined) {
+      if (!['phone', 'bank'].includes(b.destination)) return res.status(400).json({ success: false, message: 'Destination must be phone or bank.' });
+      patch.destination = b.destination; changed.push('destination');
+    }
+    if (b.bankPaybill !== undefined && b.bankPaybill !== '') {
+      if (!/^\d{5,7}$/.test(String(b.bankPaybill).trim())) return res.status(400).json({ success: false, message: "Bank paybill number must be 5-7 digits (e.g. Equity 247247)." });
+      patch.bankPaybill = String(b.bankPaybill).trim(); changed.push('bankPaybill');
+    }
+    if (b.bankAccount !== undefined && b.bankAccount !== '') {
+      if (!/^[A-Za-z0-9\-]{4,30}$/.test(String(b.bankAccount).trim())) return res.status(400).json({ success: false, message: 'Bank account number looks wrong.' });
+      patch.bankAccount = String(b.bankAccount).trim(); changed.push('bankAccount');
+    }
     if (b.percent !== undefined) {
       const n = Number(b.percent); if (!Number.isFinite(n) || n < 1 || n > 90) return res.status(400).json({ success: false, message: 'Percent must be 1-90.' });
       patch.percent = Math.floor(n); changed.push('percent');
@@ -82,10 +94,11 @@ router.post('/admin/config', requireAdmin, totpLimiter, async (req, res) => {
       patch.enabled = !!b.enabled; changed.push('enabled');
     }
     const cur = await sweepSvc.getConfig();
-    if ((patch.enabled === true || (patch.enabled === undefined && cur.enabled)) && !(patch.phone || cur.phone)) return res.status(400).json({ success: false, message: 'Add a phone number before switching the sweep on.' });
+    const merged = Object.assign({}, cur, patch);
+    if (merged.enabled && !sweepSvc.destReady(merged)) return res.status(400).json({ success: false, message: merged.destination === 'bank' ? 'Add the bank paybill number and account number first.' : 'Add a phone number first.' });
     const next = await sweepSvc.setConfig(patch, req.admin.username);
-    audit.log('sweep.config.change', { actorId: req.admin.sub, actorRole: 'admin', targetType: 'Settings', targetId: sweepSvc.KEY, ip: req.ip, meta: { changed, enabled: next.enabled, percent: next.percent, dailyCap: next.dailyCap, phoneMasked: sweepSvc.maskPhone(next.phone) } });
-    res.json({ success: true, data: { enabled: !!next.enabled, phoneMasked: sweepSvc.maskPhone(next.phone), percent: next.percent, dailyCap: next.dailyCap } });
+    audit.log('sweep.config.change', { actorId: req.admin.sub, actorRole: 'admin', targetType: 'Settings', targetId: sweepSvc.KEY, ip: req.ip, meta: { changed, enabled: next.enabled, destination: next.destination, percent: next.percent, dailyCap: next.dailyCap, phoneMasked: sweepSvc.maskPhone(next.phone), bankPaybill: next.bankPaybill, bankAccountMasked: sweepSvc.maskAcct(next.bankAccount) } });
+    res.json({ success: true, data: { enabled: !!next.enabled, destination: next.destination, percent: next.percent, dailyCap: next.dailyCap } });
   } catch (e) { console.error('[sweep/config]', e.message); res.status(500).json({ success: false, message: 'Could not save.' }); }
 });
 
