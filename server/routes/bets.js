@@ -43,6 +43,7 @@ function pickLabelFor(market, pick, match) {
 // site lists), used so placing a bet never has to crawl SofaBets when the match
 // is missing from / stale in MongoDB. Live games must be <=45s old, prematch <=10min.
 const realKickCache = new Map();
+const realKickInflight = new Map();
 function indexedFresh(matchId, prematchMs) {
   try {
     const idx = require('./sports').lookupIndexedMatch(matchId);
@@ -673,14 +674,20 @@ router.get('/my', auth, async (req, res) => {
             const pid = p && p.providerId; if (!pid) return;
             const key = sportName + ':' + pid;
             let real = realKickCache.get(key);
-            if (!real || Date.now() - real.at > 10 * 60000) {
-              let t = 0;
-              try {
-                const m = await Promise.race([sofaBets.getMatchById(pid, sportName, { rich: false }), new Promise(r => setTimeout(() => r(null), 3500))]);
-                t = m && m.utcDate ? new Date(m.utcDate).getTime() || 0 : 0;
-              } catch (_) {}
-              real = { at: Date.now(), t }; realKickCache.set(key, real);
-              if (realKickCache.size > 2000) realKickCache.clear();
+            if (real && !real.t && Date.now() - real.at > 2 * 60000) real = null;          // a miss is retried after 2 min
+            if (real && real.t && Date.now() - real.at > 60 * 60000) real = null;
+            if (!real) {
+              // The provider catalogue crawl can take longer than this request may wait. It keeps running in the
+              // background and fills the cache, so the next refresh (the page re-polls by itself) shows the real time.
+              let pr = realKickInflight.get(key);
+              if (!pr) {
+                pr = Promise.race([sofaBets.resolveExactFixture(pid, sportName, { rich: false }), new Promise(r => setTimeout(() => r(null), 90000))])
+                  .then(m => { const t = m && m.utcDate ? new Date(m.utcDate).getTime() || 0 : 0; real = { at: Date.now(), t }; realKickCache.set(key, real); if (realKickCache.size > 2000) realKickCache.clear(); return real; })
+                  .catch(() => ({ at: Date.now(), t: 0 }))
+                  .finally(() => realKickInflight.delete(key));
+                realKickInflight.set(key, pr);
+              }
+              real = await Promise.race([pr, new Promise(r => setTimeout(() => r({ at: Date.now(), t: 0, pending: true }), 6000))]);
             }
             const nowMs = Date.now();
             if (real.t && (s._srl || Math.abs(real.t - s._placed) >= 10 * 60000)) {
