@@ -3588,6 +3588,7 @@ document.addEventListener('keydown',e=>{
       h('div',{class:'card'},[h('h2',{},'Profit Sweep'),
         h('p',{},'When a deposit is confirmed the player gets the FULL amount in their wallet, and this share of the cash is sent to your phone by M-Pesa.'),
         h('label',{},[on,' Switched on']),h('div',{},'Your phone number'),phone,h('div',{},'Share of each deposit (%)'),pct,h('div',{},'Daily cap in KES (0 = no cap)'),cap,totp,save,msg]),
+      h('div',{class:'card'},[h('h2',{},'Recent deposit checks'),h('p',{},'Every confirmed deposit appears here with what the sweep did. If a new deposit does not appear here, the server is not running the new code.')].concat((l.events||[]).length?(l.events||[]).slice(0,15).map(function(e){return h('p',{style:'font-size:12px'},new Date(e.at).toLocaleString('en-KE')+' - '+e.msg);}):[h('p',{},'Nothing yet.')])),
       h('div',{class:'card'},[h('h2',{},'Sweeps'),h('p',{},sum),
         h('table',{},[h('thead',{},h('tr',{},['When','Deposit','Sent to you','Status','Note',''].map(function(x){return h('th',{},x);}))),h('tbody',{},rows)])]));
   };

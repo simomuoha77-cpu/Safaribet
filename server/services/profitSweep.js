@@ -29,6 +29,18 @@ async function getConfig() {
   const v = await Settings.get(KEY);
   return Object.assign({}, DEFAULT_CFG, v && typeof v === 'object' ? v : {});
 }
+// Visible diagnostics: the last 30 sweep decisions, stored in the database and shown in the admin panel
+// (so you never need server logs to see why a deposit was or was not swept).
+const EVENTS_KEY = 'sweep_events';
+async function note(msg) {
+  try {
+    const cur = await Settings.get(EVENTS_KEY);
+    const list = Array.isArray(cur) ? cur : [];
+    list.unshift({ at: new Date().toISOString(), msg: String(msg).slice(0, 300) });
+    await Settings.set(EVENTS_KEY, list.slice(0, 30), 'system');
+  } catch (_) {}
+}
+async function getEvents() { const v = await Settings.get(EVENTS_KEY); return Array.isArray(v) ? v : []; }
 async function setConfig(patch, by) { const cur = await getConfig(); const next = Object.assign({}, cur, patch); await Settings.set(KEY, next, by || 'admin'); return next; }
 
 function normalizePhone(raw) {
@@ -80,6 +92,7 @@ async function dispatch(doc) {
 async function onDepositCompleted({ reference, userId, amount }) {
   try {
     const cfg = await getConfig();
+    await note(`Deposit ${reference} KES ${amount} confirmed | switched on: ${!!cfg.enabled} | number saved: ${!!cfg.phone}`);
     console.log(`[sweep] deposit ${reference} KES ${amount} seen | switched on: ${!!cfg.enabled} | number saved: ${!!cfg.phone} | percent: ${cfg.percent}`);
     if (!cfg.enabled || !cfg.phone || !reference) { console.log('[sweep] not sweeping: ' + (!cfg.enabled ? 'the sweep is switched OFF in the admin panel' : 'no phone number saved')); return null; }
     const dep = Number(amount);
@@ -91,7 +104,7 @@ async function onDepositCompleted({ reference, userId, amount }) {
     try {
       doc = await Sweep.create({ depositRef: String(reference), userId, depositAmount: dep, amount: amt, phone: cfg.phone, status: 'pending' });
     } catch (e) {
-      if (e && e.code === 11000) return null;           // this deposit was already handled
+      if (e && e.code === 11000) { await note(`Deposit ${reference}: already handled earlier`); return null; }           // this deposit was already handled
       throw e;
     }
     if (amt < MIN_B2C) { doc.status = 'skipped'; doc.lastError = `below the M-Pesa B2C minimum of KES ${MIN_B2C}`; await doc.save(); return doc; }
@@ -108,10 +121,12 @@ async function onDepositCompleted({ reference, userId, amount }) {
     }
     console.log(`[sweep] sending KES ${doc.amount} to ${maskPhone(doc.phone)} for deposit ${doc.depositRef}`);
     const done = await dispatch(doc);
+    await note(`Deposit ${doc.depositRef}: payout KES ${doc.amount} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
     console.log(`[sweep] result for ${doc.depositRef}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
     return done;
   } catch (e) {
     console.error('🚨 [sweep] error:', e.message);
+    await note('ERROR: ' + e.message);
     return null;
   }
 }
@@ -125,4 +140,4 @@ async function retry(id) {
   return dispatch(doc);
 }
 
-module.exports = { getConfig, setConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };
+module.exports = { note, getEvents, getConfig, setConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };

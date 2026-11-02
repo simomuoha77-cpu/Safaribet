@@ -53,11 +53,12 @@ router.get('/admin/config', requireAdmin, async (req, res) => {
 });
 
 router.get('/admin/list', requireAdmin, async (req, res) => {
+  const events = await sweepSvc.getEvents();
   const [items, sums] = await Promise.all([
     Sweep.find().sort({ createdAt: -1 }).limit(100).select('-phone').lean(),
     Sweep.aggregate([{ $group: { _id: '$status', n: { $sum: 1 }, t: { $sum: '$amount' } } }])
   ]);
-  res.json({ success: true, items, summary: sums });
+  res.json({ success: true, items, summary: sums, events });
 });
 
 router.post('/admin/config', requireAdmin, totpLimiter, async (req, res) => {
