@@ -42,6 +42,7 @@ function pickLabelFor(market, pick, match) {
 // Fresh copy of a game from the server's own in-memory feed (the same data the
 // site lists), used so placing a bet never has to crawl SofaBets when the match
 // is missing from / stale in MongoDB. Live games must be <=45s old, prematch <=10min.
+const realKickCache = new Map();
 function indexedFresh(matchId, prematchMs) {
   try {
     const idx = require('./sports').lookupIndexedMatch(matchId);
@@ -626,7 +627,7 @@ router.get('/my', auth, async (req, res) => {
     try {
       const fin = require('../services/finalResultService');
       const pend = [];
-      bets.forEach(bt => (bt.selections || []).forEach(s => { if ((s.result || 'pending') === 'pending') pend.push(s); }));
+      bets.forEach(bt => (bt.selections || []).forEach(s => { if ((s.result || 'pending') === 'pending') { pend.push(s); Object.defineProperty(s, '_placed', { value: new Date(bt.placedAt || bt.createdAt || 0).getTime() || 0, enumerable: false, configurable: true }); } }));
       const ids = new Set();
       pend.forEach(s => {
         ids.add(s.matchId);
@@ -637,6 +638,7 @@ router.get('/my', auth, async (req, res) => {
         const rows = await Match.find({ matchId: { $in: Array.from(ids) } }, { matchId: 1, status: 1, finalVerified: 1, lastLiveSeenAt: 1, commenceTime: 1, trackerNote: 1 }).lean();
         const byId = {}; rows.forEach(r => { byId[r.matchId] = r; });
         const now = Date.now();
+        const suspects = [];
         pend.forEach(s => {
           const p = fin.parseSofaMatchId(s.matchId);
           const sib = p ? [s.matchId, `sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`] : [s.matchId];
@@ -658,7 +660,35 @@ router.get('/my', auth, async (req, res) => {
           // A saved "waiting because the match was not captured while live" note belongs to an older check: while the game is
           // live (or has not started) it would contradict the badge, so it is not shown.
           if (state === 'live' || state === 'not_started') { delete s.pendingReason; delete s.waitingBecause; }
+          // Suspect kick-off: the game was never in our live feed and its saved kick-off is (almost) the moment the bet was placed.
+          // That is the old "kick-off = bet time" fallback, so "LIVE" here is a guess from a wrong clock. Ask the provider for the real time.
+          if (state === 'live' && !seen && s._placed && kick && Math.abs(kick - s._placed) < 10 * 60000 && now - kick > 10 * 60000) suspects.push({ s, sportName, p });
         });
+        if (suspects.length) {
+          await Promise.all(suspects.map(async ({ s, sportName, p }) => {
+            const pid = p && p.providerId; if (!pid) return;
+            const key = sportName + ':' + pid;
+            let real = realKickCache.get(key);
+            if (!real || Date.now() - real.at > 10 * 60000) {
+              let t = 0;
+              try {
+                const m = await Promise.race([sofaBets.getMatchById(pid, sportName, { rich: false }), new Promise(r => setTimeout(() => r(null), 3500))]);
+                t = m && m.utcDate ? new Date(m.utcDate).getTime() || 0 : 0;
+              } catch (_) {}
+              real = { at: Date.now(), t }; realKickCache.set(key, real);
+              if (realKickCache.size > 2000) realKickCache.clear();
+            }
+            const nowMs = Date.now();
+            if (real.t && Math.abs(real.t - s._placed) >= 10 * 60000) {
+              // Provider gave a genuinely different kick-off: use it.
+              s.kickoffAt = real.t;
+              s.fixtureState = fin.fixtureLiveState({ kick: real.t, seen: 0, finalVerified: false, sport: sportName, now: nowMs });
+            } else if (!real.t) {
+              // Real kick-off unknown and the game was never seen live: do not claim LIVE.
+              s.fixtureState = 'not_started'; s.kickoffAt = null; s.kickoffUnknown = true;
+            }
+          }));
+        }
       }
     } catch (e) { /* purely informational - never block the bet list */ }
 

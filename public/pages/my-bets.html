@@ -287,10 +287,11 @@ function filter(f,el){
 function fixtureBadge(s){
   let st=s.fixtureState, kick=s.kickoffAt||(s.commenceTime?new Date(s.commenceTime).getTime():0);
   if(!st){ st = kick && kick>Date.now() ? 'not_started' : null; }
+  if(s.kickoffUnknown) st='not_started';
   // Kick-off still ahead (2 min tolerance): never LIVE, whatever a saved copy or the feed said.
   if(st==='live' && kick && kick-Date.now()>120000) st='not_started';
   // A saved copy can be older than kick-off: always let the clock correct it.
-  if(st==='not_started' && kick && kick<=Date.now()){
+  if(st==='not_started' && kick && kick<=Date.now() && !s.kickoffUnknown){
     const sp=String(s.sport||'football').toLowerCase();
     const LEN={football:125,basketball:160,tennis:240,hockey:165,ice_hockey:165,cricket:600,rugby:120,volleyball:150,handball:110,baseball:200,table_tennis:120};
     st = (Date.now()-kick) < (LEN[sp]||(/^(basket|tennis|hockey|cricket|rugby|volley|handball|baseball)/.test(sp)?180:125))*60000 ? 'live' : 'awaiting';
@@ -299,6 +300,7 @@ function fixtureBadge(s){
   const base='display:inline-block;font-size:11px;font-weight:700;margin-top:3px;padding:2px 8px;border-radius:999px;';
   if(st==='live') return `<div><span style="${base}color:#ff4d4d;background:rgba(255,77,77,0.12)">&#9679; LIVE</span></div>`;
   if(st==='not_started'){
+    if(s.kickoffUnknown) return `<div><span style="${base}color:#9fb3a5;background:rgba(159,179,165,0.12)">&#128339; Not started &middot; kick-off time to be confirmed</span></div>`;
     const when=kick?new Date(kick).toLocaleString('en-KE',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
     return `<div><span style="${base}color:#9fb3a5;background:rgba(159,179,165,0.12)">&#128339; Not started${when?' &middot; '+when:''}</span></div>`;
   }
