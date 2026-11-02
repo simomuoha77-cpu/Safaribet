@@ -1074,7 +1074,11 @@ function normalizeMatch(raw) {
       const n = Number(kickoff);
       d = new Date(n < 100000000000 ? n * 1000 : n);
     } else {
-      d = new Date(kickoff);
+      // A date-time with no zone ("2026-11-02 20:00:00") would be read in the SERVER's own timezone, shifting every
+      // kick-off by the host's offset. The feed's times are UTC, so say so explicitly.
+      let k = kickoff;
+      if (typeof k === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(k.trim())) k = k.trim().replace(' ', 'T') + 'Z';
+      d = new Date(k);
     }
     if (Number.isFinite(d.getTime())) utcDate = d.toISOString();
   }

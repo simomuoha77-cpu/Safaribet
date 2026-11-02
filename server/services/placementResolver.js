@@ -120,7 +120,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
         if (okLive || okPre) {
           idxFx = {
             homeTeam: idx.homeTeam, awayTeam: idx.awayTeam, league: idx.league || sport, sport,
-            commenceTime: idx.commenceTime ? new Date(idx.commenceTime) : new Date(), status: okLive ? 'live' : 'upcoming',
+            commenceTime: idx.commenceTime ? new Date(idx.commenceTime) : null, status: okLive ? 'live' : 'upcoming',
             providerMatchId: providerId,
             score: { home: idx.score?.home ?? null, away: idx.score?.away ?? null, minute: idx.score?.minute ?? null, period: idx.score?.period || null }
           };
@@ -154,7 +154,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
   if (liveFx) {
     fixture = {
       homeTeam: liveFx.homeTeam, awayTeam: liveFx.awayTeam, league: liveFx.competition || sport, sport,
-      commenceTime: liveFx.utcDate ? new Date(liveFx.utcDate) : new Date(), status: 'live', providerMatchId: providerId,
+      commenceTime: liveFx.utcDate ? new Date(liveFx.utcDate) : null, status: 'live', providerMatchId: providerId,
       score: { home: liveFx.score?.fullTime?.home ?? null, away: liveFx.score?.fullTime?.away ?? null, minute: liveFx.minute ?? null, period: liveFx.status || null }
     };
   } else if (matchRow) {
@@ -164,7 +164,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
   } else if (preFx) {
     fixture = {
       homeTeam: preFx.homeTeam, awayTeam: preFx.awayTeam, league: preFx.competition || sport, sport,
-      commenceTime: preFx.utcDate ? new Date(preFx.utcDate) : new Date(), status: 'upcoming', providerMatchId: providerId, score: {}
+      commenceTime: preFx.utcDate ? new Date(preFx.utcDate) : null, status: 'upcoming', providerMatchId: providerId, score: {}
     };
   }
   if (!fixture || !fixture.homeTeam || !fixture.awayTeam) {

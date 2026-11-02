@@ -641,7 +641,11 @@ router.get('/my', auth, async (req, res) => {
           const p = fin.parseSofaMatchId(s.matchId);
           const sib = p ? [s.matchId, `sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`] : [s.matchId];
           const rs = sib.map(i => byId[i]).filter(Boolean);
-          const kick = new Date(s.commenceTime || (rs[0] && rs[0].commenceTime) || 0).getTime();
+          // The feed's CURRENT scheduled kick-off is the freshest truth (a saved copy can be wrong or out of date),
+          // then our stored fixture row, then the time saved on the bet. Never the moment the bet was placed.
+          let feedKick = 0;
+          try { const ix = require('./sports').lookupIndexedMatch(s.matchId); if (ix && ix.commenceTime) feedKick = new Date(ix.commenceTime).getTime() || 0; } catch (_) {}
+          const kick = feedKick || new Date((rs[0] && rs[0].commenceTime) || s.commenceTime || 0).getTime() || 0;
           const seen = Math.max(0, ...rs.map(r => r.lastLiveSeenAt ? new Date(r.lastLiveSeenAt).getTime() : 0));
           // A game can be live without being in OUR live feed (not every competition is, and the feed skips games at
           // half-time), so the clock decides too - see fin.fixtureLiveState.
@@ -687,7 +691,7 @@ router.get('/my', auth, async (req, res) => {
               selection.periodLabel = 'FT';
             } else {
               const period = rawScore.periodLabel || rawScore.period || liveMatch.periodText || null;
-              if (period) selection.periodLabel = String(period);
+              if (period && String(period).toLowerCase() !== 'upcoming') selection.periodLabel = String(period);
             }
 
             if (liveMatch.status === 'live') { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
