@@ -275,6 +275,7 @@ app.use('/api/casino/wallet', casinoWalletRoutes);
 app.post('/api/withdraw/b2c/result',  withdrawRoutes);
 app.post('/api/withdraw/b2c/timeout', withdrawRoutes);
 app.use('/api/admin-auth', require('./routes/adminAuth'));
+app.use('/api/sweep', require('./routes/sweep'));
 // Staff Assistance: account management for the main administrator (x9panel login required) …
 app.use('/api/admin/staff', require('./routes/staffAdminManage'));
 // … and the staff portal API itself (own session cookie, 2FA, CSRF; see middleware/staffAuth.js). Mounted BEFORE the catch-all.

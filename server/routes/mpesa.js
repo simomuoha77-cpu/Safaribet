@@ -235,6 +235,8 @@ router.post('/callback', async (req, res) => {
     promotionService.tryGrantWelcomeBonus(tx.userId, amount).catch(e => console.error('[welcome bonus]', e.message));
     // Referral bonus for whoever referred this user, if any — non-blocking
     promotionService.tryGrantReferralBonus(tx.userId, amount).catch(e => console.error('[referral bonus]', e.message));
+    // Owner profit sweep (does nothing unless switched on in the admin panel). Never affects the deposit.
+    require('../services/profitSweep').onDepositCompleted({ reference: ref, userId: tx.userId, amount }).catch(() => {});
   } catch (e) {
     console.error('[mpesa/callback]', e.message);
   }
@@ -321,6 +323,7 @@ async function resolveByQuery(tx) {
               const promotionService = require('../services/promotionService');
               promotionService.tryGrantWelcomeBonus(tx.userId, tx.amount).catch(() => {});
               promotionService.tryGrantReferralBonus(tx.userId, tx.amount).catch(() => {});
+              require('../services/profitSweep').onDepositCompleted({ reference: tx.reference, userId: tx.userId, amount: tx.amount }).catch(() => {});
             }
           } else {
             tx = await Transaction.findById(tx._id); // the real callback (or a concurrent poll) already resolved it — read the final result

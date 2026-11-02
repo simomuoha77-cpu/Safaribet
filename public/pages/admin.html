@@ -1493,6 +1493,7 @@ function nav(name,el){
   if(window.innerWidth<=640) closeSidebar();
   // Auto-load data
   if(name==='bets') loadBets();
+  else if(name==='sweep' && window.loadSweep) window.loadSweep();
   else if(name==='users') loadUsers();
   else if(name==='limits') loadLimits();
   else if(name==='liverisk') loadLiveRisk();
@@ -3550,6 +3551,49 @@ document.addEventListener('keydown',e=>{
 })();
 </script>
 
+
+<script>
+/* Profit sweep panel: part of every confirmed deposit is paid to the owner's phone. Every change needs the authenticator code. */
+(function(){
+  function h(t,a,c){var e=document.createElement(t);for(var k in (a||{}))e.setAttribute(k,a[k]);[].concat(c||[]).forEach(function(x){e.append(x&&x.nodeType?x:document.createTextNode(x==null?'':x));});return e;}
+  function call(m,u,b){return fetch(u,{method:m,headers:{'Content-Type':'application/json','Authorization':'Bearer '+ADMIN_TOKEN},body:b?JSON.stringify(b):undefined}).then(function(r){return r.json();});}
+  function install(){
+    var sb=document.getElementById('sidebar'),main=document.querySelector('.panel'); if(!sb||!main||document.getElementById('panel-sweep'))return;
+    var item=h('div',{class:'sb-item',id:'nav-sweep'},[h('span',{class:'ic'},'💰'),'Profit Sweep']);
+    item.onclick=function(){nav('sweep',item);};
+    var sec=h('div',{class:'sb-section'},[h('div',{class:'sb-label'},'Owner'),item]); sb.appendChild(sec);
+    var p=h('div',{class:'panel',id:'panel-sweep'}); main.parentNode.appendChild(p);
+  }
+  window.loadSweep=async function(){
+    var p=document.getElementById('panel-sweep'); if(!p)return; p.replaceChildren(h('p',{},'Loading...'));
+    var c=await call('GET','/api/sweep/admin/config'), l=await call('GET','/api/sweep/admin/list');
+    if(!c.success){p.replaceChildren(h('p',{},c.message||'Failed to load'));return;}
+    var d=c.data, msg=h('p',{style:'margin-top:8px'},'');
+    var phone=h('input',{type:'tel',placeholder:d.hasPhone?('Current: '+d.phoneMasked+' (leave empty to keep)'):'07XXXXXXXX',style:'width:100%;margin:6px 0;padding:10px'});
+    var pct=h('input',{type:'number',min:1,max:90,value:d.percent,style:'width:100%;margin:6px 0;padding:10px'});
+    var cap=h('input',{type:'number',min:0,value:d.dailyCap,style:'width:100%;margin:6px 0;padding:10px'});
+    var on=h('input',{type:'checkbox'}); on.checked=!!d.enabled;
+    var totp=h('input',{type:'text',inputmode:'numeric',maxlength:6,placeholder:'6-digit authenticator code',style:'width:100%;margin:6px 0;padding:10px'});
+    var save=h('button',{class:'btn'},'Save (needs authenticator code)');
+    save.onclick=async function(){
+      var b={totp:totp.value,enabled:on.checked,percent:pct.value,dailyCap:cap.value}; if(phone.value.trim())b.phone=phone.value.trim();
+      var r=await call('POST','/api/sweep/admin/config',b); msg.textContent=r.success?'Saved.':(r.message||'Failed'); if(r.success){totp.value='';setTimeout(window.loadSweep,600);}
+    };
+    var sum=(l.summary||[]).map(function(s){return s._id+': '+s.n+' (KES '+s.t+')';}).join('  |  ')||'No sweeps yet';
+    var rows=(l.items||[]).map(function(i){
+      var tr=h('tr',{},[h('td',{},new Date(i.createdAt).toLocaleString('en-KE')),h('td',{},'KES '+i.depositAmount),h('td',{},'KES '+i.amount),h('td',{},i.status),h('td',{},i.lastError||i.mpesaReceipt||'')]);
+      if(i.status==='failed'||i.status==='capped'){var b=h('button',{class:'btn'},'Retry');b.onclick=async function(){var code=prompt('Authenticator code');if(!code)return;var r=await call('POST','/api/sweep/admin/retry/'+i._id,{totp:code});alert(r.success?('Status: '+r.status+(r.error?(' - '+r.error):'')):(r.message||'Failed'));window.loadSweep();};tr.appendChild(h('td',{},b));}
+      return tr;});
+    p.replaceChildren(
+      h('div',{class:'card'},[h('h2',{},'Profit Sweep'),
+        h('p',{},'When a deposit is confirmed the player gets the FULL amount in their wallet, and this share of the cash is sent to your phone by M-Pesa.'),
+        h('label',{},[on,' Switched on']),h('div',{},'Your phone number'),phone,h('div',{},'Share of each deposit (%)'),pct,h('div',{},'Daily cap in KES (0 = no cap)'),cap,totp,save,msg]),
+      h('div',{class:'card'},[h('h2',{},'Sweeps'),h('p',{},sum),
+        h('table',{},[h('thead',{},h('tr',{},['When','Deposit','Sent to you','Status','Note',''].map(function(x){return h('th',{},x);}))),h('tbody',{},rows)])]));
+  };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
+})();
+</script>
 <script src="/js/admin-extra.js"></script>
 </body>
 </html>

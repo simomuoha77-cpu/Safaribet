@@ -1,0 +1,124 @@
+// Profit sweep: after a customer deposit is CONFIRMED and fully credited to the customer's wallet, a share of that cash
+// (default 50%) is paid out by M-Pesa B2C to the owner's phone. The customer's wallet is never touched by this.
+//
+// Safety design:
+//  - The phone number, percentage and cap live only in the Settings collection, and the only code that writes them is
+//    routes/sweep.js (admin login + authenticator code). No customer-facing route takes a phone or an amount.
+//  - The amount is computed here from the verified deposit, never from a request.
+//  - Sweep.depositRef is unique, so one deposit is swept at most once.
+//  - A daily cap limits the worst case if anything ever goes wrong.
+//  - Failures are logged loudly + written to the audit log and kept in the Sweep collection for the admin panel / retry.
+const Settings = require('../models/Settings');
+const Sweep = require('../models/Sweep');
+const mpesaClient = require('./mpesaClient');
+const audit = require('./auditService');
+
+const KEY = 'sweep_config';
+const MIN_B2C = 10;                         // Safaricom B2C minimum
+const DEFAULT_CFG = { enabled: false, phone: '', percent: 50, dailyCap: 50000 };
+
+const SHORTCODE = () => process.env.MPESA_B2C_SHORTCODE || process.env.MPESA_SHORTCODE;
+const INITIATOR = () => (process.env.MPESA_INITIATOR_NAME || 'testapi').trim();
+const CRED      = () => (process.env.MPESA_SECURITY_CREDENTIAL || '').trim();
+const CK        = () => process.env.MPESA_B2C_CONSUMER_KEY || process.env.MPESA_CONSUMER_KEY;
+const CS        = () => process.env.MPESA_B2C_CONSUMER_SECRET || process.env.MPESA_CONSUMER_SECRET;
+const RESULT_URL  = () => process.env.MPESA_SWEEP_RESULT_URL  || `${process.env.APP_URL}/api/sweep/b2c/result`;
+const TIMEOUT_URL = () => process.env.MPESA_SWEEP_TIMEOUT_URL || `${process.env.APP_URL}/api/sweep/b2c/timeout`;
+
+async function getConfig() {
+  const v = await Settings.get(KEY);
+  return Object.assign({}, DEFAULT_CFG, v && typeof v === 'object' ? v : {});
+}
+async function setConfig(patch, by) { const cur = await getConfig(); const next = Object.assign({}, cur, patch); await Settings.set(KEY, next, by || 'admin'); return next; }
+
+function normalizePhone(raw) {
+  const d = String(raw || '').replace(/[\s+\-]/g, '');
+  let n = d;
+  if (/^0[17]\d{8}$/.test(d)) n = '254' + d.slice(1);
+  return /^254[17]\d{8}$/.test(n) ? n : null;
+}
+const maskPhone = p => p ? p.slice(0, 5) + '****' + p.slice(-3) : '';
+
+function nairobiDayStart() {
+  const now = new Date(Date.now() + 3 * 3600000);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 3 * 3600000);
+}
+
+async function sendB2C(phone, amount, ref) {
+  if (!CK() || !CS()) throw new Error('M-Pesa B2C credentials are not configured');
+  if (!CRED()) throw new Error('MPESA_SECURITY_CREDENTIAL is not set');
+  if (!SHORTCODE()) throw new Error('B2C shortcode is not set');
+  return mpesaClient.authedPost(CK(), CS(), '/mpesa/b2c/v1/paymentrequest', {
+    InitiatorName: INITIATOR(), SecurityCredential: CRED(), CommandID: 'BusinessPayment',
+    Amount: Math.round(amount), PartyA: SHORTCODE(), PartyB: phone,
+    Remarks: 'Operations transfer', QueueTimeOutURL: TIMEOUT_URL(), ResultURL: RESULT_URL(), Occasion: String(ref).slice(0, 100)
+  }, 15000);
+}
+
+async function dispatch(doc) {
+  doc.attempts = (doc.attempts || 0) + 1;
+  try {
+    const r = await sendB2C(doc.phone, doc.amount, doc.depositRef);
+    if (r && String(r.ResponseCode) === '0') {
+      doc.status = 'pending'; doc.conversationId = r.ConversationID; doc.lastError = undefined;
+    } else {
+      doc.status = 'failed'; doc.lastError = `Safaricom rejected: ${(r && (r.ResponseDescription || r.errorMessage)) || 'unknown'}`;
+    }
+  } catch (e) {
+    doc.status = 'failed';
+    doc.lastError = (e && e.response && e.response.data && (e.response.data.errorMessage || JSON.stringify(e.response.data))) || e.message;
+  }
+  await doc.save();
+  if (doc.status === 'failed') {
+    console.error(`🚨 [sweep] FAILED for deposit ${doc.depositRef} (KES ${doc.amount}): ${doc.lastError}`);
+    audit.log('sweep.failed', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { depositRef: doc.depositRef, amount: doc.amount, error: doc.lastError } });
+  }
+  return doc;
+}
+
+// Called ONLY after a deposit has been confirmed and credited. Never throws (must not affect the deposit).
+async function onDepositCompleted({ reference, userId, amount }) {
+  try {
+    const cfg = await getConfig();
+    if (!cfg.enabled || !cfg.phone || !reference) return null;
+    const dep = Number(amount);
+    if (!Number.isFinite(dep) || dep <= 0) return null;
+    const pct = Math.min(90, Math.max(1, Number(cfg.percent) || 50));
+    const amt = Math.floor(dep * pct / 100);
+
+    let doc;
+    try {
+      doc = await Sweep.create({ depositRef: String(reference), userId, depositAmount: dep, amount: amt, phone: cfg.phone, status: 'pending' });
+    } catch (e) {
+      if (e && e.code === 11000) return null;           // this deposit was already handled
+      throw e;
+    }
+    if (amt < MIN_B2C) { doc.status = 'skipped'; doc.lastError = `below the M-Pesa B2C minimum of KES ${MIN_B2C}`; await doc.save(); return doc; }
+
+    const since = nairobiDayStart();
+    const agg = await Sweep.aggregate([{ $match: { createdAt: { $gte: since }, status: { $in: ['pending', 'sent'] }, _id: { $ne: doc._id } } }, { $group: { _id: null, t: { $sum: '$amount' } } }]);
+    const today = agg[0] ? agg[0].t : 0;
+    const cap = Number(cfg.dailyCap);
+    if (Number.isFinite(cap) && cap > 0 && today + amt > cap) {
+      doc.status = 'capped'; doc.lastError = `daily cap KES ${cap} reached`; await doc.save();
+      console.warn(`⚠️ [sweep] daily cap reached — deposit ${doc.depositRef} not swept (KES ${amt})`);
+      audit.log('sweep.capped', { actorRole: 'system', targetType: 'Sweep', targetId: String(doc._id), meta: { amount: amt, cap } });
+      return doc;
+    }
+    return await dispatch(doc);
+  } catch (e) {
+    console.error('🚨 [sweep] error:', e.message);
+    return null;
+  }
+}
+
+async function retry(id) {
+  const doc = await Sweep.findOneAndUpdate({ _id: id, status: { $in: ['failed', 'capped'] } }, { $set: { status: 'pending' } }, { new: true });
+  if (!doc) return null;
+  const cfg = await getConfig();
+  if (!cfg.enabled || !cfg.phone) { doc.status = 'failed'; doc.lastError = 'sweep is switched off'; await doc.save(); return doc; }
+  doc.phone = cfg.phone;                                  // always the CURRENT admin-set number
+  return dispatch(doc);
+}
+
+module.exports = { getConfig, setConfig, normalizePhone, maskPhone, onDepositCompleted, retry, KEY };
