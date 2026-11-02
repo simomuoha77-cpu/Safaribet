@@ -140,7 +140,7 @@ async function onDepositCompleted({ reference, userId, amount }) {
     }
     console.log(`[sweep] sending KES ${doc.amount} to ${doc.destination === 'bank' ? 'bank paybill ' + doc.bankPaybill : maskPhone(doc.phone)} for deposit ${doc.depositRef}`);
     const done = await dispatch(doc);
-    await note(`Deposit ${doc.depositRef}: payout KES ${doc.amount} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
+    await note(`Deposit ${doc.depositRef}: payout KES ${doc.amount} to ${doc.destination === 'bank' ? 'BANK (paybill ' + doc.bankPaybill + ')' : 'PHONE ' + maskPhone(doc.phone)} -> ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
     console.log(`[sweep] result for ${doc.depositRef}: ${done.status}${done.lastError ? ' - ' + done.lastError : ''}`);
     return done;
   } catch (e) {
