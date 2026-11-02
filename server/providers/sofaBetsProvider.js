@@ -345,6 +345,17 @@ function parseOdds(raw, homeTeamName, awayTeamName) {
   return null;
 }
 
+// True when a fixture from the live feed has clearly NOT kicked off yet: kick-off still in the future, or the feed's own
+// phase text says upcoming / not started. Used so such games are not shown (or bet on) as LIVE.
+function isNotYetStarted(m, now) {
+  now = now || Date.now();
+  const kick = m && m.utcDate ? new Date(m.utcDate).getTime() : 0;
+  if (kick && kick - now > 2 * 60 * 1000) return true;
+  const txt = String((m && (m.periodText || m.statusRaw)) || '').toLowerCase().trim();
+  if (/^(upcoming|not[\s_-]*started|scheduled|pre[\s_-]*match|prematch|ns|tbd)$/.test(txt)) return true;
+  return false;
+}
+
 function parseStatus(raw, utcDate) {
   // SofaBets sends the phase of a football game in current_phase ("1st half", "Halftime", "2nd half"...) and keeps
   // is_live = true during the break, so check for the break FIRST, otherwise half time never shows as HT.
@@ -1554,7 +1565,10 @@ async function fetchLiveFootballFixturesUncached(sportName = 'football') {
             if (feedIsWrongSport(matches, sport)) { matches = []; }
             else matches = filterBySport(matches, sport);
           }
-          matches = matches.map(m => Object.assign(m, { status: 'IN_PLAY' }));
+          // The live endpoint also lists games that are only SCHEDULED (virtual/SRL and pre-listed fixtures that carry
+          // an "upcoming" phase or a kick-off still in the future). Forcing those to IN_PLAY made them show as LIVE.
+          // A game whose kick-off has not arrived (2 min tolerance for clock drift) is never live.
+          matches = matches.map(m => Object.assign(m, { status: isNotYetStarted(m) ? 'SCHEDULED' : 'IN_PLAY' }));
 
           if (matches.length) {
             if (sport !== 'football') liveGoodVariant.set(sport, vi);

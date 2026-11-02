@@ -287,6 +287,8 @@ function filter(f,el){
 function fixtureBadge(s){
   let st=s.fixtureState, kick=s.kickoffAt||(s.commenceTime?new Date(s.commenceTime).getTime():0);
   if(!st){ st = kick && kick>Date.now() ? 'not_started' : null; }
+  // Kick-off still ahead (2 min tolerance): never LIVE, whatever a saved copy or the feed said.
+  if(st==='live' && kick && kick-Date.now()>120000) st='not_started';
   // A saved copy can be older than kick-off: always let the clock correct it.
   if(st==='not_started' && kick && kick<=Date.now()){
     const sp=String(s.sport||'football').toLowerCase();
@@ -333,7 +335,7 @@ function renderBets(bets){
               r==='pending' ? (s.pickLabel||s.pick) + ' ⏳' :
               (s.pickLabel||s.pick)
             }</span>
-            ${scoreStr ? `<span class="sel-score">${s.fixtureState==='live' && s.minute!=null ? `${s.minute}′` : (s.periodLabel || (s.fixtureState==='live' ? 'LIVE' : 'FT'))}: ${scoreStr}</span>` : ''}
+            ${scoreStr && s.fixtureState!=='not_started' ? `<span class="sel-score">${s.fixtureState==='live' && s.minute!=null ? `${s.minute}′` : (s.periodLabel || (s.fixtureState==='live' ? 'LIVE' : 'FT'))}: ${scoreStr}</span>` : ''}
             ${s.league ? `<span class="sel-league">${s.league}</span>` : ''}
           </div>
           ${r==='pending' ? fixtureBadge(s) : ''}

@@ -694,7 +694,12 @@ router.get('/my', auth, async (req, res) => {
               if (period && String(period).toLowerCase() !== 'upcoming') selection.periodLabel = String(period);
             }
 
-            if (liveMatch.status === 'live') { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
+            // A game whose scheduled kick-off is still ahead (or whose phase says upcoming) is NOT live, whatever the feed flag says.
+            const lmKick = liveMatch.commenceTime ? new Date(liveMatch.commenceTime).getTime() : 0;
+            const lmPhase = String(rawScore.periodLabel || rawScore.period || liveMatch.periodText || '').toLowerCase().trim();
+            const lmFuture = (lmKick && lmKick - Date.now() > 2 * 60 * 1000) || /^(upcoming|not[\s_-]*started|scheduled|ns|tbd)$/.test(lmPhase);
+            if (lmFuture) { selection.fixtureState = 'not_started'; selection.kickoffAt = lmKick || selection.kickoffAt || null; delete selection.periodLabel; delete selection.minute; delete selection.pendingReason; delete selection.waitingBecause; }
+            else if (liveMatch.status === 'live') { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
             else if (liveMatch.status === 'finished' && (selection.score || rawScore.fullTime)) selection.fixtureState = 'finished';
           }
         }
