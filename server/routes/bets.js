@@ -663,7 +663,10 @@ router.get('/my', auth, async (req, res) => {
           if (state === 'live' || state === 'not_started') { delete s.pendingReason; delete s.waitingBecause; }
           // Suspect kick-off: the game was never in our live feed and its saved kick-off is (almost) the moment the bet was placed.
           // That is the old "kick-off = bet time" fallback, so "LIVE" here is a guess from a wrong clock. Ask the provider for the real time.
-          if (state === 'live' && !seen && s._placed && kick && Math.abs(kick - s._placed) < 10 * 60000 && now - kick > 10 * 60000) suspects.push({ s, sportName, p });
+          const isSrl = /\bSRL\b/i.test(`${s.homeTeam || ''} ${s.awayTeam || ''} ${s.league || ''}`);
+          Object.defineProperty(s, '_srl', { value: isSrl, enumerable: false, configurable: true });
+          const srlTrusted = isSrl && seen && now - seen < 3 * 60000 && kick && kick <= now + 120000 && now - kick < 45 * 60000 && Math.abs(kick - (s._placed || 0)) >= 10 * 60000;
+          if (state === 'live' && ((isSrl && !srlTrusted) || (!seen && s._placed && kick && Math.abs(kick - s._placed) < 10 * 60000 && now - kick > 10 * 60000))) suspects.push({ s, sportName, p });
         });
         if (suspects.length) {
           await Promise.all(suspects.map(async ({ s, sportName, p }) => {
@@ -680,10 +683,12 @@ router.get('/my', auth, async (req, res) => {
               if (realKickCache.size > 2000) realKickCache.clear();
             }
             const nowMs = Date.now();
-            if (real.t && Math.abs(real.t - s._placed) >= 10 * 60000) {
+            if (real.t && (s._srl || Math.abs(real.t - s._placed) >= 10 * 60000)) {
               // Provider gave a genuinely different kick-off: use it.
               s.kickoffAt = real.t;
-              s.fixtureState = fin.fixtureLiveState({ kick: real.t, seen: 0, finalVerified: false, sport: sportName, now: nowMs });
+              s.fixtureState = s._srl
+                ? (real.t > nowMs ? 'not_started' : (nowMs - real.t < 45 * 60000 ? 'live' : 'awaiting'))   // simulated games last minutes, not 2 hours
+                : fin.fixtureLiveState({ kick: real.t, seen: 0, finalVerified: false, sport: sportName, now: nowMs });
             } else if (!real.t) {
               // Real kick-off unknown and the game was never seen live: do not claim LIVE.
               s.fixtureState = 'not_started'; s.kickoffAt = null; s.kickoffUnknown = true;
@@ -730,7 +735,7 @@ router.get('/my', auth, async (req, res) => {
             const lmPhase = String(rawScore.periodLabel || rawScore.period || liveMatch.periodText || '').toLowerCase().trim();
             const lmFuture = (lmKick && lmKick - Date.now() > 2 * 60 * 1000) || /^(upcoming|not[\s_-]*started|scheduled|ns|tbd)$/.test(lmPhase);
             if (lmFuture) { selection.fixtureState = 'not_started'; selection.kickoffAt = lmKick || selection.kickoffAt || null; delete selection.periodLabel; delete selection.minute; delete selection.pendingReason; delete selection.waitingBecause; }
-            else if (liveMatch.status === 'live') { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
+            else if (liveMatch.status === 'live' && !(selection.fixtureState === 'not_started' && /\bSRL\b/i.test(`${selection.homeTeam || ''} ${selection.awayTeam || ''} ${selection.league || ''}`))) { selection.fixtureState = 'live'; delete selection.pendingReason; delete selection.waitingBecause; }
             else if (liveMatch.status === 'finished' && (selection.score || rawScore.fullTime)) selection.fixtureState = 'finished';
           }
         }
