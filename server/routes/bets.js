@@ -653,6 +653,7 @@ router.get('/my', auth, async (req, res) => {
           // half-time), so the clock decides too - see fin.fixtureLiveState.
           const sportName = ((p && p.sport) || s.sport || 'football').toLowerCase();
           const state = fin.fixtureLiveState({ kick, seen, finalVerified: rs.some(r => r.finalVerified), sport: sportName, now });
+          try { if (state === 'live') console.log('[mybets-live-debug]', JSON.stringify({ matchId: s.matchId, home: s.homeTeam, away: s.awayTeam, kick: kick ? new Date(kick).toISOString() : null, feedKick: feedKick ? new Date(feedKick).toISOString() : null, selKick: s.commenceTime || null, rowKick: rs[0] && rs[0].commenceTime || null, rowStatus: rs.map(r => r.status), seen: seen ? new Date(seen).toISOString() : null, placed: s._placed ? new Date(s._placed).toISOString() : null })); } catch (_) {}
           const note = (rs.find(r => r.trackerNote) || {}).trackerNote;
           if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
