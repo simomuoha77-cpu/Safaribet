@@ -408,7 +408,14 @@ app.get('/x9panel', panelAccessLimiter, (req, res) => {
   if (!token || req.query.t !== token) {
     return res.status(404).send('Not found');
   }
-  res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
+  // The Profit Sweep panel script is added here, so it is present whichever admin.html version is deployed.
+  try {
+    let html = require('fs').readFileSync(path.join(__dirname, '../public/pages/admin.html'), 'utf8');
+    if (!html.includes('/js/profit-sweep.js')) html = html.includes('</body>') ? html.replace('</body>', '<script src="/js/profit-sweep.js"></script>\n</body>') : html + '<script src="/js/profit-sweep.js"></script>';
+    res.set('Content-Type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').send(html);
+  } catch (e) {
+    res.sendFile(path.join(__dirname, '../public/pages/admin.html'));
+  }
 });
 
 // ── STAFF ASSISTANCE PORTAL (/staff-assistance) ──
