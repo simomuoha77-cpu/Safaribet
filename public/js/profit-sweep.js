@@ -72,5 +72,14 @@
       h('div',{class:'card'},[h('h2',{},'Sweeps'),tiles,
         h('table',{},[h('thead',{},h('tr',{},['When','Deposit','Sent to you','Status','Note',''].map(function(x){return h('th',{},x);}))),h('tbody',{},rows)])]));
   };
-  install(); document.addEventListener('DOMContentLoaded',install); setInterval(install,2000);
+  // A floating button that is always visible, so the panel can be opened even if the sidebar is long or rebuilt.
+  function floatBtn(){
+    if(document.getElementById('sweep-fab')||!document.body)return;
+    var b=h('button',{id:'sweep-fab',style:'position:fixed;right:12px;bottom:78px;z-index:99999;background:#00c853;color:#04210f;border:0;border-radius:999px;padding:12px 16px;font-weight:800;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.5)'},'💰 Profit Sweep');
+    b.onclick=function(){install();show(document.getElementById('nav-sweep'));};
+    document.body.appendChild(b);
+  }
+  function boot(){ install(); floatBtn(); }
+  boot(); document.addEventListener('DOMContentLoaded',boot); setInterval(boot,2000);
+  if(location.hash==='#sweep')setTimeout(function(){install();show(document.getElementById('nav-sweep'));},800);
 })();
