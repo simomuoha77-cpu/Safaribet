@@ -396,7 +396,7 @@ function evalWindow1x2(sel, win, ps, ctx) {
   const market = { type: 'WINDOW_1X2', period: 'FULL_MATCH' };
   if (!ps || !ps.ftFinal || !ps.ft) return { status: null, need: 'FT', reason: 'full-time result not verified yet', market };
   const goals = completeGoals(ps);
-  if (!goals || goals.some(g => !Number.isFinite(Number(g.sec)))) return { status: null, need: 'FT', reason: 'goal times were not fully captured for this match', market, noData: true };
+  if (!goals || goals.some(g => !Number.isFinite(Number(g.sec)))) return { status: null, need: 'FT', reason: 'goal times were not fully captured for this match', market, noData: true, goalOrder: true };
   const startSec = (win.from - 1) * 60, endSec = win.to * 60;      // "from 31 to 35" = minutes 31..35 = clock 30:00 to 35:00
   const GAP = 15;                                                 // seconds: a goal is seen up to one polling gap after it happened
   const edge = goals.some(g => { const s = Number(g.sec); return (s >= startSec && s < startSec + GAP) || (s >= endSec && s < endSec + GAP); });
@@ -407,6 +407,45 @@ function evalWindow1x2(sel, win, ps, ctx) {
   if (r == null) return { status: null, need: 'FT', reason: 'cannot read the pick for this market', market };
   return { status: r, need: 'FT', market, score: { home: h, away: a }, periodLabel: `${win.from}-${win.to}'` };
 }
+// ── Goal order: what is KNOWN about who scored the 1st, 2nd, 3rd ... goal ─────────────────────────────────────────
+// Sources, strongest first:
+//   1. the goals our live polling recorded, as long as the record is an unbroken chain from 0-0 (every recorded goal's
+//      running score adds up to its position, so nothing before it was missed) and no two teams scored inside the same poll;
+//   2. the verified FINAL score: any goals the record does not cover are credited to a team ONLY when one team alone can
+//      account for all of them (e.g. final 3-0 with nothing recorded: all three goals were that team's).
+// Anything else is not guessed: the goals beyond what is known stay unknown, and a market that needs them waits for the
+// provider's official result (and is refunded only as the last resort).
+// Own goals and VAR: the feed's score is the official credit, so an own goal counts for the team the score went to, and a
+// goal taken away by VAR removes that team's latest goal (see services/liveEvents.js).
+function reconstructGoals(ps) {
+  if (!ps || !ps.ftFinal || !ps.ft) return null;
+  const H = Number(ps.ft.home), A = Number(ps.ft.away);
+  if (!Number.isFinite(H) || !Number.isFinite(A)) return null;
+  const ev = Array.isArray(ps.goalEvents) ? ps.goalEvents.filter(g => g && (g.team === 'home' || g.team === 'away')) : [];
+  let h = 0, a = 0;
+  const known = [];
+  let ambiguous = false;
+  for (let i = 0; i < ev.length; i++) {
+    const g = ev[i];
+    const nh = h + (g.team === 'home' ? 1 : 0), na = a + (g.team === 'away' ? 1 : 0);
+    // chain check: the running score stored with the goal must be exactly the score reached from 0-0
+    if (g.home != null && g.away != null && (Number(g.home) !== nh || Number(g.away) !== na)) break;
+    if (nh > H || na > A) break;                                                    // more than the official final: untrustworthy
+    // two goals by different teams inside one poll: their order cannot be proven, so stop BEFORE that poll
+    if (g.batch != null && ev.some(x => x !== g && x.batch === g.batch && x.team !== g.team)) { ambiguous = true; break; }
+    known.push({ team: g.team, source: 'recorded' });
+    h = nh; a = na;
+  }
+  const rh = H - h, ra = A - a;
+  let complete = false;
+  if (rh === 0 && ra === 0) complete = true;
+  else if (!ambiguous && (rh === 0 || ra === 0)) {
+    const team = rh > 0 ? 'home' : 'away';
+    for (let i = 0; i < rh + ra; i++) known.push({ team, source: 'final-score' });
+    complete = true;
+  }
+  return { goals: known, complete, total: H + A, ambiguous };
+}
 function evalNthGoal(sel, n, ps, ctx) {
   const market = { type: 'NTH_GOAL', period: 'FULL_MATCH' };
   if (!ps || !ps.ftFinal || !ps.ft) return { status: null, need: 'FT', reason: 'full-time result not verified yet', market };
@@ -414,10 +453,9 @@ function evalNthGoal(sel, n, ps, ctx) {
   const p = norm(sel.selectionName || sel.pickLabel);
   const none = /^(none|no\s*goal|no\s*goals|nobody|no\s*team)$/.test(p);
   if (total < n) return { status: none ? 'won' : (teamOf(sel.selectionName || sel.pickLabel, ctx.home, ctx.away) ? 'lost' : null), need: 'FT', market };
-  const goals = completeGoals(ps);
-  if (!goals) return { status: null, need: 'FT', reason: 'goal order was not fully captured for this match', market, noData: true };
-  const g = goals[n - 1];
-  if (goals.some(x => x.batch != null && x.batch === g.batch && x.team !== g.team)) return { status: 'void', need: 'FT', reason: 'Both teams scored between two live updates, so the goal order cannot be proven - stake refunded', market };
+  const rec = reconstructGoals(ps);
+  const g = rec && rec.goals[n - 1];
+  if (!g) return { status: null, need: 'FT', reason: rec && rec.ambiguous ? 'two teams scored between live updates, so the goal order is not proven - waiting for the official result' : 'goal order was not fully captured for this match - waiting for the official result', market, noData: true, goalOrder: true };
   if (none) return { status: 'lost', need: 'FT', market };
   const who = teamOf(sel.selectionName || sel.pickLabel, ctx.home, ctx.away);
   if (!who || who === 'draw') return { status: null, need: 'FT', reason: 'cannot read the pick for this market', market };
@@ -469,6 +507,10 @@ function evaluate(sel, periodScores) {
   if (!sc.score) return { status: null, need, reason: sc.missing, market: pm };
   const ps0 = periodScores || {};
   ctx.scorers = ps0.scorers || null;
+  if (!ctx.scorers && ps0.ftFinal && ps0.ft && (ps0.ft.home + ps0.ft.away) > 0) {
+    const rec = reconstructGoals(ps0);
+    if (rec && rec.goals.length) ctx.scorers = { first: rec.goals[0].team, last: rec.complete ? rec.goals[rec.goals.length - 1].team : null };
+  }
   ctx.halfScores = null;
   if (ps0.ht && ps0.ft && ps0.ftFinal) {
     const sh = { home: ps0.ft.home - ps0.ht.home, away: ps0.ft.away - ps0.ht.away };
@@ -502,4 +544,4 @@ function evaluate(sel, periodScores) {
   return { status: r, need, market: pm, score: sc.score };
 }
 
-module.exports = { parseMarket, detectPeriod, requirementFor, evaluate, scoreForPeriod, outcomeSet, canSettle, parseWindow1x2, parseNthGoal };
+module.exports = { reconstructGoals, parseMarket, detectPeriod, requirementFor, evaluate, scoreForPeriod, outcomeSet, canSettle, parseWindow1x2, parseNthGoal };

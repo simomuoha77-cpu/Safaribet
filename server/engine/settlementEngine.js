@@ -403,6 +403,12 @@ function pendingMessage(g, s) {
 // SofaBets to publish its official result (checked fresh on every run) before the stake is refunded. Default 3 MINUTES
 // (was 3 hours), at least 1; set AUTO_VOID_GRACE_MIN to change it.
 const AUTO_VOID_GRACE_MS = Math.max(1, Number(process.env.AUTO_VOID_GRACE_MIN || 3)) * 60 * 1000;
+// Markets decided by goal ORDER (1st/2nd/3rd goal, first/last scorer, minute windows) are not refunded just because our live
+// polling missed an event: the engine keeps asking for the provider's official result and the verified final score, and only
+// refunds after this longer wait (default 45 minutes after the final whistle; set AUTO_VOID_GOAL_GRACE_MIN to change).
+const AUTO_VOID_GOAL_GRACE_MS = Math.max(AUTO_VOID_GRACE_MS, Number(process.env.AUTO_VOID_GOAL_GRACE_MIN || 45) * 60 * 1000);
+const GOAL_ORDER_TYPES = ['NTH_GOAL', 'FIRST_SCORER', 'LAST_SCORER', 'WINDOW_1X2'];
+const graceFor = g => ((g && g.goalOrder) ? AUTO_VOID_GOAL_GRACE_MS : AUTO_VOID_GRACE_MS);
 const officialMemo = new Map();   // per-run: one provider lookup per fixture
 async function gradeProviderSel(s, matchRows) {
   // The same provider fixture can have several Match rows (the Live tab id
@@ -450,7 +456,7 @@ async function gradeProviderSel(s, matchRows) {
     pickLabel: s.pickLabel || s.providerSelectionKey || s.pick,
     homeTeam: s.homeTeam, awayTeam: s.awayTeam, sport: s.sport
   }, ps);
-  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft, trackerNote: row.trackerNote || null };
+  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft, trackerNote: row.trackerNote || null, goalOrder: !!(r.goalOrder || (r.market && GOAL_ORDER_TYPES.includes(r.market.type))) };
   const period = r.market && r.market.period;
   return { status: r.status, score: r.score || null, periodLabel: r.periodLabel || (period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT'), source: 'market-rules', reason: r.reason || null };
 }
@@ -662,7 +668,7 @@ async function _runSettlementInner(includeApiFetch) {
               if (!s.finalSeenAt) { s.finalSeenAt = new Date(now); changed = true; }
               finalAt = new Date(s.finalSeenAt).getTime();
             }
-            if (now - finalAt >= AUTO_VOID_GRACE_MS) {
+            if (now - finalAt >= graceFor(g)) {
               s.result = 'void'; s.settledAt = new Date(); s.settledSource = 'auto-void';
               s.voidReason = 'This market could not be settled automatically - stake refunded';
               s.pendingReason = undefined; changed = true;
@@ -775,4 +781,4 @@ function settleSoon(delayMs = 1500) {
   if (settleSoonTimer.unref) settleSoonTimer.unref();
 }
 
-module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, gradeSelection, gradeProviderSelection, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts } };
+module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, gradeSelection, gradeProviderSelection, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts, gradeProviderSel, graceFor, AUTO_VOID_GRACE_MS, AUTO_VOID_GOAL_GRACE_MS } };
