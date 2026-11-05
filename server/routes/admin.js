@@ -305,6 +305,7 @@ router.get('/user/:id/bets', async (req, res) => {
     const q = { userId: req.params.id };
     if (status) q.status = status;
     const bets = await Bet.find(q).sort({ createdAt: -1 }).limit(30).lean();
+    await require('../services/fixtureState').annotate(bets);   // live / not started / awaiting badges (display only)
     res.json({ success:true, data: bets });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
@@ -621,7 +622,9 @@ router.get('/bets', async (req, res) => {
     const rows = await Bet.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit + 1)
       .populate('userId', 'username phone').lean();
     const hasMore = rows.length > limit;
-    res.json({ success: true, data: hasMore ? rows.slice(0, limit) : rows, hasMore });
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    await require('../services/fixtureState').annotate(page);   // live / not started / awaiting badges (display only)
+    res.json({ success: true, data: page, hasMore });
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
