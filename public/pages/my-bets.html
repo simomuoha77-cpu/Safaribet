@@ -251,8 +251,9 @@ function schedulePoll(){
     if(!document.getElementById('betsList')) return;              // the page has been left: stop
     if(!document.hidden){ await loadBets(true, Date.now()-lastForce>25000); }
     schedulePoll();
-  }, 8000);
+  }, anyFinishedPending() ? 2000 : 8000);
 }
+function anyFinishedPending(){ try{ return (allBets||[]).some(b=>(b.selections||[]).some(s=>(s.result||'pending')==='pending' && s.fixtureState==='finished')); }catch(e){ return false; } }
 
 async function loadBets(hadCache, refresh){
   const seq=++reqSeq;
@@ -343,7 +344,7 @@ function renderBets(bets){
           ${r==='pending' ? fixtureBadge(s) : ''}
           ${s.marketLabel ? `<div class="sel-mkt" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.marketLabel).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
           ${r==='void' && s.voidReason ? `<div class="sel-why" style="font-size:11px;color:var(--mt);margin-top:2px">${String(s.voidReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
-          ${r==='pending' && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
+          ${r==='pending' && s.fixtureState==='finished' ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px">Settling now…</div>` : r==='pending' && s.pendingReason ? `<div class="sel-why" style="font-size:11px;color:var(--yl);margin-top:2px"> ${String(s.pendingReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>` : ''}
         </div>
         <div class="sel-odds">${(s.odds||0).toFixed(2)}</div>
       </div>`;

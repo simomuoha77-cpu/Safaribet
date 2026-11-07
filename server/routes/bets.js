@@ -628,6 +628,7 @@ router.get('/my', auth, async (req, res) => {
     try {
       const fin = require('../services/finalResultService');
       const pend = [];
+      let finishedPending = false;
       bets.forEach(bt => (bt.selections || []).forEach(s => { if ((s.result || 'pending') === 'pending') { pend.push(s); Object.defineProperty(s, '_placed', { value: new Date(bt.placedAt || bt.createdAt || 0).getTime() || 0, enumerable: false, configurable: true }); } }));
       const ids = new Set();
       pend.forEach(s => {
@@ -658,6 +659,7 @@ router.get('/my', auth, async (req, res) => {
           const note = (rs.find(r => r.trackerNote) || {}).trackerNote;
           if (state === 'awaiting' && note) s.waitingBecause = note;
           s.fixtureState = state;
+          if (state === 'finished') finishedPending = true;
           s.kickoffAt = kick || null;
           // A saved "waiting because the match was not captured while live" note belongs to an older check: while the game is
           // live (or has not started) it would contradict the badge, so it is not shown.
@@ -703,6 +705,8 @@ router.get('/my', auth, async (req, res) => {
           }));
         }
       }
+      // A game is verified FINISHED but its leg is still pending: settle right now (not on the next timer pass).
+      if (finishedPending) { try { require('../engine/settlementEngine').settleSoon(200); } catch (_) {} }
     } catch (e) { /* purely informational - never block the bet list */ }
 
     // Attach the latest score/clock to EVERY selection, including the other
