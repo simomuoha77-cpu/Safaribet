@@ -433,7 +433,7 @@ async function gradeProviderSel(s, matchRows) {
     const started = s.commenceTime ? new Date(s.commenceTime).getTime() <= Date.now() : true;
     if (p && p.providerId && started && (s.providerMarketId || s.providerMarketKey)) {
       const mk0 = `${p.sport}:${p.providerId}`;
-      if (!officialMemo.has(mk0)) officialMemo.set(mk0, sofaBetsProvider.getMatchMarkets(p.providerId, p.sport, { maxAgeMs: 120000 }).catch(() => null));
+      if (!officialMemo.has(mk0)) officialMemo.set(mk0, Promise.race([sofaBetsProvider.getMatchMarkets(p.providerId, p.sport, { maxAgeMs: 120000 }), new Promise(r => setTimeout(() => r(null), 8000))]).catch(() => null));
       const det = await officialMemo.get(mk0);
       const mk = (det && det.markets || []).find(m => (s.providerMarketId && String(m.id) === String(s.providerMarketId)) || String(m.key) === String(s.providerMarketKey) && String(m.name || '') === String(s.marketLabel || m.name || ''));
       const sel = mk && (mk.selections || []).find(x => (s.providerSelectionId && String(x.id) === String(s.providerSelectionId)) || String(x.key) === String(s.providerSelectionKey));
@@ -489,15 +489,17 @@ async function whenIdle(timeoutMs = 15000) {
   return !settlementRunning;
 }
 
+let settlementStartedAt = 0;
 let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
 
 async function runSettlement(includeApiFetch = true) {
   if (global.__sbShuttingDown) return { settled: 0, paid: 0, skipped: true };       // server is stopping: start nothing new
+  if (settlementRunning && Date.now() - settlementStartedAt > 4 * 60 * 1000) { console.log('[Settlement] Previous run looks stuck (>4 min) - releasing the lock.'); settlementRunning = false; }
   if (settlementRunning) {
     console.log('[Settlement] Skipped — a settlement run is already in progress.');
     return { settled: 0, paid: 0, skipped: true };
   }
-  settlementRunning = true;
+  settlementRunning = true; settlementStartedAt = Date.now();
   try {
     if (Date.now() - lastRecovery > 5 * 60 * 1000) await recoverUnpaidPayouts();     // first pass after a restart, then every 5 min
     return await _runSettlementInner(includeApiFetch);
@@ -559,7 +561,7 @@ async function _runSettlementInner(includeApiFetch) {
         fx.set(sel.matchId, { matchId: sel.matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, league: sel.league, commenceTime: sel.commenceTime });
     }
     if (fx.size) {
-      const t = await finalResults.trackFixtures(Array.from(fx.values()), Match);
+      const t = await Promise.race([finalResults.trackFixtures(Array.from(fx.values()), Match), new Promise(r => setTimeout(() => r({ finalized: 0, waiting: [{ matchId: '-', why: 'tracker still running (continuing without it)' }] }), 25000))]);
       const old = t.waiting.filter(w => w.why !== 'still in play');
       console.log(`[Settlement] Tracker: ${fx.size} fixtures, ${t.finalized} confirmed final, ${t.waiting.length} waiting`);
       old.slice(0, 15).forEach(w => console.log(`  [Tracker] waiting ${w.matchId}: ${w.why}`));
@@ -652,6 +654,7 @@ async function _runSettlementInner(includeApiFetch) {
           // Not settleable yet (period not finished / data missing): stays pending.
           // Remember WHY, so My Bets / the admin can see what it is waiting for.
           const why = pendingMessage(g, s);
+          try { if (g && g.finalKnown) console.log(`   [Pending-but-final] ${bet.betCode} ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g.reason}`); } catch (_) {}
           if (why && s.pendingReason !== why) { s.pendingReason = why; s.pendingCheckedAt = new Date(); changed = true; }
           // The match is over and verified, but this market cannot be graded from the data we have
           // (needs corners/cards/players, or a period score we never captured). Nothing is left for
