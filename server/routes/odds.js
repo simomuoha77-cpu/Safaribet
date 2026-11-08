@@ -643,6 +643,19 @@ router.get('/market-diag/:matchId', async (req, res) => {
   } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
 });
 
+
+// Shared lists (the same for every customer): serialised once, ETag'd so an unchanged list costs a 304, and marked cacheable
+// for a few seconds so a CDN (Cloudflare) can serve it to everyone from one copy instead of Render sending it to each phone.
+function sendShared(req, res, payload, secs) {
+  let json; try { json = require('../utils/edgeAlias').outText(payload); } catch (_) { json = null; }   // same id renaming res.json applies
+  if (typeof json !== 'string') json = JSON.stringify(payload);
+  const etag = 'W/"' + crypto.createHash('sha1').update(json).digest('hex') + '"';
+  res.set('ETag', etag);
+  res.set('Cache-Control', 'public, max-age=' + secs + ', s-maxage=' + secs + ', stale-while-revalidate=' + (secs * 2));
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  return res.type('application/json').send(json);
+}
+
 router.get('/featured', async (req, res) => {
   try {
     // A football game still flagged "live" 4.5h+ after kickoff is a stuck feed entry, not a live game: leave it out of
@@ -683,7 +696,7 @@ router.get('/featured', async (req, res) => {
     // Always revalidate with the server rather than letting the browser's own
     // HTTP cache silently serve a stale copy — the 304 short-circuit above is
     // the bandwidth optimization, not the browser cache.
-    res.set('Cache-Control', 'no-cache');
+    res.set('Cache-Control', 'public, max-age=5, s-maxage=5, stale-while-revalidate=10');
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
     }
@@ -723,11 +736,7 @@ router.get('/matches/:sport', async (req, res) => {
       }))
     ).map(applyOddsPipeline);
 
-    res.json({
-      success: true,
-      data: filtered,
-      count: filtered.length
-    });
+    return sendShared(req, res, { success: true, data: filtered, count: filtered.length }, 10);
   } catch (e) {
     console.warn('[odds/matches/' + sport + '] SofaBets failed:', e.message);
     res.status(502).json({
@@ -761,7 +770,7 @@ router.get('/live', async (req, res) => {
     }
 
     live.forEach(m => lastKnownLiveByMatch.set(m.matchId, { data: m, lastSeenLiveAt: Date.now() }));
-    res.json({ success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' });
+    return sendShared(req, res, { success: true, data: live.map(applyOddsPipeline), message: live.length ? null : 'No live matches' }, 5);
   } catch (e) {
     if (lastGoodLive.length) {
       return res.json({ success: true, data: lastGoodLive.map(applyOddsPipeline), message: null });

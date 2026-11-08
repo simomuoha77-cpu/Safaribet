@@ -1667,7 +1667,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     if (document.hidden) return;      // nobody is looking: the visibility handler below refreshes at once when the app comes back
     loadAllMatches(true);
     if (currentCat !== 'live' && !document.hidden) loadMatches('live', true).catch(() => {});   // keep the full live list warm so the LIVE tab opens instantly
-  }, 20000);
+  }, 30000);
   ensureFreshSync(Date.now() - 1, 0);          // the first list must really arrive, retrying quickly if the connection was not ready
 });
 
