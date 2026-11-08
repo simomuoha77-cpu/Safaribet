@@ -523,6 +523,7 @@ mongoose.connect(process.env.MONGO_URI, {
 
     console.log('🚀 SafariBet ready (database connected)');
     scheduler.start();
+    try { require('./services/staleLiveCleanup').start(); } catch (e) { console.error('[stale-live] not started:', e.message); }
     try { require('./routes/adminExtra').startJobs(); } catch (e) { console.error('[adminJobs] not started:', e.message); }
   })
   .catch(err => {

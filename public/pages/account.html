@@ -482,6 +482,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
   setInterval(loadWallet, 10000);
   window.addEventListener('focus', loadWallet);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) loadWallet(); });
+  window.addEventListener('sb:resume', ()=>{ try{ loadWallet(); loadStats(); loadTx(); loadKycStatus(); loadLoyaltyStatus(); }catch(e){} });
 });
 
 function authHeaders(){return {Authorization:'Bearer '+localStorage.getItem('token')}}

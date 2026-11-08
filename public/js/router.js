@@ -704,6 +704,16 @@
     if (awayMs < 5000) { checkBuild(false); return; }      // quick glance (under 5s)
     checkBuild(awayMs > 120000);                             // new deploy? (reloads only when the build changed)
     try { window.dispatchEvent(new Event('sb:resume')); } catch (e) {}
+    // The customer's own data (balance, profile) is refreshed right away on every return, whatever page is open.
+    try {
+      var tk = localStorage.getItem('token');
+      if (tk) fetch('/api/wallet/balance', { headers: { Authorization: 'Bearer ' + tk } }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || !d.success) return;
+        try { var u = JSON.parse(localStorage.getItem('user') || 'null'); if (u) { u.balance = d.data.spendable; localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('sb_acct_wallet_' + (u._id || u.id || 'u'), JSON.stringify(d.data)); } } catch (e) {}
+        var b = document.getElementById('balv'); if (b) b.textContent = parseFloat(d.data.spendable).toFixed(2);
+        try { window.dispatchEvent(new CustomEvent('sb:user-refreshed', { detail: d.data })); } catch (e) {}
+      }).catch(function () {});
+    } catch (e) {}
     // Pages with no refresh logic of their own (casino lobby, jackpot, virtual, referral): after a long absence reload them
     // so nothing old stays. Never the casino-game page or a form.
     if (awayMs > 600000 && /^\/(casino|jackpot|virtual|referral)\/?$/.test(normPath(location.pathname))) sbReloadOnce();
