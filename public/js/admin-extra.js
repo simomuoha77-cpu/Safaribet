@@ -463,13 +463,20 @@
   // ═══════════════ FEED HEALTH ═══════════════
   LOAD.feed = function (el) {
     pending(el);
+    var bwP = get('/api/odds/bandwidth').catch(function () { return null; });
+    var addBw = function (b) {
+      if (!b || !b.success || !b.data || !b.data.sinceBoot) return;
+      var sb = b.data.sinceBoot, box = document.createElement('div');
+      box.innerHTML = sec('Data sent to browsers since the last restart (' + sb.minutes + ' min): ' + esc(sb.total), table(['Route', 'Requests', '304', 'Sent', 'Avg KB'], sb.top.map(function (r) { return '<tr><td style="word-break:break-all">' + esc(r.route) + '</td><td>' + r.requests + '</td><td>' + r.notModified304 + '</td><td>' + esc(r.sent) + '</td><td>' + r.avgKB + '</td></tr>'; })));
+      el.appendChild(box);
+    };
     return get('/api/admin/feed-health').then(function (d) {
       if (!d.success) return empty(el, d.message);
       var p = d.provider || {}, l = d.live || {};
       el.innerHTML = '<div class="stats-grid">' + stat('Overall', d.healthy ? 'Healthy' : 'Problems', d.healthy ? 'var(--g)' : 'var(--r)') + stat('Odds provider', p.status || '—', p.status === 'connected' ? 'var(--g)' : 'var(--r)') + stat('Live list age', l.ageMs != null ? Math.round(l.ageMs / 1000) + 's' : '—', 'var(--b)') + stat('Live games in DB', d.matches.liveInDatabase, 'var(--y)') + stat('Pending bets', d.bets.pending) + stat('Stuck bets', d.bets.stuck, d.bets.stuck ? 'var(--r)' : 'var(--g)') + '</div>' +
         (d.issues.length ? sec('Problems', d.issues.map(function (i) { return '<div style="padding:4px 0">⚠️ ' + esc(i) + '</div>'; }).join('')) : '') +
         sec('Details', table(['Item', 'Value'], [['Last good provider sync', dt(p.lastSuccessfulSync)], ['Provider last error', p.lastError || '—'], ['Consecutive failures', p.consecutiveFailures], ['Fixtures fetched', p.fixturesFetched], ['Odds parsed', p.oddsParsed], ['Last live refresh OK', dt(l.lastOkAt)], ['Last live attempt', dt(l.lastAttemptAt)], ['Sports failing now', (l.failedSports || []).join(', ') || 'none'], ['Last bet placed', dt(d.bets.lastPlacedAt)], ['Last settlement', dt(d.bets.lastSettledAt)], ['Database', d.db], ['Server uptime', Math.round(d.uptimeSec / 60) + ' min']].map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; })), '<button class="btn btn-ghost btn-sm" onclick="XA.go(\'feed\')">Refresh</button>');
-    });
+    }).then(function () { return bwP.then(addBw); });
   };
 
   // ═══════════════ WITHDRAWAL QUEUE ═══════════════

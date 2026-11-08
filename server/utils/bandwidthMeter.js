@@ -9,6 +9,8 @@
 const http = new Map();     // "GET /api/odds/featured" -> { n, bytes, n304 }
 const db = new Map();       // label -> { n, bytes }
 let since = Date.now();
+const bootAt = Date.now();
+const httpAll = new Map();   // never cleared: totals since the server started (the 10-minute window above is reset)
 
 function routeKey(req) {
   let p = (req.route && req.route.path) ? ((req.baseUrl || '') + (Array.isArray(req.route.path) ? req.route.path[0] : req.route.path)) : req.originalUrl.split('?')[0];
@@ -28,6 +30,8 @@ function middleware(req, res, next) {
       const r = http.get(k) || { n: 0, bytes: 0, n304: 0 };
       r.n++; r.bytes += bytes; if (res.statusCode === 304) r.n304++;
       http.set(k, r);
+      const a = httpAll.get(k) || { n: 0, bytes: 0, n304: 0 }; a.n++; a.bytes += bytes; if (res.statusCode === 304) a.n304++; httpAll.set(k, a);
+      if (httpAll.size > 600) httpAll.delete(httpAll.keys().next().value);
       if (http.size > 400) http.delete(http.keys().next().value);
     } catch (_) {}
   });
@@ -47,6 +51,7 @@ function snapshot() {
     sinceMinutes: Math.round((Date.now() - since) / 60000),
     httpTotal: mb(rows.reduce((s, r) => s + r.bytes, 0)),
     dbTotal: mb(dbRows.reduce((s, r) => s + r.bytes, 0)),
+    sinceBoot: (function () { const all = Array.from(httpAll.entries()).map(([k, v]) => ({ route: k, requests: v.n, notModified304: v.n304, sent: mb(v.bytes), avgKB: v.n ? +(v.bytes / v.n / 1024).toFixed(1) : 0, bytes: v.bytes })).sort((a, b) => b.bytes - a.bytes); return { minutes: Math.round((Date.now() - bootAt) / 60000), total: mb(all.reduce((t, r) => t + r.bytes, 0)), top: all.slice(0, 15).map(({ bytes, ...r }) => r) }; })(),
     http: rows.slice(0, 25).map(({ bytes, ...r }) => r),
     db: dbRows.map(({ bytes, ...r }) => r)
   };

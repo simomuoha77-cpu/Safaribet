@@ -1610,7 +1610,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     refreshBalance();
     // Keep the home header synchronized when wallet credits arrive while this
     // session is already open (for example, a referral bonus paid to the referrer).
-    setInterval(function(){ if (!document.hidden) refreshBalance(); }, 10000);        // not while the app is in the background...
+    setInterval(function(){ if (!document.hidden) refreshBalance(); }, 30000);        // not while the app is in the background...
     loadNotifications();
     loadFavorites();
     setInterval(function(){ if (!document.hidden) loadNotifications(); }, 45000);
