@@ -1,6 +1,9 @@
 name: SafariBet Cloudflare Staging Deploy
 
 on:
+  push:
+    branches:
+      - cloudflare-migration
   workflow_dispatch:
 
 jobs:
