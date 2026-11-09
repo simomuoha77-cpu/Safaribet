@@ -3,21 +3,47 @@
   "name": "safaribet",
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-11-09",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "durable_objects": {
     "bindings": [
-      { "name": "NOTIFICATION_HUB", "class_name": "NotificationHub" },
-      { "name": "BACKEND_RUNTIME", "class_name": "BackendRuntime" }
+      {
+        "name": "NOTIFICATION_HUB",
+        "class_name": "NotificationHub"
+      },
+      {
+        "name": "BACKEND_RUNTIME",
+        "class_name": "BackendRuntime"
+      }
     ]
   },
   "migrations": [
-    { "tag": "v1-notification-hub", "new_classes": ["NotificationHub"] },
-    { "tag": "v2-backend-runtime", "new_classes": ["BackendRuntime"] }
+    {
+      "tag": "v1-notification-hub",
+      "new_classes": [
+        "NotificationHub"
+      ]
+    },
+    {
+      "tag": "v2-backend-runtime",
+      "new_classes": [
+        "BackendRuntime"
+      ]
+    }
   ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/ws/*", "/.well-known/*", "/casino/*", "/staff-assistance*"]
+    "run_worker_first": [
+      "/api/*",
+      "/ws/*",
+      "/.well-known/*",
+      "/casino/*",
+      "/staff-assistance*",
+      "/casino-art/*",
+      "/download/app.apk"
+    ]
   }
 }

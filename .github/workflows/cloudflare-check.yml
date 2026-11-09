@@ -1,0 +1,33 @@
+name: SafariBet Cloudflare Build Check
+
+on:
+  push:
+    branches:
+      - cloudflare-migration
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SafariBet
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test Cloudflare Worker
+        run: npm run test:cloudflare-worker
+
+      - name: Test betting and settlement logic
+        run: npm run test:goals
+
+      - name: Build Cloudflare Worker without deploying
+        run: npx wrangler deploy --dry-run
