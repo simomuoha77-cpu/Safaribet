@@ -11,7 +11,8 @@
     "test:live": "node server/tests/liveEndpoint.test.js && node server/tests/liveTabClient.test.js && node server/tests/tabSwitch.test.js && node server/tests/serviceWorker.test.js && node server/tests/liveResilience.test.js",
     "test:admin": "node server/tests/adminExtra.test.js && node server/tests/betCorrection.test.js",
     "test:cloudflare-worker": "node --test cloudflare/worker.test.mjs",
-    "cf:dev": "npx wrangler dev"
+    "cf:dev": "npx wrangler dev",
+    "postinstall": "node tools/patch-iconv-lite.js"
   },
   "dependencies": {
     "axios": "^1.6.2",
