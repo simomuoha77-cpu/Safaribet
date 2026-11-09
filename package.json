@@ -1,0 +1,44 @@
+{
+  "name": "safaribet",
+  "version": "2.0.0",
+  "description": "SafariBet – Real Kenya Betting Platform",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "test:staff": "node server/tests/staffAssistance.test.js && node server/tests/staffAuthMiddleware.test.js && node server/tests/staffFlows.test.js && node server/tests/staffPortalSmoke.test.js && node server/tests/staffAdminPanelSmoke.test.js",
+    "test:goals": "node server/tests/goalOrder.test.js && node server/tests/marketRules.test.js && node server/tests/settlement.test.js",
+    "test:live": "node server/tests/liveEndpoint.test.js && node server/tests/liveTabClient.test.js && node server/tests/tabSwitch.test.js && node server/tests/serviceWorker.test.js && node server/tests/liveResilience.test.js",
+    "test:admin": "node server/tests/adminExtra.test.js && node server/tests/betCorrection.test.js",
+    "test:cloudflare-worker": "node --test cloudflare/worker.test.mjs",
+    "cf:dev": "npx wrangler dev"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "9.12.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "qrcode": "^1.5.3",
+    "speakeasy": "^2.0.0",
+    "ua-parser-js": "^1.0.37",
+    "uuid": "^9.0.0",
+    "ws": "^8.16.0",
+    "xss": "^1.0.15"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

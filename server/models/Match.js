@@ -1,0 +1,106 @@
+const mongoose = require('mongoose');
+
+const matchSchema = new mongoose.Schema({
+  matchId:      { type: String, required: true, unique: true, index: true },
+  sport:        { type: String, required: true, index: true },
+  league:       { type: String, required: true },
+  homeTeam:     { type: String, required: true },
+  awayTeam:     { type: String, required: true },
+  commenceTime: { type: Date, required: true, index: true },
+  status:       { type: String, enum: ['upcoming','live','finished','cancelled'], default: 'upcoming', index: true },
+  result:       { type: String, enum: ['home','draw','away',null], default: null },
+  odds: {
+    home:      { type: Number, default: null },
+    draw:      { type: Number, default: null },
+    away:      { type: Number, default: null },
+    updatedAt: { type: Date, default: Date.now }
+  },
+  hasOdds:    { type: Boolean, default: false, index: true },
+  // When true, this match's odds were set/overridden by an admin and must never be
+  // overwritten by an automated sync/poll from any external odds source (Odds API,
+  // odds-api.io, API-Football, football-data.org, etc.) — regardless of that
+  // match's `source`. This is what allows an admin to edit odds on API-sourced
+  // games, not just manually-created ones.
+  oddsLocked:      { type: Boolean, default: false, index: true },
+  oddsLockedAt:    { type: Date, default: null },
+  oddsLockedBy:    { type: String, default: null },
+  score: {
+    home:   { type: Number, default: null },
+    away:   { type: Number, default: null },
+    minute: { type: Number, default: null },
+    period: { type: String, default: null },
+    // Set only when home/away actually changes (not on every ~10s live poll) —
+    // lets the live-risk engine detect "a goal was just scored" and briefly
+    // suspend markets while odds catch up, separate from the ongoing minute/
+    // score-margin based suspension rules. See server/services/marketResolver.js.
+    lastGoalAt: { type: Date, default: null },
+    // Exact live football clock (seconds) as last read from SofaBets, whether it was running, and when we read it.
+    clockSec:     { type: Number,  default: null },
+    clockRunning: { type: Boolean, default: null },
+    clockAt:      { type: Date,    default: null }
+  },
+  // Goals seen by our own live polling (team, minute, running score) - drives the live panel's timeline.
+  goalEvents: { type: mongoose.Schema.Types.Mixed, default: [] },
+  // Provider-native SofaBets markets. Stored as Mixed because market
+  // names/options differ by sport (football, tennis, basketball, etc.).
+  // This preserves the real bookmaker markets instead of reducing every
+  // sport to SafariBet's small legacy 1X2 set.
+  markets:   { type: mongoose.Schema.Types.Mixed, default: [] },
+  bookmakers:{ type: mongoose.Schema.Types.Mixed, default: [] },
+  // When `markets` was last populated with the FULL SofaBets catalogue (as
+  // opposed to just the default single Match Result market from the routine
+  // sync). Lets callers skip repeating the slow external SofaBets search —
+  // which can loop through many pages across several hosts — when a recent
+  // enough copy is already sitting in MongoDB. Separate from the document's
+  // own `updatedAt`, which also changes on unrelated routine odds updates.
+  marketsRefreshedAt: { type: Date, default: null },
+  providerOdds: { type: mongoose.Schema.Types.Mixed, default: null },
+  aiOdds: {
+    homeWin:      { type: Number, default: null },
+    draw:         { type: Number, default: null },
+    awayWin:      { type: Number, default: null },
+    over25:       { type: Number, default: null },
+    under25:      { type: Number, default: null },
+    btts:         { type: Number, default: null },
+    bttsNo:       { type: Number, default: null },
+    dc_home_draw: { type: Number, default: null },
+    dc_home_away: { type: Number, default: null },
+    dc_draw_away: { type: Number, default: null }
+  },
+  settled:    { type: Boolean, default: false },
+  settledAt:  { type: Date },
+  // True ONLY when the provider has explicitly confirmed this fixture as
+  // FINISHED with a final score. `status: 'finished'` + a score is NOT enough
+  // for settlement — a live score must never be treated as a final result.
+  finalVerified:   { type: Boolean, default: false, index: true },
+  finalVerifiedAt: { type: Date, default: null },
+  // Period results, recorded while the game is tracked live. Needed to settle
+  // half-specific markets (1st half / 2nd half) from the right score.
+  periodScores: {
+    ht:       { home: { type: Number }, away: { type: Number } },   // score at the end of the 1st half
+    htSource: { type: String },                                      // 'provider' | 'observed' | 'inferred'
+    htAt:     { type: Date },
+    last1h:   { home: { type: Number }, away: { type: Number }, at: { type: Date } },
+    seen2h:   { type: Boolean },
+    mid:      { home: { type: Number }, away: { type: Number }, at: { type: Date }, el: { type: Number } },   // score seen inside the half-time break window
+    lastObs:  { home: { type: Number }, away: { type: Number } },   // last score seen (to detect goals between polls)
+    goalsComplete: { type: Boolean },                                  // true when every goal since 0-0 was observed in order
+    firstScorer:   { type: String },                                   // 'home' | 'away' (only when certain)
+    lastScorer:    { type: String }
+  },
+  finalSource:     { type: String, default: null },
+  trackerNote:     { type: String, default: null },   // why the tracker has not confirmed this game's end yet   // 'provider' | 'feed-ended' (see finalResultService)
+  // Live-feed observations used to confirm that a game really ended
+  lastLiveSeenAt:  { type: Date, default: null },
+  lastLiveClockSec: { type: Number, default: null },   // football clock (seconds) when the game was last seen in the live feed
+  liveAbsentSince: { type: Date, default: null },
+  lastLiveMinute:  { type: Number, default: null },
+  lastFinalCheckAt:{ type: Date, default: null },
+  isStatic:   { type: Boolean, default: false },
+  source:     { type: String, enum: ['juanai'], default: 'juanai' }
+}, { timestamps: true });
+
+matchSchema.index({ status: 1, commenceTime: 1 });
+matchSchema.index({ sport: 1, status: 1, commenceTime: 1 });
+
+module.exports = mongoose.model('Match', matchSchema);

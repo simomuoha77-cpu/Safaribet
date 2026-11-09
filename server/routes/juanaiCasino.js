@@ -1,0 +1,240 @@
+// JuanAI Casino — real-money partner integration, CASINO ONLY.
+// Football routes/providers are deliberately not referenced here.
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const auth = require('../middleware/auth');
+const walletService = require('../services/walletService');
+const juanai = require('../services/juanaiPartnerCasino');
+
+const router = express.Router();
+const actionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many casino requests. Please wait a moment.' }
+});
+
+// What the player is told. Raw upstream/axios messages (e.g. "timeout of 10000ms exceeded") are
+// logged for us but never shown to the player.
+function fail(res, e, fallback = 'Casino service is unavailable right now. Please try again.') {
+  console.error('[juanai-casino]', e?.code || e?.status || '', e?.message || e);
+  if (e?.code === 'UNSUPPORTED_GAME') return res.status(400).json({ success: false, message: 'This casino game is not available.' });
+  if (e?.status === 404) return res.status(404).json({ success: false, message: 'Game not found.' });
+  if (e?.transient || juanai.isTransient(e)) {
+    return res.status(503).json({ success: false, code: 'WARMING', retryable: true,
+      message: 'The game server is starting up. Please try again in a few seconds.' });
+  }
+  return res.status(502).json({ success: false, message: fallback });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Keep JuanAI awake and the catalogue warm (so the lobby and launches never wait on a cold start).
+if (!process.env.SAFARIBET_WORKER_RUNTIME && juanai.configured()) {
+  const t0 = setTimeout(() => juanai.warm(), 3000); if (t0.unref) t0.unref();
+  const t1 = setInterval(() => juanai.warm(), 9 * 60 * 1000); if (t1.unref) t1.unref();
+}
+
+// Public, no secrets: lets the lobby show games only once JuanAI is connected.
+// The lobby lists the games as soon as JuanAI's address is set (JUANAI_CASINO_URL or JUANAI_URL).
+router.get('/available', (req, res) => { res.set('Cache-Control', 'no-store'); const c = juanai.cfg(); res.json({ success: true, configured: !!c.base, ready: !!(juanai.configured() || (c.base && c.legacyKey)) }); });
+// Playing Aviator/JetX needs the address plus either the casino key+secret or the normal JUANAI_API_KEY.
+// Is the casino game server answering right now? (the game page asks this BEFORE it opens the game, so a sleeping or
+// unreachable game server shows our own "starting..." screen instead of a failed frame, which the phone app reports as
+// "No internet connection"). Also wakes the game server.
+router.get('/ready', auth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const c = juanai.cfg();
+    if (!c.base) return res.json({ success: true, ready: false, reason: 'not_configured' });
+    if (!/^https:\/\//i.test(c.base) && !/^http:\/\/(localhost|127\.)/i.test(c.base)) return res.json({ success: true, ready: false, reason: 'insecure', message: 'The casino server address must start with https://' });
+    const r = await require('axios').get(c.base + '/', { timeout: 8000, validateStatus: () => true, maxRedirects: 3 });
+    return res.json({ success: true, ready: r.status > 0 && r.status < 500 });
+  } catch (e) { return res.json({ success: true, ready: false, reason: 'unreachable' }); }
+});
+
+function requireLaunchReady(req, res, next) {
+  const c = juanai.cfg();
+  if (juanai.configured() || (c.base && c.legacyKey)) return next();
+  return res.status(503).json({ success: false, message: 'Casino is not available right now. Please try again later.' });
+}
+
+function requireConfigured(req, res, next) {
+  if (!juanai.configured()) return res.status(503).json({ success: false, message: 'Casino is not available right now. Please try again later.' });
+  next();
+}
+
+// Launch sessions are stateless signed tokens (valid hours), so a recent one is reused:
+// tapping a game opens instantly. The lobby also pre-creates them in the background.
+const launchCache = new Map();           // `${userId}:${gameId}` -> { at, data }
+const launchInflight = new Map();
+const LAUNCH_TTL_MS = 25 * 60 * 1000;
+
+function launchFor(user, gameId) {
+  const key = `${user._id}:${gameId}`;
+  const hit = launchCache.get(key);
+  if (hit && Date.now() - hit.at < LAUNCH_TTL_MS) return Promise.resolve(hit.data);
+  if (launchInflight.has(key)) return launchInflight.get(key);
+  const p = juanai.launchDirect(gameId, user._id, user.username || user.name || String(user._id))
+    .then(data => { if (data && data.launchUrl) launchCache.set(key, { at: Date.now(), data }); return data; })
+    .finally(() => launchInflight.delete(key));
+  launchInflight.set(key, p);
+  return p;
+}
+const launchSweep = !process.env.SAFARIBET_WORKER_RUNTIME && setInterval(() => { const now = Date.now(); for (const [k, v] of launchCache) if (now - v.at > LAUNCH_TTL_MS * 2) launchCache.delete(k); }, 10 * 60 * 1000);
+if (launchSweep && launchSweep.unref) launchSweep.unref();
+
+// Keep JuanAI's server awake (free hosting sleeps after ~15 min idle and takes 30-50s to wake).
+if (!process.env.SAFARIBET_WORKER_RUNTIME && juanai.configured()) {
+  const ping = () => { try { require('axios').get(juanai.cfg().base + '/', { timeout: 20000, validateStatus: () => true }).catch(() => {}); } catch (_) {} };
+  const k0 = setTimeout(ping, 2000); if (k0.unref) k0.unref();
+  const k1 = setInterval(ping, 4 * 60 * 1000); if (k1.unref) k1.unref();
+}
+
+function gameIdFrom(req) {
+  return String(req.params.gameId || req.body?.gameId || '').trim();
+}
+
+// The lobby is sourced ONLY from JuanAI's real partner catalogue.
+router.get('/status', auth, requireConfigured, (req, res) => {
+  juanai.warm();                      // opening the casino page wakes JuanAI before a game is tapped
+  res.json({ success: true, provider: 'JuanAI', currency: 'KES' });
+});
+
+// JuanAI dashboard artwork is stored on JuanAI. SafariBet fetches it in the background
+// so game cards can render immediately without making the casino lobby depend on JuanAI startup.
+// Instant artwork: send the browser straight to JuanAI's public, cached image route.
+// No API key, no login and no JuanAI round-trip from our server, so it works even while JuanAI is asleep.
+router.get('/art/:gameId', (req, res) => {
+  const id = String(req.params.gameId || '').toLowerCase();
+  const base = juanai.cfg().base;
+  if (!['aviator', 'jetx'].includes(id) || !base) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=300');
+  res.redirect(302, `${base}/api/casino/games/${id}/image`);
+});
+
+// Public on purpose: it is only game artwork, and it must show even before login / with an expired session.
+router.get('/images', requireConfigured, async (req, res) => {
+  try {
+    const images = await juanai.getImages();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({ success: true, images });
+  } catch (e) { fail(res, e, 'JuanAI casino images are unavailable right now.'); }
+});
+
+router.get('/games', auth, requireConfigured, async (req, res) => {
+  try {
+    const data = await juanai.listGames();
+    res.json({ success: true, count: data.length, data });
+  } catch (e) { fail(res, e, 'Casino games are unavailable right now.'); }
+});
+
+// Called by the lobby in the background: wakes JuanAI and creates the player's game session
+// ahead of time, so the tap on Aviator/JetX opens instantly. Always answers at once.
+router.post('/prelaunch', auth, requireLaunchReady, (req, res) => {
+  ['aviator', 'jetx'].forEach(id => launchFor(req.user, id).catch(() => {}));
+  res.json({ success: true });
+});
+
+// Return the actual JuanAI game URL. SafariBet never recreates the provider game.
+router.post('/launch', auth, actionLimiter, requireLaunchReady, async (req, res) => {
+  try {
+    const gameId = gameIdFrom(req);
+    if (!gameId) return res.status(400).json({ success: false, message: 'gameId is required.' });
+    // The only real-money games in JuanAI are Aviator and JetX. Do not call
+    // /games here and do not wait for a cold catalogue. The player already
+    // tapped the game, so go straight to JuanAI's session endpoint and open
+    // the exact game URL with the signed utoken.
+    if (!['aviator', 'jetx'].includes(gameId)) {
+      return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
+    }
+    const data = await launchFor(req.user, gameId);
+    if (!data?.launchUrl) return res.status(502).json({ success: false, message: 'The game could not be started. Please try again.' });
+    res.json({
+      success: true,
+      gameId,
+      mode: 'real-money',
+      realMoney: true,
+      currency: 'KES',
+      launchUrl: data.launchUrl,
+      balance: data.balance,
+      game: { gameId, id: gameId, name: gameId === 'aviator' ? 'Aviator' : 'JetX', launchMode: 'real-money', realMoney: true }
+    });
+  } catch (e) {
+    console.error('[juanai-casino-launch] FULL ERROR:', {
+      message: e?.message,
+      status: e?.status,
+      code: e?.code,
+      upstream: e?.upstream,
+      response: e?.response?.data
+    });
+    fail(res, e, 'JuanAI could not launch this game right now. Please try again.');
+  }
+});
+
+router.get('/state/:gameId', auth, requireConfigured, async (req, res) => {
+  try {
+    const gameId = gameIdFrom(req);
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
+    const data = await juanai.state(gameId);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({ success: true, gameId, data });
+  } catch (e) { fail(res, e); }
+});
+
+router.get('/players/:gameId', auth, requireConfigured, async (req, res) => {
+  try {
+    const gameId = gameIdFrom(req);
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
+    const data = await juanai.players(gameId);
+    res.json({ success: true, data });
+  } catch (e) { fail(res, e); }
+});
+
+
+router.get('/balance', auth, requireConfigured, async (req, res) => {
+  try {
+    // Read the SafariBet wallet directly so the displayed balance is never a
+    // JuanAI/in-memory balance. JuanAI's partner wallet is the same ledger.
+    const data = await walletService.getBalance(req.user._id);
+    res.json({ success: true, balance: Number(data.main), spendable: Number(data.spendable), currency: 'KES' });
+  } catch (e) { fail(res, e, 'Could not load your casino balance.'); }
+});
+
+router.post('/bet', auth, actionLimiter, requireConfigured, async (req, res) => {
+  try {
+    const gameId = String(req.body?.gameId || '').trim().toLowerCase();
+    const slot = Number(req.body?.slot);
+    const stake = Number(req.body?.stake);
+    if (!['aviator', 'jetx'].includes(gameId)) return res.status(400).json({ success: false, message: 'Casino game is not available for real-money play.' });
+    if (![1, 2].includes(slot)) return res.status(400).json({ success: false, message: 'Invalid bet slot.' });
+    if (!Number.isFinite(stake) || stake < 1 || stake > 50000) return res.status(400).json({ success: false, message: 'Stake must be between KES 1 and KES 50,000.' });
+
+    const result = await juanai.placeBet(req.user._id, gameId, slot, stake);
+    if (!result?.success) return res.status(400).json({ success: false, message: result?.message || 'Bet could not be placed.' });
+    res.json({ success: true, betId: result.betId, roundId: result.roundId, gameId, slot, stake });
+  } catch (e) { fail(res, e, 'Bet could not be placed. Please try again.'); }
+});
+
+router.get('/bet/:betId', auth, requireConfigured, async (req, res) => {
+  try {
+    const result = await juanai.betResult(req.params.betId, req.user._id);
+    if (!result?.success) return res.status(404).json({ success: false, message: 'Bet not found.' });
+    if (String(result.userId) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'Bet does not belong to this account.' });
+    res.json({ success: true, data: result });
+  } catch (e) { fail(res, e, 'Could not load the bet status.'); }
+});
+
+router.post('/bet/:betId/cashout', auth, actionLimiter, requireConfigured, async (req, res) => {
+  try {
+    const existing = await juanai.betResult(req.params.betId, req.user._id);
+    if (!existing?.success) return res.status(404).json({ success: false, message: 'Bet not found.' });
+    if (String(existing.userId) !== String(req.user._id)) return res.status(403).json({ success: false, message: 'Bet does not belong to this account.' });
+    const result = await juanai.cashOut(req.params.betId, req.user._id);
+    if (!result?.success) return res.status(400).json({ success: false, message: result?.message || 'Cash out was not accepted.' });
+    res.json({ success: true, data: result });
+  } catch (e) { fail(res, e, 'Cash out was not accepted. Please try again.'); }
+});
+
+module.exports = router;
