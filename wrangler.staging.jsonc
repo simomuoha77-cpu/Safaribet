@@ -21,13 +21,13 @@
   "migrations": [
     {
       "tag": "v1-notification-hub",
-      "new_classes": [
+      "new_sqlite_classes": [
         "NotificationHub"
       ]
     },
     {
       "tag": "v2-backend-runtime",
-      "new_classes": [
+      "new_sqlite_classes": [
         "BackendRuntime"
       ]
     }
