@@ -23,6 +23,6 @@ staffAuditSchema.index({ staffId: 1, createdAt: -1 });
 
 const BLOCKED = ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne', 'deleteOne', 'deleteMany', 'findOneAndDelete', 'findOneAndRemove'];
 for (const op of BLOCKED) staffAuditSchema.pre(op, function () { throw new Error('Staff audit records are append-only.'); });
-staffAuditSchema.pre('save', function (next) { if (!this.isNew) return next(new Error('Staff audit records are append-only.')); next(); });
+staffAuditSchema.pre('save', function () { if (!this.isNew) throw new Error('Staff audit records are append-only.'); });   // Mongoose 9: no next()
 
 module.exports = mongoose.model('StaffAudit', staffAuditSchema);

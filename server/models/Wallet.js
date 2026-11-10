@@ -33,7 +33,9 @@ walletSchema.set('toJSON', { virtuals: true });
 walletSchema.set('toObject', { virtuals: true });
 
 // Guard: block direct $set on balance fields — force use of $inc via walletService
-walletSchema.pre('findOneAndUpdate', function(next) {
+// NOTE: Mongoose 9 no longer passes `next` to pre hooks (calling it throws "next is not a function", which made EVERY
+// wallet debit/credit - and therefore every bet - fail with a 500). Hooks are plain/async functions now.
+walletSchema.pre('findOneAndUpdate', function() {
   const update = this.getUpdate();
   const guarded = ['main', 'bonus', 'locked', 'pending'];
   if (update?.$set) {
@@ -44,7 +46,6 @@ walletSchema.pre('findOneAndUpdate', function(next) {
       }
     }
   }
-  next();
 });
 
 module.exports = mongoose.model('Wallet', walletSchema);

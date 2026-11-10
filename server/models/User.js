@@ -81,14 +81,14 @@ userSchema.methods.toJSON = function() {
 };
 
 // Prevent negative balance
-userSchema.pre('save', function(next) {
+// (Mongoose 9: pre hooks no longer receive `next` - plain/async functions only.)
+userSchema.pre('save', function() {
   if (this.balance < 0) this.balance = 0;
-  next();
 });
 
 // Auto-generate a unique referral code for new users
-userSchema.pre('save', async function(next) {
-  if (!this.isNew || this.referralCode) return next();
+userSchema.pre('save', async function() {
+  if (!this.isNew || this.referralCode) return;
   const base = (this.username || 'user').slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '');
   let code, exists = true, attempts = 0;
   while (exists && attempts < 10) {
@@ -97,18 +97,16 @@ userSchema.pre('save', async function(next) {
     attempts++;
   }
   this.referralCode = code;
-  next();
 });
 
 // Log any direct balance changes (security audit)
-userSchema.pre('findOneAndUpdate', function(next) {
+userSchema.pre('findOneAndUpdate', function() {
   const update = this.getUpdate();
   // Only allow $inc for balance — block $set balance from non-internal sources
   if (update?.$set?.balance !== undefined) {
     console.warn('[SECURITY] Direct $set balance attempted — blocked');
     delete update.$set.balance;
   }
-  next();
 });
 
 module.exports = mongoose.model('User', userSchema);
