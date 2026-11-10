@@ -461,6 +461,30 @@ async function gradeProviderSel(s, matchRows) {
   return { status: r.status, score: r.score || null, periodLabel: r.periodLabel || (period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT'), source: 'market-rules', reason: r.reason || null };
 }
 
+// Official provider results used to be fetched one fixture after another INSIDE the grading loop (up to 8 s each), so with many
+// open bets a single pass could take minutes and every bet waited behind it. They are now fetched at the same time, up front;
+// gradeProviderSel then finds each answer already in officialMemo.
+async function prefetchOfficial(bets) {
+  const todo = new Map();
+  const now = Date.now();
+  for (const bet of bets) for (const s of (bet.selections || [])) {
+    if (s.result !== 'pending' || !isProviderSel(s) || !(s.providerMarketId || s.providerMarketKey)) continue;
+    const p = finalResults.parseSofaMatchId(s.matchId);
+    if (!p || !p.providerId) continue;
+    if (s.commenceTime && new Date(s.commenceTime).getTime() > now) continue;      // not started: nothing official yet
+    const mk0 = `${p.sport}:${p.providerId}`;
+    if (!officialMemo.has(mk0) && !todo.has(mk0)) todo.set(mk0, p);
+  }
+  const entries = Array.from(todo.entries());
+  for (let i = 0; i < entries.length; i += 6) {
+    await Promise.all(entries.slice(i, i + 6).map(([mk0, p]) => {
+      const pr = Promise.race([sofaBetsProvider.getMatchMarkets(p.providerId, p.sport, { maxAgeMs: 120000 }), new Promise(r => setTimeout(() => r(null), 8000))]).catch(() => null);
+      officialMemo.set(mk0, pr);
+      return pr;
+    }));
+  }
+}
+
 // Finishes any payout that was claimed but not confirmed (e.g. the server was stopped for a deploy in between).
 // payWinner / payRefund are idempotent, so running this twice - or racing a normal payout - can never pay twice.
 let lastRecovery = 0;
@@ -624,6 +648,7 @@ async function _runSettlementInner(includeApiFetch) {
   const now = Date.now();
   const matchRows = new Map(); // matchId -> Match row, loaded once per run
   officialMemo.clear();
+  try { await prefetchOfficial(bets); } catch (_) {}
 
 
   for (const bet of bets) {

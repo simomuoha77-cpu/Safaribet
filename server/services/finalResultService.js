@@ -78,14 +78,19 @@ async function verifyFinalResult(matchId) {
 //      hiccup can never satisfy this.
 // ══════════════════════════════════════════════════════════════════════════════
 const MIN_DURATION_MIN = { football: 110, basketball: 125, tennis: 90, hockey: 150, cricket: 480, volleyball: 90, rugby: 110, handball: 100 };
-const ABSENT_MS = Number(process.env.SETTLE_ABSENT_MS) || 15 * 60 * 1000;          // tunable: only used when the feed never says FINISHED
+// Game left the live feed while NOT yet in its closing stage (e.g. last seen around minute 80-85): wait this long before calling it over.
+// Was 15 min. A half-time gap can no longer be mistaken for full time because the closing-stage rules in inferEnded() still apply.
+const ABSENT_MS = Number(process.env.SETTLE_ABSENT_MS) || 4 * 60 * 1000;          // tunable: only used when the feed never says FINISHED
 // A football game last seen at 90:00 or later was in its closing stage: once it has left the live feed for this long
 // it is over (the usual wait is 15 minutes). Together with the settlement run every minute: about 2-3 minutes.
 const FAST_ABSENT_MS = Number(process.env.SETTLE_FAST_ABSENT_MS) || 100 * 1000;
 const FOOTBALL_LAST_MIN = 80;
 const memo = new Map(); // key -> { ts, data }
 const exactChecked = new Map();                       // matchId -> last time the exact-fixture lookup ran (throttle)
-const EXACT_CHECK_GAP_MS = 3 * 60 * 1000;
+const EXACT_CHECK_GAP_MS = Number(process.env.SETTLE_EXACT_GAP_MS) || 60 * 1000;   // was 3 min: ask the provider about the exact fixture every minute
+// The exact-fixture question only ever accepts an explicit provider FINISHED + full-time score, so asking EARLY is harmless
+// (it can never settle a game that is still in play). It starts at this share of the sport's minimum game length (was 100%).
+const EXACT_START_SHARE = 0.75;
 const FORCE_EXACT_GAP_MS = 20 * 1000;           // on-demand checks (My Bets opened) may ask the provider for the exact fixture this often
 async function memoized(key, ttlMs, fn) {
   const hit = memo.get(key);
@@ -112,22 +117,30 @@ function inferEnded(row, sport, now) {
   if (!kickoff) return { ok: false, why: 'no kickoff time' };
   const minDur = (MIN_DURATION_MIN[sport] || 180) * 60000;
   const clock = row.lastLiveClockSec != null ? Number(row.lastLiveClockSec) : null;
-  const fast = sport === 'football' && Number.isFinite(clock) && clock >= 90 * 60;   // the feed's own clock had reached full time
-  if (!fast && now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
   const h = row.score && row.score.home, a = row.score && row.score.away;
   if (h == null || a == null) return { ok: false, why: 'no score was ever recorded from the live feed' };
   const lastSeen = row.lastLiveSeenAt || (row.status === 'finished' || row.status === 'live' ? row.fetchedAt : null);
   if (!lastSeen) return { ok: false, why: 'match was never seen live' };
-  const absent = row.liveAbsentSince || (row.status === 'finished' ? row.fetchedAt : null);
-  if (!absent || now - new Date(absent).getTime() < (fast ? FAST_ABSENT_MS : ABSENT_MS)) return { ok: false, why: 'not absent from live feed long enough' };
   const minute = row.lastLiveMinute != null ? row.lastLiveMinute : (row.score && row.score.minute);
+  const seenEl = (new Date(lastSeen).getTime() - kickoff) / 60000;   // minutes after kickoff when it was last seen live
+
+  // CLOSING STAGE (football): the last live sighting was already at the very end of the game, so the score we hold is the final
+  // score and the only thing left is to be sure the game really left the feed (no half-time / mid-game gap is possible here).
+  //   - the feed's own clock had reached 90:00, or
+  //   - the feed's minute was 85+, or
+  //   - no minute/clock, but it was last seen 100+ min after kickoff (90 min + ~15 min break = game minute ~85).
+  const closing = sport === 'football' && (
+    (Number.isFinite(clock) && clock >= 90 * 60) ||
+    (minute != null && Number(minute) >= 85) ||
+    (minute == null && Number.isFinite(seenEl) && seenEl >= 100));
+  if (!closing && now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
+  const absent = row.liveAbsentSince || (row.status === 'finished' ? row.fetchedAt : null);
+  if (!absent || now - new Date(absent).getTime() < (closing ? FAST_ABSENT_MS : ABSENT_MS)) return { ok: false, why: 'not absent from live feed long enough' };
   if (sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
   // The feed usually sends no minute. Then use the clock instead: a game last seen LIVE 97+ minutes
-  // after kickoff (90 minutes + the ~15 minute break, i.e. game minute ~82) that has since been gone
-  // from the live feed for 15+ minutes has ended. Last seen earlier than that -> it may still be
-  // in play (feed gap / suspension), so it keeps waiting.
+  // after kickoff (90 minutes + the ~15 minute break, i.e. game minute ~82) that has since left the feed has ended.
+  // Last seen earlier than that -> it may still be in play (feed gap / suspension), so it keeps waiting for the provider.
   if (sport === 'football' && minute == null) {
-    const seenEl = (new Date(lastSeen).getTime() - kickoff) / 60000;
     if (!Number.isFinite(seenEl) || seenEl < 97) return { ok: false, why: `last seen only ${Math.max(0, Math.round(seenEl || 0))} min after kickoff` };
   }
   return { ok: true, home: Number(h), away: Number(a) };
@@ -282,7 +295,7 @@ function observePeriods(prev, item, sport, now = new Date(), kickoff) {
 // still needs an explicit provider FINISHED - but nothing is served from a stale cache and the exact-fixture question is
 // not held back by the minimum-game-length gate or the 3-minute throttle, so a game the scheduled poller missed (or a
 // server that was asleep) is picked up immediately instead of staying "awaiting result".
-async function trackFixtures(fixtures, Match, opts) {
+async function trackFixturesSeq(fixtures, Match, opts) {
   const force = !!(opts && opts.force);
   const now = Date.now();
   const out = { finalized: 0, waiting: [] };
@@ -358,7 +371,7 @@ async function trackFixtures(fixtures, Match, opts) {
       // Safety net: the feed-based check cannot confirm this game (never seen live, or the feed dropped it early).
       // Once it is past the sport's minimum game length, ask the provider for this EXACT fixture. Only an explicit
       // FINISHED status with a full-time score is accepted (verifyFinalResult), so nothing is guessed.
-      if (kickoff.getTime() && (force || now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000)) {
+      if (kickoff.getTime() && (force || now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000 * EXACT_START_SHARE)) {
         const last = exactChecked.get(fx.matchId) || 0;
         if (now - last >= (force ? FORCE_EXACT_GAP_MS : EXACT_CHECK_GAP_MS)) {
           exactChecked.set(fx.matchId, now);
@@ -370,6 +383,21 @@ async function trackFixtures(fixtures, Match, opts) {
       out.waiting.push({ matchId: fx.matchId, why: inf.why });
     } catch (e) { out.waiting.push({ matchId: fx.matchId, why: 'tracker error: ' + e.message }); }
   }
+  return out;
+}
+
+// Several fixtures are checked AT THE SAME TIME (was one after the other: one slow provider lookup of up to 12 s held up every
+// game behind it, so a finished game could wait many minutes just because of its place in the queue).
+const TRACK_CONCURRENCY = Math.max(1, Number(process.env.SETTLE_TRACK_CONCURRENCY) || 6);
+async function trackFixtures(fixtures, Match, opts) {
+  const list = Array.isArray(fixtures) ? fixtures : [];
+  if (list.length <= 1) return trackFixturesSeq(list, Match, opts);
+  const n = Math.min(TRACK_CONCURRENCY, list.length);
+  const slices = Array.from({ length: n }, () => []);
+  list.forEach((fx, i) => slices[i % n].push(fx));
+  const parts = await Promise.all(slices.map(sl => trackFixturesSeq(sl, Match, opts).catch(e => ({ finalized: 0, waiting: sl.map(fx => ({ matchId: fx.matchId, why: 'tracker error: ' + e.message })) }))));
+  const out = { finalized: 0, waiting: [] };
+  for (const r of parts) { out.finalized += (r && r.finalized) || 0; out.waiting.push(...((r && r.waiting) || [])); }
   return out;
 }
 
