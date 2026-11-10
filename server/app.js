@@ -89,7 +89,7 @@ app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 const bandwidthMeter = require('./utils/bandwidthMeter');
 app.use(bandwidthMeter.middleware);
 if (!process.env.SAFARIBET_WORKER_RUNTIME) bandwidthMeter.start();
-app.use(compression());
+if (!process.env.SAFARIBET_WORKER_RUNTIME) app.use(compression());
 // rawBody is kept ONLY for the JuanAI casino callbacks: their HMAC signature is over the exact bytes sent.
 app.use(express.json({ limit: '50kb', verify: (req, res, buf) => { if (req.originalUrl && (req.originalUrl.startsWith('/api/casino/juanai/') || req.originalUrl.startsWith('/api/v1/casino/'))) req.rawBody = buf.toString('utf8'); } })); // limit body size
 // Parse cookies — needed for casino game launcher auth
