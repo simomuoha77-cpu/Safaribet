@@ -518,8 +518,8 @@ header{
 .mth-2{display:grid;grid-template-columns:1fr 58px 58px;padding:4px 12px 6px;font-size:10px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px}
 .mth-3{display:grid;grid-template-columns:1fr 58px 58px 58px 58px;padding:4px 12px 6px;font-size:10px;font-weight:700;color:var(--mt);text-transform:uppercase;letter-spacing:0.5px}
 
-.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid var(--bd);white-space:nowrap}
-.toast.on{opacity:1}
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;border:1px solid var(--bd);white-space:normal;text-align:center;max-width:calc(100vw - 24px)}
+.toast.on{opacity:1;pointer-events:auto}
 .toast.ok{border-color:var(--g);color:var(--g)}
 .toast.err{border-color:var(--rd);color:var(--rd)}
 .toast.info{border-color:var(--yl);color:var(--yl)}
@@ -3937,7 +3937,7 @@ async function placeBet(){
   const send=()=>fetch('/api/bets/place',{method:'POST',headers:Object.assign({'Content-Type':'application/json','X-Idempotency-Key':idemKey},auth()),body}).then(r=>r.json());
 
   // meanwhile, after a few seconds, also ask the server directly whether the bet exists
-  let pollTimer=null, polls=0;
+  let pollTimer=null, polls=0, retrying=false;
   const poll=async()=>{
     if(done) return;
     polls++;
@@ -3945,7 +3945,7 @@ async function placeBet(){
       const r=await fetch('/api/bets/place-status/'+encodeURIComponent(idemKey),{headers:auth()});
       const d=await r.json();
       if(d.success&&d.state==='placed') return success(d.bet);
-      if(d.success&&d.state==='failed') return failure(d.message);
+      if(d.success&&d.state==='failed'&&!retrying) return failure(d.message);   // while an automatic retry is pending a failed first attempt is not final
     }catch(e){}
     if(!done&&polls<60) pollTimer=setTimeout(poll,1000);
   };
@@ -3969,8 +3969,18 @@ async function placeBet(){
       }
       if(lastErr&&!done) throw lastErr;
     }
+    // The odds provider / database being briefly slow is temporary: retry automatically (up to 2 times, 1.5s then 3s)
+    // with the SAME idempotency key. The server answers a repeat of that key with the original bet if it was placed,
+    // so a retry can never place - or charge for - a second bet.
+    for(let i=0; i<2 && !done && d && !d.success && (d.code==='timeout'||d.code==='db_unavailable'||d.code==='upstream_limit'); i++){
+      retrying=true; btn.textContent='Retrying ('+(i+1)+'/2)...';
+      await new Promise(r=>setTimeout(r,1500*(i+1)));
+      if(done) break;
+      try{ d=await send(); }catch(e){ break; }
+    }
+    retrying=false;
     if(d&&d.success) success(d);
-    else if(d) failure(d.message);
+    else if(d) failure((d.message||'Failed to place bet')+(d.debug?' ['+d.debug.name+': '+d.debug.error+']':''));
   };
   try{
     // whichever comes first: the request's own answer, or the status check finding the bet
@@ -3994,7 +4004,8 @@ let tTmr=null;
 function showT(msg,type=''){
   const el=document.getElementById('toast');
   el.textContent=msg; el.className=`toast on ${type}`;
-  clearTimeout(tTmr); tTmr=setTimeout(()=>el.classList.remove('on'),3500);
+  clearTimeout(tTmr); tTmr=setTimeout(()=>el.classList.remove('on'),type==='err'?7000:3500);   // errors stay long enough to read; tap to dismiss
+  el.onclick=()=>el.classList.remove('on');
 }
 </script>
 <script>SB.run()</script>

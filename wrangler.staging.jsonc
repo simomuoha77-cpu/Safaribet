@@ -2,6 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "safaribet-staging",
   "keep_vars": true,
+  "vars": {
+    // STAGING ONLY: include the real error name/message in failed place-bet responses. Never set on production.
+    "SB_DEBUG_ERRORS": "1"
+  },
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-11-09",
   "compatibility_flags": [

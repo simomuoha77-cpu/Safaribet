@@ -567,7 +567,7 @@ function holdCrawler(maxMs) {
   const release = () => {
     if (done) return; done = true; clearTimeout(timer);
     userMarketsActive = Math.max(0, userMarketsActive - 1);
-    if (userMarketsActive === 0) setTimeout(pumpWarm, 1500).unref();   // let the crawler resume shortly after
+    if (userMarketsActive === 0) { const rt = setTimeout(pumpWarm, 1500); if (rt && typeof rt.unref === 'function') rt.unref(); }   // let the crawler resume shortly after (Workers' setTimeout may not return an object with unref)
   };
   const timer = setTimeout(release, maxMs || 5000); if (timer.unref) timer.unref();
   return release;
@@ -713,8 +713,23 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
     return sofaFetch(base, path, query || {}, 2, MARKETS_FAST_TIMEOUT_MS);
   };
 
+  // The exact fixture's own details (teams, league, kick-off, status) when the same payload that carried the markets also
+  // carries them. Identity rule is unchanged: only accepted when the payload's OWN id equals the requested id. This lets
+  // bet placement confirm fixture + markets in ONE round instead of crawling the catalogue for the fixture separately.
+  const captureFixture = payload => {
+    try {
+      const src = payload && payload.fixture && typeof payload.fixture === 'object' ? payload.fixture : payload;
+      if (!src || typeof src !== 'object' || Array.isArray(src)) return;
+      if (String(findIdInPayload(src) == null ? '' : findIdInPayload(src)).trim() !== String(id)) return;
+      const nm = safeNormalizeMatch(src);
+      if (nm && String(nm.providerMatchId).trim() === String(id) && nm.homeTeam && nm.awayTeam) result.fixture = nm;
+    } catch (_) {}
+  };
+  let fullListSeen = false;   // a /api/fixture-markets answer with a real market list has arrived
+
   const saveIfRicher = (payload, source) => {
     try {
+      captureFixture(payload);
       const markets = normalizeMarketList(payload && payload.fixture || payload);
       if (Array.isArray(markets) && markets.length > 1) {
         const k = String(source).split(String(id)).join(':id').replace(/:item$/, '');
@@ -756,6 +771,7 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
         const foundId = findIdInPayload(payload && payload.fixture || payload);
         if (foundId != null && String(foundId) !== String(id)) return;
         saveIfRicher(payload, `${base}/api/fixture-markets/${id}`);
+        try { const ml = normalizeMarketList(payload && payload.fixture || payload); if (Array.isArray(ml) && ml.length > 1) fullListSeen = true; } catch (_) {}
       } finally { fmPending--; }
     })());
   }
@@ -798,7 +814,9 @@ function fetchMatchMarketsParallel(id, name, cacheKey, background) {
       resolve(result);
     };
     const check = () => {
-      if (result.markets.length > 1 && !graceTimer && !done && fmPending <= 0) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
+      // Once ONE host has delivered the full list there is no reason to wait for the other host (a dead/slow secondary host
+      // used to hold every lookup for its whole 6 s timeout).
+      if (result.markets.length > 1 && !graceTimer && !done && (fmPending <= 0 || fullListSeen)) graceTimer = setTimeout(finish, 350);  // brief window for a richer copy
       if (pending === 0) finish();
     };
     tasks.forEach(t => t.then(() => {}, e => { if (errs.length < 40) errs.push(String(e && e.message || e).replace(/https?:\/\/[^ ]+/g, '').slice(0, 70)); }).then(() => { pending--; check(); }));
@@ -930,6 +948,36 @@ async function getMatchById(providerMatchId, sportName = 'football', options = {
     `/api/matches/${encodeURIComponent(id)}`,
     `/api/events/${encodeURIComponent(id)}`
   ];
+
+  // FAST MODE (bet placement): a customer is waiting, so every exact-id endpoint is asked AT THE SAME TIME with a short
+  // timeout and no retry sleeps, and the multi-page catalogue crawl is skipped. The sequential walk below needs
+  // 6 round trips (12 s timeout + retry each) before it even starts crawling, which can never fit a placement budget.
+  // Identity is unchanged: acceptExact() only keeps an item whose OWN id equals the requested id.
+  if (options && options.fast === true) {
+    const tasks = [];
+    for (const base of BASES) {
+      for (const path of directPaths) {
+        tasks.push(sofaFetch(base, path, {}, 2, MARKETS_FAST_TIMEOUT_MS).then(payload => {
+          const items = extractItems(payload);
+          if (items.length > 1) return;
+          if (items.length === 1) acceptExact(items[0], `${base}${path}`);
+          else if (payload && typeof payload === 'object' && !Array.isArray(payload)) acceptExact(payload.fixture || payload.event || payload.match || payload, `${base}${path}`);
+        }));
+      }
+      for (const sportId of candidates) {
+        tasks.push(sofaFetch(base, '/api/fixtures-by-sport', { sportId: String(sportId), fixtureId: id, page: '1', limit: '1' }, 2, MARKETS_FAST_TIMEOUT_MS).then(payload => {
+          for (const item of extractItems(payload)) acceptExact(item, `${base}/api/fixtures-by-sport:fixtureId`);
+        }));
+      }
+    }
+    // Return the moment the first exact fixture is confirmed (or when every request has failed).
+    await new Promise(resolve => {
+      let pending = tasks.length;
+      if (!pending) return resolve();
+      for (const t of tasks) t.then(() => {}, () => {}).then(() => { pending--; if (best || pending === 0) resolve(); });
+    });
+    return best;
+  }
   for (const base of BASES) {
     for (const path of directPaths) {
       try {

@@ -22,7 +22,17 @@ const { parseSofaMatchId } = require('./finalResultService');
 const LIVE_MAX_AGE_MS = 45 * 1000;
 const PREMATCH_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_LIST_MAX_STALE_MS = 20 * 1000;
-const DEFAULT_BUDGET_MS = 1800;                       // a slow provider must never keep a bet waiting more than ~2s
+// A slow provider must never keep a bet waiting forever. On the always-warm Node server ~2s is plenty (everything is cached
+// by the background crawler). On Cloudflare Workers the crawler/feed loops are disabled (SAFARIBET_WORKER_RUNTIME), so a bet
+// is often the FIRST request for that fixture and must fetch it cold: 1.8s is simply too short there and every such bet
+// failed with "The odds provider is responding slowly". Override with PLACE_BUDGET_MS.
+function defaultBudgetMs() {
+  const env = Number(process.env.PLACE_BUDGET_MS);
+  if (Number.isFinite(env) && env >= 500) return env;
+  return process.env.SAFARIBET_WORKER_RUNTIME ? 8000 : 1800;
+}
+const DEFAULT_BUDGET_MS = 1800;                       // kept for backwards compatibility with importers/tests
+const IN_PLAY = new Set(['IN_PLAY', 'LIVE', 'PAUSED', '1H', '2H', 'HT', 'ET']);
 // If the provider is slow, an already-cached market list may still be used - but ONLY when the price the player
 // is looking at is still exactly the cached price (see below), and only while the cache is this young.
 const STALE_OK_LIVE_MS = 2 * 60 * 1000;
@@ -75,7 +85,7 @@ function findMarketAndOutcome(markets, ref) {
 //   { ok:true, fixture:{homeTeam,awayTeam,league,commenceTime,sport,status,providerMatchId}, mk, out, source }
 //   { ok:false, code:'bad_id'|'not_live'|'finished'|'not_found'|'market_gone'|'timeout'|'unavailable', reason }
 async function resolveProviderSelection(sel, matchRow, opts = {}) {
-  const budget = opts.budgetMs || DEFAULT_BUDGET_MS;
+  const budget = opts.budgetMs || defaultBudgetMs();
   const parsed = parseSofaMatchId(sel.matchId);
   if (!parsed || !parsed.providerId) return { ok: false, code: 'bad_id', reason: 'Invalid fixture reference' };
   const { providerId, sport, isLive: isLiveId } = parsed;
@@ -131,21 +141,35 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
 
   // 2. One bounded provider round (everything in parallel). The slow fixture look-ups are skipped when step 1b found the fixture.
   const wantFixtureInfo = !matchRow && !idxFx;
-  const [mkRes, liveRes, preRes] = await Promise.all([
-    withBudget(sofaBets.getMatchMarkets(providerId, sport, { maxAgeMs: maxAge }), budget),
-    !idxFx && (nowLive || !matchRow) ? withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: LIVE_LIST_MAX_STALE_MS }), budget) : Promise.resolve({ ok: true, v: null }),
-    wantFixtureInfo && !isLiveId ? withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget) : Promise.resolve({ ok: true, v: null })
-  ]);
+  // All three are STARTED together; the markets answer is awaited first because, when it already carries the exact
+  // fixture's details (teams, status), the two fixture look-ups are not needed and must not hold the bet up.
+  const mkP = withBudget(sofaBets.getMatchMarkets(providerId, sport, { maxAgeMs: maxAge }), budget);
+  const liveP = !idxFx && (nowLive || !matchRow) ? withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: LIVE_LIST_MAX_STALE_MS }), budget) : Promise.resolve({ ok: true, v: null });
+  // fast:true = all exact-id endpoints asked in parallel, no catalogue crawl (see sofaBetsProvider.getMatchById)
+  const preP = wantFixtureInfo && !isLiveId ? withBudget(sofaBets.getMatchById(providerId, sport, { rich: false, fast: true }), budget) : Promise.resolve({ ok: true, v: null });
+
+  const mkRes = await mkP;
+  // Fixture details that arrived in the SAME provider answer as the markets (exact provider id already verified there).
+  const mkFx = mkRes.ok && mkRes.v && mkRes.v.fixture && String(mkRes.v.fixture.providerMatchId) === String(providerId) &&
+    mkRes.v.fixture.homeTeam && mkRes.v.fixture.awayTeam ? mkRes.v.fixture : null;
+  const mkFxInPlay = !!(mkFx && IN_PLAY.has(String(mkFx.status || '').toUpperCase()));
+  // pre-match: the markets answer's fixture is enough. live: only when it confirms the game is in play.
+  const skipFixtureWaits = !!mkFx && (!isLiveId || mkFxInPlay);
+  const [liveRes, preRes] = skipFixtureWaits ? [{ ok: true, v: null }, { ok: true, v: null }] : await Promise.all([liveP, preP]);
 
   const liveFx = liveRes.ok && liveRes.v && String(liveRes.v.providerMatchId) === String(providerId) ? liveRes.v : null;
   const preFx = preRes.ok && preRes.v && String(preRes.v.providerMatchId) === String(providerId) ? preRes.v : null;
 
-  if (isLiveId && !liveFx && !idxFx) {
+  if (isLiveId && !liveFx && !idxFx && !(mkFx && mkFxInPlay)) {
     if (liveRes.timeout) return { ok: false, code: 'timeout', reason: 'The odds provider is responding slowly. Please try again in a moment.' };
     return { ok: false, code: 'not_live', reason: 'Live betting is no longer available for this fixture' };
   }
+  // a pre-match reference whose fixture the provider now reports as in play: betting on the pre-match price is closed
+  if (!isLiveId && !preFx && !idxFx && !matchRow && mkFxInPlay) {
+    return { ok: false, code: 'finished', reason: 'Betting has closed for this fixture' };
+  }
 
-  const fxStatus = String((liveFx || preFx || {}).status || '').toUpperCase();
+  const fxStatus = String((liveFx || preFx || mkFx || {}).status || '').toUpperCase();
   if (['FINISHED', 'CANCELLED', 'POSTPONED', 'ABANDONED'].includes(fxStatus)) {
     return { ok: false, code: 'finished', reason: 'Betting has closed for this fixture' };
   }
@@ -165,6 +189,12 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
     fixture = {
       homeTeam: preFx.homeTeam, awayTeam: preFx.awayTeam, league: preFx.competition || sport, sport,
       commenceTime: preFx.utcDate ? new Date(preFx.utcDate) : null, status: 'upcoming', providerMatchId: providerId, score: {}
+    };
+  } else if (mkFx) {
+    fixture = {
+      homeTeam: mkFx.homeTeam, awayTeam: mkFx.awayTeam, league: mkFx.competition || sport, sport,
+      commenceTime: mkFx.utcDate ? new Date(mkFx.utcDate) : null, status: isLiveId ? 'live' : 'upcoming', providerMatchId: providerId,
+      score: isLiveId ? { home: mkFx.score?.fullTime?.home ?? null, away: mkFx.score?.fullTime?.away ?? null, minute: mkFx.minute ?? null, period: mkFx.status || null } : {}
     };
   }
   if (!fixture || !fixture.homeTeam || !fixture.awayTeam) {
@@ -214,4 +244,4 @@ async function resolveMany(items, matchMap, opts) {
   return Promise.all(items.map(sel => resolveProviderSelection(sel, matchMap ? matchMap[sel.matchId] : null, opts)));
 }
 
-module.exports = { withBudget, findMarketAndOutcome, resolveProviderSelection, resolveMany, LIVE_MAX_AGE_MS, PREMATCH_MAX_AGE_MS };
+module.exports = { withBudget, findMarketAndOutcome, resolveProviderSelection, resolveMany, defaultBudgetMs, LIVE_MAX_AGE_MS, PREMATCH_MAX_AGE_MS };

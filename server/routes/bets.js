@@ -231,10 +231,11 @@ async function placeBetHandler(req, res) {
     const fallbackFor = (matchId, providerId, sport, isLiveId) => {
       let f = fallbacks.get(matchId);
       if (!f) {
-        const budget = 2500;
+        // 2.5s on the warm Node server; longer on Workers where nothing is pre-warmed (see placementResolver.defaultBudgetMs)
+        const budget = Math.max(2500, placementResolver.defaultBudgetMs());
         f = {
           liveP: placementResolver.withBudget(sofaBets.getLiveMatchById(providerId, sport, { rich: false, maxStaleMs: 20000 }), budget),
-          preP: !isLiveId ? placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false }), budget) : null
+          preP: !isLiveId ? placementResolver.withBudget(sofaBets.getMatchById(providerId, sport, { rich: false, fast: true }), budget) : null
         };
         fallbacks.set(matchId, f);
       }
@@ -518,9 +519,29 @@ async function placeBetHandler(req, res) {
       wallet:       newBalance
     });
   } catch (e) {
-    console.error('[bets/place]', e.message, JSON.stringify(marks));
-    res.status(500).json({ success: false, message: 'Failed to place bet' });
+    const f = classifyPlaceError(e);
+    // Full stack + where the request got to, so `wrangler tail` shows the REAL cause instead of a generic message.
+    console.error('[bets/place] FAILED', JSON.stringify({ name: e && e.name, code: e && e.code, message: e && e.message, steps: marks, user: String(req.user && req.user._id || '') }), '\n', e && e.stack);
+    res.status(f.status).json(Object.assign({ success: false, code: f.code, message: f.message },
+      process.env.SB_DEBUG_ERRORS === '1' ? { debug: { name: e && e.name, error: String(e && e.message || e).slice(0, 300), steps: marks } } : {}));
   }
+}
+
+// Turns an unexpected exception into an honest, retryable answer where that is what it really is.
+// (Database/network hiccups are NOT "the bet failed for good" - the stake is only taken after all checks and is refunded
+// if the bet cannot be saved, and the client retries with the same idempotency key, so a retry can never double-charge.)
+function classifyPlaceError(e) {
+  const name = String(e && e.name || ''), msg = String(e && e.message || '');
+  if (/MongoNetwork|MongoServerSelection|MongoTimeout|MongoNotConnected|PoolClear|Topology/i.test(name) || /ECONNRESET|ETIMEDOUT|buffering timed out|not connected|server selection/i.test(msg)) {
+    return { status: 503, code: 'db_unavailable', message: 'We could not reach the database just now. Please try again in a moment.' };
+  }
+  if (/too many subrequests/i.test(msg)) {
+    return { status: 503, code: 'upstream_limit', message: 'The server is busy right now. Please try again in a moment.' };
+  }
+  if (name === 'ValidationError' || name === 'CastError') {
+    return { status: 400, code: 'invalid_bet', message: 'This bet could not be validated. Please remove the selection and add it again.' };
+  }
+  return { status: 500, code: 'internal', message: 'Failed to place bet. Please check My Bets before trying again.' };
 }
 
 // Duplicate-bet protection. The browser sends a fresh X-Idempotency-Key for every PLACE BET press.
@@ -544,7 +565,7 @@ router.post('/place', (req, res, next) => {
     entry = { done: false, result: null };
     entry.p = new Promise(resolve => {
       const cap = { _s: 200, status(c) { this._s = c; return this; }, json(b) { resolve({ status: this._s, body: b }); return this; } };
-      placeBetHandler(req, cap).catch(() => resolve({ status: 500, body: { success: false, message: 'Failed to place bet' } }));
+      placeBetHandler(req, cap).catch(e => { console.error('[bets/place] unhandled', e && e.stack || e); resolve({ status: 500, body: { success: false, code: 'internal', message: 'Failed to place bet' } }); });
     }).then(r => { entry.done = true; entry.result = r; return r; });
     placeInflight.set(k, entry);
     const t = setTimeout(() => placeInflight.delete(k), 5 * 60 * 1000); if (t.unref) t.unref();
