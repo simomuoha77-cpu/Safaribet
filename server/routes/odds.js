@@ -357,7 +357,7 @@ if (!process.env.SAFARIBET_WORKER_RUNTIME) (function snapBoot() {
 router.use('/featured', (req, res, next) => {
   if (req.method !== 'GET') return next();
   const warm = !!C.get('fixtures', FIXTURES_TTL);
-  if (!warm && snap.json && Date.now() - snap.ts < SNAP_MAX_AGE_MS) {
+  if (false && !warm && snap.json && Date.now() - snap.ts < SNAP_MAX_AGE_MS) {
     fixturesWithFallback().catch(() => {});                       // refresh in the background; next request is the real one
     res.set('ETag', snap.etag); res.set('Cache-Control', 'no-cache');
     if (req.headers['if-none-match'] === snap.etag) return res.status(304).end();
