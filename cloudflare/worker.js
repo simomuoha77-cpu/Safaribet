@@ -11,6 +11,22 @@ function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...headers } });
 }
 
+// Serves a static page through the ASSETS binding. Depending on the assets "html_handling" mode a request for
+// /pages/x.html can come back as a 3xx to /pages/x; that redirect must not leak to the browser (the SPA router rejects
+// redirected page fetches and would fall back to a full reload). Follow it once, same-origin only.
+async function servePage(env, request, assetPath) {
+  const target = new URL(assetPath, request.url);
+  let res = await env.ASSETS.fetch(new Request(target, request));
+  for (let i = 0; i < 2 && res.status >= 300 && res.status < 400; i++) {
+    const loc = res.headers.get('location');
+    if (!loc) break;
+    const next = new URL(loc, target);
+    if (next.origin !== target.origin) break;
+    res = await env.ASSETS.fetch(new Request(next, request));
+  }
+  return res;
+}
+
 // The Express app and its MongoDB connection live in a single Durable Object.
 // Ordinary Worker isolates cannot safely retain MongoDB TCP connections.
 function copyEnvironment(env) {
@@ -66,12 +82,12 @@ export default {
     if (path === '/x9panel') return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
 
     if (path === '/staff-assistance' || path.startsWith('/staff-assistance/')) {
-      return env.ASSETS.fetch(new Request(new URL('/staff/staff-assistance.html', request.url), request));
+      return servePage(env, request, '/staff/staff-assistance.html');
     }
     if (path.startsWith('/casino/play/')) {
       const game = path.split('/').pop().toLowerCase();
       if (!['aviator', 'jetx'].includes(game)) return Response.redirect(new URL('/casino', request.url), 302);
-      return env.ASSETS.fetch(new Request(new URL('/pages/casino-game.html', request.url), request));
+      return servePage(env, request, '/pages/casino-game.html');
     }
     const legacyPage = path.match(/^\/pages\/([^/]+)$/);
     if (legacyPage) return Response.redirect(new URL('/' + legacyPage[1].replace(/\.html$/i, ''), request.url), 301);
@@ -82,7 +98,7 @@ export default {
       '/terms': '/pages/terms.html', '/privacy': '/pages/privacy.html', '/responsible': '/pages/responsible.html',
       '/contact': '/pages/contact.html', '/about': '/pages/about.html', '/match': '/pages/match.html', '/jackpot': '/pages/jackpot.html'
     };
-    if (pageMap[path]) return env.ASSETS.fetch(new Request(new URL(pageMap[path], request.url), request));
+    if (pageMap[path]) return servePage(env, request, pageMap[path]);
     return env.ASSETS.fetch(request);
   }
 };

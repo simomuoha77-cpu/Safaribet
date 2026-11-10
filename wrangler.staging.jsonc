@@ -48,7 +48,25 @@
       "/casino/*",
       "/staff-assistance*",
       "/casino-art/*",
-      "/download/app.apk"
+      "/download/app.apk",
+      // clean page URLs: served by the Worker (pageMap in cloudflare/worker.js). Without these, a refresh / deep link
+      // on e.g. /deposit hit the SPA fallback and returned the HOME page.
+      "/deposit",
+      "/withdraw",
+      "/my-bets",
+      "/account",
+      "/login",
+      "/register",
+      "/casino",
+      "/virtual",
+      "/referral",
+      "/terms",
+      "/privacy",
+      "/responsible",
+      "/contact",
+      "/about",
+      "/match",
+      "/jackpot"
     ]
   }
 }

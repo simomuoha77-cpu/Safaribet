@@ -348,13 +348,26 @@
   var htmlCache = {};
   function fetchHtml(u) {
     var key = normPath(u.pathname) + u.search;
+    // Every client-rendered route must map to its real page file. Without an entry the router fetched e.g. "/deposit",
+    // which on Cloudflare is not a file, so the assets layer's single-page-app fallback answered with index.html (the
+    // HOME page) and Deposit / Withdraw "went back home".
     var pagePaths = {
       '/casino': '/pages/casino',
       '/my-bets': '/pages/my-bets',
       '/account': '/pages/account',
       '/login': '/pages/login',
       '/register': '/pages/register',
-      '/match': '/pages/match'
+      '/match': '/pages/match',
+      '/deposit': '/pages/deposit',
+      '/withdraw': '/pages/withdraw',
+      '/referral': '/pages/referral',
+      '/terms': '/pages/terms',
+      '/privacy': '/pages/privacy',
+      '/responsible': '/pages/responsible',
+      '/contact': '/pages/contact',
+      '/about': '/pages/about',
+      '/jackpot': '/pages/jackpot',
+      '/virtual': '/pages/virtual'
     };
     var pagePath = pagePaths[normPath(u.pathname)] || u.pathname;
     var url = pagePath + u.search;

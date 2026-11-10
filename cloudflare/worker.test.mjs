@@ -207,3 +207,41 @@ test('backend Durable Object fails closed when MongoDB secret is absent', async 
   assert.equal(response.status, 503);
   assert.equal((await response.json()).code, 'MONGO_URI_MISSING');
 });
+
+test('deposit and withdraw are served as their own pages (not the home page)', async () => {
+  for (const route of ['/deposit', '/withdraw']) {
+    const e = env();
+    const res = await worker.fetch(new Request('https://example.test' + route), e);
+    assert.equal(res.status, 200);
+    assert.deepEqual(e.requested, ['/pages' + route + '.html']);
+  }
+});
+
+test('an assets redirect (/pages/x.html -> /pages/x) is followed inside the Worker, never leaked to the browser', async () => {
+  const requested = [];
+  const e = { ASSETS: { fetch: async req => {
+    const p = new URL(req.url).pathname; requested.push(p);
+    if (p.endsWith('.html')) return new Response(null, { status: 307, headers: { location: p.replace(/\.html$/, '') } });
+    return new Response('page:' + p);
+  } } };
+  const res = await worker.fetch(new Request('https://example.test/deposit'), e);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), 'page:/pages/deposit');
+  assert.deepEqual(requested, ['/pages/deposit.html', '/pages/deposit']);
+});
+
+test('every client-side route in router.js has a page-fetch mapping and a Worker-first route', async () => {
+  const fs = await import('node:fs');
+  const router = fs.readFileSync(new URL('../public/js/router.js', import.meta.url), 'utf8');
+  const routes = [...router.slice(router.indexOf('var ROUTES = {'), router.indexOf('function normPath')).matchAll(/'(\/[a-z-]+)'\s*:\s*1/g)].map(m => m[1]).filter(r => r !== '/');
+  const mapBlock = router.slice(router.indexOf('var pagePaths = {'), router.indexOf('var pagePath = '));
+  const wrangler = fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const staging = fs.readFileSync(new URL('../wrangler.staging.jsonc', import.meta.url), 'utf8');
+  assert.ok(routes.length >= 14);
+  for (const r of routes) {
+    assert.ok(mapBlock.includes("'" + r + "': '/pages" + r + "'"), r + ' missing from router pagePaths (the router would fetch the SPA fallback = home page)');
+    assert.ok(fs.existsSync(new URL('../public/pages' + r + '.html', import.meta.url)), r + ' page file missing');
+    assert.ok(wrangler.includes('"' + r + '"'), r + ' not in wrangler.jsonc run_worker_first');
+    assert.ok(staging.includes('"' + r + '"'), r + ' not in wrangler.staging.jsonc run_worker_first');
+  }
+});
