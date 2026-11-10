@@ -61,7 +61,11 @@
       "/contact",
       "/about",
       "/match",
-      "/jackpot"
+      "/jackpot",
+      // admin panel (token-gated in the Worker) and a block on direct access to its static HTML
+      "/x9panel",
+      "/x9panel/",
+      "/pages/admin*"
     ]
   }
 }

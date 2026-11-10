@@ -27,6 +27,36 @@ async function servePage(env, request, assetPath) {
   return res;
 }
 
+function notFound() {
+  return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow' } });
+}
+// constant-time string compare (the token is a secret)
+function safeEqual(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+async function serveAdminPanel(request, env, url) {
+  const token = env.ADMIN_PANEL_TOKEN;
+  if (!token || typeof token !== 'string' || !safeEqual(url.searchParams.get('t') || '', token)) return notFound();
+  const res = await servePage(env, request, '/pages/admin.html');
+  if (!res.ok) return notFound();
+  let html = await res.text();
+  // The Profit Sweep panel script is added here so it is present whichever admin.html version is deployed (as before).
+  if (!html.includes('/js/profit-sweep.js')) {
+    const tag = '<script src="/js/profit-sweep.js"></script>\n';
+    html = html.includes('</body>') ? html.replace('</body>', tag + '</body>') : html + tag;
+  }
+  return new Response(html, { status: 200, headers: {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-robots-tag': 'noindex, nofollow',
+    'referrer-policy': 'no-referrer'          // the link carries the secret token: never leak it through the Referer header
+  } });
+}
+
 // The Express app and its MongoDB connection live in a single Durable Object.
 // Ordinary Worker isolates cannot safely retain MongoDB TCP connections.
 function copyEnvironment(env) {
@@ -77,9 +107,12 @@ export default {
       return env.BACKEND_RUNTIME.get(backendId).fetch(request);
     }
 
-    // The legacy admin HTML route reads from the Node filesystem and has not
-    // yet been safely ported to asset-backed serving/rate limiting. Fail closed.
-    if (path === '/x9panel') return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+    // ── ADMIN PANEL (/x9panel) ──
+    // Same two layers as the Express version: (1) ?t=<ADMIN_PANEL_TOKEN> proves you were given the link, otherwise a plain
+    // 404 indistinguishable from a missing route; (2) the panel's own login (username + email + password + TOTP).
+    // The HTML is a public static asset too, so direct requests for it are 404'd here - otherwise anyone could skip layer 1.
+    if (/^\/pages\/admin(\.html)?\/?$/i.test(path)) return notFound();
+    if (path === '/x9panel' || path === '/x9panel/') return serveAdminPanel(request, env, url);
 
     if (path === '/staff-assistance' || path.startsWith('/staff-assistance/')) {
       return servePage(env, request, '/staff/staff-assistance.html');

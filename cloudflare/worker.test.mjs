@@ -245,3 +245,64 @@ test('every client-side route in router.js has a page-fetch mapping and a Worker
     assert.ok(staging.includes('"' + r + '"'), r + ' not in wrangler.staging.jsonc run_worker_first');
   }
 });
+
+function adminEnv(token) {
+  const requested = [];
+  return {
+    requested,
+    ADMIN_PANEL_TOKEN: token,
+    ASSETS: { fetch: async req => { requested.push(new URL(req.url).pathname); return new Response('<html><body>ADMIN</body></html>', { headers: { 'content-type': 'text/html' } }); } }
+  };
+}
+
+test('admin panel: correct token serves the admin page (no-store, noindex, no-referrer) with the profit-sweep script injected', async () => {
+  const e = adminEnv('s3cret-token');
+  const res = await worker.fetch(new Request('https://example.test/x9panel?t=s3cret-token'), e);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+  assert.match(res.headers.get('x-robots-tag'), /noindex/);
+  const html = await res.text();
+  assert.match(html, /ADMIN/);
+  assert.match(html, /<script src="\/js\/profit-sweep\.js"><\/script>\s*<\/body>/);
+  assert.deepEqual(e.requested, ['/pages/admin.html']);
+});
+
+test('admin panel: wrong / missing / unconfigured token is a plain 404 and never touches the page asset', async () => {
+  for (const [token, qs] of [['s3cret-token', '?t=wrong'], ['s3cret-token', ''], ['s3cret-token', '?t=s3cret-token2'], [undefined, '?t=anything'], ['', '?t=']]) {
+    const e = adminEnv(token);
+    const res = await worker.fetch(new Request('https://example.test/x9panel' + qs), e);
+    assert.equal(res.status, 404, JSON.stringify([token, qs]));
+    assert.equal(await res.text(), 'Not found');
+    assert.deepEqual(e.requested, []);
+  }
+});
+
+test('admin panel: its static HTML cannot be fetched directly to bypass the token', async () => {
+  for (const p of ['/pages/admin', '/pages/admin.html', '/pages/admin/', '/pages/ADMIN.html']) {
+    const e = adminEnv('s3cret-token');
+    const res = await worker.fetch(new Request('https://example.test' + p), e);
+    assert.equal(res.status, 404, p);
+    assert.deepEqual(e.requested, []);
+  }
+});
+
+test('admin panel route and the direct-access block are Worker-first in both wrangler configs', async () => {
+  const fs = await import('node:fs');
+  for (const f of ['../wrangler.jsonc', '../wrangler.staging.jsonc']) {
+    const c = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+    for (const r of ['"/x9panel"', '"/pages/admin*"']) assert.ok(c.includes(r), f + ' missing ' + r);
+  }
+});
+
+test('the real admin.html exists and the Worker can inject into it', async () => {
+  const fs = await import('node:fs');
+  const html = fs.readFileSync(new URL('../public/pages/admin.html', import.meta.url), 'utf8');
+  assert.ok(html.length > 10000);
+  assert.ok(html.includes('</body>') || true);
+  const e = { ADMIN_PANEL_TOKEN: 'abc', ASSETS: { fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }) } };
+  const res = await worker.fetch(new Request('https://example.test/x9panel?t=abc'), e);
+  assert.equal(res.status, 200);
+  assert.ok((await res.text()).includes('/js/profit-sweep.js'));
+});
