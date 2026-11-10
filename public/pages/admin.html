@@ -1939,9 +1939,13 @@ function renderAdminSelectionLine(betId, s){
   const correctBtn = canCorrect
     ? ` <span onclick="openOverrideSelection('${betId}','${s.matchId.replace(/'/g,"\\'")}','${(s.homeTeam||'').replace(/'/g,"\\'")}','${(s.awayTeam||'').replace(/'/g,"\\'")}','${r}')" style="cursor:pointer;color:var(--b);font-size:10px;text-decoration:underline;margin-left:6px">Fix</span>`
     : '';
+  // A game that is over but never got a result (the server did not see it live): the admin can type the real full-time score.
+  const scoreBtn = (r === 'pending' && !s.excludedFromPayout && s.fixtureState === 'awaiting')
+    ? ` <span onclick="setFinalScoreAdmin('${s.matchId.replace(/'/g,"\\'")}','${(s.homeTeam||'').replace(/'/g,"\\'")}','${(s.awayTeam||'').replace(/'/g,"\\'")}')" style="cursor:pointer;color:var(--b);font-size:10px;text-decoration:underline;margin-left:6px">Set score</span>`
+    : '';
   return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 0">
     <span>${ICONS[r]} ${s.homeTeam} vs ${s.awayTeam} → <b>${s.pickLabel || s.pick}</b> @ ${s.odds}x${scoreStr}${correctedTag}</span>
-    <span style="color:${COLORS[r]};font-weight:700;text-transform:capitalize;white-space:nowrap">${r==='pending' ? fixtureLabelAdmin(s) : r}${correctBtn}</span>
+    <span style="color:${COLORS[r]};font-weight:700;text-transform:capitalize;white-space:nowrap">${r==='pending' ? fixtureLabelAdmin(s) : r}${correctBtn}${scoreBtn}</span>
   </div>`;
 }
 
@@ -1950,6 +1954,23 @@ function renderAdminSelectionLine(betId, s){
 // this is a rare, deliberate admin action, not a frequent workflow, and the
 // server-side validation (reason required, can't "correct" to the same
 // result, etc.) is the real safety net regardless of how it's collected here.
+// Game is over but has no result (the server never saw it live): enter the REAL full-time score, then every waiting bet on it settles.
+async function setFinalScoreAdmin(matchId, homeTeam, awayTeam){
+  const inp = prompt(`Final score for ${homeTeam} vs ${awayTeam}\n\nFull-time score, 90 minutes, HOME team first.\nFormat: home-away, e.g. 2-1\n\nOnly type the REAL result - it settles every bet on this game.`);
+  if (!inp) return;
+  const m = inp.trim().match(/^(\d{1,2})\s*[-:]\s*(\d{1,2})$/);
+  if (!m) { toast('Score must look like 2-1', 'err'); return; }
+  const hs = parseInt(m[1], 10), as = parseInt(m[2], 10);
+  if (!confirm(`Confirm FINAL score:\n\n${homeTeam}  ${hs} - ${as}  ${awayTeam}\n\nAll waiting bets on this game will be settled (won/lost) and paid now.`)) return;
+  try {
+    const d = await api('/api/admin/match/final-score', { method:'POST', body: JSON.stringify({ matchId, homeScore: hs, awayScore: as }) });
+    if (d.success) {
+      toast('✅ ' + d.message, 'ok');
+      setTimeout(() => { const betsPanelActive = document.getElementById('panel-bets')?.classList.contains('on'); if (betsPanelActive) loadBets(); else loadUserBets(); }, 2500);
+    } else toast('❌ ' + (d.message || 'Failed'), 'err');
+  } catch(e) { toast('❌ ' + (e.message || 'Request failed'), 'err'); }
+}
+
 async function openOverrideSelection(betId, matchId, homeTeam, awayTeam, currentResult){
   const newResult = prompt(
     `Correct the result for ${homeTeam} vs ${awayTeam}\n\nCurrently marked: ${currentResult}\n\nType the correct result — won, lost, or void:`

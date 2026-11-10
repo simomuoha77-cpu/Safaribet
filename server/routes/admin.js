@@ -1489,6 +1489,61 @@ router.post('/force-settle', async (req, res) => {
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
+// ── SET FINAL SCORE (from the Bet Management panel) ──
+// For a game the server never saw live: it has no score, and the provider keeps no results list, so its bets would wait
+// forever. The admin types the REAL full-time score; the game is then marked final (source: admin) and the normal
+// settlement turns every waiting bet on it into won / lost / void. Same safety rules as tools/set-final-score.js:
+// the game must have kicked off 100+ minutes ago, and a result the system already confirmed is never overwritten.
+router.post('/match/final-score', async (req, res) => {
+  try {
+    const fin = require('../services/finalResultService');
+    const { matchId, homeScore, awayScore } = req.body || {};
+    const h = Number(homeScore), a = Number(awayScore);
+    const intOk = v => Number.isInteger(v) && v >= 0 && v <= 99;
+    if (!matchId || !intOk(h) || !intOk(a)) return res.status(400).json({ success: false, message: 'Enter the full-time score as two whole numbers, e.g. 2-1.' });
+    const id0 = String(matchId);
+    const p = fin.parseSofaMatchId(id0);
+    const sib = new Set([id0]);
+    if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => sib.add(x));
+    const ids = Array.from(sib);
+
+    const rows = await Match.find({ matchId: { $in: ids } }).lean();
+    const waiting = await Bet.find({ status: 'pending', selections: { $elemMatch: { matchId: { $in: ids }, result: 'pending' } } }, { selections: 1 }).lean();
+    if (!waiting.length) return res.status(404).json({ success: false, message: 'No waiting bet is on this game.' });
+
+    // already confirmed final by the system: never overwrite it
+    const done = rows.find(r => r.finalVerified === true && r.score && r.score.home != null && r.score.away != null);
+    if (done) {
+      const same = Number(done.score.home) === h && Number(done.score.away) === a;
+      return res.status(409).json({ success: false, message: same
+        ? 'This game is already confirmed final with this score. Press "Settle now" and the bets will settle.'
+        : `The system already confirmed this game as ${done.score.home}-${done.score.away}. Nothing changed. Check the real result first.` });
+    }
+
+    // the game must really be over: kick-off time from our row, else from the bet's own selection
+    let kick = 0;
+    for (const r of rows) { const t = r.commenceTime ? new Date(r.commenceTime).getTime() : 0; if (t) { kick = t; break; } }
+    let sel0 = null;
+    for (const b of waiting) { sel0 = (b.selections || []).find(x => ids.includes(x.matchId) && x.result === 'pending'); if (sel0) break; }
+    if (!kick && sel0 && sel0.commenceTime) kick = new Date(sel0.commenceTime).getTime() || 0;
+    if (!kick || Date.now() - kick < 100 * 60000) return res.status(400).json({ success: false, message: 'This game kicked off less than 100 minutes ago (or has no kick-off time), so it may still be playing. Nothing changed.' });
+
+    const set = { status: 'finished', result: fin.resultFromScore(h, a), 'score.home': h, 'score.away': a, 'score.period': 'FT', finalVerified: true, finalVerifiedAt: new Date(), finalSource: 'admin', settled: false, trackerNote: null };
+    const r = await Match.updateMany({ matchId: { $in: ids } }, { $set: set });
+    // every id a waiting bet points at needs a row to carry the result
+    const have = new Set(rows.map(m => m.matchId));
+    let created = 0;
+    for (const b of waiting) for (const s of (b.selections || [])) {
+      if (!ids.includes(s.matchId) || have.has(s.matchId)) continue;
+      await Match.updateOne({ matchId: s.matchId }, { $setOnInsert: { matchId: s.matchId, homeTeam: s.homeTeam, awayTeam: s.awayTeam, league: s.league, sport: (p && p.sport) || 'football', commenceTime: s.commenceTime ? new Date(s.commenceTime) : new Date(kick), source: 'admin' }, $set: set }, { upsert: true });
+      have.add(s.matchId); created++;
+    }
+    audit('SET_FINAL_SCORE', { matchId: id0, home: h, away: a, bets: waiting.length, rows: (r.modifiedCount != null ? r.modifiedCount : r.nModified) + created });
+    try { require('../engine/settlementEngine').settleSoon(500); } catch (_) {}      // settle right away
+    res.json({ success: true, message: `Marked FINAL ${h}-${a}. ${waiting.length} waiting bet(s) are settling now.`, bets: waiting.length });
+  } catch (e) { return safeError(res, e, 'admin'); }
+});
+
 // ── REFERRAL CONFIG ──
 router.get('/referral/config', async (req, res) => {
   try {
