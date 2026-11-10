@@ -353,7 +353,8 @@
       '/my-bets': '/pages/my-bets',
       '/account': '/pages/account',
       '/login': '/pages/login',
-      '/register': '/pages/register'
+      '/register': '/pages/register',
+      '/match': '/pages/match'
     };
     var pagePath = pagePaths[normPath(u.pathname)] || u.pathname;
     var url = pagePath + u.search;
