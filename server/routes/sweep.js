@@ -3,7 +3,7 @@
 // login AND a current authenticator (TOTP) code, and is written to the audit log.
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const speakeasy = require('speakeasy');
+const { verifyTotp } = require('../utils/safeCrypto');
 const { requireAdmin } = require('../utils/adminAuth');
 const AdminUser = require('../models/AdminUser');
 const Sweep = require('../models/Sweep');
@@ -44,7 +44,7 @@ async function checkTotp(req) {
   const code = String((req.body && req.body.totp) || '').trim();
   if (!/^\d{6}$/.test(code)) return false;
   const admin = await AdminUser.findById(req.admin.sub);
-  return !!admin && speakeasy.totp.verify({ secret: admin.totpSecret, encoding: 'base32', token: code, window: 1 });
+  return !!admin && (await verifyTotp(admin.totpSecret, code, 1));
 }
 
 function publicCfg(c) {

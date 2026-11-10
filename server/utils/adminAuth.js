@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { signJwt, verifyJwt } = require('./safeCrypto');
 const crypto = require('crypto');
 
 // A stable signing secret is required so tokens survive server restarts —
@@ -18,19 +18,19 @@ if (!JWT_SECRET) {
 
 const TOKEN_TTL = '12h';
 
-function issueAdminToken(admin) {
-  return jwt.sign({ sub: String(admin._id), username: admin.username }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+async function issueAdminToken(admin) {
+  return signJwt({ sub: String(admin._id), username: admin.username }, JWT_SECRET, TOKEN_TTL);
 }
 
 // Express middleware — verifies a Bearer JWT issued by /api/admin-auth/login.
 // This is now the ONLY way into any /admin-prefixed route anywhere in the app;
 // the old shared x-admin-secret header check has been fully removed.
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) return res.status(401).json({ success: false, message: 'Not authenticated — please log in.' });
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = await verifyJwt(token, JWT_SECRET);
     req.admin = payload; // { sub, username, iat, exp }
     next();
   } catch (e) {

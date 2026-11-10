@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const speakeasy = require('speakeasy');
+const speakeasy = require('speakeasy'); // still used to GENERATE secrets in /setup and /create
+const { verifyTotp } = require('../utils/safeCrypto');
 const qrcode = require('qrcode');
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
@@ -93,7 +94,7 @@ router.post('/login', async (req, res) => {
     if (!passwordOk) return fail();
 
     stage = 'check-totp';
-    const totpOk = speakeasy.totp.verify({ secret: admin.totpSecret, encoding: 'base32', token: String(totpCode).trim(), window: 1 });
+    const totpOk = await verifyTotp(admin.totpSecret, totpCode, 1);
     if (!totpOk) return fail();
 
     // Recording the last-login time is bookkeeping only — it must never be able to block a valid login.
@@ -105,12 +106,14 @@ router.post('/login', async (req, res) => {
     }
 
     stage = 'issue-token';
-    const token = issueAdminToken(admin);
+    const token = await issueAdminToken(admin);
     res.json({ success: true, token, username: admin.username });
   } catch (e) {
     // `stage` shows which step threw (visible in `wrangler tail` / server logs only, never sent to the browser).
     console.error('[admin-auth/login] failed at stage "' + stage + '":', e && (e.stack || e.message));
-    res.status(500).json({ success: false, message: 'Login failed.' });
+    // Staging only (SB_DEBUG_ERRORS=1): show which step failed so the cause is visible without log digging.
+    const dbg = process.env.SB_DEBUG_ERRORS === '1' ? { debug: { stage, name: e && e.name, error: String((e && e.message) || e).slice(0, 300) } } : {};
+    res.status(500).json(Object.assign({ success: false, message: 'Login failed.' }, dbg));
   }
 });
 
