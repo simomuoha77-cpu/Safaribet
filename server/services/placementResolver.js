@@ -109,7 +109,7 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
   // 1b. Fixture details from the server's own in-memory feed: NO network. Teams/league/kick-off never change;
   //     status is checked (live must be <=45s old, prematch must not have kicked off yet).
   let idxFx = null;
-  if (!matchRow) {
+  {
     try {
       const idx = require('../routes/sports').lookupIndexedMatch(sel.matchId);
       if (idx && idx.homeTeam && idx.awayTeam && !['finished', 'cancelled'].includes(idx.status)) {
@@ -157,10 +157,10 @@ async function resolveProviderSelection(sel, matchRow, opts = {}) {
       commenceTime: liveFx.utcDate ? new Date(liveFx.utcDate) : null, status: 'live', providerMatchId: providerId,
       score: { home: liveFx.score?.fullTime?.home ?? null, away: liveFx.score?.fullTime?.away ?? null, minute: liveFx.minute ?? null, period: liveFx.status || null }
     };
-  } else if (matchRow) {
-    fixture = fixtureFromRow(matchRow);
   } else if (idxFx) {
     fixture = idxFx;
+  } else if (matchRow) {
+    fixture = fixtureFromRow(matchRow);
   } else if (preFx) {
     fixture = {
       homeTeam: preFx.homeTeam, awayTeam: preFx.awayTeam, league: preFx.competition || sport, sport,
