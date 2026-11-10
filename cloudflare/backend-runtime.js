@@ -75,7 +75,7 @@ export class BackendRuntime {
         }
         await this.connectPromise;
       }
-      return await runtime.handler(request);
+      return await runtime.handler.fetch(request);
     } catch (error) {
       console.error('[safaribet-backend-runtime]', error?.stack || error?.message || error);
       return Response.json({ success: false, code: 'BACKEND_UNAVAILABLE' }, {
