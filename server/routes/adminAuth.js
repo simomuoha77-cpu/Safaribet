@@ -70,33 +70,46 @@ router.post('/setup', async (req, res) => {
 
 // ── LOGIN — username + email + password + 6-digit TOTP code, all required together ──
 router.post('/login', async (req, res) => {
+  let stage = 'start';
   try {
-    const { username, email, password, totpCode } = req.body;
+    const { username, email, password, totpCode } = req.body || {};
     if (!username || !email || !password || !totpCode) {
       return res.status(400).json({ success: false, message: 'Username, email, password, and your 6-digit code are all required.' });
     }
 
+    stage = 'find-admin';
     const admin = await AdminUser.findOne({ username: String(username).trim().toLowerCase() });
     // Deliberately vague error for any failure below — never reveal which
     // specific factor (username/email/password/code) was wrong.
     const fail = () => res.status(401).json({ success: false, message: 'Invalid credentials.' });
 
     if (!admin || !admin.isActive) return fail();
+    if (!admin.passwordHash || !admin.totpSecret) return fail();
+    stage = 'check-email';
     if (!safeCompare(admin.email, String(email).trim().toLowerCase())) return fail();
 
-    const passwordOk = await bcrypt.compare(password, admin.passwordHash);
+    stage = 'check-password';
+    const passwordOk = await bcrypt.compare(String(password), admin.passwordHash);
     if (!passwordOk) return fail();
 
+    stage = 'check-totp';
     const totpOk = speakeasy.totp.verify({ secret: admin.totpSecret, encoding: 'base32', token: String(totpCode).trim(), window: 1 });
     if (!totpOk) return fail();
 
-    admin.lastLoginAt = new Date();
-    await admin.save();
+    // Recording the last-login time is bookkeeping only — it must never be able to block a valid login.
+    stage = 'record-login';
+    try {
+      await AdminUser.updateOne({ _id: admin._id }, { $set: { lastLoginAt: new Date() } });
+    } catch (e) {
+      console.error('[admin-auth/login] could not record lastLoginAt:', e && e.message);
+    }
 
+    stage = 'issue-token';
     const token = issueAdminToken(admin);
     res.json({ success: true, token, username: admin.username });
   } catch (e) {
-    console.error('[admin-auth/login]', e.message);
+    // `stage` shows which step threw (visible in `wrangler tail` / server logs only, never sent to the browser).
+    console.error('[admin-auth/login] failed at stage "' + stage + '":', e && (e.stack || e.message));
     res.status(500).json({ success: false, message: 'Login failed.' });
   }
 });
