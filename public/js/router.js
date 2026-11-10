@@ -347,13 +347,22 @@
   // ── Fetching pages ──
   var htmlCache = {};
   function fetchHtml(u) {
-    var key = normPath(u.pathname) + u.search, url = u.pathname + u.search;
+    var key = normPath(u.pathname) + u.search;
+    var pagePaths = {
+      '/casino': '/pages/casino',
+      '/my-bets': '/pages/my-bets',
+      '/account': '/pages/account',
+      '/login': '/pages/login',
+      '/register': '/pages/register'
+    };
+    var pagePath = pagePaths[normPath(u.pathname)] || u.pathname;
+    var url = pagePath + u.search;
     function once(signal) {
       return _fetch(url, { credentials: 'same-origin', headers: { 'X-SB-Nav': '1' }, signal: signal }).then(function (r) {
         var bad = function (m) { var e = new Error(m); e.fatal = true; return e; };      // not worth retrying
         if (!r.ok) { if (r.status < 500) throw bad('HTTP ' + r.status); throw new Error('HTTP ' + r.status); }
         var finalPath = normPath(new URL(r.url, location.href).pathname);
-        if (r.redirected && finalPath !== normPath(u.pathname)) throw bad('redirected');
+        if (r.redirected && finalPath !== normPath(pagePath)) throw bad('redirected');
         var ct = r.headers.get('content-type') || '';
         if (ct.indexOf('text/html') === -1) throw bad('not html');
         return r.text();
