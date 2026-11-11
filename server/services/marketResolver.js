@@ -399,6 +399,47 @@ function resolveOdds(match, market, pick) {
   return result;
 }
 
+// ── CASH OUT PRICING ──
+// resolveOdds() deliberately hides a price once a game is nearly decided (lead rules) so nobody can BET on it. Cash out must not reuse
+// that: a bet on the team leading 3-0 at 74' is exactly the one a player wants to cash out, and "no price" made it say
+// "odds updating, try again shortly" for ever. Here the suspension only matters when it means the data cannot be trusted:
+//   - stale_data  (no update from the live feed for a while)  -> unavailable
+//   - goal_event  (a goal was just scored, odds still moving) -> unavailable
+// For a leg the lead rules consider (nearly) decided in the bet's favour, the live price is taken from the feed but kept between
+// 1.05 and 1.10 (never the pre-match price), so the offer stays below the full win. Certain results (Over/BTTS) are exact.
+// Returns { odds } | { unavailable: reason } | null (no price at all).
+const CASHOUT_NEAR_DECIDED_MAX_ODDS = 1.10;
+const CASHOUT_NEAR_DECIDED_MIN_ODDS = 1.05;
+function resolveCashoutOdds(match, market, pick) {
+  const reason = getSuspensionReason(match, market, pick);
+  if (reason === 'stale_data' || reason === 'goal_event') return { unavailable: reason };
+  const h = match.score?.home, a = match.score?.away;
+
+  if (reason === 'mathematically_certain' && h != null && a != null) {
+    if (market === 'ou25') return { odds: pick === 'over25' ? CASHOUT_NEAR_DECIDED_MIN_ODDS : 1000, certain: true };
+    if (market === 'btts') return { odds: pick === 'btts' ? CASHOUT_NEAR_DECIDED_MIN_ODDS : 1000, certain: true };
+  }
+
+  let raw = null;
+  if (REAL_MARKETS.has(market)) raw = getRealOdds(match, market, pick);
+  else if (DERIVED_MARKETS.has(market)) {
+    const supplied = market === 'dc' ? getRealOdds(match, market, pick) : null;
+    raw = supplied != null ? supplied : getSyntheticOdds(match, market, pick);
+  }
+
+  if (reason === 'lead_rule' && h != null && a != null) {
+    const leadsForPick =
+      (market === '1x2' && ((pick === 'home' && h > a) || (pick === 'away' && a > h))) ||
+      (market === 'dc' && ((pick === 'dc_1x' && h > a) || (pick === 'dc_x2' && a > h) || (pick === 'dc_12' && h !== a)));
+    if (leadsForPick) {
+      const o = Math.min(raw != null ? raw : CASHOUT_NEAR_DECIDED_MAX_ODDS, CASHOUT_NEAR_DECIDED_MAX_ODDS);
+      return { odds: Math.max(CASHOUT_NEAR_DECIDED_MIN_ODDS, o), nearDecided: true };
+    }
+  }
+  if (raw == null) return null;
+  return { odds: Math.max(1.01, raw) };
+}
+
 // ── ODDS BOOST ──
 // Looks up an active promotional boost for this exact match+market+pick, and
 // returns the boosted price ONLY if the given stake is within the admin's
@@ -419,7 +460,7 @@ async function getBoostedOdds(matchId, market, pick, stake) {
 }
 
 module.exports = {
-  REAL_MARKETS, DERIVED_MARKETS, resolveOdds, isPickSuspended, getBoostedOdds,
+  REAL_MARKETS, DERIVED_MARKETS, resolveOdds, resolveCashoutOdds, isPickSuspended, getBoostedOdds,
   MIN_VIABLE_ODDS, getMinViableOdds,
   getSuspensionReason, isMarketSuspended, getLiveRiskConfig
 };

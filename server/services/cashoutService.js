@@ -2,7 +2,7 @@ const Bet = require('../models/Bet');
 const Match = require('../models/Match');
 const walletService = require('./walletService');
 const Transaction = require('../models/Transaction');
-const { resolveOdds } = require('./marketResolver');
+const { resolveCashoutOdds } = require('./marketResolver');
 
 /**
  * Cash Out — let a user settle a pending bet early for a value based on
@@ -124,13 +124,14 @@ async function getCashOutQuote(bet) {
     // used to inflate a cash-out quote.
     const match = matchMap[sel.matchId];
     const market = sel.market || '1x2';
-    const live = resolveOdds(match, market, sel.pick);
+    const live = resolveCashoutOdds(match, market, sel.pick);
 
     // No live price available (market currently suspended/re-pricing, or
     // missing data) — do NOT fall back to the original odds, since that
     // silently re-derives potentialWin. Cash out is simply not offered right
     // now, same as a real bookmaker suspending cash out mid-market-move.
-    if (!live) {
+    // (resolveCashoutOdds only refuses when the data is stale or a goal was just scored; a nearly decided game is priced, not blocked.)
+    if (!live || live.unavailable) {
       return { eligible: false, reason: 'Cash Out temporarily unavailable — odds updating, try again shortly' };
     }
 
@@ -152,14 +153,12 @@ async function getCashOutQuote(bet) {
   }
 
   const fairValue = parseFloat((bet.stake * factor).toFixed(2));
-  let cashOutValue = parseFloat((fairValue * CASHOUT_MARGIN).toFixed(2));
-
-  // HARD SAFETY CAP — cash out can never pay more than a full win would have.
+  // HARD SAFETY CAP — cash out can never pay more than a full win would have. The cap is applied BEFORE the margin, so a nearly
+  // won bet still pays below its full win (it used to be paid at exactly 100% once the cap kicked in).
   // This is the only place potentialWin (via netPayout) is used at all.
   const maxPossiblePayout = bet.netPayout || bet.potentialWin;
-  if (maxPossiblePayout && cashOutValue > maxPossiblePayout) {
-    cashOutValue = maxPossiblePayout;
-  }
+  const capped = maxPossiblePayout && fairValue > maxPossiblePayout ? maxPossiblePayout : fairValue;
+  const cashOutValue = parseFloat((capped * CASHOUT_MARGIN).toFixed(2));
 
   if (cashOutValue < MIN_CASHOUT_AMOUNT) {
     return { eligible: false, reason: 'Cash out value too low right now' };
