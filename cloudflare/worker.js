@@ -76,7 +76,10 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.BACKEND_RUNTIME) return;
     copyEnvironment(env);
-    const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-primary');
+    // A SEPARATE instance ('safaribet-cron') of the same class: the live poll and settlement run in their own event loop and
+    // never compete with customers' requests (bet placement, deposits) served by 'safaribet-primary'. Both talk to the same MongoDB;
+    // settlement and payouts are idempotent (atomic claim per bet), so a deploy or an overlap can never pay a bet twice.
+    const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-cron');
     ctx.waitUntil(
       env.BACKEND_RUNTIME.get(backendId).fetch(new Request('https://internal/__cron/tick', { method: 'POST' }))
         .then(r => r.text()).then(t => console.log('[cron] tick:', t)).catch(e => console.error('[cron] tick failed:', e && e.message))
