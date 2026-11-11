@@ -130,6 +130,15 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   ]);
 });
 
+// Background engine entry points for the Cloudflare cron tick (cloudflare/backend-runtime.js). They are plain require() calls with
+// LITERAL paths inside the app itself, so the Workers bundler always includes these modules (the same way it already includes
+// them for the Express routes). import(path) from the runtime file did not: 'No such module ../server/engine/apifootball.js'.
+app.locals.engine = {
+  updateLive: () => require('./engine/apifootball').updateLive(),
+  runSettlement: full => require('./engine/settlementEngine').runSettlement(full),
+  settleJackpots: () => require('./engine/jackpotSettlement').settleJackpots()
+};
+
 app.get('/api/version', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ success: true, build: process.env.SB_BUILD_ID || 'cloudflare' }); });
 
 // Static files and page routing are served by Workers Static Assets. This app is API-only.

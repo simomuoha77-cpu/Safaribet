@@ -47,7 +47,7 @@ export class BackendRuntime {
 
         const server = createServer(app);
         server.listen(8787);
-        return { handler: httpServerHandler(server), mongoose };
+        return { handler: httpServerHandler(server), mongoose, app };
       })().catch(error => {
         this.runtimePromise = null;
         throw error;
@@ -89,17 +89,11 @@ export class BackendRuntime {
       const runtime = await this.initialize();
       try { hbCol = runtime.mongoose.connection.collection('cron_heartbeat'); } catch (_) {}
       hb({ startedAt: new Date() });
-      // The server modules are CommonJS: the functions live on module.exports (= the namespace's default).
-      // The import paths MUST be literal strings: Wrangler's bundler cannot follow import(variable), which is why an
-      // earlier version failed with 'No such module "../server/engine/apifootball.js"'.
-      const [liveMod, settleMod, jackpotMod] = await Promise.all([
-        import('../server/engine/apifootball.js'),
-        import('../server/engine/settlementEngine.js'),
-        import('../server/engine/jackpotSettlement.js')
-      ]);
-      const { updateLive } = liveMod.default || liveMod;
-      const { runSettlement } = settleMod.default || settleMod;
-      const { settleJackpots } = jackpotMod.default || jackpotMod;
+      // The engine functions come from the Express app itself (app.locals.engine, defined in server/app.js): they are bundled
+      // there with literal require() paths. Importing them from this file by path failed with 'No such module'.
+      const eng = runtime.app && runtime.app.locals && runtime.app.locals.engine;
+      if (!eng) throw new Error('engine entry points missing on the app (server/app.js)');
+      const { updateLive, runSettlement, settleJackpots } = eng;
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;
