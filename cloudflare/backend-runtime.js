@@ -75,10 +75,20 @@ export class BackendRuntime {
   // Background work that the Express process normally does with timers (server/engine/scheduler.js), run from the
   // every-minute Cron Trigger: poll live games (so a game is SEEN live and its end can be confirmed), then settle bets.
   // One tick lasts ~50s and polls live every 10s, like the original; a second tick never overlaps a running one.
+  async saveTickStatus(status) {
+    try {
+      const mongoose = (await this.initialize()).mongoose;
+      if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+        await mongoose.connection.db.collection('sb_cron').updateOne({ _id: 'tick' }, { $set: Object.assign({}, status, { savedAt: new Date() }) }, { upsert: true });
+      }
+    } catch (_) { /* status only: never affects settlement */ }
+  }
+
   async cronTick() {
     if (this.tickRunning && Date.now() - this.tickRunning < 3 * 60000) return { skipped: true };
     this.tickRunning = Date.now();
     const out = { live: 0, settle: 0, errors: [] };
+    await this.saveTickStatus({ at: new Date().toISOString(), phase: 'started' });
     try {
       const runtime = await this.initialize();
       this.engine = runtime.app && runtime.app.locals && runtime.app.locals.engine;
@@ -112,6 +122,7 @@ export class BackendRuntime {
     }
     // Shown in GET /api/health ("cron") so it is obvious whether the background job is alive and what failed.
     globalThis.__sbCron = { at: new Date().toISOString(), live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };
+    await this.saveTickStatus(globalThis.__sbCron);   // a Durable Object is evicted from memory when idle, so keep it in MongoDB too
     if (out.errors.length) console.error('[cron] tick errors:', out.errors.slice(0, 5).join(' | '));
     return out;
   }

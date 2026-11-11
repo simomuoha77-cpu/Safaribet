@@ -272,15 +272,24 @@ app.get('/api/app-info', async (req, res) => {
 });
 
 // ── HEALTH ──
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const dbState = mongoose.connection.readyState; // 0=disconnected,1=connected,2=connecting,3=disconnecting
   const dbStateNames = ['disconnected','connected','connecting','disconnecting'];
+  // Last background tick (live poll + settlement) on Cloudflare. Read from MongoDB because the Durable Object that runs it is
+  // evicted from memory when idle. null = it has never run.
+  let cron = globalThis.__sbCron || null;
+  try {
+    if (dbState === 1 && mongoose.connection.db) {
+      const d = await mongoose.connection.db.collection('sb_cron').findOne({ _id: 'tick' });
+      if (d) { delete d._id; cron = d; }
+    }
+  } catch (_) {}
   res.json({
     status: dbState === 1 ? 'ok' : 'degraded',
     time: new Date().toISOString(),
     uptime: Math.floor(process.uptime()),
     database: dbStateNames[dbState] || 'unknown',
-    cron: globalThis.__sbCron || null   // last background tick (live poll + settlement) on Cloudflare; null = it has not run yet
+    cron
   });
 });
 
