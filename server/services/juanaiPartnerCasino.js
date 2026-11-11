@@ -249,7 +249,31 @@ async function fetchArt(id) {
   if (r.status !== 200 || !/^image\//i.test(type) || !r.data || !r.data.length) throw new Error(`art ${id}: HTTP ${r.status} ${type}`);
   const item = { buf: Buffer.from(r.data), type: type.split(';')[0], at: Date.now() };
   artCache.set(id, item);
+  saveStoredArt(id, item);
   return item;
+}
+
+// The memory cache is empty after every restart / cold start, and JuanAI (free Render) may be asleep for 30-60 s, which is
+// longer than the lobby waits - so the cards used to fall back to a placeholder. The last good picture is therefore also kept in
+// MongoDB and served from there at once; the live copy from JuanAI still refreshes it in the background.
+const artKey = id => 'casino-art-' + id;
+function saveStoredArt(id, item) {
+  try {
+    if (!item || !item.buf || item.buf.length > 3 * 1024 * 1024) return;      // artwork only; keep the document small
+    require('../models/SiteImage').findOneAndUpdate({ key: artKey(id) },
+      { key: artKey(id), dataUrl: `data:${item.type};base64,${item.buf.toString('base64')}`, mimeType: item.type, sizeBytes: item.buf.length, uploadedAt: new Date() },
+      { upsert: true }).catch(() => {});
+  } catch (_) {}
+}
+async function loadStoredArt(id) {
+  try {
+    const d = await require('../models/SiteImage').findOne({ key: artKey(id) }).lean();
+    const m = d && d.dataUrl && /^data:([^;]+);base64,([\s\S]+)$/.exec(d.dataUrl);
+    if (!m) return null;
+    const item = { buf: Buffer.from(m[2], 'base64'), type: m[1], at: 0 };       // at: 0 -> counts as old, so a fresh copy is fetched in the background
+    artCache.set(id, item);
+    return item;
+  } catch (_) { return null; }
 }
 
 function refreshArt(id) {
@@ -258,7 +282,7 @@ function refreshArt(id) {
 }
 
 async function getArt(id, waitMs = 8000) {
-  const hit = artCache.get(id);
+  const hit = artCache.get(id) || await loadStoredArt(id);
   if (hit) { if (Date.now() - hit.at > 10 * 60 * 1000) refreshArt(id); return hit; }
   return Promise.race([refreshArt(id), new Promise(r => setTimeout(() => r(null), waitMs))]);
 }
