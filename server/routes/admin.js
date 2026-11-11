@@ -562,6 +562,15 @@ router.get('/sms/history', async (req, res) => {
   } catch (e) { return safeError(res, e, 'admin/sms-history'); }
 });
 
+// What the PLAYER sees in their transaction history. Every adjustment - credit or deduction - is shown, so the history always adds
+// up to the balance. A deduction is labelled with its reason (e.g. "Duplicate credit"); the word "Admin" is never shown to players.
+function adjustmentLabel(amt, note) {
+  const n = String(note || '').trim();
+  const generic = !n || /^admin adjustment/i.test(n);
+  if (amt < 0) return generic ? 'Balance correction' : `Balance correction - ${n}`.slice(0, 120);
+  return generic ? 'Account credit' : n.slice(0, 120);
+}
+
 // ── BALANCE ──
 router.post('/balance', async (req, res) => {
   try {
@@ -582,7 +591,7 @@ router.post('/balance', async (req, res) => {
     }
     await User.findByIdAndUpdate(user._id, { $inc:{ balance: amt } }).catch(()=>{}); // keep legacy field in sync
 
-    await Transaction.create({ userId:user._id, type:amt>0?'bonus':'withdrawal', amount:amt, balance:wallet.main, description:note||`Admin adjustment KES ${amt}` });
+    await Transaction.create({ userId:user._id, type:amt>0?'bonus':'withdrawal', amount:amt, balance:wallet.main, description: adjustmentLabel(amt, note) });
     audit('ADJUST_BALANCE', { username:user.username, amount:amt, note });
     require('../services/auditService').log('admin.balance.adjust', { targetType:'User', targetId:user._id.toString(), meta:{ amount:amt, note } });
     res.json({ success:true, balance:wallet.main });

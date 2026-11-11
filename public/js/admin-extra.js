@@ -298,7 +298,7 @@
       grid(150, fld('Self-exclude (days, 0 = clear)', inp('pr-d', '0', 'number')) + fld('Cool-off (hours, 0 = clear)', inp('pr-h', '0', 'number')) + fld('Daily deposit limit', inp('pr-dep', 'none', 'number', u.dailyDepositLimit)) + fld('Daily stake limit', inp('pr-st', 'none', 'number', u.dailyStakeLimit))) +
       '<div style="color:var(--mt);font-size:11px;margin:4px 0">Now: ' + (u.selfExcludedUntil && new Date(u.selfExcludedUntil) > new Date() ? 'self-excluded until ' + dt(u.selfExcludedUntil) : 'not excluded') + (u.cooloffUntil && new Date(u.cooloffUntil) > new Date() ? ' · cool-off until ' + dt(u.cooloffUntil) : '') + '</div><button class="btn btn-g btn-sm" onclick="XA.pRg()">Save</button>');
     h += sec('Money',
-      grid(170, fld('Balance adjust (+ or −)', inp('pm-adj', 'e.g. 500 or -200', 'number')) + fld('Note', inp('pm-adjn', 'reason')) + fld('Give bonus (KES)', inp('pm-bn', '100', 'number')) + fld('Play-through ×', inp('pm-bw', '1', 'number', 1)) + fld('Bonus valid (days)', inp('pm-bd', '7', 'number', 7))) +
+      grid(170, fld('Balance adjust (+ or −)', inp('pm-adj', 'e.g. 500 or -200', 'number')) + fld('Reason (shown to the player on deductions)', '<select class="inp" id="pm-adjr"><option value="">— choose (required for a deduction) —</option><option>Duplicate credit</option><option>Bonus reversed</option><option>Wrong amount credited</option><option>Other (write it in the note)</option></select>') + fld('Note', inp('pm-adjn', 'extra detail (optional)')) + fld('Give bonus (KES)', inp('pm-bn', '100', 'number')) + fld('Play-through ×', inp('pm-bw', '1', 'number', 1)) + fld('Bonus valid (days)', inp('pm-bd', '7', 'number', 7))) +
       '<div style="display:flex;gap:6px;margin-top:6px"><button class="btn btn-y btn-sm" onclick="XA.pAdjust()">Adjust main balance</button><button class="btn btn-g btn-sm" onclick="XA.pBonus()">Give bonus</button></div>');
     // notes + tags
     h += sec('Tags & notes',
@@ -345,7 +345,11 @@
   function pAdjust() {
     var amt = val('pm-adj'); if (!amt) return toast('Enter an amount', 'err');
     if (!confirm('Adjust ' + cur.user.username + ' main balance by KES ' + amt + '?')) return;
-    var body = { identifier: cur.user.phone, amount: Number(amt), note: val('pm-adjn') || 'Admin adjustment' };
+    var reason = val('pm-adjr'), extra = val('pm-adjn');
+    if (Number(amt) < 0 && !reason) return toast('Choose a reason for the deduction (e.g. Duplicate credit)', 'err');
+    if (/^Other/.test(reason) && !extra) return toast('Write the reason in the note', 'err');
+    var why = /^Other/.test(reason) ? extra : (reason + (extra ? ' - ' + extra : ''));
+    var body = { identifier: cur.user.phone, amount: Number(amt), note: why || '' };
     post('/api/admin/balance', body).then(function (r) {
       if (r.pendingApproval) { toast(r.message, 'warn'); return; }
       say(r); if (r.success) reopen();
