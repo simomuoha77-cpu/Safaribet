@@ -103,8 +103,12 @@ export class BackendRuntime {
       const minute = new Date().getUTCMinutes();
       let i = 0;
       while (Date.now() - started < tickMs) {
-        try { await updateLive(); out.live++; } catch (e) { out.errors.push('live: ' + e.message); }
-        if (i % 2 === 1) { try { await runSettlement(false); out.settle++; } catch (e) { out.errors.push('settle: ' + e.message); } }
+        // Live poll and settlement run TOGETHER in every pass: the live poll can take 30-50 s on a cold cache (catalogue crawl),
+        // and when settlement waited behind it (it used to run on every 2nd pass) it never ran at all.
+        await Promise.all([
+          Promise.resolve().then(() => updateLive()).then(() => { out.live++; }, e => { out.errors.push('live: ' + e.message); }),
+          Promise.resolve().then(() => runSettlement(false)).then(() => { out.settle++; }, e => { out.errors.push('settle: ' + e.message); })
+        ]);
         i++;
         const wait = stepMs - ((Date.now() - started) % stepMs);
         if (Date.now() - started + wait >= tickMs) break;
