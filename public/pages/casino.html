@@ -83,42 +83,35 @@ async function loadGames(){
   // JuanAI is contacted only when the player actually launches Aviator/JetX.
 }
 
-function applyCasinoImages(images){
-  if(!images || typeof images!=='object') return;
+// Our own copy (/casino-art/<id>.png, kept in our database and by the phone's cache) is the ONLY picture source.
+// This used to swap it for a direct JuanAI link and replace the cards' error handler: when JuanAI was asleep the link failed,
+// the picture disappeared and the retries stopped. Now a picture that is already showing is never touched, and a missing one is
+// simply asked for again through the same retrying path.
+function artShown(img){ return !!(img && img.complete && img.naturalWidth>0); }
+function applyCasinoImages(){
   for(const id of ['aviator','jetx']){
-    const src=typeof images[id]==='string' ? images[id] : '';
-    const card=document.querySelector(`.card[data-id="${id}"]`);
-    if(!card || !src) continue;
-    const art=card.querySelector('.art');
-    if(!art) continue;
-    let img=art.querySelector('img');
-    if(!img){
-      img=document.createElement('img');
-      img.alt=id==='aviator'?'Aviator':'JetX';
-      img.loading='eager';
-      img.decoding='async';
-      art.appendChild(img);
-    }
-    img.onload=()=>art.classList.remove('noimg');
-    img.onerror=()=>art.classList.add('noimg');
-    img.referrerPolicy='no-referrer';
-    img.src=src;
+    const img=document.querySelector(`.card[data-id="${id}"] .art img`);
+    if(!img || artShown(img)) continue;
+    img.dataset.try='0';
+    img.src='/casino-art/'+id+'.png?r='+Date.now();
   }
 }
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) applyCasinoImages(); });
+window.addEventListener('online',()=>applyCasinoImages());
 
 const IMG_KEY='sb_casino_images_v1';
 async function loadCasinoImages(attempt=0){
   // Artwork is optional: cards are already visible. Show last saved artwork instantly,
   // then fetch fresh ones, retrying while JuanAI wakes up.
   if(attempt===0){
-    try{ const c=JSON.parse(localStorage.getItem(IMG_KEY)||'null'); if(c) applyCasinoImages(c); }catch(_){}
+    
   }
   let got=false;
   try{
     const r=await fetch('/api/casino/juanai/images',{cache:'no-store'});
     const d=await r.json();
     if(d && d.success && d.images){
-      applyCasinoImages(d.images);
+      applyCasinoImages();
       if(d.images.aviator||d.images.jetx){
         got=true;
         try{ localStorage.setItem(IMG_KEY,JSON.stringify(d.images)); }catch(_){}

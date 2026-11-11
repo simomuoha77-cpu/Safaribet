@@ -94,6 +94,8 @@ export class BackendRuntime {
       const eng = runtime.app && runtime.app.locals && runtime.app.locals.engine;
       if (!eng) throw new Error('engine entry points missing on the app (server/app.js)');
       const { updateLive, runSettlement, settleJackpots } = eng;
+      // casino lobby pictures: keep them saved in the database and keep JuanAI awake (never waits, never breaks the tick)
+      try { if (eng.ensureCasinoArt) Promise.resolve(eng.ensureCasinoArt()).catch(() => {}); } catch (_) {}
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;

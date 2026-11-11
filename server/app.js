@@ -136,7 +136,8 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 app.locals.engine = {
   updateLive: () => require('./engine/apifootball').updateLive(),
   runSettlement: full => require('./engine/settlementEngine').runSettlement(full),
-  settleJackpots: () => require('./engine/jackpotSettlement').settleJackpots()
+  settleJackpots: () => require('./engine/jackpotSettlement').settleJackpots(),
+  ensureCasinoArt: () => require('./services/juanaiPartnerCasino').ensureArt()
 };
 
 app.get('/api/version', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ success: true, build: process.env.SB_BUILD_ID || 'cloudflare' }); });
@@ -154,7 +155,7 @@ app.get('/casino-art/:file', async (req, res) => {
   try {
     const art = await require('./services/juanaiPartnerCasino').getArt(id);
     if (!art) return res.status(404).end();
-    res.set({ 'Content-Type': art.type, 'Cache-Control': 'no-cache' });
+    res.set({ 'Content-Type': art.type, 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
     res.send(art.buf);
   } catch (e) { res.status(404).end(); }
 });

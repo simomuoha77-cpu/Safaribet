@@ -287,6 +287,18 @@ async function getArt(id, waitMs = 8000) {
   return Promise.race([refreshArt(id), new Promise(r => setTimeout(() => r(null), waitMs))]);
 }
 
+// Called every minute by the cron tick (and safe to call any time): makes sure both pictures are saved in the database,
+// and refreshes them about every 8 minutes. Fetching the picture is also a cheap request to JuanAI, so this keeps its free
+// server from falling asleep, which is what made the lobby pictures come and go. It never waits for JuanAI.
+async function ensureArt() {
+  if (!cfg().base) return;
+  for (const id of ['aviator', 'jetx']) {
+    let hit = artCache.get(id);
+    if (!hit) hit = await loadStoredArt(id);
+    if (!hit || Date.now() - hit.at > 8 * 60 * 1000) refreshArt(id);
+  }
+}
+
 function warmArt() { if (cfg().base) ['aviator', 'jetx'].forEach(id => refreshArt(id)); }
 
 async function state(gameId) {
@@ -400,4 +412,4 @@ async function launch(gameId, userId, username) {
   return response;
 }
 
-module.exports = { getArt, warmArt, getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };
+module.exports = { getArt, warmArt, ensureArt, getImages, cfg, configured, configError, warm, isTransient, listGames, state, players, balance, placeBet, betResult, cashOut, ensureWalletRegistered, launchDirect, launch };

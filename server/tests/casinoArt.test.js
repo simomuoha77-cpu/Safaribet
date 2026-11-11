@@ -32,5 +32,18 @@ let pass = 0, fail = 0; const t = (n, c) => { c ? pass++ : fail++; console.log((
   const t0 = Date.now();
   const b = await svc2.getArt('aviator');
   t('after a restart with JuanAI asleep the saved picture is served at once', b && b.buf.equals(png) && Date.now() - t0 < 1000);
+  // ensureArt (cron): a saved copy is served without a refresh while it is fresh; a missing one triggers a fetch (wakes JuanAI)
+  delete require.cache[require.resolve('../services/juanaiPartnerCasino')];
+  let n = 0;
+  Module._load = function (req, parent, ...r) {
+    if (req === 'axios') return async () => { n++; return { status: 200, headers: { 'content-type': 'image/png' }, data: png }; };
+    if (/models\/SiteImage$/.test(req)) return { findOne: () => ({ lean: async () => null }), findOneAndUpdate: () => Promise.resolve({}) };
+    return orig.call(this, req, parent, ...r);
+  };
+  const svc3 = require('../services/juanaiPartnerCasino');
+  await svc3.ensureArt(); await new Promise(r => setTimeout(r, 30));
+  t('ensureArt fetches both pictures when nothing is saved', n === 2);
+  await svc3.ensureArt(); await new Promise(r => setTimeout(r, 30));
+  t('ensureArt does not refetch while the pictures are fresh', n === 2);
   console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();
