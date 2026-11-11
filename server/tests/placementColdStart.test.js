@@ -142,7 +142,7 @@ const fx = status => ({ providerMatchId: '777', homeTeam: 'Kobe Storks', awayTea
   const took = Date.now() - t;
   quiet(false);
   check('P1: full market list returned', m.markets.length === 2);
-  check('P1: did not wait for the dead secondary host (was ~6s)', took < 2000);
+  console.log('P1 took ms', took); check('P1: did not wait for the dead secondary host (was ~6s)', took < 2000);
   check('P1: exact fixture details captured from the same answer', !!m.fixture && m.fixture.homeTeam === 'Kobe Storks' && m.fixture.awayTeam === 'Tokyo Sunrockers' && String(m.fixture.providerMatchId) === '777');
 
   quiet(true);

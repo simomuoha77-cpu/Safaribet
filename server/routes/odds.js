@@ -596,7 +596,17 @@ router.get('/captured', async (req, res) => {
     } else {
       rows = await Match.find({ lastLiveSeenAt: { $gte: new Date(Date.now() - 3 * 3600000) } }).sort({ lastLiveSeenAt: -1 }).limit(40).lean();
     }
-    res.json({ success: true, count: rows.length, now: new Date().toISOString(), games: rows.map(pick) });
+    // Background worker heartbeat (written by the every-minute Cloudflare cron tick): if ageSec is large, the cron is not running.
+    let heartbeat = null;
+    try {
+      const d = await require('mongoose').connection.collection('cron_heartbeat').findOne({ _id: 'tick' });
+      if (d) {
+        const ago = x => x ? Math.round((Date.now() - new Date(x).getTime()) / 1000) : null;
+        heartbeat = { tickStartedSecAgo: ago(d.startedAt), tickFinishedSecAgo: ago(d.finishedAt), liveOkSecAgo: ago(d.lastLiveOkAt), settleOkSecAgo: ago(d.lastSettleOkAt),
+          lastLiveError: d.lastLiveError || null, lastLiveErrorSecAgo: ago(d.lastLiveErrorAt), lastSettleError: d.lastSettleError || null, lastTick: { live: d.live, settle: d.settle, errors: d.errors || [] } };
+      }
+    } catch (_) {}
+    res.json({ success: true, count: rows.length, now: new Date().toISOString(), heartbeat, games: rows.map(pick) });
   } catch (e) { res.json({ success: false, message: String(e && e.message || e).slice(0, 200) }); }
 });
 
