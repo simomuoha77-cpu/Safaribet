@@ -88,6 +88,7 @@ export class BackendRuntime {
     if (this.tickRunning && Date.now() - this.tickRunning < 3 * 60000) return { skipped: true };
     this.tickRunning = Date.now();
     const out = { live: 0, settle: 0, errors: [] };
+    const tickStart = Date.now();
     await this.saveTickStatus({ at: new Date().toISOString(), phase: 'started' });
     try {
       const runtime = await this.initialize();
@@ -128,7 +129,7 @@ export class BackendRuntime {
       this.tickRunning = 0;
     }
     // Shown in GET /api/health ("cron") so it is obvious whether the background job is alive and what failed.
-    globalThis.__sbCron = { at: new Date().toISOString(), live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };
+    globalThis.__sbCron = { at: new Date().toISOString(), ms: Date.now() - tickStart, live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };
     await this.saveTickStatus(globalThis.__sbCron);   // a Durable Object is evicted from memory when idle, so keep it in MongoDB too
     if (out.errors.length) console.error('[cron] tick errors:', out.errors.slice(0, 5).join(' | '));
     return out;

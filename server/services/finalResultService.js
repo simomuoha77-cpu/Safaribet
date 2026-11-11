@@ -91,6 +91,10 @@ const EXACT_CHECK_GAP_MS = Number(process.env.SETTLE_EXACT_GAP_MS) || 60 * 1000;
 // The exact-fixture question only ever accepts an explicit provider FINISHED + full-time score, so asking EARLY is harmless
 // (it can never settle a game that is still in play). It starts at this share of the sport's minimum game length (was 100%).
 const EXACT_START_SHARE = 0.75;
+const OLD_FIXTURE_MS = 6 * 3600 * 1000;           // past this the game is no longer looked for in the day's catalogue every pass
+const VERY_OLD_FIXTURE_MS = 24 * 3600 * 1000;
+const OLD_EXACT_GAP_MS = 10 * 60 * 1000;          // exact-fixture question for a game 6-24 h after kick-off
+const VERY_OLD_EXACT_GAP_MS = 60 * 60 * 1000;     // ... and once an hour after 24 h
 const FORCE_EXACT_GAP_MS = 20 * 1000;           // on-demand checks (My Bets opened) may ask the provider for the exact fixture this often
 async function memoized(key, ttlMs, fn) {
   const hit = memo.get(key);
@@ -341,7 +345,9 @@ async function trackFixturesSeq(fixtures, Match, opts) {
 
       // exact-id sources only
       let item = (await liveFeed(p.sport, force) || new Map()).get(id) || null;
-      if (!item) item = ((await catalogue(p.sport, nairobiDate(kickoff), force)) || new Map()).get(id) || null;
+      // A game still unresolved long after kick-off is not looked for in the day's catalogue on every pass (that crawl is dozens of
+      // provider calls and a Durable Object is billed for the time it waits): old games are asked about rarely, below.
+      if (!item && (force || now - kickoff.getTime() < OLD_FIXTURE_MS)) item = ((await catalogue(p.sport, nairobiDate(kickoff), force)) || new Map()).get(id) || null;
 
       const finish = async (sc, source) => {
         await Match.updateMany({ matchId: { $in: sibIds } }, { $set: {
@@ -381,9 +387,16 @@ async function trackFixturesSeq(fixtures, Match, opts) {
       // Once it is past the sport's minimum game length, ask the provider for this EXACT fixture. Only an explicit
       // FINISHED status with a full-time score is accepted (verifyFinalResult), so nothing is guessed.
       if (kickoff.getTime() && (force || now - kickoff.getTime() >= (MIN_DURATION_MIN[p.sport] || 180) * 60000 * EXACT_START_SHARE)) {
-        const last = exactChecked.get(fx.matchId) || 0;
-        if (now - last >= (force ? FORCE_EXACT_GAP_MS : EXACT_CHECK_GAP_MS)) {
-          exactChecked.set(fx.matchId, now);
+        // The throttle is kept in MongoDB (lastFinalCheckAt), not only in memory: the Durable Object that runs this is evicted when
+        // idle, which wiped the in-memory map and made EVERY pass re-ask the provider about EVERY stuck game (~85,000 failing
+        // provider calls in a day). It also backs off with the age of the game: the provider does not know some games at all.
+        const age = now - kickoff.getTime();
+        const gap = force ? FORCE_EXACT_GAP_MS : age > VERY_OLD_FIXTURE_MS ? VERY_OLD_EXACT_GAP_MS : age > OLD_FIXTURE_MS ? OLD_EXACT_GAP_MS : EXACT_CHECK_GAP_MS;
+        const dbLast = rows.reduce((mx, r) => Math.max(mx, r.lastFinalCheckAt ? new Date(r.lastFinalCheckAt).getTime() : 0), 0);
+        const last = Math.max(exactChecked.get(id) || 0, exactChecked.get(fx.matchId) || 0, dbLast);
+        if (now - last >= gap) {
+          exactChecked.set(id, now);
+          try { await Match.updateMany({ matchId: { $in: sibIds } }, { $set: { lastFinalCheckAt: new Date() } }); } catch (_) {}
           const fin = await verifyFinalResult(fx.matchId);
           if (fin) { await finish({ home: fin.homeScore, away: fin.awayScore }, 'provider-exact'); continue; }
         }
