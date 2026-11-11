@@ -740,6 +740,18 @@ router.get('/my', auth, async (req, res) => {
           for (const selection of (bt.selections || [])) {
             let liveMatch = null;
             try { liveMatch = lookupIndexedMatch(selection.matchId); } catch (_) {}
+            // A leg that is already settled is FINISHED: it keeps its graded score and shows "FT" (or HT / 2H for half markets).
+            // Live data (minute, IN_PLAY, LIVE) must never be laid over it - that is what showed "51': 2 - 0" on a finished game.
+            if (selection.result && selection.result !== 'pending') {
+              delete selection.minute;
+              selection.fixtureState = 'finished';
+              if (!/^(HT|1H|2H|FT)$/i.test(String(selection.periodLabel || ''))) selection.periodLabel = 'FT';
+              if (!selection.score && liveMatch && liveMatch.status === 'finished') {
+                const fs = (liveMatch.score || {}), fh = fs.home ?? (fs.fullTime && fs.fullTime.home), fa = fs.away ?? (fs.fullTime && fs.fullTime.away);
+                if (fh != null && fa != null && Number.isFinite(Number(fh)) && Number.isFinite(Number(fa))) selection.score = { home: Number(fh), away: Number(fa) };
+              }
+              continue;
+            }
             if (!liveMatch) continue;
 
             const rawScore = liveMatch.score || {};
