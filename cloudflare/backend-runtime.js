@@ -90,10 +90,16 @@ export class BackendRuntime {
       try { hbCol = runtime.mongoose.connection.collection('cron_heartbeat'); } catch (_) {}
       hb({ startedAt: new Date() });
       // The server modules are CommonJS: the functions live on module.exports (= the namespace's default).
-      const load = async path => { const m = await import(path); return m.default || m; };
-      const { updateLive } = await load('../server/engine/apifootball.js');
-      const { runSettlement } = await load('../server/engine/settlementEngine.js');
-      const { settleJackpots } = await load('../server/engine/jackpotSettlement.js');
+      // The import paths MUST be literal strings: Wrangler's bundler cannot follow import(variable), which is why an
+      // earlier version failed with 'No such module "../server/engine/apifootball.js"'.
+      const [liveMod, settleMod, jackpotMod] = await Promise.all([
+        import('../server/engine/apifootball.js'),
+        import('../server/engine/settlementEngine.js'),
+        import('../server/engine/jackpotSettlement.js')
+      ]);
+      const { updateLive } = liveMod.default || liveMod;
+      const { runSettlement } = settleMod.default || settleMod;
+      const { settleJackpots } = jackpotMod.default || jackpotMod;
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;
