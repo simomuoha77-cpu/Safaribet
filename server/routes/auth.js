@@ -77,8 +77,18 @@ async function completeRegistration(req, res, { username, phone, passwordHash, r
           { userId: user._id, amount: newUserAmount, reference: `referral_new_${user._id}`, description: 'New user referral welcome bonus' },
           { userId: referredBy, amount: referrerAmount, reference: `referral_referrer_${user._id}`, description: `Referral bonus — ${user.username} verified their phone` }
         ];
+        // Per-referrer cap (admin setting): once a referrer has been paid for this many verified referrals, further referrals
+        // still register but earn them no more bonus. The new user's own welcome bonus is not affected.
+        const maxPerUser = Math.max(0, Math.floor(Number(await settings.get('referral_max_per_user')) || 0));
+        let referrerCapped = false;
+        if (maxPerUser > 0) {
+          const paidCount = await Transaction.countDocuments({ userId: referredBy, type: 'referral_bonus', reference: { $regex: '^referral_referrer_' } });
+          referrerCapped = paidCount >= maxPerUser;
+          if (referrerCapped) console.log(`[referral] referrer ${String(referredBy)} reached the limit of ${maxPerUser} rewarded referrals - no bonus for ${user.username}`);
+        }
         for (const reward of rewards) {
           if (reward.amount <= 0) continue;
+          if (referrerCapped && String(reward.userId) === String(referredBy)) continue;
           const paid = await WalletHistory.findOne({ userId: reward.userId, bucket: 'main', reason: 'referral_bonus', reference: reward.reference }).lean();
           if (paid) continue;
           const wallet = await walletService.credit(reward.userId, 'main', reward.amount, 'referral_bonus', reward.reference, { referredUser: user._id, trigger: 'phone_otp_verified' });

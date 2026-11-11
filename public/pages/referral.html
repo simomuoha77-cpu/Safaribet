@@ -171,7 +171,7 @@ async function loadStats() {
     const r = await fetch('/api/referral/stats', { headers: { Authorization: 'Bearer ' + token } });
     const d = await r.json();
     if (!d.success) return;
-    const { totalReferrals, totalEarned, referralLink, recentReferrals, bonusPerReferral, referralEnabled } = d.data;
+    const { totalReferrals, totalEarned, referralLink, recentReferrals, bonusPerReferral, referralEnabled, maxRewardedReferrals, rewardedReferrals, limitReached } = d.data;
     refLink = referralLink;
 
     document.getElementById('totalRefs').textContent = totalReferrals;
@@ -195,6 +195,11 @@ async function loadStats() {
       heroAmount.textContent = `KES ${bonusPerReferral}`;
       heroAmount.style.color = 'var(--yl)';
       heroPer.textContent    = 'paid instantly to your balance';
+      if (maxRewardedReferrals > 0) {
+        heroPer.textContent = limitReached
+          ? `You have earned the bonus for the maximum of ${maxRewardedReferrals} referrals. Friends can still join with your link, but no more bonus is paid.`
+          : `paid instantly to your balance · ${rewardedReferrals}/${maxRewardedReferrals} rewarded referrals used`;
+      }
     }
 
     const listEl = document.getElementById('recentList');

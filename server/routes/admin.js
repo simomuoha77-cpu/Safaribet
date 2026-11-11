@@ -1560,15 +1560,21 @@ router.get('/referral/config', async (req, res) => {
     res.json({ success: true, data: {
       enabled: cfg.referral_enabled !== false,
       newUserAmount: Number(cfg.referral_new_user_amount) || 0,
-      referrerAmount: Number(cfg.referral_referrer_amount ?? cfg.referral_amount) || 0
+      referrerAmount: Number(cfg.referral_referrer_amount ?? cfg.referral_amount) || 0,
+      maxPerUser: Math.max(0, Math.floor(Number(cfg.referral_max_per_user) || 0))
     }});
   } catch(e) { return safeError(res, e, 'admin'); }
 });
 
 router.post('/referral/config', async (req, res) => {
   try {
-    const { enabled, newUserAmount, referrerAmount } = req.body || {};
+    const { enabled, newUserAmount, referrerAmount, maxPerUser } = req.body || {};
     const s = require('../models/Settings');
+    if (maxPerUser !== undefined) {
+      const m = Number(maxPerUser);
+      if (!Number.isInteger(m) || m < 0) return res.status(400).json({ success:false, message:'Referral limit must be a whole number (0 = no limit)' });
+      await s.set('referral_max_per_user', m);
+    }
     if (enabled !== undefined) await s.set('referral_enabled', Boolean(enabled));
     for (const [field, key] of [['newUserAmount', 'referral_new_user_amount'], ['referrerAmount', 'referral_referrer_amount']]) {
       if (req.body[field] !== undefined) {
@@ -1577,12 +1583,13 @@ router.post('/referral/config', async (req, res) => {
         await s.set(key, n);
       }
     }
-    audit('UPDATE_REFERRAL_CONFIG', { enabled, newUserAmount, referrerAmount });
+    audit('UPDATE_REFERRAL_CONFIG', { enabled, newUserAmount, referrerAmount, maxPerUser });
     const updated = await s.getAll();
     res.json({ success:true, message:'Referral config updated', data: {
       enabled: updated.referral_enabled !== false,
       newUserAmount: Number(updated.referral_new_user_amount) || 0,
-      referrerAmount: Number(updated.referral_referrer_amount ?? updated.referral_amount) || 0
+      referrerAmount: Number(updated.referral_referrer_amount ?? updated.referral_amount) || 0,
+      maxPerUser: Math.max(0, Math.floor(Number(updated.referral_max_per_user) || 0))
     }});
   } catch(e) { return safeError(res, e, 'admin'); }
 });

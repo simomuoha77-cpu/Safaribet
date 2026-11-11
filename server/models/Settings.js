@@ -16,7 +16,8 @@ const DEFAULTS = {
   referral_enabled: true,
   referral_amount:  5, // legacy setting retained for backward compatibility
   referral_new_user_amount: 0,
-  referral_referrer_amount: 5
+  referral_referrer_amount: 5,
+  referral_max_per_user: 0   // most referrals that earn ONE referrer a bonus (0 = no limit)
 };
 
 async function get(key) {

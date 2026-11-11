@@ -16,7 +16,11 @@ router.get('/stats', auth, async (req, res) => {
 
     const enabled  = cfg.referral_enabled !== false;
     const amount   = Number(cfg.referral_referrer_amount ?? cfg.referral_amount) || 0;
-    const totalEarned = totalReferrals * amount;
+    const maxPerUser = Math.max(0, Math.floor(Number(cfg.referral_max_per_user) || 0));
+    // Bonuses really paid to this user (a limit means not every referral earns one)
+    const paidCount = await require('../models/Transaction').countDocuments({ userId: req.user._id, type: 'referral_bonus', reference: { $regex: '^referral_referrer_' } });
+    const totalEarned = paidCount * amount;
+    const limitReached = maxPerUser > 0 && paidCount >= maxPerUser;
 
     const recentReferrals = await User.find({ referredBy: req.user._id })
       .select('username createdAt').sort({ createdAt: -1 }).limit(10).lean();
@@ -32,6 +36,9 @@ router.get('/stats', auth, async (req, res) => {
         totalReferrals,
         totalEarned,
         bonusPerReferral: amount,
+        maxRewardedReferrals: maxPerUser,
+        rewardedReferrals: paidCount,
+        limitReached,
         referralEnabled:  enabled,
         recentReferrals: recentReferrals.map(r => ({
           username: r.username.slice(0, 3) + '***',

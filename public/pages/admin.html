@@ -519,9 +519,15 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
             <input type="number" id="refReferrerAmountInp" min="0" step="0.01" placeholder="e.g. 10" style="width:100%;min-width:0;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
           </div>
         </div>
+        <div>
+          <label style="font-size:12px;color:var(--mt);font-weight:600;display:block;margin-bottom:6px">Max rewarded referrals per user (0 = no limit)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" id="refMaxPerUserInp" min="0" step="1" placeholder="e.g. 20" style="width:100%;min-width:0;background:var(--s3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:14px;font-weight:700;color:var(--tx);outline:none"/>
+          </div>
+        </div>
       </div>
       <button class="btn btn-g btn-sm" onclick="saveRefAmounts()">Save Bonus Amounts</button>
-      <div style="font-size:11px;color:var(--mt);margin-top:5px">Set either amount to 0 to disable that person's bonus. Both bonuses are paid only after phone OTP verification.</div>
+      <div style="font-size:11px;color:var(--mt);margin-top:5px">Set either amount to 0 to disable that person's bonus. Both bonuses are paid only after phone OTP verification. After a user has earned the referral bonus for the limit above, new referrals still register (and the new player still gets their bonus) but the referrer is not paid again.</div>
 
       <!-- Live status -->
       <div id="refConfigStatus" style="font-size:12px;padding:8px 12px;border-radius:8px;background:var(--s3);color:var(--mt)">Loading...</div>
@@ -3325,7 +3331,8 @@ async function loadRefConfig(){
   try {
     const d = await api(`/api/admin/referral/config`);
     if (!d.success) return;
-    const { enabled, newUserAmount, referrerAmount } = d.data;
+    const { enabled, newUserAmount, referrerAmount, maxPerUser } = d.data;
+    const mpi = document.getElementById('refMaxPerUserInp'); if (mpi) mpi.value = maxPerUser || 0;
     const toggle = document.getElementById('refEnabledToggle');
     const track  = document.getElementById('refToggleTrack');
     const thumb  = document.getElementById('refToggleThumb');
@@ -3363,10 +3370,12 @@ async function updateRefConfig(){
 async function saveRefAmounts(){
   const newUserAmount = Number(document.getElementById('refNewUserAmountInp').value);
   const referrerAmount = Number(document.getElementById('refReferrerAmountInp').value);
+  const maxPerUser = Number(document.getElementById('refMaxPerUserInp').value || 0);
   if (!Number.isFinite(newUserAmount) || newUserAmount < 0 || !Number.isFinite(referrerAmount) || referrerAmount < 0) { toast('Enter valid bonus amounts (0 or more)', 'err'); return; }
+  if (!Number.isInteger(maxPerUser) || maxPerUser < 0) { toast('Referral limit must be a whole number (0 = no limit)', 'err'); return; }
   try {
-    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ newUserAmount, referrerAmount }) });
-    if (d.success) { updateRefStatusBadge(d.data.enabled, d.data.newUserAmount, d.data.referrerAmount); toast('✅ New user and referrer bonuses saved'); }
+    const d = await api(`/api/admin/referral/config`, { method:'POST', body: JSON.stringify({ newUserAmount, referrerAmount, maxPerUser }) });
+    if (d.success) { updateRefStatusBadge(d.data.enabled, d.data.newUserAmount, d.data.referrerAmount); toast('✅ Referral bonuses and limit saved'); }
     else toast(d.message || 'Update failed', 'err');
   } catch(e) { toast('Network error', 'err'); }
 }
