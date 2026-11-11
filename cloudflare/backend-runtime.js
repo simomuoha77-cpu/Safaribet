@@ -47,7 +47,7 @@ export class BackendRuntime {
 
         const server = createServer(app);
         server.listen(8787);
-        return { handler: httpServerHandler(server), mongoose, app };
+        return { handler: httpServerHandler(server), mongoose };
       })().catch(error => {
         this.runtimePromise = null;
         throw error;
@@ -79,29 +79,19 @@ export class BackendRuntime {
     if (this.tickRunning && Date.now() - this.tickRunning < 3 * 60000) return { skipped: true };
     this.tickRunning = Date.now();
     const out = { live: 0, settle: 0, errors: [] };
-    // Heartbeat in MongoDB so it can be checked from the site (GET /api/odds/captured): when the last tick started / finished,
-    // when the live poll last SUCCEEDED, and the last errors. Best effort: it must never break the tick.
-    let hbCol = null;
-    const hb = fields => { try { if (hbCol) hbCol.updateOne({ _id: 'tick' }, { $set: fields }, { upsert: true }).catch(() => {}); } catch (_) {} };
-    // One hung provider call must not freeze the whole tick (a tick that never reaches its end looks exactly like "cron not running").
-    const within = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + ' timed out after ' + Math.round(ms / 1000) + 's')), ms))]);
     try {
-      const runtime = await this.initialize();
-      try { hbCol = runtime.mongoose.connection.collection('cron_heartbeat'); } catch (_) {}
-      hb({ startedAt: new Date() });
-      // The engine functions come from the Express app itself (app.locals.engine, defined in server/app.js): they are bundled
-      // there with literal require() paths. Importing them from this file by path failed with 'No such module'.
-      const eng = runtime.app && runtime.app.locals && runtime.app.locals.engine;
-      if (!eng) throw new Error('engine entry points missing on the app (server/app.js)');
-      const { updateLive, runSettlement, settleJackpots } = eng;
-      // casino lobby pictures: keep them saved in the database and keep JuanAI awake (never waits, never breaks the tick)
-      try { if (eng.ensureCasinoArt) Promise.resolve(eng.ensureCasinoArt()).catch(() => {}); } catch (_) {}
+      await this.initialize();
+      // The server modules are CommonJS: the functions live on module.exports (= the namespace's default).
+      const load = async path => { const m = await import(path); return m.default || m; };
+      const { updateLive } = await load('../server/engine/apifootball.js');
+      const { runSettlement } = await load('../server/engine/settlementEngine.js');
+      const { settleJackpots } = await load('../server/engine/jackpotSettlement.js');
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;
       while (Date.now() - started < 50000) {
-        try { await within(updateLive(), 25000, 'live poll'); out.live++; hb({ lastLiveOkAt: new Date() }); } catch (e) { out.errors.push('live: ' + e.message); hb({ lastLiveErrorAt: new Date(), lastLiveError: String(e.message).slice(0, 200) }); }
-        if (i % 2 === 1) { try { await within(runSettlement(false), 40000, 'settlement'); out.settle++; hb({ lastSettleOkAt: new Date() }); } catch (e) { out.errors.push('settle: ' + e.message); hb({ lastSettleErrorAt: new Date(), lastSettleError: String(e.message).slice(0, 200) }); } }
+        try { await updateLive(); out.live++; } catch (e) { out.errors.push('live: ' + e.message); }
+        if (i % 2 === 1) { try { await runSettlement(false); out.settle++; } catch (e) { out.errors.push('settle: ' + e.message); } }
         i++;
         const wait = 10000 - ((Date.now() - started) % 10000);
         if (Date.now() - started + wait >= 50000) break;
@@ -116,7 +106,6 @@ export class BackendRuntime {
       out.errors.push(e && e.message);
     } finally {
       this.tickRunning = 0;
-      hb({ finishedAt: new Date(), live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) });
     }
     return out;
   }
