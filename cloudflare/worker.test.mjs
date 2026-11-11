@@ -344,6 +344,20 @@ test('cron tick runs the live poll and settlement through app.locals.engine and 
   assert.ok(globalThis.__sbCron && globalThis.__sbCron.at, 'last tick is recorded for /api/health');
 });
 
+test('by default a cron tick is ONE pass and never sleeps (Durable Object duration is billed while awake)', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  const calls = { live: 0, settle: 0 };
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x' });
+  rt.initialize = async () => ({ app: { locals: { engine: {
+    updateLive: async () => { calls.live++; }, runSettlement: async () => { calls.settle++; }, settleJackpots: async () => {}
+  } } } });
+  const t0 = Date.now();
+  await rt.cronTick();
+  assert.equal(calls.live, 1);
+  assert.ok(calls.settle >= 1);
+  assert.ok(Date.now() - t0 < 2000, 'no sleeping between passes');
+});
+
 test('cron tick reports (not hides) a missing engine, and the runtime never uses import(variable)', async () => {
   const { BackendRuntime } = await import('./backend-runtime.js');
   const rt = new BackendRuntime({}, { MONGO_URI: 'x', CRON_TICK_MS: '50', CRON_STEP_MS: '10' });

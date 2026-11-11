@@ -97,12 +97,15 @@ export class BackendRuntime {
       const engine = this.engine;
       if (!engine || typeof engine.updateLive !== 'function' || typeof engine.runSettlement !== 'function') throw new Error('cron: app.locals.engine is missing');
       const { updateLive, runSettlement, settleJackpots } = engine;
-      const tickMs = Number(this.env.CRON_TICK_MS) || 50000;
+      // ONE pass per cron invocation (every minute). It used to loop for 50 s with 10 s sleeps: a Durable Object is billed for every
+      // second it is awake, so that kept it busy ~83% of the day and used up the free daily Durable Objects duration (prod + staging
+      // together went past 100%). One pass costs a few seconds. CRON_TICK_MS / CRON_STEP_MS exist only so tests can loop.
+      const tickMs = Number(this.env.CRON_TICK_MS) || 0;
       const stepMs = Number(this.env.CRON_STEP_MS) || 10000;
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;
-      while (Date.now() - started < tickMs) {
+      do {
         // Live poll and settlement run TOGETHER in every pass: the live poll can take 30-50 s on a cold cache (catalogue crawl),
         // and when settlement waited behind it (it used to run on every 2nd pass) it never ran at all.
         await Promise.all([
@@ -111,9 +114,9 @@ export class BackendRuntime {
         ]);
         i++;
         const wait = stepMs - ((Date.now() - started) % stepMs);
-        if (Date.now() - started + wait >= tickMs) break;
+        if (Date.now() - started + wait >= tickMs) break;   // default tickMs = 0 -> a single pass, no sleeping
         await new Promise(r => setTimeout(r, wait));
-      }
+      } while (true);
       // slower safety-net pass (provider snapshot) + jackpots every 5 minutes, as in scheduler.js
       if (minute % 5 === 0) {
         try { await runSettlement(true); } catch (e) { out.errors.push('settle-full: ' + e.message); }
