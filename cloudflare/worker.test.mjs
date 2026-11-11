@@ -331,7 +331,7 @@ test('a public request can never reach the internal cron tick path', async () =>
 test('cron tick runs the live poll and settlement through app.locals.engine and reports into /api/health', async () => {
   const { BackendRuntime } = await import('./backend-runtime.js');
   const calls = { live: 0, settle: 0 };
-  const rt = new BackendRuntime({}, { MONGO_URI: 'x', CRON_TICK_MS: '120', CRON_STEP_MS: '20' });
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x', CRON_TICK_MS: '1500', CRON_STEP_MS: '50' });
   rt.initialize = async () => ({ app: { locals: { engine: {
     updateLive: async () => { calls.live++; return { live: 3 }; },
     runSettlement: async () => { calls.settle++; return { settled: 0 }; },
