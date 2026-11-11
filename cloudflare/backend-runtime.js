@@ -47,7 +47,7 @@ export class BackendRuntime {
 
         const server = createServer(app);
         server.listen(8787);
-        return { handler: httpServerHandler(server), mongoose };
+        return { handler: httpServerHandler(server), mongoose, app };
       })().catch(error => {
         this.runtimePromise = null;
         throw error;
@@ -80,21 +80,24 @@ export class BackendRuntime {
     this.tickRunning = Date.now();
     const out = { live: 0, settle: 0, errors: [] };
     try {
-      await this.initialize();
-      // The server modules are CommonJS: the functions live on module.exports (= the namespace's default).
-      const load = async path => { const m = await import(path); return m.default || m; };
-      const { updateLive } = await load('../server/engine/apifootball.js');
-      const { runSettlement } = await load('../server/engine/settlementEngine.js');
-      const { settleJackpots } = await load('../server/engine/jackpotSettlement.js');
+      const runtime = await this.initialize();
+      this.engine = runtime.app && runtime.app.locals && runtime.app.locals.engine;
+      // The engine entry points are plain require() calls with literal paths inside server/app.js (app.locals.engine), so the
+      // Workers bundler includes them. import(variable) from here made every tick fail with "module not found".
+      const engine = this.engine;
+      if (!engine || typeof engine.updateLive !== 'function' || typeof engine.runSettlement !== 'function') throw new Error('cron: app.locals.engine is missing');
+      const { updateLive, runSettlement, settleJackpots } = engine;
+      const tickMs = Number(this.env.CRON_TICK_MS) || 50000;
+      const stepMs = Number(this.env.CRON_STEP_MS) || 10000;
       const started = Date.now();
       const minute = new Date().getUTCMinutes();
       let i = 0;
-      while (Date.now() - started < 50000) {
+      while (Date.now() - started < tickMs) {
         try { await updateLive(); out.live++; } catch (e) { out.errors.push('live: ' + e.message); }
         if (i % 2 === 1) { try { await runSettlement(false); out.settle++; } catch (e) { out.errors.push('settle: ' + e.message); } }
         i++;
-        const wait = 10000 - ((Date.now() - started) % 10000);
-        if (Date.now() - started + wait >= 50000) break;
+        const wait = stepMs - ((Date.now() - started) % stepMs);
+        if (Date.now() - started + wait >= tickMs) break;
         await new Promise(r => setTimeout(r, wait));
       }
       // slower safety-net pass (provider snapshot) + jackpots every 5 minutes, as in scheduler.js
@@ -107,6 +110,9 @@ export class BackendRuntime {
     } finally {
       this.tickRunning = 0;
     }
+    // Shown in GET /api/health ("cron") so it is obvious whether the background job is alive and what failed.
+    globalThis.__sbCron = { at: new Date().toISOString(), live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };
+    if (out.errors.length) console.error('[cron] tick errors:', out.errors.slice(0, 5).join(' | '));
     return out;
   }
 

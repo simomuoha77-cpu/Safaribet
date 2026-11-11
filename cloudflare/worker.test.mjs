@@ -327,3 +327,32 @@ test('a public request can never reach the internal cron tick path', async () =>
   assert.notEqual(res.headers.get('content-type'), 'application/json');
   assert.ok(e.requested.length >= 0);
 });
+
+test('cron tick runs the live poll and settlement through app.locals.engine and reports into /api/health', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  const calls = { live: 0, settle: 0 };
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x', CRON_TICK_MS: '120', CRON_STEP_MS: '20' });
+  rt.initialize = async () => ({ app: { locals: { engine: {
+    updateLive: async () => { calls.live++; return { live: 3 }; },
+    runSettlement: async () => { calls.settle++; return { settled: 0 }; },
+    settleJackpots: async () => {}
+  } } } });
+  const out = await rt.cronTick();
+  assert.ok(calls.live >= 2, 'live poll ran repeatedly');
+  assert.ok(calls.settle >= 1, 'settlement ran');
+  assert.deepEqual(out.errors, []);
+  assert.ok(globalThis.__sbCron && globalThis.__sbCron.at, 'last tick is recorded for /api/health');
+});
+
+test('cron tick reports (not hides) a missing engine, and the runtime never uses import(variable)', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x', CRON_TICK_MS: '50', CRON_STEP_MS: '10' });
+  rt.initialize = async () => ({ app: { locals: {} } });
+  const out = await rt.cronTick();
+  assert.match(out.errors.join(' '), /engine is missing/);
+  const fs = await import('node:fs');
+  for (const f of ['backend-runtime.js', 'worker.js']) {
+    const src = fs.readFileSync(new URL('./' + f, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+    assert.equal(/import\(\s*[^'"\s]/.test(src), false, f + ' must not use import(variable): the Workers bundler cannot resolve it');
+  }
+});

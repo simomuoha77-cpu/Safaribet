@@ -23,5 +23,12 @@ t('last seen 90 min after kickoff, no minute -> not guessed', inferEnded(row({ c
 t('minute 60 last seen -> not guessed', inferEnded(row({ lastLiveMinute: 60, liveAbsentSince: new Date(now - 30 * MIN) }), 'football', now).ok === false);
 t('never seen live -> not guessed', inferEnded(row({ lastLiveSeenAt: null, liveAbsentSince: null, status: 'upcoming' }), 'football', now).ok === false);
 t('no score ever recorded -> not guessed', inferEnded(row({ score: {} }), 'football', now).ok === false);
+// SRL (simulated) games last ~12 real minutes
+const srl = (o) => Object.assign({ homeTeam: 'Legia Warszawa SRL', awayTeam: 'Torino FC SRL', league: 'SRL Club Friendlies', commenceTime: new Date(now - 40 * MIN), score: { home: 1, away: 0 }, lastLiveSeenAt: new Date(now - 28 * MIN), liveAbsentSince: new Date(now - 27 * MIN), status: 'live' }, o);
+t('SRL seen 12 min after kickoff, gone for 27 min -> over', inferEnded(srl({ lastLiveSeenAt: new Date(now - 28 * MIN) }), 'football', now).ok === true);
+t('SRL seen only 3 min after kickoff -> not guessed', inferEnded(srl({ lastLiveSeenAt: new Date(now - 37 * MIN) }), 'football', now).ok === false);
+t('SRL absent only 1 min -> still waiting', inferEnded(srl({ liveAbsentSince: new Date(now - 1 * MIN) }), 'football', now).ok === false);
+t('SRL never seen live -> not guessed', inferEnded(srl({ lastLiveSeenAt: null, liveAbsentSince: null, status: 'upcoming' }), 'football', now).ok === false);
+t('normal game with SRL-like timing is untouched', inferEnded(row({ commenceTime: new Date(now - 40 * MIN), lastLiveSeenAt: new Date(now - 28 * MIN), liveAbsentSince: new Date(now - 27 * MIN) }), 'football', now).ok === false);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

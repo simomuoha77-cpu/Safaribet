@@ -112,10 +112,17 @@ function finalScoreOf(fx) {
   return { home: Number(ft.home), away: Number(ft.away) };
 }
 
+// Simulated (SRL) football is played in about 12 REAL minutes. The normal rules (110+ min game, last seen 97+ min after kick-off)
+// can never be met, so these games stayed "awaiting result" for ever.
+const isSrlRow = r => /\bSRL\b/i.test(`${(r && r.homeTeam) || ''} ${(r && r.awayTeam) || ''} ${(r && r.league) || ''}`);
+const SRL_MIN_DURATION_MIN = 20;       // a simulated game is never over earlier than this after kick-off
+const SRL_CLOSING_SEEN_MIN = 9;        // last seen live this long after kick-off = it was in its final minutes
+
 function inferEnded(row, sport, now) {
   const kickoff = row.commenceTime ? new Date(row.commenceTime).getTime() : 0;
   if (!kickoff) return { ok: false, why: 'no kickoff time' };
-  const minDur = (MIN_DURATION_MIN[sport] || 180) * 60000;
+  const srl = sport === 'football' && isSrlRow(row);
+  const minDur = (srl ? SRL_MIN_DURATION_MIN : (MIN_DURATION_MIN[sport] || 180)) * 60000;
   const clock = row.lastLiveClockSec != null ? Number(row.lastLiveClockSec) : null;
   const h = row.score && row.score.home, a = row.score && row.score.away;
   if (h == null || a == null) return { ok: false, why: 'no score was ever recorded from the live feed' };
@@ -132,15 +139,17 @@ function inferEnded(row, sport, now) {
   const closing = sport === 'football' && (
     (Number.isFinite(clock) && clock >= 90 * 60) ||
     (minute != null && Number(minute) >= 85) ||
-    (minute == null && Number.isFinite(seenEl) && seenEl >= 100));
+    (srl && Number.isFinite(seenEl) && seenEl >= SRL_CLOSING_SEEN_MIN) ||
+    (!srl && minute == null && Number.isFinite(seenEl) && seenEl >= 100));
   if (!closing && now - kickoff < minDur) return { ok: false, why: 'minimum game length not reached yet' };
   const absent = row.liveAbsentSince || (row.status === 'finished' ? row.fetchedAt : null);
   if (!absent || now - new Date(absent).getTime() < (closing ? FAST_ABSENT_MS : ABSENT_MS)) return { ok: false, why: 'not absent from live feed long enough' };
-  if (sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
+  if (srl && !closing) return { ok: false, why: 'simulated game: last seen too early to be the final score' };
+  if (!srl && sport === 'football' && minute != null && Number(minute) < FOOTBALL_LAST_MIN) return { ok: false, why: `last seen at minute ${minute}` };
   // The feed usually sends no minute. Then use the clock instead: a game last seen LIVE 97+ minutes
   // after kickoff (90 minutes + the ~15 minute break, i.e. game minute ~82) that has since left the feed has ended.
   // Last seen earlier than that -> it may still be in play (feed gap / suspension), so it keeps waiting for the provider.
-  if (sport === 'football' && minute == null) {
+  if (!srl && sport === 'football' && minute == null) {
     if (!Number.isFinite(seenEl) || seenEl < 97) return { ok: false, why: `last seen only ${Math.max(0, Math.round(seenEl || 0))} min after kickoff` };
   }
   return { ok: true, home: Number(h), away: Number(a) };

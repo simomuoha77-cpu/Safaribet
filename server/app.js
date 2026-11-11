@@ -279,7 +279,8 @@ app.get('/api/health', (req, res) => {
     status: dbState === 1 ? 'ok' : 'degraded',
     time: new Date().toISOString(),
     uptime: Math.floor(process.uptime()),
-    database: dbStateNames[dbState] || 'unknown'
+    database: dbStateNames[dbState] || 'unknown',
+    cron: globalThis.__sbCron || null   // last background tick (live poll + settlement) on Cloudflare; null = it has not run yet
   });
 });
 
