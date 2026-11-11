@@ -69,6 +69,20 @@ function copyEnvironment(env) {
 
 export { NotificationHub, BackendRuntime };
 export default {
+  // Cron Trigger (every minute, see wrangler.jsonc). The Express app's setInterval/node-cron loops do not exist on Workers,
+  // so this is what polls live games, records final results and settles bets. The tick runs inside the BackendRuntime
+  // Durable Object (it owns the MongoDB connection). /__cron/tick is never forwarded from a public request (only /api/*,
+  // /casino-art/* and /download/app.apk are), so only this handler can reach it.
+  async scheduled(event, env, ctx) {
+    if (!env.BACKEND_RUNTIME) return;
+    copyEnvironment(env);
+    const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-primary');
+    ctx.waitUntil(
+      env.BACKEND_RUNTIME.get(backendId).fetch(new Request('https://internal/__cron/tick', { method: 'POST' }))
+        .then(r => r.text()).then(t => console.log('[cron] tick:', t)).catch(e => console.error('[cron] tick failed:', e && e.message))
+    );
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;

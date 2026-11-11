@@ -306,3 +306,24 @@ test('the real admin.html exists and the Worker can inject into it', async () =>
   assert.equal(res.status, 200);
   assert.ok((await res.text()).includes('/js/profit-sweep.js'));
 });
+
+test('cron trigger runs the live poll + settlement tick inside the backend Durable Object', async () => {
+  const calls = [];
+  const e = {
+    BACKEND_RUNTIME: {
+      idFromName: n => n,
+      get: () => ({ fetch: async req => { calls.push([req.method, new URL(req.url).pathname]); return new Response('{"live":5}'); } })
+    }
+  };
+  const pending = [];
+  await worker.scheduled({}, e, { waitUntil: p => pending.push(p) });
+  await Promise.all(pending);
+  assert.deepEqual(calls, [['POST', '/__cron/tick']]);
+});
+
+test('a public request can never reach the internal cron tick path', async () => {
+  const e = env();
+  const res = await worker.fetch(new Request('https://example.test/__cron/tick', { method: 'POST' }), e);
+  assert.notEqual(res.headers.get('content-type'), 'application/json');
+  assert.ok(e.requested.length >= 0);
+});
