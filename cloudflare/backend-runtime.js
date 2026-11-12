@@ -56,7 +56,26 @@ export class BackendRuntime {
     return this.runtimePromise;
   }
 
+  // The MongoDB driver keeps a heartbeat timer and open sockets per server; on Workers that stops a Durable Object from ever going
+  // idle, so it is billed for 24h/day (~10,800 of the 13,000 GB-s free daily allowance PER object) even with no customers.
+  // After IDLE_DISCONNECT_MS with no request in flight the connection is closed so the object can sleep; the next request
+  // reconnects (a few hundred ms). With steady traffic nothing changes.
+  scheduleIdleDisconnect(runtime) {
+    const ms = this.env.IDLE_DISCONNECT_MS === undefined ? 15000 : Number(this.env.IDLE_DISCONNECT_MS);
+    if (!(ms > 0)) return;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.active > 0) return;
+      if (runtime.mongoose.connection.readyState !== 1) return;
+      this.disconnecting = runtime.mongoose.disconnect()
+        .catch(e => console.error('[idle-disconnect]', e && e.message))
+        .finally(() => { this.connectPromise = null; this.disconnecting = null; });
+    }, ms);
+  }
+
   async ensureConnected(runtime) {
+    if (this.disconnecting) await this.disconnecting;
     if (runtime.mongoose.connection.readyState !== 1) {
       if (!this.connectPromise) {
         this.connectPromise = runtime.mongoose.connect(this.env.MONGO_URI, {
@@ -148,12 +167,9 @@ export class BackendRuntime {
     }
     try {
       const runtime = await this.initialize();
-      await this.ensureConnected(runtime);
-      if (new URL(request.url).pathname === '/__cron/tick') {
-        const job = new URL(request.url).searchParams.get('job');
-        return Response.json(await this.cronTick(job === 'live' || job === 'settle' ? job : 'all'), { headers: { 'cache-control': 'no-store' } });
-      }
-      return await runtime.handler.fetch(request);
+      this.active = (this.active || 0) + 1;
+      try { return await this.serve(runtime, request); }
+      finally { this.active--; this.scheduleIdleDisconnect(runtime); }
     } catch (error) {
       console.error('[safaribet-backend-runtime]', error?.stack || error?.message || error);
       return Response.json({ success: false, code: 'BACKEND_UNAVAILABLE' }, {
@@ -161,5 +177,14 @@ export class BackendRuntime {
         headers: { 'cache-control': 'no-store' }
       });
     }
+  }
+
+  async serve(runtime, request) {
+    await this.ensureConnected(runtime);
+    if (new URL(request.url).pathname === '/__cron/tick') {
+      const job = new URL(request.url).searchParams.get('job');
+      return Response.json(await this.cronTick(job === 'live' || job === 'settle' ? job : 'all'), { headers: { 'cache-control': 'no-store' } });
+    }
+    return await runtime.handler.fetch(request);
   }
 }

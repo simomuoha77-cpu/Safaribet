@@ -385,3 +385,19 @@ test('cron jobs are separate: the settle job never runs the live poll and vice v
     if (expSettle) assert.ok(calls.settle >= 1, job + ' settle calls'); else assert.equal(calls.settle, 0, job + ' settle calls');
   }
 });
+
+test('idle Durable Object closes MongoDB (so it can sleep) and reconnects on the next request', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  let state = 1, connects = 0, disconnects = 0;
+  const mongoose = { connection: { get readyState() { return state; } },
+    connect: async () => { connects++; state = 1; }, disconnect: async () => { disconnects++; state = 0; } };
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x', IDLE_DISCONNECT_MS: '40' });
+  rt.initialize = async () => ({ mongoose, handler: { fetch: async () => new Response('ok') } });
+  assert.equal(await (await rt.fetch(new Request('https://x/api/ping2'))).text(), 'ok');
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(disconnects, 1, 'closed after idle');
+  assert.equal(await (await rt.fetch(new Request('https://x/api/ping2'))).text(), 'ok');
+  assert.equal(connects, 1, 'reconnected on demand');
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(disconnects, 2);
+});
