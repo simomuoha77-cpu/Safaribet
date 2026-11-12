@@ -25,16 +25,47 @@ async function getOrCreateWallet(userId) {
   return wallet;
 }
 
+// A balance shown to a customer can never be below zero, whatever is stored (bad data, an old import, a manual database edit).
+const nonNeg = n => { n = Number(n); return Number.isFinite(n) && n > 0 ? parseFloat(n.toFixed(2)) : 0; };
+
 async function getBalance(userId) {
   const wallet = await getOrCreateWallet(userId);
+  const main = nonNeg(wallet.main), bonus = nonNeg(wallet.bonus);
   return {
-    main: wallet.main,
-    bonus: wallet.bonus,
-    locked: wallet.locked,
-    pending: wallet.pending,
-    spendable: parseFloat((wallet.main + wallet.bonus).toFixed(2)),
-    withdrawable: wallet.main
+    main,
+    bonus,
+    locked: nonNeg(wallet.locked),
+    pending: nonNeg(wallet.pending),
+    spendable: parseFloat((main + bonus).toFixed(2)),
+    withdrawable: main
   };
+}
+
+/**
+ * Self-healing: a wallet bucket that is below zero is invalid (debit() cannot produce one), so it came from outside this service.
+ * Set it back to 0 and write a ledger row that records the original amount, so nothing disappears silently.
+ * Also fixes the legacy User.balance mirror. Returns how many buckets were repaired.
+ */
+async function repairNegativeBalances(limit = 200) {
+  let fixed = 0;
+  const wallets = await Wallet.find({ $or: [{ main: { $lt: 0 } }, { bonus: { $lt: 0 } }, { locked: { $lt: 0 } }, { pending: { $lt: 0 } }] }).limit(limit).lean();
+  for (const w of wallets) {
+    for (const bucket of ['main', 'bonus', 'locked', 'pending']) {
+      const old = w[bucket];
+      if (!(old < 0)) continue;
+      const res = await Wallet.findOneAndUpdate({ _id: w._id, [bucket]: { $lt: 0 } }, { $set: { [bucket]: 0 } }, { new: true });
+      if (!res) continue;
+      fixed++;
+      await WalletHistory.create({
+        userId: w.userId, bucket, change: parseFloat((-old).toFixed(2)), balanceAfter: 0,
+        reason: 'admin_adjustment', reference: 'negative_balance_repair',
+        meta: { note: 'Negative balance reset to 0', previousBalance: old }
+      }).catch(() => {});
+      console.warn(`[wallet] repaired negative ${bucket} balance ${old} -> 0 for user ${w.userId}`);
+    }
+  }
+  try { await require('../models/User').collection.updateMany({ balance: { $lt: 0 } }, { $set: { balance: 0 } }); } catch (_) {}
+  return fixed;
 }
 
 /**
@@ -248,5 +279,6 @@ module.exports = {
   finalizeWithdrawal,
   confirmDeposit,
   getHistory,
+  repairNegativeBalances,
   migrateFromLegacyUser
 };

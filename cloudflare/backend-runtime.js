@@ -122,6 +122,7 @@ export class BackendRuntime {
       if (minute % 5 === 0) {
         try { await runSettlement(true); } catch (e) { out.errors.push('settle-full: ' + e.message); }
         try { await settleJackpots(); } catch (e) { out.errors.push('jackpots: ' + e.message); }
+        try { if (engine.repairNegativeBalances) await engine.repairNegativeBalances(); } catch (e) { out.errors.push('repair: ' + e.message); }
       }
     } catch (e) {
       out.errors.push(e && e.message);

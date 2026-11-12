@@ -437,7 +437,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       newDevice: isNewDevice,
-      user: { id: user._id, username: user.username, phone: user.phone, balance: user.balance }
+      user: { id: user._id, username: user.username, phone: user.phone, balance: Math.max(0, Number(user.balance) || 0) }
     });
 
   } catch (e) {
@@ -578,13 +578,13 @@ router.post('/2fa/disable', auth, twoFaLimiter, async (req, res) => {
 
 // ── ME ──
 router.get('/me', auth, async (req, res) => {
-  res.json({ success: true, user: { id: req.user._id, username: req.user.username, phone: req.user.phone, balance: req.user.balance } });
+  res.json({ success: true, user: { id: req.user._id, username: req.user.username, phone: req.user.phone, balance: Math.max(0, Number(req.user.balance) || 0) } });
 });
 
 // ── BALANCE ──
 router.get('/balance', auth, async (req, res) => {
   const user = await User.findById(req.user._id).select('balance');
-  res.json({ success: true, balance: user.balance });
+  res.json({ success: true, balance: Math.max(0, Number(user.balance) || 0) });
 });
 
 module.exports = router;

@@ -137,6 +137,7 @@ app.locals.engine = {
   updateLive: () => require('./engine/apifootball').updateLive(),
   runSettlement: full => require('./engine/settlementEngine').runSettlement(full),
   settleJackpots: () => require('./engine/jackpotSettlement').settleJackpots(),
+  repairNegativeBalances: () => require('./services/walletService').repairNegativeBalances(),
   ensureCasinoArt: () => require('./services/juanaiPartnerCasino').ensureArt()
 };
 
