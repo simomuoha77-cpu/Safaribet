@@ -281,8 +281,11 @@ app.get('/api/health', async (req, res) => {
   let cron = globalThis.__sbCron || null;
   try {
     if (dbState === 1 && mongoose.connection.db) {
-      const d = await mongoose.connection.db.collection('sb_cron').findOne({ _id: 'tick' });
-      if (d) { delete d._id; cron = d; }
+      const col = mongoose.connection.db.collection('sb_cron');
+      const [d, ds, dl] = await Promise.all([col.findOne({ _id: 'tick' }), col.findOne({ _id: 'tick_settle' }), col.findOne({ _id: 'tick_live' })]);
+      for (const x of [d, ds, dl]) if (x) delete x._id;
+      if (ds || dl) cron = { settle: ds || null, live: dl || null };
+      else if (d) cron = d;
     }
   } catch (_) {}
   res.json({

@@ -80,10 +80,14 @@ export default {
     // never compete with customers' requests (bet placement, deposits) served by 'safaribet-primary'. Both talk to the same MongoDB;
     // settlement and payouts are idempotent (atomic claim per bet), so a deploy or an overlap can never pay a bet twice.
     const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-cron');
-    ctx.waitUntil(
-      env.BACKEND_RUNTIME.get(backendId).fetch(new Request('https://internal/__cron/tick', { method: 'POST' }))
-        .then(r => r.text()).then(t => console.log('[cron] tick:', t)).catch(e => console.error('[cron] tick failed:', e && e.message))
-    );
+    // Two separate requests = two invocations, each with its OWN limit of outgoing requests (50 on the free plan): the live poll
+    // can no longer use them all up before the settlement lookups run.
+    for (const job of ['settle', 'live']) {
+      ctx.waitUntil(
+        env.BACKEND_RUNTIME.get(backendId).fetch(new Request('https://internal/__cron/tick?job=' + job, { method: 'POST' }))
+          .then(r => r.text()).then(t => console.log('[cron] ' + job + ':', t)).catch(e => console.error('[cron] ' + job + ' failed:', e && e.message))
+      );
+    }
   },
 
   async fetch(request, env, ctx) {

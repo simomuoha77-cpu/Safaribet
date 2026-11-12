@@ -75,21 +75,27 @@ export class BackendRuntime {
   // Background work that the Express process normally does with timers (server/engine/scheduler.js), run from the
   // every-minute Cron Trigger: poll live games (so a game is SEEN live and its end can be confirmed), then settle bets.
   // One tick lasts ~50s and polls live every 10s, like the original; a second tick never overlaps a running one.
-  async saveTickStatus(status) {
+  async saveTickStatus(status, id = 'tick') {
     try {
       const mongoose = (await this.initialize()).mongoose;
       if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
-        await mongoose.connection.db.collection('sb_cron').updateOne({ _id: 'tick' }, { $set: Object.assign({}, status, { savedAt: new Date() }) }, { upsert: true });
+        await mongoose.connection.db.collection('sb_cron').updateOne({ _id: id }, { $set: Object.assign({}, status, { savedAt: new Date() }) }, { upsert: true });
       }
     } catch (_) { /* status only: never affects settlement */ }
   }
 
-  async cronTick() {
-    if (this.tickRunning && Date.now() - this.tickRunning < 3 * 60000) return { skipped: true };
-    this.tickRunning = Date.now();
+  // job: 'live' (poll the live feed) | 'settle' (track results + settle bets) | 'all' (both; tests). The Cron Trigger starts 'live' and
+  // 'settle' as TWO separate requests: Workers on the free plan allow only 50 outgoing requests per invocation, and the live poll's
+  // catalogue crawl used them all up, so the settlement lookups that came after it failed ("Too many subrequests"). Each job now has its own.
+  async cronTick(job = 'all') {
+    const wantLive = job !== 'settle', wantSettle = job !== 'live';
+    this.running = this.running || {};
+    if (this.running[job] && Date.now() - this.running[job] < 3 * 60000) return { skipped: true, job };
+    this.running[job] = Date.now();
+    const statusId = job === 'all' ? 'tick' : 'tick_' + job;
     const out = { live: 0, settle: 0, errors: [] };
     const tickStart = Date.now();
-    await this.saveTickStatus({ at: new Date().toISOString(), phase: 'started' });
+    await this.saveTickStatus({ at: new Date().toISOString(), phase: 'started' }, statusId);
     try {
       const runtime = await this.initialize();
       this.engine = runtime.app && runtime.app.locals && runtime.app.locals.engine;
@@ -110,16 +116,16 @@ export class BackendRuntime {
         // Live poll and settlement run TOGETHER in every pass: the live poll can take 30-50 s on a cold cache (catalogue crawl),
         // and when settlement waited behind it (it used to run on every 2nd pass) it never ran at all.
         await Promise.all([
-          Promise.resolve().then(() => updateLive()).then(() => { out.live++; }, e => { out.errors.push('live: ' + e.message); }),
-          Promise.resolve().then(() => runSettlement(false)).then(() => { out.settle++; }, e => { out.errors.push('settle: ' + e.message); })
-        ]);
+          wantLive && Promise.resolve().then(() => updateLive()).then(() => { out.live++; }, e => { out.errors.push('live: ' + e.message); }),
+          wantSettle && Promise.resolve().then(() => runSettlement(false)).then(() => { out.settle++; }, e => { out.errors.push('settle: ' + e.message); })
+        ].filter(Boolean));
         i++;
         const wait = stepMs - ((Date.now() - started) % stepMs);
         if (Date.now() - started + wait >= tickMs) break;   // default tickMs = 0 -> a single pass, no sleeping
         await new Promise(r => setTimeout(r, wait));
       } while (true);
       // slower safety-net pass (provider snapshot) + jackpots every 5 minutes, as in scheduler.js
-      if (minute % 5 === 0) {
+      if (wantSettle && minute % 5 === 0) {
         try { await runSettlement(true); } catch (e) { out.errors.push('settle-full: ' + e.message); }
         try { await settleJackpots(); } catch (e) { out.errors.push('jackpots: ' + e.message); }
         try { if (engine.repairNegativeBalances) await engine.repairNegativeBalances(); } catch (e) { out.errors.push('repair: ' + e.message); }
@@ -127,11 +133,11 @@ export class BackendRuntime {
     } catch (e) {
       out.errors.push(e && e.message);
     } finally {
-      this.tickRunning = 0;
+      this.running[job] = 0;
     }
     // Shown in GET /api/health ("cron") so it is obvious whether the background job is alive and what failed.
     globalThis.__sbCron = { at: new Date().toISOString(), ms: Date.now() - tickStart, live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };
-    await this.saveTickStatus(globalThis.__sbCron);   // a Durable Object is evicted from memory when idle, so keep it in MongoDB too
+    await this.saveTickStatus(globalThis.__sbCron, statusId);   // a Durable Object is evicted from memory when idle, so keep it in MongoDB too
     if (out.errors.length) console.error('[cron] tick errors:', out.errors.slice(0, 5).join(' | '));
     return out;
   }
@@ -144,7 +150,8 @@ export class BackendRuntime {
       const runtime = await this.initialize();
       await this.ensureConnected(runtime);
       if (new URL(request.url).pathname === '/__cron/tick') {
-        return Response.json(await this.cronTick(), { headers: { 'cache-control': 'no-store' } });
+        const job = new URL(request.url).searchParams.get('job');
+        return Response.json(await this.cronTick(job === 'live' || job === 'settle' ? job : 'all'), { headers: { 'cache-control': 'no-store' } });
       }
       return await runtime.handler.fetch(request);
     } catch (error) {

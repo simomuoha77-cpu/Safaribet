@@ -318,7 +318,8 @@ test('cron trigger runs the live poll + settlement tick inside the backend Durab
   const pending = [];
   await worker.scheduled({}, e, { waitUntil: p => pending.push(p) });
   await Promise.all(pending);
-  assert.deepEqual(calls, [['POST', '/__cron/tick']]);
+  assert.deepEqual(calls, [['POST', '/__cron/tick'], ['POST', '/__cron/tick']]);
+  assert.equal(calls.length, 2, 'live poll and settlement are two separate invocations (own subrequest budget each)');
 });
 
 test('a public request can never reach the internal cron tick path', async () => {
@@ -368,5 +369,19 @@ test('cron tick reports (not hides) a missing engine, and the runtime never uses
   for (const f of ['backend-runtime.js', 'worker.js']) {
     const src = fs.readFileSync(new URL('./' + f, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
     assert.equal(/import\(\s*[^'"\s]/.test(src), false, f + ' must not use import(variable): the Workers bundler cannot resolve it');
+  }
+});
+
+test('cron jobs are separate: the settle job never runs the live poll and vice versa', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  for (const [job, expLive, expSettle] of [['settle', 0, 1], ['live', 1, 0]]) {
+    const calls = { live: 0, settle: 0 };
+    const rt = new BackendRuntime({}, { MONGO_URI: 'x' });
+    rt.initialize = async () => ({ app: { locals: { engine: {
+      updateLive: async () => { calls.live++; }, runSettlement: async () => { calls.settle++; }, settleJackpots: async () => {}
+    } } } });
+    await rt.cronTick(job);
+    assert.equal(calls.live, expLive, job + ' live calls');
+    if (expSettle) assert.ok(calls.settle >= 1, job + ' settle calls'); else assert.equal(calls.settle, 0, job + ' settle calls');
   }
 });
