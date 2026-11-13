@@ -743,6 +743,22 @@ label.lbl{display:block;font-size:10px;color:var(--mt);text-transform:uppercase;
 <!-- 10. LIMITS -->
 <div class="panel" id="panel-limits">
   <div class="sec">
+    <div class="sec-hdr"><h3>💰 Cash Out</h3></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-size:14px;font-weight:700">Allow customers to cash out</div>
+        <div style="font-size:12px;color:var(--mt);margin-top:2px">Turn OFF to stop all cash outs. Customers see "Cash out is temporarily unavailable". Bets are not affected.</div>
+      </div>
+      <label style="position:relative;display:inline-block;width:48px;height:26px;flex-shrink:0">
+        <input type="checkbox" id="coEnabledToggle" style="opacity:0;width:0;height:0" onchange="updateCashoutConfig()"/>
+        <span id="coToggleTrack" style="position:absolute;cursor:pointer;inset:0;background:#333;border-radius:13px;transition:0.3s">
+          <span id="coToggleThumb" style="position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:0.3s"></span>
+        </span>
+      </label>
+    </div>
+    <div id="coStatus" style="font-size:12px;margin-top:10px;color:var(--mt)">Loading...</div>
+  </div>
+  <div class="sec">
     <div class="sec-hdr"><h3>⚖️ Betting Limits</h3></div>
     <label class="lbl">Min Stake (KES)</label><input class="inp" type="number" id="limMinBet" value="10"/>
     <label class="lbl">Max Stake (KES)</label><input class="inp" type="number" id="limMaxBet" value="500000"/>
@@ -1500,7 +1516,7 @@ function nav(name,el){
   // Auto-load data
   if(name==='bets') loadBets();
   else if(name==='users') loadUsers();
-  else if(name==='limits') loadLimits();
+  else if(name==='limits') { loadLimits(); loadCashoutConfig(); }
   else if(name==='liverisk') loadLiveRisk();
   else if(name==='bonus') loadBonusSettings();
   else if(name==='transactions') loadTx();
@@ -3320,6 +3336,29 @@ async function exportData(type){
     a.download=`betake-${type}-${new Date().toISOString().split('T')[0]}.json`;a.click();
     toast(`Exported ${type} data`,'ok');
   }else toast('Export failed','err');
+}
+
+// ══ CASH OUT ON/OFF ══
+function paintCashout(enabled){
+  document.getElementById('coEnabledToggle').checked = enabled;
+  document.getElementById('coToggleTrack').style.background = enabled ? 'var(--g)' : '#333';
+  document.getElementById('coToggleThumb').style.transform = enabled ? 'translateX(22px)' : 'translateX(0)';
+  const el = document.getElementById('coStatus');
+  el.style.color = enabled ? 'var(--g)' : 'var(--r)';
+  el.textContent = enabled ? '🟢 Cash out is ON' : '🔴 Cash out is OFF — customers cannot cash out';
+}
+async function loadCashoutConfig(){
+  try { const d = await api('/api/admin/cashout/config'); if (d.success) paintCashout(d.data.enabled); }
+  catch(e) { const el = document.getElementById('coStatus'); if (el) el.textContent = 'Failed to load'; }
+}
+async function updateCashoutConfig(){
+  const enabled = document.getElementById('coEnabledToggle').checked;
+  paintCashout(enabled);
+  try {
+    const d = await api('/api/admin/cashout/config', { method:'POST', body: JSON.stringify({ enabled }) });
+    if (d.success) toast(enabled ? '✅ Cash out ON' : '🔴 Cash out OFF');
+    else { toast(d.message || 'Update failed', 'err'); loadCashoutConfig(); }
+  } catch(e) { toast('Network error', 'err'); loadCashoutConfig(); }
 }
 
 // ══ REFERRALS ══

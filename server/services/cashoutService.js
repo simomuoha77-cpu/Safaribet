@@ -74,7 +74,13 @@ const CASHOUT_MARGIN = clampMargin(parseFloat(process.env.CASHOUT_MARGIN || '0.9
 const MIN_CASHOUT_AMOUNT = 5; // KES
 const BUILDER_CORRELATION_DISCOUNT = 0.90; // same factor used in bettingService.calculateBetBuilderOdds
 
+async function cashoutEnabled() {
+  try { return (await require('../models/Settings').get('cashout_enabled')) !== false; }
+  catch (_) { return true; }   // a settings read failure must never switch cash out off by accident
+}
+
 async function getCashOutQuote(bet) {
+  if (!(await cashoutEnabled())) return { eligible: false, reason: 'Cash out is temporarily unavailable' };
   if (bet.status !== 'pending') return { eligible: false, reason: 'Bet is already settled' };
   if (bet.cashedOut) return { eligible: false, reason: 'Already cashed out' };
 
@@ -214,4 +220,4 @@ async function executeCashOut(betId, userId) {
   return { betCode: bet.betCode, cashOutValue: quote.cashOutValue };
 }
 
-module.exports = { getCashOutQuote, executeCashOut };
+module.exports = { getCashOutQuote, executeCashOut, cashoutEnabled };

@@ -1553,6 +1553,21 @@ router.post('/match/final-score', async (req, res) => {
   } catch (e) { return safeError(res, e, 'admin'); }
 });
 
+// ── CASH OUT ON/OFF ──
+router.get('/cashout/config', async (req, res) => {
+  try { res.json({ success: true, data: { enabled: (await require('../models/Settings').get('cashout_enabled')) !== false } }); }
+  catch (e) { return safeError(res, e, 'admin'); }
+});
+router.post('/cashout/config', async (req, res) => {
+  try {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== 'boolean') return res.status(400).json({ success: false, message: 'enabled must be true or false' });
+    await require('../models/Settings').set('cashout_enabled', enabled);
+    audit('UPDATE_CASHOUT_CONFIG', { enabled });
+    res.json({ success: true, message: enabled ? 'Cash out is ON' : 'Cash out is OFF', data: { enabled } });
+  } catch (e) { return safeError(res, e, 'admin'); }
+});
+
 // ── REFERRAL CONFIG ──
 router.get('/referral/config', async (req, res) => {
   try {
