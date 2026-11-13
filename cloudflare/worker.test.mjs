@@ -401,3 +401,20 @@ test('idle Durable Object closes MongoDB (so it can sleep) and reconnects on the
   await new Promise(r => setTimeout(r, 120));
   assert.equal(disconnects, 2);
 });
+
+test('public polling endpoints are answered from the edge cache (the Durable Object is not woken again)', async () => {
+  const store = new Map();
+  globalThis.caches = { default: { match: async k => { const r = store.get(k.url); return r ? r.clone() : undefined; }, put: async (k, r) => { store.set(k.url, r); } } };
+  try {
+    const { default: worker } = await import('./worker.js');
+    let hits = 0;
+    const env = { BACKEND_RUNTIME: { idFromName: () => 'id', get: () => ({ fetch: async () => { hits++; return new Response('{"ok":1}', { status: 200 }); } }) }, ASSETS: { fetch: async () => new Response('a') } };
+    const ctx = { waitUntil: p => p };
+    for (let i = 0; i < 3; i++) await worker.fetch(new Request('https://safaribet.top/api/odds/all-counts'), env, ctx);
+    assert.equal(hits, 1, 'second and third request came from the cache');
+    for (let i = 0; i < 2; i++) await worker.fetch(new Request('https://safaribet.top/api/bets/my'), env, ctx);
+    assert.equal(hits, 3, 'private endpoints are never cached');
+    await worker.fetch(new Request('https://safaribet.top/api/odds/all-counts', { method: 'POST' }), env, ctx);
+    assert.equal(hits, 4, 'only GET is cached');
+  } finally { delete globalThis.caches; }
+});

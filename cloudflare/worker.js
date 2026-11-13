@@ -67,6 +67,31 @@ function copyEnvironment(env) {
   process.env.SB_NO_SWEEP = '1';
 }
 
+// Public, identical-for-everyone GET endpoints that every open page asks for every few seconds. They are answered from
+// Cloudflare's edge cache for a few seconds instead of waking the Durable Object each time: a Durable Object is billed for as
+// long as it is awake, and a request every second or two kept it awake all day. Only an exact allow-list, GET, no cookies/auth
+// needed (none of these read the logged-in user), and only successful JSON answers are stored.
+const EDGE_CACHE_SECONDS = {
+  '/api/settings/site': 10, '/api/odds/all-counts': 5, '/api/odds/featured': 10, '/api/sports/live/count': 5,
+  '/api/sports/team-logos/all': 60, '/api/content': 20, '/api/app-info': 60, '/api/version': 30
+};
+async function edgeCached(request, env, ctx, path, fetchOrigin) {
+  const ttl = EDGE_CACHE_SECONDS[path];
+  if (!ttl || request.method !== 'GET' || typeof caches === 'undefined' || !caches.default) return fetchOrigin();
+  const key = new Request(new URL(request.url).toString(), { method: 'GET' });
+  try {
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+  } catch (_) { return fetchOrigin(); }
+  const res = await fetchOrigin();
+  if (res.status !== 200) return res;
+  const out = new Response(res.body, res);
+  out.headers.set('cache-control', 'public, max-age=' + ttl);
+  out.headers.delete('set-cookie');
+  try { ctx.waitUntil(caches.default.put(key, out.clone())); } catch (_) {}
+  return out;
+}
+
 export { NotificationHub, BackendRuntime };
 export default {
   // Cron Trigger (every minute, see wrangler.jsonc). The Express app's setInterval/node-cron loops do not exist on Workers,
@@ -125,7 +150,7 @@ export default {
       if (!env.BACKEND_RUNTIME) return json({ success: false, code: 'BACKEND_UNAVAILABLE' }, 503);
       copyEnvironment(env);
       const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-primary');
-      return env.BACKEND_RUNTIME.get(backendId).fetch(request);
+      return edgeCached(request, env, ctx, path, () => env.BACKEND_RUNTIME.get(backendId).fetch(request));
     }
 
     // ── ADMIN PANEL (/x9panel) ──
