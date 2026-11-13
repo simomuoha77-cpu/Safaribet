@@ -292,11 +292,13 @@ async function getArt(id, waitMs = 8000) {
 // server from falling asleep, which is what made the lobby pictures come and go. It never waits for JuanAI.
 async function ensureArt() {
   if (!cfg().base) return;
+  const started = [];
   for (const id of ['aviator', 'jetx']) {
     let hit = artCache.get(id);
     if (!hit) hit = await loadStoredArt(id);
-    if (!hit || Date.now() - hit.at > 8 * 60 * 1000) refreshArt(id);
+    if (!hit || Date.now() - hit.at > 8 * 60 * 1000) started.push(refreshArt(id));
   }
+  return Promise.all(started);   // the caller (cron on Workers) may wait for the downloads, because a Worker stops background work when its request ends
 }
 
 function warmArt() { if (cfg().base) ['aviator', 'jetx'].forEach(id => refreshArt(id)); }

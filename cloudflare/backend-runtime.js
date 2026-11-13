@@ -144,6 +144,12 @@ export class BackendRuntime {
         await new Promise(r => setTimeout(r, wait));
       } while (true);
       // slower safety-net pass (provider snapshot) + jackpots every 5 minutes, as in scheduler.js
+      // Lobby pictures (Aviator / JetX): download from JuanAI and keep a copy in MongoDB so the casino page always shows them.
+      // Nothing was doing this on Workers, so every cold start left the cards blank. Cheap when the copies are fresh (no request).
+      if (wantLive && typeof engine.ensureCasinoArt === 'function') {
+        try { await Promise.race([engine.ensureCasinoArt(), new Promise(r => setTimeout(r, 30000))]); }
+        catch (e) { out.errors.push('casino-art: ' + e.message); }
+      }
       if (wantSettle && minute % 5 === 0) {
         try { await runSettlement(true); } catch (e) { out.errors.push('settle-full: ' + e.message); }
         try { await settleJackpots(); } catch (e) { out.errors.push('jackpots: ' + e.message); }
