@@ -49,7 +49,7 @@ jobs:
           IM=$(command -v magick || command -v convert)
           mkdir -p resources
           "$IM" ../public/icon-512.png -resize 1024x1024 resources/icon.png
-          "$IM" -size 2732x2732 xc:'#0a0e0a' \( ../public/icon-512.png -resize 700x700 \) -gravity center -composite resources/splash.png
+          "$IM" -size 2732x2732 xc:'#0a0e0a' \( ../public/icon-512.png -resize 1200x1200 \) -gravity center -composite resources/splash.png
           cp resources/splash.png resources/splash-dark.png
 
       - name: Create Android project
@@ -106,6 +106,13 @@ jobs:
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/sign/release.keystore" --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" --ks-key-alias "$KS_ALIAS" \
             --out "$RUNNER_TEMP/out/SafariBet-$VERSION_NAME.apk" "$RUNNER_TEMP/out/aligned.apk"
           "$BT/apksigner" verify --print-certs "$RUNNER_TEMP/out/SafariBet-$VERSION_NAME.apk"
+
+      - name: Show signing fingerprint (needed so links open in the app)
+        run: |
+          FP=$(keytool -list -v -keystore "$RUNNER_TEMP/sign/release.keystore" -storepass "$KS_PASS" -alias "$KS_ALIAS" 2>/dev/null | grep -m1 'SHA256:' | sed 's/.*SHA256: *//')
+          echo "SHA-256 fingerprint: $FP"
+          echo "### App signing fingerprint" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$FP\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
