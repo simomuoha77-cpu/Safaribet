@@ -33,8 +33,19 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -42,6 +53,94 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     private static final String HOME = "https://safaribet.top";
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        showSplashOverlay();
+    }
+
+    // Launch screen: the SafariBet icon, a row of sport icons and moving dots, shown until the site has loaded.
+    private void showSplashOverlay() {
+        final float d = getResources().getDisplayMetrics().density;
+        final int GREEN = 0xFF00C853, DIM = 0x44FFFFFF;
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(0xFF0A0E0A);
+        overlay.setClickable(true);
+
+        ImageView tile = new ImageView(this);
+        int tileRes = getResources().getIdentifier("splash_tile", "drawable", getPackageName());
+        if (tileRes != 0) tile.setImageResource(tileRes);
+        overlay.addView(tile, new FrameLayout.LayoutParams((int) (150 * d), (int) (150 * d), Gravity.CENTER));
+
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        LinearLayout icons = new LinearLayout(this);
+        icons.setOrientation(LinearLayout.HORIZONTAL);
+        icons.setGravity(Gravity.CENTER);
+        int[] sports = {0x26BD, 0x1F3C0, 0x1F3BE, 0x1F3D0, 0x1F3C6};
+        for (int cp : sports) {
+            TextView t = new TextView(this);
+            t.setText(new String(Character.toChars(cp)));
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+            t.setPadding((int) (9 * d), 0, (int) (9 * d), 0);
+            icons.addView(t);
+        }
+        bottom.addView(icons);
+
+        LinearLayout dotsRow = new LinearLayout(this);
+        dotsRow.setOrientation(LinearLayout.HORIZONTAL);
+        dotsRow.setGravity(Gravity.CENTER);
+        final View[] dots = new View[5];
+        for (int i = 0; i < dots.length; i++) {
+            View dot = new View(this);
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(i == 0 ? GREEN : DIM);
+            dot.setBackground(g);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams((int) (8 * d), (int) (8 * d));
+            lp.setMargins((int) (6 * d), (int) (18 * d), (int) (6 * d), 0);
+            dotsRow.addView(dot, lp);
+            dots[i] = dot;
+        }
+        bottom.addView(dotsRow);
+
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        blp.bottomMargin = (int) (72 * d);
+        overlay.addView(bottom, blp);
+
+        addContentView(overlay, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        final Handler h = new Handler(Looper.getMainLooper());
+        final long start = System.currentTimeMillis();
+        final int[] step = {0};
+        h.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                step[0]++;
+                for (int i = 0; i < dots.length; i++) {
+                    ((GradientDrawable) dots[i].getBackground()).setColor(i == step[0] % dots.length ? GREEN : DIM);
+                }
+                long elapsed = System.currentTimeMillis() - start;
+                WebView w = getBridge() != null ? getBridge().getWebView() : null;
+                String u = w != null ? w.getUrl() : null;
+                boolean loaded = w != null && u != null && u.startsWith("http") && w.getProgress() >= 100;
+                if ((loaded && elapsed >= 1600) || elapsed >= 9000) {
+                    overlay.animate().alpha(0f).setDuration(300).withEndAction(new Runnable() {
+                        @Override
+                        public void run() {
+                            ViewGroup p = (ViewGroup) overlay.getParent();
+                            if (p != null) p.removeView(overlay);
+                        }
+                    }).start();
+                    return;
+                }
+                h.postDelayed(this, 350);
+            }
+        }, 350);
+    }
 
     @Override
     public void onStart() {
