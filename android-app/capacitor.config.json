@@ -6,11 +6,29 @@
     "url": "https://safaribet.top",
     "cleartext": false,
     "errorPath": "offline.html",
-    "allowNavigation": ["safaribet.top", "*.safaribet.top", "*.onrender.com"]
+    "allowNavigation": [
+      "safaribet.top",
+      "*.safaribet.top",
+      "*.onrender.com"
+    ]
   },
   "android": {
     "allowMixedContent": false,
     "backgroundColor": "#0a0e0a",
     "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1800,
+      "launchAutoHide": true,
+      "backgroundColor": "#0a0e0a",
+      "androidScaleType": "CENTER_INSIDE",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "LocalNotifications": {
+      "iconColor": "#00C853"
+    }
   }
 }

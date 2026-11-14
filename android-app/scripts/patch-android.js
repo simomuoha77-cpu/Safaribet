@@ -28,9 +28,15 @@ const javaDir = path.join(root, 'src', 'main', 'java', 'top', 'safaribet', 'app'
 fs.mkdirSync(javaDir, { recursive: true });
 fs.writeFileSync(path.join(javaDir, 'MainActivity.java'), `package top.safaribet.app;
 
-import android.os.Bundle;
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.getcapacitor.BridgeActivity;
 
@@ -40,6 +46,39 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStart() {
         super.onStart();
+        setupPullToRefresh();
+        askNotificationPermission();
+        openLink(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        openLink(intent);
+    }
+
+    // A safaribet.top link tapped anywhere (WhatsApp, SMS, browser...) opens inside the app, on that exact page.
+    private void openLink(Intent intent) {
+        if (intent == null) return;
+        Uri data = intent.getData();
+        if (data == null) return;
+        String url = data.toString();
+        intent.setData(null);
+        if (!url.startsWith(HOME)) return;
+        WebView webView = getBridge().getWebView();
+        if (webView != null) webView.loadUrl(url);
+    }
+
+    // Android 13+ needs the user to allow notifications.
+    private void askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        }
+    }
+
+    private void setupPullToRefresh() {
         final WebView webView = getBridge().getWebView();
         if (webView == null || webView.getParent() instanceof SwipeRefreshLayout) return;
         ViewGroup parent = (ViewGroup) webView.getParent();
@@ -62,6 +101,21 @@ public class MainActivity extends BridgeActivity {
     }
 }
 `);
+// Links to safaribet.top open in this app (Android App Links); permission for notifications.
+edit('src/main/AndroidManifest.xml', s => {
+  if (!s.includes('POST_NOTIFICATIONS')) s = s.replace('<application', '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application');
+  if (!s.includes('android:host="safaribet.top"')) s = s.replace('</activity>',
+    '    <intent-filter android:autoVerify="true">\n' +
+    '            <action android:name="android.intent.action.VIEW" />\n' +
+    '            <category android:name="android.intent.category.DEFAULT" />\n' +
+    '            <category android:name="android.intent.category.BROWSABLE" />\n' +
+    '            <data android:scheme="https" android:host="safaribet.top" />\n' +
+    '        </intent-filter>\n    </activity>');
+  return s;
+});
+// Launch screen: plain dark background, the big logo comes from the splash image (no small icon in a circle)
+edit('src/main/res/values/styles.xml', s => s.includes('windowSplashScreenBackground') ? s :
+  s.replace(/(<style name="AppTheme\.NoActionBarLaunch"[^>]*>)/, '$1\n        <item name="windowSplashScreenBackground">#0a0e0a</item>\n        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>'));
 console.log('pull-to-refresh added');
 
 console.log('patched: versionName', versionName, 'versionCode', versionCode);

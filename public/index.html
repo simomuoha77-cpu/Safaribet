@@ -1306,6 +1306,24 @@ function timeAgo(iso){
   if (s < 86400) return Math.floor(s/3600)+'h ago';
   return Math.floor(s/86400)+'d ago';
 }
+// Inside the Android app: show each NEW unread notification as a phone notification too (once per notification).
+async function appNotify(items){
+  try{
+    const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (!LN || !items || !items.length) return;
+    let seen = []; try { seen = JSON.parse(localStorage.getItem('sb_notified') || '[]'); } catch(e){}
+    const fresh = items.filter(n => !n.read && seen.indexOf(n._id) < 0);
+    if (!fresh.length) return;
+    const first = !seen.length && !localStorage.getItem('sb_notified');   // first ever run: mark as seen, do not flood old ones
+    const all = seen.concat(fresh.map(n => n._id)).slice(-100);
+    localStorage.setItem('sb_notified', JSON.stringify(all));
+    if (first) return;
+    const perm = await LN.checkPermissions();
+    if (perm.display !== 'granted') return;
+    await LN.schedule({ notifications: fresh.slice(0, 5).map((n, i) => ({
+      id: Math.floor(Date.now() % 1000000000) + i, title: n.title || 'SafariBet', body: n.message || '' })) });
+  }catch(e){}
+}
 async function loadNotifications(){
   const t = localStorage.getItem('token');
   if (!t) return;
@@ -1314,6 +1332,7 @@ async function loadNotifications(){
     const d = await r.json();
     if (!d.success) return;
     document.getElementById('notifBell').style.display = 'block';
+    appNotify(d.items || []);
     const badge = document.getElementById('notifBadge');
     if (d.unreadCount > 0) {
       badge.style.display = 'flex';
