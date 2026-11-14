@@ -44,9 +44,12 @@ jobs:
 
       - name: Prepare icon and splash from the website artwork
         run: |
+          sudo apt-get update -y
+          sudo apt-get install -y imagemagick
+          IM=$(command -v magick || command -v convert)
           mkdir -p resources
-          convert ../public/icon-512.png -resize 1024x1024 resources/icon.png
-          convert -size 2732x2732 xc:'#0a0e0a' \( ../public/icon-512.png -resize 700x700 \) -gravity center -composite resources/splash.png
+          "$IM" ../public/icon-512.png -resize 1024x1024 resources/icon.png
+          "$IM" -size 2732x2732 xc:'#0a0e0a' \( ../public/icon-512.png -resize 700x700 \) -gravity center -composite resources/splash.png
           cp resources/splash.png resources/splash-dark.png
 
       - name: Create Android project
