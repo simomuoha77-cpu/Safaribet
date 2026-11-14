@@ -150,7 +150,13 @@ export default {
       if (!env.BACKEND_RUNTIME) return json({ success: false, code: 'BACKEND_UNAVAILABLE' }, 503);
       copyEnvironment(env);
       const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-primary');
-      return edgeCached(request, env, ctx, path, () => env.BACKEND_RUNTIME.get(backendId).fetch(request));
+      try {
+        return await edgeCached(request, env, ctx, path, () => env.BACKEND_RUNTIME.get(backendId).fetch(request));
+      } catch (e) {
+        // e.g. the Durable Objects daily free limit: answer with a clean error instead of Cloudflare's "Error 1101" page
+        console.error('[backend] unavailable:', e && e.message);
+        return json({ success: false, code: 'BACKEND_UNAVAILABLE', message: 'Service temporarily unavailable. Please try again shortly.' }, 503);
+      }
     }
 
     // ── ADMIN PANEL (/x9panel) ──
