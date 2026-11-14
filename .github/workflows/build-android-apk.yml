@@ -27,6 +27,8 @@ jobs:
         working-directory: android-app
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: cloudflare-migration
 
       - uses: actions/setup-node@v4
         with:
