@@ -20,4 +20,48 @@ edit('src/main/AndroidManifest.xml', s => {
 });
 edit('src/main/res/values/styles.xml', s => s.includes('statusBarColor') ? s :
   s.replace(/(<style name="AppTheme\.NoActionBar"[^>]*>)/, '$1\n        <item name="android:statusBarColor">#0a0e0a</item>\n        <item name="android:navigationBarColor">#0a0e0a</item>'));
+
+// ── Pull-to-refresh: wrap the WebView in a SwipeRefreshLayout ──
+edit('build.gradle', s => s.includes('swiperefreshlayout') ? s :
+  s.replace(/dependencies\s*\{/, 'dependencies {\n    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"'));
+const javaDir = path.join(root, 'src', 'main', 'java', 'top', 'safaribet', 'app');
+fs.mkdirSync(javaDir, { recursive: true });
+fs.writeFileSync(path.join(javaDir, 'MainActivity.java'), `package top.safaribet.app;
+
+import android.os.Bundle;
+import android.view.ViewGroup;
+import android.webkit.WebView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    private static final String HOME = "https://safaribet.top";
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        final WebView webView = getBridge().getWebView();
+        if (webView == null || webView.getParent() instanceof SwipeRefreshLayout) return;
+        ViewGroup parent = (ViewGroup) webView.getParent();
+        int index = parent.indexOfChild(webView);
+        ViewGroup.LayoutParams lp = webView.getLayoutParams();
+        parent.removeView(webView);
+        final SwipeRefreshLayout swipe = new SwipeRefreshLayout(this);
+        swipe.addView(webView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        parent.addView(swipe, index, lp != null ? lp : new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        swipe.setColorSchemeColors(0xFF00C853);
+        swipe.setProgressBackgroundColorSchemeColor(0xFF0A0E0A);
+        swipe.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override
+            public void onRefresh() {
+                String url = webView.getUrl();
+                if (url == null || !url.startsWith(HOME)) webView.loadUrl(HOME); else webView.reload();
+                swipe.postDelayed(new Runnable() { @Override public void run() { swipe.setRefreshing(false); } }, 1200);
+            }
+        });
+    }
+}
+`);
+console.log('pull-to-refresh added');
+
 console.log('patched: versionName', versionName, 'versionCode', versionCode);
