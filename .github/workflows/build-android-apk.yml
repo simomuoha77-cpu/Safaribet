@@ -45,7 +45,7 @@ jobs:
       - name: Prepare icon and splash from the website artwork
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y imagemagick
+          sudo apt-get install -y imagemagick fonts-dejavu-core
           IM=$(command -v magick || command -v convert)
           mkdir -p resources
           "$IM" ../public/icon-512.png -resize 1024x1024 resources/icon.png
@@ -54,6 +54,14 @@ jobs:
 
       - name: Create Android project
         run: npx cap add android
+
+      - name: Create launch-screen logo (SafariBet wordmark)
+        run: |
+          IM=$(command -v magick || command -v convert)
+          mkdir -p android/app/src/main/res/drawable-nodpi
+          "$IM" -background none -fill '#00c853' -font DejaVu-Sans-Bold -pointsize 200 label:Safari \
+            \( -background none -fill '#ffd600' -font DejaVu-Sans-Bold -pointsize 200 label:Bet \) +append -trim +repage \
+            -resize 700x -background none -gravity center -extent 1152x1152 android/app/src/main/res/drawable-nodpi/splash_logo.png
 
       - name: Generate launcher icons and splash screens
         run: >

@@ -115,7 +115,7 @@ edit('src/main/AndroidManifest.xml', s => {
 });
 // Launch screen: plain dark background, the big logo comes from the splash image (no small icon in a circle)
 edit('src/main/res/values/styles.xml', s => s.includes('windowSplashScreenBackground') ? s :
-  s.replace(/(<style name="AppTheme\.NoActionBarLaunch"[^>]*>)/, '$1\n        <item name="windowSplashScreenBackground">#0a0e0a</item>\n        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>'));
+  s.replace(/(<style name="AppTheme\.NoActionBarLaunch"[^>]*>)/, '$1\n        <item name="windowSplashScreenBackground">#0a0e0a</item>\n        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>'));
 console.log('pull-to-refresh added');
 
 console.log('patched: versionName', versionName, 'versionCode', versionCode);
