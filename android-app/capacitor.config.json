@@ -18,15 +18,6 @@
     "webContentsDebuggingEnabled": false
   },
   "plugins": {
-    "SplashScreen": {
-      "launchShowDuration": 1800,
-      "launchAutoHide": true,
-      "backgroundColor": "#0a0e0a",
-      "androidScaleType": "CENTER_INSIDE",
-      "showSpinner": false,
-      "splashFullScreen": true,
-      "splashImmersive": true
-    },
     "LocalNotifications": {
       "iconColor": "#00C853"
     }

@@ -127,7 +127,7 @@ public class MainActivity extends BridgeActivity {
                 WebView w = getBridge() != null ? getBridge().getWebView() : null;
                 String u = w != null ? w.getUrl() : null;
                 boolean loaded = w != null && u != null && u.startsWith("http") && w.getProgress() >= 100;
-                if ((loaded && elapsed >= 1600) || elapsed >= 9000) {
+                if ((loaded && elapsed >= 2600) || elapsed >= 10000) {
                     overlay.animate().alpha(0f).setDuration(300).withEndAction(new Runnable() {
                         @Override
                         public void run() {
