@@ -1,0 +1,16 @@
+{
+  "appId": "top.safaribet.app",
+  "appName": "SafariBet",
+  "webDir": "www",
+  "server": {
+    "url": "https://safaribet.top",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": ["safaribet.top", "*.safaribet.top", "*.onrender.com"]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0a0e0a",
+    "webContentsDebuggingEnabled": false
+  }
+}

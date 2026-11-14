@@ -1,0 +1,14 @@
+{
+  "name": "safaribet-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SafariBet Android app (Capacitor shell around https://safaribet.top)",
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5"
+  }
+}
