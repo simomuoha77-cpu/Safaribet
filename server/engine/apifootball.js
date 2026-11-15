@@ -427,6 +427,20 @@ async function updateLive() {
     const live = await getLive();
     const liveIds = new Set(live.map(m => m.matchId));
 
+    // One read for all live games (was two reads per game, one after the other) and batched writes (was one write per game, one
+    // after the other). On Workers every database round trip is slow and the object is billed while it waits, so a poll with ~100
+    // live games used to take over a minute. The per-game logic below is unchanged; only the database round trips are batched.
+    const rowById = new Map();
+    {
+      const ids = live.map(m => m.matchId);
+      for (let i = 0; i < ids.length; i += 500) {
+        try {
+          const rows = await Match.find({ matchId: { $in: ids.slice(i, i + 500) } }, { matchId: 1, score: 1, goalEvents: 1, finalVerified: 1, periodScores: 1 }).lean();
+          for (const r of rows) rowById.set(r.matchId, r);
+        } catch (e) { /* non-fatal: games without a row are written in full below */ }
+      }
+    }
+    const ops = [], opFull = [];
     for (const m of live) {
       // Detect a real goal (score actually changed since our last poll) so the
       // live-risk engine can briefly suspend markets while odds catch up — see
@@ -434,8 +448,8 @@ async function updateLive() {
       // this write, since `$set: m` below replaces the whole `score` subdocument
       // every ~10s regardless of whether anything changed, which would otherwise
       // silently wipe out a previously-recorded lastGoalAt on every non-scoring poll.
+      const existing = rowById.get(m.matchId) || null;
       try {
-        const existing = await Match.findOne({ matchId: m.matchId }, { score: 1, goalEvents: 1 }).lean();
         const prevH = existing?.score?.home, prevA = existing?.score?.away;
         const knownBefore = existing && prevH != null && prevA != null; // false on the very first sync — not a real "goal event"
         const scoreChanged = knownBefore && (prevH !== m.score?.home || prevA !== m.score?.away);
@@ -452,8 +466,7 @@ async function updateLive() {
       m.liveAbsentSince = null;
       if (m.score && m.score.minute != null) m.lastLiveMinute = m.score.minute;
       if (m.score && m.score.clockSec != null) m.lastLiveClockSec = m.score.clockSec;
-      let prevRow = null;
-      try { prevRow = await Match.findOne({ matchId: m.matchId }, { finalVerified: 1, periodScores: 1 }).lean(); } catch (e) {}
+      const prevRow = existing;
       if (prevRow && prevRow.finalVerified) continue;
       try {
         const newPs = require('../services/finalResultService').observePeriods(prevRow && prevRow.periodScores, { score: { fullTime: { home: m.score && m.score.home, away: m.score && m.score.away }, minute: m.score && m.score.minute, halfTime: m._halfTime }, _statusRaw: m._statusRaw, _halfTime: m._halfTime, status: m.score && m.score.period, minute: m.score && m.score.minute }, 'football', new Date(), m.commenceTime);
@@ -461,25 +474,32 @@ async function updateLive() {
       } catch (e) { /* never block the live poll */ }
       delete m._statusRaw; delete m._halfTime;
       // Unchanged since the last write (only the clock / time-stamps moved): send just those; otherwise the full row as before.
+      // A game with no row yet is always written in full (a small update would not create it).
       const gate = liveGate.decide(m);
-      let wrote = false;
-      if (gate.kind === 'touch') {
-        try {
-          const r = await Match.updateOne({ matchId: m.matchId }, { $set: touchSet(m) });
-          wrote = !(r && r.matchedCount === 0);
-          if (wrote) bandwidthMeter.addDb('live_touch', 260);
-        } catch (e) { wrote = false; }
-        if (!wrote) liveGate.forget(m.matchId);
+      if (gate.kind === 'touch' && existing) {
+        ops.push({ updateOne: { filter: { matchId: m.matchId }, update: { $set: touchSet(m) } } });
+        opFull.push(null);
+      } else {
+        ops.push({ updateOne: { filter: { matchId: m.matchId }, update: { $set: m }, upsert: true, setDefaultsOnInsert: true } });
+        opFull.push({ id: m.matchId, fp: gate.fp, bytes: gate.bytes });
       }
-      if (!wrote) {
-        await Match.findOneAndUpdate(
-          { matchId: m.matchId },
-          { $set: m },
-          { upsert: true }
-        ).then(() => { liveGate.recordFull(m.matchId, gate.fp); bandwidthMeter.addDb('live_full', gate.bytes + 120); }).catch(() => {});
-      }
-      if (m.finalVerified === true) { try { require('./settlementEngine').settleSoon(); } catch (e) {} }
     }
+    for (let i = 0; i < ops.length; i += 100) {
+      const chunk = ops.slice(i, i + 100), meta = opFull.slice(i, i + 100);
+      try {
+        await Match.bulkWrite(chunk, { ordered: false });
+        meta.forEach((x, k) => {
+          if (x) { liveGate.recordFull(x.id, x.fp); bandwidthMeter.addDb('live_full', x.bytes + 120); }
+          else bandwidthMeter.addDb('live_touch', 260);
+        });
+      } catch (e) {
+        // Some writes may not have gone through: forget what we remember about these games so the next poll sends them in full.
+        meta.forEach(x => { if (x) liveGate.forget(x.id); });
+        for (const op of chunk) { const id = op.updateOne && op.updateOne.filter && op.updateOne.filter.matchId; if (id) liveGate.forget(id); }
+        console.error('  [sofabets] live write batch failed:', e.message);
+      }
+    }
+    for (const m of live) { if (m.finalVerified === true) { try { require('./settlementEngine').settleSoon(); } catch (e) {} break; } }
 
     // A match that is no longer in the live response is NOT necessarily over:
     // it can be halftime, a feed gap/outage, a different sport's feed (this

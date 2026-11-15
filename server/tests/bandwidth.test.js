@@ -9,8 +9,11 @@ const wire = { bulk: 0, one: 0, touch: 0, ops: 0 };
 const size = o => Buffer.byteLength(JSON.stringify(o));
 function applySet(row, set) { for (const [k, v] of Object.entries(set)) { if (k.includes('.')) { const [a, b] = k.split('.'); row[a] = row[a] || {}; row[a][b] = v; } else row[k] = v; } }
 const Match = {
-  bulkWrite: async (ops) => {
-    let matched = 0, upserted = 0; wire.bulk += size(ops);
+  bulkWrite: async (ops, opts) => {
+    // while the live poll runs (wire.liveMode): count its batches as per-game wire bytes (full = upsert, touch = plain update)
+    const livePoll = !!wire.liveMode;
+    if (livePoll) { for (const op of ops) { const u = op.updateOne; if (u && u.upsert) wire.one += size(u.update); else if (u) wire.touch += size(u.update); } }
+    let matched = 0, upserted = 0; if (!livePoll) wire.bulk += size(ops);
     for (const op of ops) {
       if (op.updateMany) { for (const id of op.updateMany.filter.matchId.$in) { const r = rows.get(id); if (r) { matched++; applySet(r, op.updateMany.update.$set); } } wire.ops++; continue; }
       const u = op.updateOne; const id = u.filter.matchId; wire.ops++;
@@ -19,7 +22,7 @@ const Match = {
       if (r) applySet(r, u.update.$set); }
     return { matchedCount: matched, upsertedCount: upserted };
   },
-  find: (q) => ({ lean: async () => [] }),
+  find: (q) => ({ lean: async () => { const ids = q && q.matchId && q.matchId.$in; return ids ? ids.filter(i => rows.has(i)).map(i => JSON.parse(JSON.stringify(rows.get(i)))) : []; } }),
   deleteMany: async () => ({ deletedCount: 0 }),
   findOne: (q) => ({ lean: async () => (rows.get(q.matchId) ? JSON.parse(JSON.stringify(rows.get(q.matchId))) : null) }),
   findOneAndUpdate: async (q, u) => { wire.one += size(u); let r = rows.get(q.matchId); if (!r) { r = { matchId: q.matchId }; rows.set(q.matchId, r); } applySet(r, u.$set); return r; },
@@ -54,6 +57,7 @@ function raw(i, over) {
 
 (async () => {
   const A = require('../engine/apifootball.js');
+  const liveCall = async () => { wire.liveMode = true; try { return await A.updateLive(); } finally { wire.liveMode = false; } };
 
   // ═══ 1. fixture sync: only changed games are sent in full ═══
   const N = 1500;
@@ -89,22 +93,22 @@ function raw(i, over) {
   const KICK = new Date(Date.now() - 600000).toISOString();
   const live = (min, hs, as, clock) => raw(1, { utcDate: KICK, status: 'IN_PLAY', minute: min, score: { fullTime: { home: hs, away: as } }, liveClockSec: clock, clockRunning: true });
   feed = [live(10, 0, 0, 600)];
-  await A.updateLive();
+  await liveCall();
   const liveFirst = wire.one; check('first live poll stores the game in full', rows.size === 1 && liveFirst > 300 && wire.touch === 0);
   const id = Array.from(rows.keys())[0];
   const t0 = new Date(rows.get(id).lastLiveSeenAt).getTime();
   await new Promise(r => setTimeout(r, 20));
   feed = [live(10, 0, 0, 610)];                                     // 10 s later: only the clock moved
-  wire.one = 0; wire.touch = 0; await A.updateLive();
+  wire.one = 0; wire.touch = 0; await liveCall();
   check('clock-only change: a small update, not the full row', wire.one === 0 && wire.touch > 0 && wire.touch < liveFirst * 0.5);
   console.log(`      live poll bytes: full ${KB(liveFirst)} -> clock-only ${KB(wire.touch)}`);
   check('...yet lastLiveSeenAt, clock and liveAbsentSince are still refreshed', new Date(rows.get(id).lastLiveSeenAt).getTime() > t0 && rows.get(id).score.clockSec === 610 && rows.get(id).liveAbsentSince === null);
   feed = [live(11, 1, 0, 660)];                                     // goal
-  wire.one = 0; wire.touch = 0; await A.updateLive();
+  wire.one = 0; wire.touch = 0; await liveCall();
   check('score/minute change: full row sent again', wire.one > 300 && rows.get(id).score.home === 1);
   check('goal time (lastGoalAt) still recorded', !!(rows.get(id).score && rows.get(id).score.lastGoalAt));
   feed = [live(12, 1, 0, 720)];                                     // next poll: minute moved, no goal -> lastGoalAt must carry forward
-  await A.updateLive(); check('lastGoalAt carried forward on later polls', !!(rows.get(id).score && rows.get(id).score.lastGoalAt));
+  await liveCall(); check('lastGoalAt carried forward on later polls', !!(rows.get(id).score && rows.get(id).score.lastGoalAt));
 
   // ═══ 3. list slimming ═══
   const { slimRow, slimList } = require('../utils/listSlim.js');
