@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SafariBet Casino</title>
+<link rel="icon" type="image/png" href="/favicon.png"/>
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"/>
+<link rel="shortcut icon" href="/favicon.ico"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#00c853"/>
+<meta name="robots" content="noindex,nofollow" data-sb-page-head/>
+
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#050a07;color:#fff;font-family:Arial,sans-serif;overflow:hidden}.bar{height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#07110c;border-bottom:1px solid rgba(0,200,83,.18);position:relative;z-index:2}.back{border:0;background:none;color:#00c853;font-size:25px;line-height:1;padding:4px 8px;cursor:pointer}.title{font-weight:800;font-size:15px;flex:1}.status{font-size:11px;color:#789078}.frame{width:100%;height:calc(100% - 48px);border:0;display:block;background:#0b0a14}.loading{position:absolute;inset:48px 0 0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;background:transparent;pointer-events:none;z-index:1}.loading.hasErr{background:#050a07;pointer-events:auto}.spin{width:34px;height:34px;border:3px solid rgba(0,200,83,.2);border-top-color:#00c853;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.err{display:none;text-align:center;padding:24px;color:#9aae9d}.retry{margin-top:12px;padding:11px 18px;border:0;border-radius:10px;background:#00c853;color:#001;font-weight:800}
+</style>
+</head>
+<body>
+<div class="bar"><button class="back" id="back" aria-label="Back">←</button><div class="title" id="title">SafariBet Casino</div><div class="status">SafariBet</div></div>
+<div class="loading" id="loading"><div class="spin"></div><div class="err" id="err"><div id="errText"></div><button class="retry" id="retry">Try again</button></div></div>
+<iframe id="game" class="frame" title="Casino game" allow="fullscreen; autoplay" allowfullscreen></iframe>
+<script>
+(function(){
+  const id=location.pathname.split('/').filter(Boolean).pop().toLowerCase();
+  const names={aviator:'Aviator',jetx:'JetX'};
+  if(!names[id]){location.replace('/casino');return;}
+  document.getElementById('title').textContent=names[id];
+  const loading=document.getElementById('loading'), frame=document.getElementById('game'), err=document.getElementById('err'), errText=document.getElementById('errText');
+  const token=localStorage.getItem('token');
+  function back(){location.href='/casino';}
+  document.getElementById('back').addEventListener('click',back);
+  const authH={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  // The game is only put on screen once the game server answers. A frame that cannot load is reported by the phone app
+  // as "No internet connection", so we check first and show our own message while the game server wakes up.
+  async function gameServerReady(){
+    for(let i=0;i<14;i++){                                   // up to ~70 s (a sleeping server needs 30-50 s)
+      try{
+        const r=await fetch('/api/casino/juanai/ready',{cache:'no-store',headers:authH});
+        const d=await r.json();
+        if(d&&d.ready) return true;
+        if(d&&d.reason==='insecure') throw new Error(d.message||'Casino server address is not secure.');
+        if(d&&d.reason==='not_configured') throw new Error('Casino is not available right now.');
+      }catch(e){ if(e&&e.message&&!/fetch|network|load failed/i.test(e.message)) throw e; }
+      errText.textContent='';
+      document.getElementById('errText').parentNode.style.display='none';
+      await wait(5000);
+    }
+    return false;
+  }
+  async function start(){
+    if(!token){location.href='/login';return;}
+    loading.style.display='flex';loading.classList.remove('hasErr');err.style.display='none';
+    try{
+      if(!(await gameServerReady())) throw new Error('The game server is not answering yet. Please try again in a moment.');
+      // Open instantly from the link the casino lobby already prepared on this phone.
+      try{
+        const c=JSON.parse(localStorage.getItem('sb_launch_'+id)||'null');
+        if(c&&c.url&&Date.now()-c.at<20*60*1000&&!frame.src.startsWith('http')){
+          frame.src=c.url; frame.onload=()=>{loading.style.display='none';};
+          setTimeout(()=>{loading.style.display='none';},1500);
+          return;
+        }
+      }catch(_){}
+      const r=await fetch('/api/casino/juanai/launch',{method:'POST',cache:'no-store',headers:authH,body:JSON.stringify({gameId:id})});
+      let d={};try{d=await r.json()}catch(_){ }
+      if(!r.ok||!d.success||!d.launchUrl) throw new Error(d.message||'Could not start the game.');
+      frame.src=d.launchUrl;
+      frame.onload=()=>{loading.style.display='none';};
+      try{localStorage.setItem('sb_launch_'+id,JSON.stringify({at:Date.now(),url:d.launchUrl}));}catch(_){}
+      setTimeout(()=>{if(frame.src&&loading.style.display!=='none')loading.style.display='none';},1500);
+    }catch(e){
+      errText.textContent=e.message||'Could not start the game. Please try again.';
+      loading.classList.add('hasErr');err.style.display='block';
+    }
+  }
+  document.getElementById('retry').addEventListener('click',start);
+  start();
+})();
+</script>
+</body>
+</html>

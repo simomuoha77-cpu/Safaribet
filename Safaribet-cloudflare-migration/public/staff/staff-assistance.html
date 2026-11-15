@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>SafariBet Staff Assistance</title>
+<style>
+:root{--bg:#0b1210;--card:#121c18;--card2:#17241f;--line:#223229;--tx:#e6f2ea;--mut:#8aa396;--g:#1fd36b;--g2:#0fa650;--y:#f5c542;--r:#ff5d5d;--b:#4aa8ff}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:var(--g);text-decoration:none}button,input,select,textarea{font:inherit;color:var(--tx)}
+.top{position:sticky;top:0;z-index:5;background:#0e1814;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:10px 14px}
+.brand{font-weight:800;font-size:18px;letter-spacing:.5px}.brand b{color:var(--y)}.brand small{display:block;font-size:10px;color:var(--mut);font-weight:600;letter-spacing:1px;text-transform:uppercase}
+.sp{flex:1}.who{font-size:12px;color:var(--mut);text-align:right}
+nav{display:flex;gap:6px;overflow-x:auto;padding:8px 12px;background:#0e1814;border-bottom:1px solid var(--line);position:sticky;top:53px;z-index:4}
+nav a{white-space:nowrap;padding:7px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--mut);font-size:13px;font-weight:600}
+nav a.on{background:var(--g2);color:#fff;border-color:var(--g2)}
+nav .badge{background:var(--r);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:4px}
+main{max-width:1100px;margin:0 auto;padding:14px 14px 70px}
+h1{font-size:20px;margin:6px 0 12px}h2{font-size:16px;margin:18px 0 8px;color:var(--g)}h3{font-size:14px;margin:12px 0 6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stat{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:12px}.stat b{display:block;font-size:24px}.stat span{font-size:12px;color:var(--mut)}
+.stat.warn b{color:var(--y)}.stat.bad b{color:var(--r)}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;background:#0c1511;border:1px solid var(--line);border-radius:9px;padding:10px 11px}
+textarea{min-height:80px;resize:vertical}input:focus,select:focus,textarea:focus{outline:2px solid var(--g2);border-color:transparent}
+.btn{background:var(--g2);color:#fff;border:0;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer}.btn:disabled{opacity:.5;cursor:default}
+.btn.sec{background:var(--card2);border:1px solid var(--line);color:var(--tx)}.btn.red{background:#b83a3a}.btn.sm{padding:6px 10px;font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:130px}.row>.btn{flex:0 0 auto}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--line);color:var(--mut)}
+.pill.open{color:var(--b)}.pill.pending{color:var(--y)}.pill.escalated,.pill.urgent,.pill.failed,.pill.lost,.pill.denied,.pill.failure,.pill.rejected{color:var(--r)}.pill.resolved,.pill.won,.pill.completed,.pill.success,.pill.approved,.pill.active{color:var(--g)}
+.pill.high{color:var(--y)}.pill.void,.pill.cancelled,.pill.closed,.pill.low{color:var(--mut)}
+.item{display:block;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;color:var(--tx)}.item:hover{border-color:var(--g2)}
+.item .t{font-weight:700}.item .m{font-size:12px;color:var(--mut);margin-top:3px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mut);font-weight:600;font-size:12px}
+.scroll{overflow-x:auto}.mut{color:var(--mut)}.small{font-size:12px}.err{background:#3a1a1a;border:1px solid #6b2a2a;color:#ffb4b4;padding:10px;border-radius:9px;margin:8px 0}
+.ok{background:#12301f;border:1px solid #1f5a37;color:#9be8bb;padding:10px;border-radius:9px;margin:8px 0}.warnbox{background:#33290f;border:1px solid #6b5a1f;color:#f5d98a;padding:10px;border-radius:9px;margin:8px 0}
+.msg{border-radius:10px;padding:9px 11px;margin:7px 0;border:1px solid var(--line)}.msg.customer{background:#10261b;border-color:#1f5a37}.msg.internal{background:#2a2410;border-color:#5a4a1a}
+.msg .h{font-size:11px;color:var(--mut);margin-bottom:3px}.pre{white-space:pre-wrap;word-break:break-word}
+.center{max-width:420px;margin:8vh auto 0;padding:0 14px}.bar{height:8px;background:var(--g2);border-radius:4px;min-width:2px}
+.pager{display:flex;gap:8px;align-items:center;justify-content:center;margin:10px 0}.hide{display:none}
+code{background:#0c1511;padding:2px 6px;border-radius:6px;word-break:break-all}
+@media(min-width:760px){main{padding-top:20px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+/* ── tiny safe DOM helpers: every dynamic value goes in through textContent, never innerHTML ── */
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  if (attrs) for (const k of Object.keys(attrs)) {
+    const v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (k === 'value') e.value = v; else e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat(Infinity)) { if (c == null || c === false) continue; e.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c))); }
+  return e;
+}
+const $ = (s, r) => (r || document).querySelector(s);
+const fmt = d => d ? new Date(d).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const kes = n => 'KES ' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const pill = (t, cls) => el('span', { class: 'pill ' + (cls || t) }, String(t).replace(/_/g, ' '));
+const S = { csrf: null, staff: null, perms: [], stage: null, setup: {}, unread: 0 };
+const can = p => S.perms.includes(p);
+
+/* ── API ── */
+async function api(method, path, body, extraHeaders) {
+  const opts = { method, credentials: 'same-origin', headers: { 'Accept': 'application/json' } };
+  if (S.csrf && method !== 'GET') opts.headers['X-CSRF-Token'] = S.csrf;
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  Object.assign(opts.headers, extraHeaders || {});
+  let r, d;
+  try { r = await fetch('/api/assistance' + path, opts); d = await r.json().catch(() => ({})); }
+  catch (e) { return { success: false, message: 'Network problem. Check your connection.' }; }
+  if (r.status === 401 && S.staff) { S.staff = null; S.csrf = null; renderLogin(d.message || 'Session ended — please sign in again.'); return { success: false, message: d.message, handled: true }; }
+  if (r.status === 403 && d.code === 'CSRF') { await loadSession(); }
+  d.httpStatus = r.status; return d;
+}
+const GET = (p, q) => api('GET', p + (q ? '?' + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== '' && v != null)).toString() : ''));
+const POST = (p, b, h) => api('POST', p, b || {}, h);
+
+function msgBox(host, text, kind) { const old = $('.flash', host); if (old) old.remove(); host.prepend(el('div', { class: (kind === 'ok' ? 'ok' : kind === 'warn' ? 'warnbox' : 'err') + ' flash' }, text)); }
+
+/* ── session / shell ── */
+async function loadSession() {
+  const d = await GET('/auth/session');
+  if (d && d.authenticated) { S.csrf = d.csrf; S.staff = d.staff; S.perms = d.permissions; S.stage = d.stage; S.setup = d.setup || {}; S.roleLabel = d.roleLabel; return true; }
+  S.staff = null; S.csrf = null; S.perms = []; return false;
+}
+function app() { return $('#app'); }
+function clearApp() { app().replaceChildren(); }
+
+function renderLogin(notice) {
+  clearApp();
+  const form = el('form', { class: 'card', autocomplete: 'off' },
+    el('h1', null, 'Staff sign in'),
+    notice ? el('div', { class: 'err' }, notice) : null,
+    el('label', null, 'Username'), el('input', { name: 'username', autocomplete: 'username', autocapitalize: 'none', required: true }),
+    el('label', null, 'Password'), el('input', { name: 'password', type: 'password', autocomplete: 'current-password', required: true }),
+    el('label', null, 'Authenticator code (leave empty on your very first sign-in)'), el('input', { name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', placeholder: '6-digit code or recovery code' }),
+    el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn', type: 'submit', style: 'width:100%' }, 'Sign in')),
+    el('p', { class: 'small mut', style: 'margin-top:12px' }, 'Forgot your password? ', el('a', { href: '#', onclick: e => { e.preventDefault(); renderReset(); } }, 'Ask the administrator to reset it')));
+  form.addEventListener('submit', async e => {
+    e.preventDefault(); const f = new FormData(form), btn = $('button', form); btn.disabled = true;
+    const d = await api('POST', '/auth/login', { username: f.get('username'), password: f.get('password'), code: f.get('code') });
+    btn.disabled = false;
+    if (!d.success) { msgBox(form, d.message || 'Sign-in failed.'); return; }
+    S.csrf = d.csrf; S.staff = d.staff; S.perms = d.permissions; S.stage = d.stage; S.setup = d.setup || {}; S.roleLabel = d.roleLabel;
+    boot();
+  });
+  app().append(el('div', { class: 'center' }, el('div', { class: 'brand', style: 'text-align:center;margin-bottom:14px;font-size:24px' }, 'Safari', el('b', null, 'Bet'), el('small', null, 'Staff Assistance')), form));
+}
+function renderReset() {
+  clearApp();
+  const form = el('form', { class: 'card' }, el('h1', null, 'Password help'),
+    el('p', { class: 'mut small' }, 'No email is sent. This leaves a request for the administrator, who will reset your password and contact you.'),
+    el('label', null, 'Your username'), el('input', { name: 'username', required: true, autocapitalize: 'none' }),
+    el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn', type: 'submit' }, 'Send request'), ' ', el('button', { class: 'btn sec', type: 'button', onclick: () => renderLogin() }, 'Back')));
+  form.addEventListener('submit', async e => { e.preventDefault(); const d = await POST('/auth/request-reset', { username: new FormData(form).get('username') }); msgBox(form, d.message || d.msg || 'Done.', d.success ? 'ok' : 'err'); });
+  app().append(el('div', { class: 'center' }, form));
+}
+
+/* first sign-in: choose a password, then enrol an authenticator app */
+function renderSetup() {
+  clearApp();
+  const box = el('div', { class: 'center' });
+  app().append(box);
+  box.append(el('div', { class: 'brand', style: 'text-align:center;margin-bottom:12px' }, 'Safari', el('b', null, 'Bet'), el('small', null, 'Account setup')));
+  if (S.setup.mustChangePassword) {
+    const f = el('form', { class: 'card' }, el('h1', null, 'Choose a new password'),
+      el('p', { class: 'mut small' }, 'At least 12 characters with upper and lower case letters, a number and a symbol.'),
+      el('label', null, 'Temporary password'), el('input', { name: 'cur', type: 'password', autocomplete: 'current-password', required: true }),
+      el('label', null, 'New password'), el('input', { name: 'nw', type: 'password', autocomplete: 'new-password', required: true }),
+      el('label', null, 'Repeat new password'), el('input', { name: 'nw2', type: 'password', autocomplete: 'new-password', required: true }),
+      el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn', type: 'submit' }, 'Save password')));
+    f.addEventListener('submit', async e => {
+      e.preventDefault(); const v = new FormData(f);
+      if (v.get('nw') !== v.get('nw2')) return msgBox(f, 'The two new passwords are different.');
+      const d = await POST('/auth/change-password', { currentPassword: v.get('cur'), newPassword: v.get('nw') });
+      if (!d.success) return msgBox(f, d.message || 'Could not change password.');
+      S.csrf = d.csrf; S.staff = d.staff; S.perms = d.permissions; S.stage = d.stage; S.setup = d.setup || {}; boot();
+    });
+    box.append(f); return;
+  }
+  if (S.setup.needs2fa) {
+    const card = el('div', { class: 'card' }, el('h1', null, 'Set up two-factor sign-in'), el('p', { class: 'mut small' }, 'Install an authenticator app (Google Authenticator, Authy, Microsoft Authenticator), then scan the code below.'));
+    const holder = el('div'); card.append(holder); box.append(card);
+    holder.append(el('button', { class: 'btn', onclick: async ev => {
+      ev.target.disabled = true; const d = await POST('/auth/2fa/setup');
+      if (!d.success) { ev.target.disabled = false; return msgBox(card, d.message || 'Could not start setup.'); }
+      holder.replaceChildren();
+      if (d.qrDataUrl) holder.append(el('div', { style: 'text-align:center;background:#fff;border-radius:10px;padding:10px;margin:10px 0' }, el('img', { src: d.qrDataUrl, alt: 'QR code', style: 'width:200px;height:200px' })));
+      holder.append(el('p', { class: 'small mut' }, 'Cannot scan? Enter this key by hand:'), el('p', null, el('code', null, d.manualKey)));
+      const f = el('form', null, el('label', null, 'Code from the app'), el('input', { name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', required: true }), el('div', { style: 'margin-top:12px' }, el('button', { class: 'btn', type: 'submit' }, 'Confirm')));
+      f.addEventListener('submit', async e => {
+        e.preventDefault(); const r = await POST('/auth/2fa/confirm', { code: new FormData(f).get('code') });
+        if (!r.success) return msgBox(f, r.message || 'Wrong code.');
+        S.csrf = r.csrf; S.staff = r.staff; S.perms = r.permissions; S.stage = r.stage; S.setup = r.setup || {};
+        box.replaceChildren(el('div', { class: 'card' }, el('h1', null, 'Save your recovery codes'),
+          el('div', { class: 'warnbox' }, 'Each code works once if you lose your phone. They are shown ONLY now. Write them down and keep them private.'),
+          el('div', { class: 'pre' }, r.recoveryCodes.map(c => el('div', null, el('code', null, c)))),
+          el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn', onclick: () => boot() }, 'I have saved them — continue'))));
+      });
+      holder.append(f);
+    } }, 'Show QR code'));
+    return;
+  }
+  box.append(el('div', { class: 'card' }, 'Setup is complete.', el('div', { style: 'margin-top:10px' }, el('button', { class: 'btn', onclick: () => boot() }, 'Continue'))));
+}
+
+const NAV = [
+  ['#/dashboard', 'Dashboard', () => true], ['#/tickets', 'Tickets', () => can('tickets.view')], ['#/players', 'Players', () => can('players.search')],
+  ['#/bets', 'Bets', () => can('bets.view')], ['#/transactions', 'Transactions', () => can('tx.view')], ['#/risk', 'Risk', () => can('risk.view')],
+  ['#/reports', 'Reports', () => can('reports.read')], ['#/audit', 'Audit', () => can('audit.read')], ['#/staff', 'Staff', () => can('staff.view')],
+  ['#/notifications', 'Alerts', () => true]
+];
+function renderShell() {
+  clearApp();
+  const nav = el('nav', { id: 'nav' }, NAV.filter(n => n[2]()).map(n => el('a', { href: n[0], 'data-h': n[0] }, n[1], n[0] === '#/notifications' ? el('span', { class: 'badge hide', id: 'nbadge' }) : null)));
+  app().append(
+    el('div', { class: 'top' }, el('div', { class: 'brand' }, 'Safari', el('b', null, 'Bet'), el('small', null, 'Staff Assistance')), el('div', { class: 'sp' }),
+      el('div', { class: 'who' }, S.staff.displayName, el('br'), S.roleLabel || ''),
+      el('button', { class: 'btn sec sm', onclick: async () => { await POST('/auth/logout'); S.staff = null; S.csrf = null; renderLogin('You have signed out.'); } }, 'Sign out')),
+    nav, el('main', { id: 'main' }));
+  refreshBadge();
+}
+async function refreshBadge() { const d = await GET('/notifications'); if (d.success) { S.unread = d.unread; const b = $('#nbadge'); if (b) { b.textContent = d.unread; b.classList.toggle('hide', !d.unread); } } }
+function setNavOn(hash) { document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', hash.startsWith(a.getAttribute('data-h')))); }
+
+/* ── router ── */
+const routes = [];
+function route(re, fn) { routes.push([re, fn]); }
+async function router() {
+  if (!S.staff || S.stage !== 'full') return;
+  const hash = location.hash || '#/dashboard', q = {};
+  const [pathPart, qs] = hash.split('?'); if (qs) new URLSearchParams(qs).forEach((v, k) => q[k] = v);
+  setNavOn(pathPart);
+  const main = $('#main'); main.replaceChildren(el('p', { class: 'mut' }, 'Loading…'));
+  for (const [re, fn] of routes) { const m = re.exec(pathPart); if (m) { try { main.replaceChildren(); await fn(main, m.slice(1).map(decodeURIComponent), q); } catch (e) { console.error(e); main.replaceChildren(el('div', { class: 'err' }, 'This page failed to load.')); } return; } }
+  main.replaceChildren(el('div', { class: 'card' }, 'Page not found.'));
+}
+window.addEventListener('hashchange', router);
+const need = (main, p) => { if (can(p)) return true; main.append(el('div', { class: 'err' }, 'You do not have access to this page.')); return false; };
+function pager(host, d, go) {
+  if (!d || d.pages <= 1) return;
+  host.append(el('div', { class: 'pager' }, el('button', { class: 'btn sec sm', disabled: d.page <= 1, onclick: () => go(d.page - 1) }, '← Prev'), el('span', { class: 'mut small' }, `Page ${d.page} of ${d.pages} · ${d.total} total`), el('button', { class: 'btn sec sm', disabled: d.page >= d.pages, onclick: () => go(d.page + 1) }, 'Next →')));
+}
+const sel = (name, opts, cur) => el('select', { name }, opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return el('option', { value: v, selected: v === cur }, l); }));
+const CATS = ['account', 'deposit', 'withdrawal', 'bet_dispute', 'bonus', 'technical', 'responsible_gaming', 'risk', 'other'].map(c => [c, c.replace(/_/g, ' ')]);
+const PRIS = ['low', 'normal', 'high', 'urgent'];
+
+/* ── dashboard ── */
+route(/^#\/dashboard$/, async main => {
+  const d = await GET('/dashboard'); if (!d.success) return main.append(el('div', { class: 'err' }, d.message || 'Could not load.'));
+  main.append(el('h1', null, 'Welcome, ' + S.staff.displayName));
+  const stat = (n, label, cls, href) => el(href ? 'a' : 'div', { class: 'stat ' + (cls || ''), href }, el('b', null, n), el('span', null, label));
+  const g = [];
+  if (d.tickets) g.push(stat(d.tickets.open, 'Open tickets', '', '#/tickets?status=open'), stat(d.tickets.pending, 'Pending', '', '#/tickets?status=pending'), stat(d.tickets.escalated, 'Escalated', d.tickets.escalated ? 'warn' : '', '#/tickets?status=escalated'), stat(d.tickets.assignedToMe, 'Assigned to me', '', '#/tickets?assigned=me&status=active'), stat(d.tickets.overdue, 'Overdue', d.tickets.overdue ? 'bad' : '', '#/tickets?overdue=1'));
+  if (d.finance) g.push(stat(d.finance.pendingTransactions, 'Pending deposits/withdrawals', d.finance.pendingTransactions ? 'warn' : '', '#/transactions?status=pending'), stat(d.finance.reviewsAwaitingApproval, 'Reviews awaiting approval', d.finance.reviewsAwaitingApproval ? 'warn' : '', '#/transactions?queue=pending_approval'));
+  if (d.accountIssues) g.push(stat(d.accountIssues.lockedAccounts, 'Locked accounts', d.accountIssues.lockedAccounts ? 'warn' : ''), stat(d.accountIssues.openAccountTickets, 'Open account issues'));
+  g.push(stat(d.unreadNotifications, 'Unread alerts', d.unreadNotifications ? 'warn' : '', '#/notifications'));
+  main.append(el('div', { class: 'grid' }, g));
+  if (d.stats) main.append(el('div', { class: 'card', style: 'margin-top:12px' }, el('h3', null, 'Activity'), el('div', { class: 'small mut' },
+    d.stats.ticketsCreatedToday != null ? `Tickets: ${d.stats.ticketsCreatedToday} created today · ${d.stats.ticketsResolvedToday} resolved today · ${d.stats.ticketsCreatedWeek} created / ${d.stats.ticketsResolvedWeek} resolved in 7 days. ` : '',
+    d.stats.reviewsToday != null ? `Finance reviews: ${d.stats.reviewsToday} today · ${d.stats.reviewsWeek} in 7 days.` : '')));
+  const list = (title, arr) => { if (!arr || !arr.length) return; main.append(el('h2', null, title), arr.map(ticketItem)); };
+  list('Assigned to me', d.recentAssigned); list('Recent bet investigations', d.recentBetInvestigations);
+  if (d.recentActivity && d.recentActivity.length) main.append(el('h2', null, can('audit.read') ? 'Recent staff activity' : 'My recent activity'), el('div', { class: 'card scroll' }, el('table', null, el('tbody', null, d.recentActivity.map(a => el('tr', null, el('td', { class: 'small mut' }, fmt(a.at)), el('td', null, a.by || ''), el('td', null, a.action), el('td', null, pill(a.outcome))))))));
+});
+const ticketItem = t => el('a', { class: 'item', href: '#/tickets/' + t.ticketNo }, el('div', { class: 't' }, t.ticketNo + ' · ' + t.subject), el('div', { class: 'm' }, pill(t.status), ' ', pill(t.priority), t.overdue ? [' ', pill('overdue', 'failed')] : '', ' · ', t.team, ' · ', t.assignedToName ? 'with ' + t.assignedToName : 'unassigned', t.player ? ' · ' + t.player.username : '', ' · ', fmt(t.updatedAt)));
+
+/* ── tickets ── */
+route(/^#\/tickets$/, async (main, _, q) => {
+  if (!need(main, 'tickets.view')) return;
+  const f = { status: q.status || 'active', assigned: q.assigned || '', q: q.q || '', category: q.category || '', overdue: q.overdue || '', kind: q.kind || '' };
+  main.append(el('div', { class: 'row', style: 'justify-content:space-between;align-items:center' }, el('h1', { style: 'margin:0' }, 'Tickets'), can('tickets.manage') ? el('a', { class: 'btn sm', href: '#/tickets/new' }, '+ New ticket') : null));
+  const bar = el('div', { class: 'card' }, el('div', { class: 'row' },
+    el('div', null, el('label', null, 'Status'), sel('status', [['active', 'Active'], 'open', 'pending', 'escalated', 'resolved', 'closed', ['', 'Any']], f.status)),
+    el('div', null, el('label', null, 'Assigned'), sel('assigned', [['', 'Anyone'], ['me', 'Me'], ['unassigned', 'Unassigned']], f.assigned)),
+    el('div', null, el('label', null, 'Type'), sel('kind', [['', 'All'], ['ticket', 'Tickets'], ['bet_investigation', 'Bet investigations'], ['transaction_issue', 'Transaction issues'], ['risk_case', 'Risk cases']], f.kind)),
+    el('div', null, el('label', null, 'Search (TK-number, bet code or subject)'), el('input', { name: 'q', value: f.q })),
+    el('button', { class: 'btn', onclick: () => { const v = {}; bar.querySelectorAll('select,input').forEach(x => v[x.name] = x.value); location.hash = '#/tickets?' + new URLSearchParams(Object.entries(v).filter(([, x]) => x)).toString(); } }, 'Filter')));
+  const out = el('div'); main.append(bar, out);
+  const load = async pg => {
+    out.replaceChildren(el('p', { class: 'mut' }, 'Loading…'));
+    const d = await GET('/tickets', { ...f, page: pg });
+    out.replaceChildren(); if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    if (!d.tickets.length) out.append(el('div', { class: 'card mut' }, 'No tickets match.'));
+    d.tickets.forEach(t => out.append(ticketItem(t))); pager(out, d, load);
+  };
+  load(1);
+});
+
+route(/^#\/tickets\/new$/, async (main, _, q) => {
+  if (!need(main, 'tickets.manage')) return;
+  const f = el('form', { class: 'card' }, el('h1', null, 'New ticket'),
+    el('label', null, 'Player (username, phone or player ID — optional)'), el('input', { name: 'player', value: q.player || '' }),
+    el('label', null, 'Subject'), el('input', { name: 'subject', maxlength: 160, required: true }),
+    el('label', null, 'What happened?'), el('textarea', { name: 'description', required: true }),
+    el('div', { class: 'row' }, el('div', null, el('label', null, 'Category'), sel('category', CATS, 'other')), el('div', null, el('label', null, 'Priority'), sel('priority', PRIS, 'normal'))),
+    el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn', type: 'submit' }, 'Create ticket')));
+  f.addEventListener('submit', async e => { e.preventDefault(); const v = Object.fromEntries(new FormData(f)); const d = await POST('/tickets', v); if (!d.success) return msgBox(f, d.message || 'Could not create.'); location.hash = '#/tickets/' + d.ticket.ticketNo; });
+  main.append(f);
+});
+
+route(/^#\/tickets\/(TK-\d+)$/i, async (main, [no]) => {
+  if (!need(main, 'tickets.view')) return;
+  const d = await GET('/tickets/' + no); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  const t = d.ticket, reload = () => router();
+  main.append(el('a', { href: '#/tickets', class: 'small' }, '← All tickets'),
+    el('div', { class: 'card' }, el('h1', { style: 'margin-top:0' }, t.ticketNo + ' · ' + t.subject),
+      el('div', null, pill(t.status), ' ', pill(t.priority), t.overdue ? [' ', pill('overdue', 'failed')] : '', ' ', pill(t.kind.replace('_', ' '), 'low')),
+      el('p', { class: 'small mut' }, 'Team: ', t.team, ' · Assigned: ', t.assignedToName || 'nobody', ' · Category: ', t.category.replace(/_/g, ' '), ' · Opened ', fmt(t.createdAt), ' by ', t.createdByName || '—', ' · Due ', fmt(t.dueAt)),
+      t.player ? el('p', null, 'Player: ', el('a', { href: '#/players/' + t.player.id }, t.player.username), ' ', el('span', { class: 'mut small' }, t.player.phone)) : null,
+      t.betCode ? el('p', null, 'Bet: ', el('a', { href: '#/bets/' + t.betCode }, t.betCode)) : null,
+      t.txId ? el('p', null, 'Transaction: ', el('a', { href: '#/transactions/' + t.txId }, t.txId)) : null,
+      t.description ? el('div', { class: 'pre' }, t.description) : null,
+      t.resolutionNote ? el('div', { class: 'ok' }, 'Resolution: ' + t.resolutionNote) : null, t.closeReason ? el('div', { class: 'warnbox' }, 'Closed: ' + t.closeReason) : null));
+  main.append(el('h2', null, 'Conversation'));
+  if (!d.ticket.messages.length) main.append(el('p', { class: 'mut small' }, 'No messages yet.'));
+  d.ticket.messages.forEach(m => main.append(el('div', { class: 'msg ' + m.kind }, el('div', { class: 'h' }, (m.kind === 'customer' ? 'Reply sent to player' : 'Internal note — never shown to the player'), ' · ', m.by || '', ' · ', fmt(m.at)), el('div', { class: 'pre' }, m.body))));
+  const closed = t.status === 'closed';
+  const box = (title, ph, perm, path, label, internal) => {
+    if (!can(perm) || closed || (!internal && !t.player)) return;
+    const f = el('form', { class: 'card' }, el('h3', null, title), el('textarea', { name: 'body', placeholder: ph, required: true }), el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn' + (internal ? ' sec' : ''), type: 'submit' }, label)));
+    f.addEventListener('submit', async e => { e.preventDefault(); const r = await POST('/tickets/' + t.ticketNo + path, { body: new FormData(f).get('body') }); if (!r.success) return msgBox(f, r.message || 'Failed.'); reload(); });
+    main.append(f);
+  };
+  box('Reply to player', 'This appears in the player\'s notifications.', 'tickets.reply', '/reply', 'Send reply to player', false);
+  box('Internal note', 'Only staff can see this.', 'tickets.manage', '/note', 'Add internal note', true);
+
+  const act = el('div', { class: 'card' }, el('h3', null, 'Actions'));
+  if (can('tickets.manage') && !closed) {
+    act.append(el('div', { class: 'row' }, el('button', { class: 'btn sec', onclick: async () => { const r = await POST('/tickets/' + t.ticketNo + '/assign', { staffId: 'me' }); if (!r.success) return msgBox(act, r.message); reload(); } }, 'Assign to me')));
+    if (can('tickets.assign')) {
+      const sw = el('select', { name: 'staffId' }, el('option', { value: '' }, 'Assign to…')); act.append(el('div', { class: 'row', style: 'margin-top:8px' }, sw, el('button', { class: 'btn sec', onclick: async () => { if (!sw.value) return; const r = await POST('/tickets/' + t.ticketNo + '/assign', { staffId: sw.value }); if (!r.success) return msgBox(act, r.message); reload(); } }, 'Assign')));
+      GET('/staff/assignable').then(s => s.success && s.staff.forEach(x => sw.append(el('option', { value: x.id }, x.name + ' (' + x.role + ')'))));
+    }
+  }
+  if (can('tickets.escalate') && !closed && t.status !== 'resolved') {
+    const team = sel('team', [['support', 'Support'], ['finance', 'Finance'], ['risk', 'Risk & Compliance'], ['manager', 'Manager']], 'manager'), note = el('input', { placeholder: 'Why are you escalating?' });
+    act.append(el('h3', null, 'Escalate'), el('div', { class: 'row' }, team, note, el('button', { class: 'btn red', onclick: async () => { const r = await POST('/tickets/' + t.ticketNo + '/escalate', { team: team.value, note: note.value }); if (!r.success) return msgBox(act, r.message); reload(); } }, 'Escalate')));
+  }
+  if (can('tickets.manage')) {
+    const st = sel('status', [['open', 'Open'], ['pending', 'Pending'], ['resolved', 'Resolved'], ['closed', 'Closed']], ''), note = el('input', { placeholder: 'Resolution note / closure reason' });
+    act.append(el('h3', null, 'Change status'), el('div', { class: 'row' }, st, note, el('button', { class: 'btn', onclick: async () => { const r = await POST('/tickets/' + t.ticketNo + '/status', { status: st.value, note: note.value }); if (!r.success) return msgBox(act, r.message); reload(); } }, 'Update')));
+    if (!closed) { const pr = sel('priority', PRIS, t.priority); act.append(el('h3', null, 'Priority'), el('div', { class: 'row' }, pr, el('button', { class: 'btn sec', onclick: async () => { const r = await POST('/tickets/' + t.ticketNo + '/priority', { priority: pr.value }); if (!r.success) return msgBox(act, r.message); reload(); } }, 'Set priority'))); }
+  }
+  main.append(act);
+  main.append(el('h2', null, 'History'), el('div', { class: 'card scroll' }, el('table', null, el('tbody', null, d.ticket.history.slice().reverse().map(h => el('tr', null, el('td', { class: 'small mut' }, fmt(h.at)), el('td', null, h.by || ''), el('td', null, h.action + (h.from || h.to ? ': ' + (h.from || '') + ' → ' + (h.to || '') : '')), el('td', { class: 'small mut' }, h.note || '')))))));
+});
+
+/* ── players ── */
+route(/^#\/players$/, async (main, _, q) => {
+  if (!need(main, 'players.search')) return;
+  const inp = el('input', { name: 'q', value: q.q || '', placeholder: 'Username, phone (07…) or player ID', autocapitalize: 'none' });
+  const out = el('div');
+  const go = () => { location.hash = '#/players?q=' + encodeURIComponent(inp.value.trim()); };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  main.append(el('h1', null, 'Players'), el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', null, inp), el('button', { class: 'btn', onclick: go }, 'Search'))), out);
+  if (!q.q) return out.append(el('p', { class: 'mut' }, 'Search by username, phone number or player ID (at least 3 characters).'));
+  const load = async pg => {
+    const d = await GET('/players/search', { q: q.q, page: pg }); out.replaceChildren();
+    if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    if (!d.players.length) out.append(el('div', { class: 'card mut' }, 'No players found.'));
+    d.players.forEach(p => out.append(el('a', { class: 'item', href: '#/players/' + p.id }, el('div', { class: 't' }, p.username, ' ', pill(p.isActive ? 'active' : 'suspended', p.isActive ? 'active' : 'failed')), el('div', { class: 'm' }, p.phone, ' · KYC ', p.kycStatus, ' · joined ', fmt(p.createdAt)))));
+    pager(out, d, load);
+  };
+  load(1);
+});
+route(/^#\/players\/([a-f0-9]{24})$/i, async (main, [id]) => {
+  if (!need(main, 'players.view')) return;
+  const d = await GET('/players/' + id); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  const p = d.player, r = p.restrictions;
+  main.append(el('a', { href: '#/players', class: 'small' }, '← Search'),
+    el('div', { class: 'card' }, el('h1', { style: 'margin-top:0' }, p.username, ' ', pill(p.status, p.status === 'active' ? 'active' : 'failed')),
+      el('div', { class: 'grid' }, ...[['Main balance', kes(p.wallet.main)], ['Bonus', kes(p.wallet.bonus)], ['Locked', kes(p.wallet.locked)], ['Pending', kes(p.wallet.pending)]].map(([l, v]) => el('div', { class: 'stat' }, el('b', { style: 'font-size:17px' }, v), el('span', null, l)))),
+      el('p', { class: 'small mut' }, 'Phone: ', p.phone, p.phoneVerified ? ' (verified)' : '', ' · Registered ', fmt(p.registeredAt), ' · Last login ', fmt(p.lastLogin), ' · KYC ', p.kyc.status),
+      el('p', { class: 'small' }, 'Restrictions: ', [r.suspended && 'account suspended', r.loginLockedUntil && 'login locked until ' + fmt(r.loginLockedUntil), r.selfExcludedUntil && 'self-excluded until ' + fmt(r.selfExcludedUntil), r.dailyDepositLimit != null && 'daily deposit limit ' + kes(r.dailyDepositLimit), r.dailyStakeLimit != null && 'daily stake limit ' + kes(r.dailyStakeLimit)].filter(Boolean).join(' · ') || 'none'),
+      p.riskFlags ? (p.riskFlags.length ? el('div', { class: 'warnbox' }, 'Risk flags: ' + p.riskFlags.join(' · ')) : el('p', { class: 'small mut' }, 'No risk flags.')) : null,
+      el('div', { class: 'row', style: 'margin-top:8px' }, can('tickets.manage') ? el('a', { class: 'btn sm', href: '#/tickets/new?player=' + encodeURIComponent(p.username) }, 'Create ticket') : null, can('bets.view') ? el('a', { class: 'btn sec sm', href: '#/bets?userId=' + p.id }, 'All bets') : null, can('tx.view') ? el('a', { class: 'btn sec sm', href: '#/transactions?player=' + p.id }, 'All transactions') : null)));
+  if (can('tx.view')) main.append(el('h2', null, 'Recent transactions'), el('div', { class: 'card scroll' }, p.recentTransactions.length ? el('table', null, el('thead', null, el('tr', null, ['When', 'Type', 'Amount', 'Status', 'Reference'].map(h => el('th', null, h)))), el('tbody', null, p.recentTransactions.map(t => el('tr', null, el('td', { class: 'small' }, fmt(t.createdAt)), el('td', null, el('a', { href: '#/transactions/' + t.id }, t.type)), el('td', null, kes(t.amount)), el('td', null, pill(t.status)), el('td', { class: 'small mut' }, t.mpesaRef || t.reference || ''))))) : el('span', { class: 'mut' }, 'None.')));
+  if (can('bets.view')) main.append(el('h2', null, 'Recent bets'), el('div', { class: 'card scroll' }, p.recentBets.length ? el('table', null, el('thead', null, el('tr', null, ['Placed', 'Code', 'Stake', 'Odds', 'Status', 'Payout'].map(h => el('th', null, h)))), el('tbody', null, p.recentBets.map(b => el('tr', null, el('td', { class: 'small' }, fmt(b.createdAt)), el('td', null, el('a', { href: '#/bets/' + b.betCode }, b.betCode)), el('td', null, kes(b.stake)), el('td', null, b.odds), el('td', null, pill(b.status)), el('td', null, b.payout ? kes(b.payout) : '—'))))) : el('span', { class: 'mut' }, 'None.')));
+  if (p.tickets.length) main.append(el('h2', null, 'Support history'), p.tickets.map(ticketItem));
+});
+
+/* ── bets ── */
+route(/^#\/bets$/, async (main, _, q) => {
+  if (!need(main, 'bets.view')) return;
+  const inp = el('input', { name: 'q', value: q.q || '', placeholder: 'Bet code, e.g. SB1A2B3C4', autocapitalize: 'characters' }), st = sel('status', [['', 'Any status'], 'pending', 'won', 'lost', 'void', 'cancelled', 'cashed_out'], q.status || '');
+  const go = () => { const p = new URLSearchParams(); if (inp.value.trim()) p.set('q', inp.value.trim()); if (st.value) p.set('status', st.value); if (q.userId) p.set('userId', q.userId); location.hash = '#/bets?' + p.toString(); };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  const out = el('div'); main.append(el('h1', null, 'Bet investigation'), el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', null, el('label', null, 'Bet code'), inp), el('div', null, el('label', null, 'Status'), st), el('button', { class: 'btn', onclick: go }, 'Search')), q.userId ? el('p', { class: 'small mut' }, 'Showing bets of one player. ', el('a', { href: '#/bets' }, 'Clear')) : null), out);
+  if (!q.q && !q.userId && !q.status) return out.append(el('p', { class: 'mut' }, 'Search by bet code, or open a player to see their bets.'));
+  const load = async pg => {
+    const d = await GET('/bets/search', { q: q.q, userId: q.userId, status: q.status, page: pg }); out.replaceChildren();
+    if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    if (!d.bets.length) out.append(el('div', { class: 'card mut' }, 'No bets found.'));
+    d.bets.forEach(b => out.append(el('a', { class: 'item', href: '#/bets/' + b.betCode }, el('div', { class: 't' }, b.betCode, ' ', pill(b.status)), el('div', { class: 'm' }, b.player ? b.player.username + ' · ' : '', kes(b.stake), ' @ ', b.odds, ' · ', b.selections, ' selection(s) · ', fmt(b.createdAt)))));
+    pager(out, d, load);
+  };
+  load(1);
+});
+route(/^#\/bets\/([A-Za-z0-9]{4,16})$/, async (main, [code]) => {
+  if (!need(main, 'bets.view')) return;
+  const d = await GET('/bets/' + code.toUpperCase()); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  const b = d.bet;
+  main.append(el('a', { href: '#/bets', class: 'small' }, '← Bets'),
+    el('div', { class: 'card' }, el('h1', { style: 'margin-top:0' }, b.betCode, ' ', pill(b.status)),
+      el('p', null, 'Player: ', b.player ? el('a', { href: '#/players/' + b.player.id }, b.player.username) : '—', ' · ', b.betType, b.systemConfig ? ` (${b.systemConfig.pick}/${b.systemConfig.of})` : ''),
+      el('div', { class: 'grid' }, ...[['Stake', kes(b.stake)], ['Total odds', b.totalOdds], ['Potential win', kes(b.potentialWin)], ['Payout', kes(b.payout)]].map(([l, v]) => el('div', { class: 'stat' }, el('b', { style: 'font-size:17px' }, v), el('span', null, l)))),
+      el('p', { class: 'small mut' }, 'Placed ', fmt(b.placedAt), ' · Settled ', fmt(b.settledAt), b.stakeFromBonus ? ` · bonus stake ${kes(b.stakeFromBonus)}` : '', b.payoutState ? ' · payout ' + b.payoutState : '', b.cashedOut ? ' · cashed out ' + kes(b.cashOutAmount) : '')));
+  main.append(el('div', { class: b.discrepancies.length ? 'warnbox' : 'ok' }, b.discrepancies.length ? ['Discrepancies found:', el('ul', null, b.discrepancies.map(x => el('li', null, x)))] : 'No discrepancies found in the stored numbers.'));
+  main.append(el('h2', null, 'Selections'), el('div', { class: 'card scroll' }, el('table', null, el('thead', null, el('tr', null, ['Match', 'Market · pick', 'Odds', 'Result', 'Score', 'Notes'].map(h => el('th', null, h)))),
+    el('tbody', null, b.selections.map(s => el('tr', null, el('td', null, s.match, el('div', { class: 'small mut' }, fmt(s.kickoff))), el('td', null, s.market, el('div', { class: 'small mut' }, s.pick)), el('td', null, s.odds), el('td', null, pill(s.result)), el('td', null, s.score || '—', s.periodLabel ? ' (' + s.periodLabel + ')' : ''),
+      el('td', { class: 'small mut' }, [s.settledSource && 'source: ' + s.settledSource, s.pendingReason && 'pending: ' + s.pendingReason, s.voidReason && 'void: ' + s.voidReason, s.adminCorrected && 'admin corrected', s.excludedFromPayout && 'excluded from payout'].filter(Boolean).join(' · '))))))));
+  if (b.ledger.length || b.transactions.length) main.append(el('h2', null, 'Wallet records for this bet'), el('div', { class: 'card scroll' }, el('table', null, el('tbody', null, b.ledger.map(l => el('tr', null, el('td', { class: 'small' }, fmt(l.at)), el('td', null, l.reason), el('td', null, l.bucket), el('td', null, (l.change > 0 ? '+' : '') + l.change), el('td', { class: 'small mut' }, 'balance ' + l.balanceAfter))), b.transactions.map(t => el('tr', null, el('td', { class: 'small' }, fmt(t.at)), el('td', null, el('a', { href: '#/transactions/' + t.id }, t.type)), el('td', null, kes(t.amount)), el('td', null, pill(t.status)), el('td')))))));
+  if (b.investigations.length) main.append(el('h2', null, 'Investigations'), b.investigations.map(ticketItem));
+  if (can('bets.investigate')) {
+    const f = el('form', { class: 'card' }, el('h3', null, b.investigations.some(i => ['open', 'pending', 'escalated'].includes(i.status)) ? 'Add a finding to the open investigation' : 'Open an investigation'),
+      el('p', { class: 'small mut' }, 'Staff cannot change a settled bet. Record what you found; escalate the case if a correction is needed.'),
+      el('textarea', { name: 'note', required: true, placeholder: 'What did the player report? What did you check?' }), el('div', { class: 'row' }, el('div', null, el('label', null, 'Priority'), sel('priority', PRIS, 'normal')), el('button', { class: 'btn', type: 'submit' }, 'Save')));
+    f.addEventListener('submit', async e => { e.preventDefault(); const r = await POST('/bets/' + b.betCode + '/investigate', Object.fromEntries(new FormData(f))); if (!r.success) return msgBox(f, r.message || 'Failed.'); location.hash = '#/tickets/' + r.ticket.ticketNo; });
+    main.append(f);
+  }
+});
+
+/* ── transactions & review queue ── */
+route(/^#\/transactions$/, async (main, _, q) => {
+  if (!need(main, 'tx.view')) return;
+  if (q.queue) return reviewQueue(main, q.queue);
+  const f = el('div', { class: 'card' }, el('div', { class: 'row' },
+    el('div', null, el('label', null, 'Transaction ID / M-Pesa code / reference'), el('input', { name: 'q', value: q.q || '' })),
+    el('div', null, el('label', null, 'Player (ID, username or phone)'), el('input', { name: 'player', value: q.player || '' })),
+    el('div', null, el('label', null, 'Type'), sel('type', [['', 'Any'], 'deposit', 'withdrawal', 'win', 'stake', 'bonus', 'refund', 'casino_bet', 'casino_win', 'casino_refund', 'referral_bonus'], q.type || '')),
+    el('div', null, el('label', null, 'Status'), sel('status', [['', 'Any'], 'pending', 'processing', 'completed', 'failed'], q.status || '')),
+    el('div', null, el('label', null, 'From'), el('input', { name: 'from', type: 'date', value: q.from || '' })), el('div', null, el('label', null, 'To'), el('input', { name: 'to', type: 'date', value: q.to || '' })),
+    el('button', { class: 'btn', onclick: () => { const v = {}; f.querySelectorAll('select,input').forEach(x => { if (x.value) v[x.name] = x.value; }); location.hash = '#/transactions?' + new URLSearchParams(v).toString(); } }, 'Search')));
+  const out = el('div');
+  main.append(el('div', { class: 'row', style: 'justify-content:space-between;align-items:center' }, el('h1', { style: 'margin:0' }, 'Transactions'), el('div', null, el('a', { class: 'btn sec sm', href: '#/transactions?queue=pending_approval' }, 'Review queue'))), f, out);
+  if (!Object.keys(q).length) return out.append(el('p', { class: 'mut' }, 'Add a filter, for example status “pending” to see payments waiting.'));
+  const load = async pg => {
+    const d = await GET('/transactions/search', { ...q, page: pg }); out.replaceChildren();
+    if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    if (!d.transactions.length) out.append(el('div', { class: 'card mut' }, 'No transactions match.'));
+    d.transactions.forEach(t => out.append(el('a', { class: 'item', href: '#/transactions/' + t.id }, el('div', { class: 't' }, t.type.replace(/_/g, ' '), ' · ', kes(t.amount), ' ', pill(t.status)), el('div', { class: 'm' }, t.player ? t.player.username + ' · ' : '', t.mpesaRef || t.reference || '', ' · ', fmt(t.createdAt)))));
+    pager(out, d, load);
+  };
+  load(1);
+});
+async function reviewQueue(main, status) {
+  main.append(el('div', { class: 'row', style: 'justify-content:space-between;align-items:center' }, el('h1', { style: 'margin:0' }, 'Finance review queue'), el('a', { class: 'btn sec sm', href: '#/transactions' }, '← Transactions')),
+    el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', null, el('label', null, 'Show'), (() => { const s = sel('status', [['pending_approval', 'Waiting for approval'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['recorded', 'Recorded (no approval needed)']], status); s.addEventListener('change', () => { location.hash = '#/transactions?queue=' + s.value; }); return s; })()))));
+  const out = el('div'); main.append(out);
+  const load = async pg => {
+    const d = await GET('/reviews', { status, page: pg }); out.replaceChildren(); if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    if (!d.reviews.length) out.append(el('div', { class: 'card mut' }, 'Nothing here.'));
+    d.reviews.forEach(r => {
+      const card = el('div', { class: 'card' }, el('div', { class: 't' }, r.decision.replace(/_/g, ' '), ' · ', kes(r.amount), ' ', pill(r.status)),
+        el('p', { class: 'small' }, el('a', { href: '#/transactions/' + r.txId }, 'Open transaction'), ' · ', r.player ? r.player.username : '', ' · ', r.txType, ' (', r.txStatusAtReview, ') · by ', r.submittedBy, ' · ', fmt(r.submittedAt)),
+        el('div', { class: 'pre' }, r.reason), r.decidedBy ? el('p', { class: 'small mut' }, 'Decided by ', r.decidedBy, ' ', fmt(r.decidedAt), r.decisionNote ? ' — ' + r.decisionNote : '') : null,
+        r.executionState === 'awaiting_admin_execution' ? el('div', { class: 'warnbox' }, 'Approved — waiting for the main administrator to carry it out. Staff cannot move money.') : null);
+      if (r.status === 'pending_approval' && can('tx.approve')) {
+        if (r.mine) card.append(el('p', { class: 'small mut' }, 'You submitted this, so someone else must approve it.'));
+        else { const note = el('input', { placeholder: 'Note (required when rejecting)' }); card.append(el('div', { class: 'row' }, note, el('button', { class: 'btn', onclick: async () => { const x = await POST('/reviews/' + r.id + '/approve', { note: note.value }); if (!x.success) return msgBox(card, x.message); load(pg); } }, 'Approve'), el('button', { class: 'btn red', onclick: async () => { const x = await POST('/reviews/' + r.id + '/reject', { note: note.value }); if (!x.success) return msgBox(card, x.message); load(pg); } }, 'Reject'))); }
+      }
+      out.append(card);
+    });
+    pager(out, d, load);
+  };
+  load(1);
+}
+route(/^#\/transactions\/([a-f0-9]{24})$/i, async (main, [id]) => {
+  if (!need(main, 'tx.view')) return;
+  const d = await GET('/transactions/' + id); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  const t = d.transaction;
+  main.append(el('a', { href: '#/transactions', class: 'small' }, '← Transactions'),
+    el('div', { class: 'card' }, el('h1', { style: 'margin-top:0' }, t.type.replace(/_/g, ' '), ' · ', kes(t.amount), ' ', pill(t.status)),
+      el('p', null, 'Player: ', t.player ? el('a', { href: '#/players/' + t.player.id }, t.player.username) : '—', ' · ', t.player ? t.player.phone : ''),
+      el('p', { class: 'small mut' }, 'ID ', el('code', null, t.id), el('br'), t.mpesaRef ? ['M-Pesa code: ', el('code', null, t.mpesaRef), el('br')] : null, t.reference ? ['Reference: ', el('code', null, t.reference), el('br')] : null, t.conversationId ? ['Provider conversation: ', el('code', null, t.conversationId), el('br')] : null, 'Created ', fmt(t.createdAt), ' · Updated ', fmt(t.updatedAt), ' · Balance after ', kes(t.balanceAfter)),
+      t.description ? el('p', null, t.description) : null, el('div', { class: 'warnbox' }, t.note)));
+  if (t.ledger.length) main.append(el('h2', null, 'Wallet ledger entries'), el('div', { class: 'card scroll' }, el('table', null, el('tbody', null, t.ledger.map(l => el('tr', null, el('td', { class: 'small' }, fmt(l.at)), el('td', null, l.reason), el('td', null, l.bucket), el('td', null, (l.change > 0 ? '+' : '') + l.change), el('td', { class: 'small mut' }, 'balance ' + l.balanceAfter)))))));
+  main.append(el('h2', null, 'Review history'));
+  if (!t.reviews.length) main.append(el('p', { class: 'mut small' }, 'No reviews yet.'));
+  t.reviews.forEach(r => main.append(el('div', { class: 'card' }, el('div', { class: 't' }, r.decision.replace(/_/g, ' '), ' ', pill(r.status)), el('p', { class: 'small mut' }, 'by ', r.submittedBy, ' ', fmt(r.submittedAt), r.decidedBy ? ' · decided by ' + r.decidedBy + ' ' + fmt(r.decidedAt) : ''), el('div', { class: 'pre' }, r.reason), r.executionState === 'awaiting_admin_execution' ? el('div', { class: 'warnbox' }, 'Waiting for the main administrator to carry it out.') : null)));
+  if (t.tickets.length) main.append(el('h2', null, 'Related cases'), t.tickets.map(ticketItem));
+  if (can('tx.review')) {
+    const key = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g, '');
+    const f = el('form', { class: 'card' }, el('h3', null, 'Record a review decision'),
+      el('p', { class: 'small mut' }, 'This records your decision and who approved it. It never changes a balance or marks a payment successful — that only happens through the payment service and the main administrator.'),
+      el('label', null, 'Decision'), sel('decision', [['no_action', 'No action needed'], ['confirm_with_provider', 'Needs confirmation with payment provider'], ['recommend_reversal', 'Recommend reversal (needs 2nd approval)'], ['recommend_manual_credit', 'Recommend manual credit (needs 2nd approval)'], ['recommend_block', 'Recommend blocking the account (needs 2nd approval)'], ['escalate', 'Escalate to manager']], 'no_action'),
+      el('label', null, 'Reason / evidence (at least 10 characters)'), el('textarea', { name: 'reason', required: true }), el('div', { style: 'margin-top:10px' }, el('button', { class: 'btn', type: 'submit' }, 'Submit decision')));
+    f.addEventListener('submit', async e => { e.preventDefault(); const btn = $('button', f); btn.disabled = true; const r = await POST('/transactions/' + t.id + '/review', Object.fromEntries(new FormData(f)), { 'Idempotency-Key': key }); btn.disabled = false; if (!r.success) return msgBox(f, r.message || 'Failed.'); router(); });
+    main.append(f);
+  }
+});
+
+/* ── risk ── */
+route(/^#\/risk$/, async main => {
+  if (!need(main, 'risk.view')) return;
+  const d = await GET('/risk/flags'); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  main.append(el('h1', null, 'Risk & compliance'), el('p', { class: 'small mut' }, 'Generated ', fmt(d.generatedAt), ' from live data.'));
+  const sec = (title, rows, cols, map) => { main.append(el('h2', null, title)); main.append(el('div', { class: 'card scroll' }, rows.length ? el('table', null, el('thead', null, el('tr', null, cols.map(c => el('th', null, c)))), el('tbody', null, rows.map(r => el('tr', null, map(r))))) : el('span', { class: 'mut' }, 'Nothing flagged.'))); };
+  const pl = p => el('td', null, el('a', { href: '#/players/' + (p.id) }, p.username));
+  sec('Repeated failed transactions (7 days)', d.repeatedFailedTransactions, ['Player', 'Failures', 'Amount'], r => [pl(r.player), el('td', null, r.failures), el('td', null, kes(r.amount))]);
+  sec('High stake velocity (24 hours)', d.highStakeVelocity, ['Player', 'Bets', 'Staked'], r => [pl(r.player), el('td', null, r.bets), el('td', null, kes(r.staked))]);
+  sec('Repeated void/cancelled bets (7 days)', d.repeatedVoidBets, ['Player', 'Count'], r => [pl(r.player), el('td', null, r.count)]);
+  sec('Locked accounts', d.lockedAccounts, ['Player', 'Locked until'], r => [pl(r.player), el('td', null, fmt(r.until))]);
+  sec('Self-excluded players', d.selfExcluded, ['Player', 'Until'], r => [pl(r.player), el('td', null, fmt(r.until))]);
+  main.append(el('h2', null, 'Risk cases'), el('p', null, el('a', { href: '#/tickets?kind=risk_case&status=active' }, 'Open risk cases →')));
+  if (can('risk.manage')) {
+    const f = el('form', { class: 'card' }, el('h3', null, 'Record a finding'), el('label', null, 'Player (username, phone or ID)'), el('input', { name: 'player', required: true }), el('label', null, 'Subject (optional)'), el('input', { name: 'subject', maxlength: 160 }),
+      el('label', null, 'Finding'), el('textarea', { name: 'finding', required: true }), el('div', { class: 'row' }, el('div', null, el('label', null, 'Priority'), sel('priority', PRIS, 'high')), el('button', { class: 'btn', type: 'submit' }, 'Open risk case')));
+    f.addEventListener('submit', async e => { e.preventDefault(); const r = await POST('/risk/cases', Object.fromEntries(new FormData(f))); if (!r.success) return msgBox(f, r.message || 'Failed.'); location.hash = '#/tickets/' + r.ticket.ticketNo; });
+    main.append(f);
+  }
+});
+
+/* ── reports ── */
+route(/^#\/reports$/, async (main, _, q) => {
+  if (!need(main, 'reports.read')) return;
+  const days = q.days || '30', d = await GET('/reports/summary', { days }); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  const ds = sel('days', [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']], days); ds.addEventListener('change', () => { location.hash = '#/reports?days=' + ds.value; });
+  main.append(el('div', { class: 'row', style: 'align-items:center' }, el('h1', { style: 'margin:0' }, 'Reports'), ds));
+  const bars = (title, rows, key) => { const max = Math.max(1, ...rows.map(r => r[key])); main.append(el('h2', null, title), el('div', { class: 'card' }, rows.length ? rows.map(r => el('div', { style: 'display:flex;gap:8px;align-items:center;margin:4px 0' }, el('span', { class: 'small mut', style: 'width:110px;flex:none' }, r.date || r.category || r.status || r.staff || r.action), el('div', { style: 'flex:1' }, el('div', { class: 'bar', style: 'width:' + Math.max(1, Math.round(r[key] / max * 100)) + '%' })), el('b', null, r[key]))) : el('span', { class: 'mut' }, 'No data.'))); };
+  if (d.tickets) {
+    const t = d.tickets;
+    main.append(el('div', { class: 'grid', style: 'margin-top:12px' }, ...[['Open now', t.openNow], ['Overdue now', t.overdueNow], ['Escalated now', t.escalatedNow], ['Avg resolution (h)', t.avgResolutionHours == null ? '—' : t.avgResolutionHours], ['Resolved in period', t.resolvedCount]].map(([l, v]) => el('div', { class: 'stat' }, el('b', null, v), el('span', null, l)))));
+    bars('Tickets created per day', t.createdPerDay, 'count'); bars('Tickets resolved per day', t.resolvedPerDay, 'count'); bars('Tickets by category', t.byCategory, 'count');
+    main.append(el('h2', null, 'Staff workload (open tickets)'), el('div', { class: 'card scroll' }, el('table', null, el('thead', null, el('tr', null, ['Staff', 'Open', 'Overdue'].map(h => el('th', null, h)))), el('tbody', null, d.workload.map(w => el('tr', null, el('td', null, w.staff), el('td', null, w.open), el('td', null, w.overdue)))))));
+    bars('Bet investigations by status', d.betInvestigations, 'count');
+  }
+  if (d.finance) { bars('Finance reviews by status', d.finance.reviewsByStatus, 'count'); main.append(el('div', { class: 'card' }, el('b', null, 'Pending payments: '), d.finance.pendingTransactions.length ? d.finance.pendingTransactions.map(x => `${x.type}: ${x.count} (${kes(x.amount)}) `).join(' · ') : 'none', el('br'), el('b', null, 'Approved decisions waiting for the main administrator: '), d.finance.approvedAwaitingAdminExecution)); }
+  if (d.auditEvents) { main.append(el('h2', null, 'Audit events'), el('div', { class: 'card scroll' }, el('table', null, el('tbody', null, d.auditEvents.map(a => el('tr', null, el('td', null, a.action), el('td', null, pill(a.outcome)), el('td', null, a.count))))))); }
+});
+
+/* ── audit ── */
+route(/^#\/audit$/, async (main, _, q) => {
+  if (!need(main, 'audit.read')) return;
+  const f = el('div', { class: 'card' }, el('div', { class: 'row' }, el('div', null, el('label', null, 'Staff / admin username'), el('input', { name: 'actor', value: q.actor || '' })), el('div', null, el('label', null, 'Action starts with'), el('input', { name: 'action', value: q.action || '', placeholder: 'e.g. ticket. or tx.' })),
+    el('div', null, el('label', null, 'Outcome'), sel('outcome', [['', 'Any'], 'success', 'denied', 'failure'], q.outcome || '')), el('div', null, el('label', null, 'Target ID'), el('input', { name: 'targetId', value: q.targetId || '' })),
+    el('div', null, el('label', null, 'From'), el('input', { name: 'from', type: 'date', value: q.from || '' })), el('div', null, el('label', null, 'To'), el('input', { name: 'to', type: 'date', value: q.to || '' })),
+    el('button', { class: 'btn', onclick: () => { const v = {}; f.querySelectorAll('select,input').forEach(x => { if (x.value) v[x.name] = x.value; }); location.hash = '#/audit?' + new URLSearchParams(v).toString(); } }, 'Filter')));
+  const out = el('div'); main.append(el('h1', null, 'Audit trail'), el('p', { class: 'small mut' }, 'Read-only. Records cannot be edited or deleted.'), f, out);
+  const load = async pg => {
+    const d = await GET('/audit', { ...q, page: pg }); out.replaceChildren(); if (!d.success) return out.append(el('div', { class: 'err' }, d.message));
+    out.append(el('div', { class: 'card scroll' }, el('table', null, el('thead', null, el('tr', null, ['When', 'Who', 'Action', 'Target', 'Outcome', 'Details'].map(h => el('th', null, h)))),
+      el('tbody', null, d.events.map(e => el('tr', null, el('td', { class: 'small' }, fmt(e.at)), el('td', null, e.actor || '—', e.actorType === 'admin' ? el('div', { class: 'small mut' }, 'admin') : null), el('td', null, e.action), el('td', { class: 'small' }, e.targetType ? e.targetType + ':' + (e.targetId || '') : ''), el('td', null, pill(e.outcome)), el('td', { class: 'small mut' }, [e.reason, e.meta ? JSON.stringify(e.meta).slice(0, 160) : ''].filter(Boolean).join(' · ')))))))); pager(out, d, load);
+  };
+  load(1);
+});
+
+/* ── staff directory (read-only; accounts are managed in x9panel) ── */
+route(/^#\/staff$/, async main => {
+  if (!need(main, 'staff.view')) return;
+  const d = await GET('/staff'); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  main.append(el('h1', null, 'Staff'), el('p', { class: 'small mut' }, 'Accounts, roles and permissions are managed by the main administrator in the admin panel.'), el('div', { class: 'card scroll' }, el('table', null, el('thead', null, el('tr', null, ['Name', 'Username', 'Role', 'Status', 'Last sign-in'].map(h => el('th', null, h)))), el('tbody', null, d.staff.map(s => el('tr', null, el('td', null, s.displayName), el('td', null, s.username), el('td', null, s.role), el('td', null, pill(s.status)), el('td', { class: 'small' }, fmt(s.lastLoginAt))))))));
+});
+
+/* ── notifications ── */
+route(/^#\/notifications$/, async main => {
+  const d = await GET('/notifications'); if (!d.success) return main.append(el('div', { class: 'err' }, d.message));
+  main.append(el('div', { class: 'row', style: 'align-items:center' }, el('h1', { style: 'margin:0' }, 'Alerts'), d.unread ? el('button', { class: 'btn sec sm', onclick: async () => { await POST('/notifications/read', { all: true }); router(); refreshBadge(); } }, 'Mark all read') : null));
+  if (!d.notifications.length) main.append(el('div', { class: 'card mut', style: 'margin-top:10px' }, 'No alerts.'));
+  const dest = l => !l ? null : l.startsWith('ticket:') ? '#/tickets/' + l.slice(7) : l.startsWith('review:') ? '#/transactions?queue=pending_approval' : null;
+  d.notifications.forEach(n => { const h = dest(n.link); main.append(el(h ? 'a' : 'div', { class: 'item', href: h, onclick: () => { if (!n.read) { POST('/notifications/read', { ids: [n.id] }).then(refreshBadge); } } }, el('div', { class: 't' }, n.read ? '' : '● ', n.title), el('div', { class: 'm' }, n.body, ' · ', fmt(n.at)))); });
+});
+
+/* ── boot ── */
+async function boot() {
+  const ok = S.staff ? true : await loadSession();
+  if (!ok) return renderLogin();
+  if (S.stage !== 'full') return renderSetup();
+  renderShell();
+  if (!location.hash) location.hash = '#/dashboard'; else router();
+  if (!window.__badgeTimer) window.__badgeTimer = setInterval(() => { if (S.staff && S.stage === 'full' && !document.hidden) refreshBadge(); }, 60000);
+}
+boot();
+</script>
+</body>
+</html>

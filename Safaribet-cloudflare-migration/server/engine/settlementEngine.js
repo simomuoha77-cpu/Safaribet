@@ -1,0 +1,787 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// Settlement Engine — runs every 5 minutes via scheduler
+//
+// Strategy: Juan API has NO /api/results endpoint. Finished games disappear
+// from the feed. We must capture scores while games are live (updateLive in
+// apifootball.js does this), then settle from the DB when the game drops off.
+// ══════════════════════════════════════════════════════════════════════════════
+const Bet         = require('../models/Bet');
+const Match       = require('../models/Match');
+const User        = require('../models/User');
+const Transaction = require('../models/Transaction');
+const WalletHistory = require('../models/WalletHistory');
+const { getFixtures } = require('./apifootball');
+const walletService = require('../services/walletService');
+const finalResults = require('../services/finalResultService');
+const marketRules  = require('../services/marketRules');
+const sofaBetsProvider = require('../providers/sofaBetsProvider');
+
+// ── helpers ──
+// A SofaBets-native (More Markets) selection: graded by market-aware rules.
+const isProviderSel = s => !!s && (s.provider === 'sofabets' || String(s.market || '').startsWith('sb:'));
+
+function clean(s) { return (s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function teamsMatch(a, b) {
+  const ca = clean(a), cb = clean(b);
+  if (!ca || !cb) return false;
+  return ca === cb || ca.includes(cb.slice(0,6)) || cb.includes(ca.slice(0,6));
+}
+
+// Compute 1x2 result from score
+function scoreToResult(h, a) {
+  if (h === null || h === undefined || a === null || a === undefined) return null;
+  h = Number(h); a = Number(a);
+  if (isNaN(h) || isNaN(a)) return null;
+  return h > a ? 'home' : a > h ? 'away' : 'draw';
+}
+
+// Grade a SofaBets-native (provider) selection directly from its own stored
+// market name + pick label + final score — no translation through the
+// legacy pick-code table, which only knows SafariBet's own six markets.
+// Returns 'won' | 'lost' | 'void' | null (null = leave pending; the existing
+// stale-pending safety net in runSettlement below still applies, so an
+// unrecognized market never gets silently mis-graded — it just waits for
+// manual review instead).
+function gradeProviderSelection(s, homeScore, awayScore) {
+  const h = Number(homeScore), a = Number(awayScore);
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+  const total = h + a;
+
+  const homeTeam = clean(s.homeTeam || '');
+  const awayTeam = clean(s.awayTeam || '');
+  // Prefer the market's actual stored name (added going forward — see
+  // Bet.js marketLabel). Older bets placed before that field existed fall
+  // back to the previous heuristic of combining whatever text is available.
+  const marketText = clean(s.marketLabel || s.providerMarketKey || s.market || '');
+  const pickLabelRaw = String(s.pickLabel || s.providerSelectionKey || s.pick || '');
+  const pickText = clean(pickLabelRaw);
+
+  const mentionsHome = pickText && homeTeam && (pickText === homeTeam || pickText.includes(homeTeam) || homeTeam.includes(pickText));
+  const mentionsAway = pickText && awayTeam && (pickText === awayTeam || pickText.includes(awayTeam) || awayTeam.includes(pickText));
+  // .includes(), not exact equality — Double Chance labels are compound
+  // phrases like "Draw or Namibia", not the bare word "draw".
+  const mentionsDraw = pickText.includes('draw') || pickText === 'x' || pickText.includes('tie');
+
+  // ── Match Result / 1X2 / Winner ──
+  if (/matchresult|1x2|winner|fulltimeresult|fulltime$/.test(marketText)) {
+    if (mentionsDraw) return h === a ? 'won' : 'lost';
+    if (mentionsHome) return h > a ? 'won' : 'lost';
+    if (mentionsAway) return a > h ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Draw No Bet ──
+  if (/drawnobet|dnb/.test(marketText)) {
+    if (h === a) return 'void'; // stake refunded — standard DNB rule
+    if (mentionsHome) return h > a ? 'won' : 'lost';
+    if (mentionsAway) return a > h ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Double Chance ── (pick combines two of the three 1X2 outcomes, e.g.
+  // "Home or Draw", "Draw or Away", "Home or Away")
+  if (/doublechance/.test(marketText)) {
+    if (!(mentionsHome || mentionsAway || mentionsDraw)) return null;
+    const won = (mentionsHome && h > a) || (mentionsAway && a > h) || (mentionsDraw && h === a);
+    return won ? 'won' : 'lost';
+  }
+
+  // ── Both Teams To Score ──
+  if (/bothteamstoscore|btts/.test(marketText)) {
+    if (/^(yes|gg)$/.test(pickText)) return (h > 0 && a > 0) ? 'won' : 'lost';
+    if (/^(no|ng)$/.test(pickText)) return (h === 0 || a === 0) ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Odd/Even (total goals) ──
+  if (/oddeven/.test(marketText)) {
+    const isOdd = total % 2 === 1;
+    if (pickText === 'odd') return isOdd ? 'won' : 'lost';
+    if (pickText === 'even') return !isOdd ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Correct Score / Exact Score — pick label like "2-1" or "2:1" ──
+  const csMatch = pickLabelRaw.match(/^(\d+)\s*[-:]\s*(\d+)$/);
+  if (csMatch && /correctscore|exactscore/.test(marketText)) {
+    return (Number(csMatch[1]) === h && Number(csMatch[2]) === a) ? 'won' : 'lost';
+  }
+
+  // ── Exact/Total Goals — pick label like "3" or "3 goals" meaning the
+  // exact total number of goals in the match ──
+  if (/exactgoals|totalgoals/.test(marketText)) {
+    const numMatch = pickLabelRaw.match(/(\d+)/);
+    if (numMatch) return Number(numMatch[1]) === total ? 'won' : 'lost';
+    return null;
+  }
+
+  // ── Over/Under — ANY line, not just 2.5. Covers both a match-wide total
+  // ("Over/Under", pick "Over 2.5") and a single team's own total ("Comoros
+  // total", pick "Over 0.5") — the market name is checked for which team it
+  // names, defaulting to the match-wide total if neither/both are named. ──
+  const ouMatch = pickLabelRaw.match(/^(over|under)\s*([\d.]+)$/i);
+  if (ouMatch) {
+    const isOver = ouMatch[1].toLowerCase() === 'over';
+    const line = Number(ouMatch[2]);
+    if (!Number.isFinite(line)) return null;
+    let relevant = total;
+    const marketMentionsHome = marketText.includes(homeTeam) && homeTeam.length > 0;
+    const marketMentionsAway = marketText.includes(awayTeam) && awayTeam.length > 0;
+    if (marketMentionsHome && !marketMentionsAway) relevant = h;
+    else if (marketMentionsAway && !marketMentionsHome) relevant = a;
+    return isOver ? (relevant > line ? 'won' : 'lost') : (relevant < line ? 'won' : 'lost');
+  }
+
+  return null; // unrecognized market/pick combination — leave pending for manual review
+}
+
+// Grade a selection pick against the match result
+// Handles 1x2 picks (home/draw/away) AND extended markets (dc_1x, dc_12, dc_x2, btts, bttsNo, over25, under25)
+function gradeSelection(pick, result, homeScore, awayScore) {
+  if (!result) return null;
+  const h = Number(homeScore), a = Number(awayScore);
+  const totalGoals = h + a;
+
+  switch (pick) {
+    // ── 1x2 ──
+    case 'home': return result === 'home' ? 'won' : 'lost';
+    case 'draw': return result === 'draw' ? 'won' : 'lost';
+    case 'away': return result === 'away' ? 'won' : 'lost';
+
+    // ── Double Chance ──
+    case 'dc_1x': return (result === 'home' || result === 'draw') ? 'won' : 'lost';
+    case 'dc_12': return (result === 'home' || result === 'away') ? 'won' : 'lost';
+    case 'dc_x2': return (result === 'draw' || result === 'away') ? 'won' : 'lost';
+
+    // ── Both Teams To Score ──
+    case 'btts':   return (!isNaN(h) && !isNaN(a) && h > 0 && a > 0) ? 'won' : 'lost';
+    case 'btts_no':
+    case 'bttsno':
+    case 'bttsNo': return (!isNaN(h) && !isNaN(a) && (h === 0 || a === 0)) ? 'won' : 'lost';
+
+    // ── Over/Under 2.5 ──
+    case 'over25':  return (!isNaN(totalGoals) && totalGoals > 2.5)  ? 'won' : 'lost';
+    case 'under25': return (!isNaN(totalGoals) && totalGoals < 2.5)  ? 'won' : 'lost';
+
+    // ── Handicap (synthetic market — see marketResolver.js) — simple 0-line
+    // handicap equivalent to "which team has more goals", same math as 1x2
+    // home/away but offered as its own market with different (derived) odds ──
+    case 'handicap_home': return h > a ? 'won' : 'lost';
+    case 'handicap_away': return a > h ? 'won' : 'lost';
+
+    // ── fallback: treat as 1x2 ──
+    default: return result === pick ? 'won' : 'lost';
+  }
+}
+
+// A payout is recorded in the wallet history under (reference = bet code, reason = 'bet_payout').
+// If that record already exists the bet has been paid: never pay it a second time.
+async function alreadyPaid(bet) {
+  try { return !!(await WalletHistory.exists({ userId: bet.userId, reference: bet.betCode, reason: 'bet_payout' })); }
+  catch (e) { return false; }
+}
+
+// Atomically take ownership of a pending bet. Only ONE caller can ever move a bet out of 'pending',
+// so overlapping runs / a second instance / a repeated provider update can never pay it twice.
+async function claimBet(bet, fields) {
+  const r = await Bet.findOneAndUpdate({ _id: bet._id, status: 'pending' }, { $set: fields });
+  return !!r;
+}
+
+// Pay out a won bet. THROWS if the wallet credit fails (the caller reopens the bet so the next run retries).
+async function payWinner(bet, netPayout) {
+  if (await alreadyPaid(bet)) { console.log(`  [payWinner] ${bet.betCode} already paid - duplicate settlement ignored`); return; }
+  const wallet = await walletService.payoutWin(bet.userId, netPayout, bet.betCode, { betId: bet._id });
+  try {
+    // Keep legacy User.balance in sync for any UI still reading it directly
+    await User.findByIdAndUpdate(bet.userId, { $inc: { balance: netPayout } }).catch(() => {});
+    await Transaction.create({
+      userId: bet.userId, type: 'win', amount: netPayout,
+      balance: wallet ? wallet.main : undefined,
+      reference: bet.betCode,
+      description: `Win: ${bet.betCode} — KES ${netPayout}`
+    });
+    const user = await User.findById(bet.userId).lean();
+    console.log(`  💰 Paid KES ${netPayout} → ${user?.username || bet.userId} [${bet.betCode}]`);
+    require('../services/notificationService')
+      .notify(bet.userId, 'bet_won', { betCode: bet.betCode, amount: netPayout })
+      .catch(()=>{});
+  } catch (e) {
+    console.error(`  [payWinner] paid, but bookkeeping failed for ${bet.betCode}:`, e.message);   // money is already in the wallet
+  }
+}
+
+// Every game on the bet was voided: give the stake back (recorded as a refund, not as winnings). Throws like payWinner.
+async function payRefund(bet) {
+  if (await alreadyPaid(bet)) { console.log(`  [payRefund] ${bet.betCode} already refunded - duplicate settlement ignored`); return; }
+  const wallet = await walletService.payoutWin(bet.userId, bet.stake, bet.betCode, { betId: bet._id });
+  try {
+    await User.findByIdAndUpdate(bet.userId, { $inc: { balance: bet.stake } }).catch(() => {});
+    await Transaction.create({
+      userId: bet.userId, type: 'refund', amount: bet.stake,
+      balance: wallet ? wallet.main : undefined,
+      reference: bet.betCode,
+      description: `Refund: ${bet.betCode} — all games voided, stake returned`
+    });
+    console.log(`  ↩ Refunded KES ${bet.stake} [${bet.betCode}]`);
+    require('../services/notificationService').notify(bet.userId, 'bet_void', { betCode: bet.betCode }).catch(() => {});
+  } catch (e) {
+    console.error(`  [payRefund] refunded, but bookkeeping failed for ${bet.betCode}:`, e.message);
+  }
+}
+
+// Instantly finalize a bet as LOST the moment any single selection loses —
+// mirrors how real sportsbooks (Betika, SportPesa) settle accumulators: one
+// loss kills the whole slip immediately, without waiting for the rest of the
+// matches to finish. The remaining still-pending selections keep grading in
+// later settlement runs purely for display (see runSettlement's query below),
+// but never re-trigger finalization once a bet is already lost.
+async function finalizeBetAsLost(bet) {
+  const settledAt = new Date();
+  if (!(await claimBet(bet, { status: 'lost', payout: 0, netPayout: 0, settledAt }))) {
+    console.log(`  [Settlement] ${bet.betCode} was already settled elsewhere - skipped`);
+    return { status: 'skipped', netPayout: 0 };
+  }
+  bet.status    = 'lost';
+  bet.payout    = 0;
+  bet.netPayout = 0;
+  bet.settledAt = settledAt;
+  await bet.save();
+
+  require('../services/notificationService')
+    .notify(bet.userId, 'bet_lost', { betCode: bet.betCode }).catch(()=>{});
+
+  return { status: 'lost', netPayout: 0 };
+}
+
+// Fully grade and save one bet once all selections have results
+async function finalizeBet(bet) {
+  // Admin-added selections (see POST /api/bets/admin/add-selection) are
+  // deliberately excluded from every aggregate calculation below — they still
+  // get graded won/lost/void on their own for display, but must never affect
+  // whether the rest of the bet wins, or what it pays out.
+  const realSelections = bet.selections.filter(s => !s.excludedFromPayout);
+  const nonVoid = realSelections.filter(s => s.result !== 'void');
+  const anyLost = nonVoid.some(s => s.result === 'lost');
+
+  let status, payout, netPayout;
+
+  if (nonVoid.length === 0) {
+    // All voided — full refund. Recorded as VOID (refunded), not as a win: it must not count as a won bet.
+    status = 'void'; payout = bet.stake; netPayout = bet.stake;
+  } else if (anyLost) {
+    status = 'lost'; payout = 0; netPayout = 0;
+  } else {
+    const wonOdds  = nonVoid.reduce((acc, s) => acc * (s.result === 'won' ? s.odds : 1), 1);
+    payout         = parseFloat((bet.stake * wonOdds).toFixed(2));
+    const winnings = payout - bet.stake;
+    const tax      = parseFloat((Math.max(0, winnings) * 0.20).toFixed(2));
+    netPayout      = parseFloat((payout - tax).toFixed(2));
+    status = 'won';
+  }
+
+  const settledAt = new Date();
+  const owesPayout = (status === 'won' || status === 'void') && netPayout > 0;
+  if (!(await claimBet(bet, { status, payout, netPayout, settledAt, ...(owesPayout ? { payoutState: 'pending' } : {}) }))) {
+    console.log(`  [Settlement] ${bet.betCode} was already settled elsewhere - skipped`);
+    return { status: 'skipped', netPayout: 0 };
+  }
+  bet.status    = status;
+  bet.payout    = payout;
+  bet.netPayout = netPayout;
+  bet.settledAt = settledAt;
+  await bet.save();
+
+  try {
+    if (status === 'won' && netPayout > 0) await payWinner(bet, netPayout);
+    else if (status === 'void' && netPayout > 0) await payRefund(bet);
+    if (owesPayout) await Bet.updateOne({ _id: bet._id }, { $set: { payoutState: 'paid' } }).catch(() => {});
+  } catch (e) {
+    // The wallet credit failed: reopen the bet so the next settlement run pays it (payout is idempotent).
+    console.error(`  [Settlement] payout failed for ${bet.betCode}, will retry next run:`, e.message);
+    await Bet.updateOne({ _id: bet._id, status }, { $set: { status: 'pending' }, $unset: { settledAt: 1, payoutState: 1 } }).catch(() => {});
+    return { status: 'retry', netPayout: 0 };
+  }
+
+  if (status === 'lost') {
+    require('../services/notificationService')
+      .notify(bet.userId, 'bet_lost', { betCode: bet.betCode }).catch(()=>{});
+  }
+
+  return { status, netPayout };
+}
+
+// Try to settle a single selection using a known match result
+function applyResult(s, matchResult, homeScore, awayScore) {
+  if (s.result !== 'pending') return false;
+
+  // Provider-native markets are not interchangeable with SafariBet's legacy
+  // picks. Grade them directly from their own stored market name + pick
+  // label — never interpret an arbitrary provider key as if it were one of
+  // SafariBet's six legacy picks.
+  // SofaBets-native selections are graded ONLY by the market-aware path in
+  // runSettlement (gradeProviderSel): it knows the market's period (1st half,
+  // 2nd half, full match), so it must never fall through to the full-time-only
+  // legacy grader below.
+  if (s.provider === 'sofabets') return false;
+
+  const grade = gradeSelection(s.pick, matchResult, homeScore, awayScore);
+  if (!grade) return false;
+  s.result    = grade;
+  s.settledAt = new Date();
+  // Save final score on the selection so it shows in the bet slip
+  if (homeScore !== null && homeScore !== undefined) {
+    s.score = { home: homeScore, away: awayScore };
+  }
+  return true;
+}
+
+
+// ── Market-aware grading of a SofaBets-native selection ──
+// Fixture state + market period + market type + pick decide WHEN and HOW a
+// selection settles. Returns { status, score, periodLabel, source } or
+// { status: null, reason } (stay pending).
+
+// Merge the rows of one provider fixture into a single view.
+const HT_RANK = { admin: 4, provider: 3, observed: 2, inferred: 1 };
+function mergeFixtureRows(rows) {
+  if (!rows || !rows.length) return null;
+  const out = Object.assign({}, rows.find(r => r.finalVerified) || rows[0]);
+  out.trackerNote = (rows.find(r => r.trackerNote) || {}).trackerNote || null;
+  const fin = rows.find(r => r.finalVerified === true && r.score && r.score.home != null && r.score.away != null);
+  if (fin) { out.finalVerified = true; out.score = fin.score; out.status = 'finished'; out.finalVerifiedAt = fin.finalVerifiedAt || fin.updatedAt || null; }
+  let bestHt = null;
+  for (const r of rows) {
+    const ps = r.periodScores || {};
+    if (ps.ht && ps.ht.home != null && ps.ht.away != null) {
+      const rank = HT_RANK[ps.htSource] || 0;
+      if (!bestHt || rank > bestHt.rank) bestHt = { rank, ht: ps.ht, src: ps.htSource };
+    }
+  }
+  const scorers = { first: null, last: null };
+  for (const r of rows) {
+    const ps = r.periodScores || {};
+    if (!scorers.first && ps.firstScorer) scorers.first = ps.firstScorer;
+    if (!scorers.last && ps.lastScorer && fin && ps.lastObs && ps.lastObs.home === Number(fin.score.home) && ps.lastObs.away === Number(fin.score.away)) scorers.last = ps.lastScorer;
+  }
+  out.periodScores = { ht: bestHt ? bestHt.ht : undefined, htSource: bestHt ? bestHt.src : undefined, scorers };
+  let goalEvents = null;
+  for (const r of rows) if (Array.isArray(r.goalEvents) && (!goalEvents || r.goalEvents.length > goalEvents.length)) goalEvents = r.goalEvents;
+  out.goalEvents = goalEvents || [];
+  return out;
+}
+
+
+// Plain-language reason a More Markets selection is still pending.
+function pendingMessage(g, s) {
+  const r = String((g && g.reason) || '');
+  if (!r) return 'Waiting for the match result';
+  const refundNote = ' - refunded automatically if it cannot be confirmed';
+  if (/first-half result not available|half-time score was not recorded/i.test(r)) {
+    return (g && g.finalKnown) ? 'Half-time score was not captured' + refundNote : 'Waiting for the first half to finish';
+  }
+  if (/not verified yet|not available yet|not tracked|never seen|minimum game length|not absent|last seen at|last seen only/i.test(r)) {
+    const n = String((g && g.trackerNote) || '');
+    const why = /no score was ever recorded/i.test(n) ? 'the live score was never captured'
+      : /never seen live/i.test(n) ? 'the match was not captured while live'
+      : /not absent/i.test(n) ? 'still listed as live'
+      : /minimum game length/i.test(n) ? 'the match is not over yet'
+      : /last seen at minute/i.test(n) ? n.replace(/^last seen at minute (\d+).*$/i, 'last seen at minute $1')
+      : /last seen only (\d+) min/i.test(n) ? n.replace(/^last seen only (\d+) min after kickoff$/i, 'last seen live $1 min after kickoff')
+      : /minute unknown/i.test(n) ? 'game length unconfirmed'
+      : '';
+    return 'Waiting for the match to finish' + (why ? ` (${why})` : '');
+  }
+  if (/unrecognised market|feed does not provide|cannot provide|order was not observed|not supported|cannot read pick|cannot grade|cannot split|inconsistent/i.test(r)) {
+    return 'This market cannot be read automatically' + refundNote.replace('if it cannot be confirmed', 'after the match');
+  }
+  return 'Awaiting result: ' + r;
+}
+
+// After the match is verified final, markets the server cannot grade itself (corners, cards, players ...) wait this long for
+// SofaBets to publish its official result (checked fresh on every run) before the stake is refunded. Default 3 MINUTES
+// (was 3 hours), at least 1; set AUTO_VOID_GRACE_MIN to change it.
+const AUTO_VOID_GRACE_MS = Math.max(1, Number(process.env.AUTO_VOID_GRACE_MIN || 3)) * 60 * 1000;
+// Markets decided by goal ORDER (1st/2nd/3rd goal, first/last scorer, minute windows) are not refunded just because our live
+// polling missed an event: the engine keeps asking for the provider's official result and the verified final score, and only
+// refunds after this longer wait (default 45 minutes after the final whistle; set AUTO_VOID_GOAL_GRACE_MIN to change).
+const AUTO_VOID_GOAL_GRACE_MS = Math.max(AUTO_VOID_GRACE_MS, Number(process.env.AUTO_VOID_GOAL_GRACE_MIN || 45) * 60 * 1000);
+const GOAL_ORDER_TYPES = ['NTH_GOAL', 'FIRST_SCORER', 'LAST_SCORER', 'WINDOW_1X2'];
+const graceFor = g => ((g && g.goalOrder) ? AUTO_VOID_GOAL_GRACE_MS : AUTO_VOID_GRACE_MS);
+const officialMemo = new Map();   // per-run: one provider lookup per fixture
+async function gradeProviderSel(s, matchRows) {
+  // The same provider fixture can have several Match rows (the Live tab id
+  // "sofabets_live_<sport>_<id>", the main-feed id "sofabets_<id>", ...), each
+  // fed by a different poller with different observations (final score, half-time,
+  // goal order). Settlement uses ALL of them for this EXACT provider fixture id.
+  const key = s.matchId;
+  if (!matchRows.has(key)) {
+    const p = finalResults.parseSofaMatchId(key);
+    const ids = new Set([key]);
+    if (p) [`sofabets_${p.providerId}`, `sofabets_${p.sport}_${p.providerId}`, `sofabets_live_${p.providerId}`, `sofabets_live_${p.sport}_${p.providerId}`].forEach(x => ids.add(x));
+    let rows = [];
+    try { rows = await Match.find({ matchId: { $in: Array.from(ids) } }).lean(); } catch (e) {}
+    matchRows.set(key, mergeFixtureRows(rows));
+  }
+  const row = matchRows.get(key);
+
+  // 1. Official provider result for THIS exact market + selection, when the
+  //    provider exposes it (exact fixture id, exact market id, exact selection id).
+  try {
+    const p = finalResults.parseSofaMatchId(s.matchId);
+    const started = s.commenceTime ? new Date(s.commenceTime).getTime() <= Date.now() : true;
+    if (p && p.providerId && started && (s.providerMarketId || s.providerMarketKey)) {
+      const mk0 = `${p.sport}:${p.providerId}`;
+      if (!officialMemo.has(mk0)) officialMemo.set(mk0, Promise.race([sofaBetsProvider.getMatchMarkets(p.providerId, p.sport, { maxAgeMs: 120000 }), new Promise(r => setTimeout(() => r(null), 8000))]).catch(() => null));
+      const det = await officialMemo.get(mk0);
+      const mk = (det && det.markets || []).find(m => (s.providerMarketId && String(m.id) === String(s.providerMarketId)) || String(m.key) === String(s.providerMarketKey) && String(m.name || '') === String(s.marketLabel || m.name || ''));
+      const sel = mk && (mk.selections || []).find(x => (s.providerSelectionId && String(x.id) === String(s.providerSelectionId)) || String(x.key) === String(s.providerSelectionKey));
+      if (sel && sel.providerResult && (mk.providerSettled || sel.providerResult)) {
+        return { status: sel.providerResult, score: null, periodLabel: null, source: 'provider' };
+      }
+    }
+  } catch (e) { /* provider unavailable -> fall back to our own period scores */ }
+
+  // 2. Market rules on the recorded period scores
+  if (!row) return { status: null, reason: 'fixture not tracked yet' };
+  const ft = row.finalVerified === true && row.score && row.score.home != null && row.score.away != null
+    ? { home: Number(row.score.home), away: Number(row.score.away) } : null;
+  const htRaw = row.periodScores && row.periodScores.ht;
+  const ht = htRaw && htRaw.home != null && htRaw.away != null ? { home: Number(htRaw.home), away: Number(htRaw.away) } : null;
+  const ps = { ft, ftFinal: !!ft, ht, htFinal: !!ht, scorers: (row.periodScores && row.periodScores.scorers) || null, goalEvents: row.goalEvents || null };
+
+  const r = marketRules.evaluate({
+    marketLabel: s.marketLabel || s.providerMarketKey || s.market,
+    pickLabel: s.pickLabel || s.providerSelectionKey || s.pick,
+    homeTeam: s.homeTeam, awayTeam: s.awayTeam, sport: s.sport
+  }, ps);
+  if (!r.status) return { status: null, reason: r.reason, need: r.need, finalKnown: !!ft, trackerNote: row.trackerNote || null, goalOrder: !!(r.goalOrder || (r.market && GOAL_ORDER_TYPES.includes(r.market.type))) };
+  const period = r.market && r.market.period;
+  return { status: r.status, score: r.score || null, periodLabel: r.periodLabel || (period === 'FIRST_HALF' ? 'HT' : period === 'SECOND_HALF' ? '2H' : 'FT'), source: 'market-rules', reason: r.reason || null };
+}
+
+// Finishes any payout that was claimed but not confirmed (e.g. the server was stopped for a deploy in between).
+// payWinner / payRefund are idempotent, so running this twice - or racing a normal payout - can never pay twice.
+let lastRecovery = 0;
+async function recoverUnpaidPayouts() {
+  lastRecovery = Date.now();
+  let fixed = 0;
+  try {
+    const stuck = await Bet.find({ payoutState: 'pending', status: { $in: ['won', 'void'] }, settledAt: { $lte: new Date(Date.now() - 90 * 1000) } }).limit(100);
+    for (const bet of stuck) {
+      try {
+        if (bet.status === 'won' && bet.netPayout > 0) await payWinner(bet, bet.netPayout);
+        else if (bet.status === 'void' && bet.netPayout > 0) await payRefund(bet);
+        await Bet.updateOne({ _id: bet._id }, { $set: { payoutState: 'paid' } });
+        fixed++;
+        console.log(`  [Recovery] completed unpaid payout for ${bet.betCode}`);
+      } catch (e) { console.error(`  [Recovery] ${bet.betCode} still unpaid, will retry:`, e.message); }
+    }
+  } catch (e) { console.error('[Recovery] sweep failed:', e.message); }
+  return fixed;
+}
+
+// Resolves once no settlement run is in progress (used by the graceful shutdown on deploys).
+async function whenIdle(timeoutMs = 15000) {
+  const t = Date.now();
+  while (settlementRunning && Date.now() - t < timeoutMs) await new Promise(r => setTimeout(r, 200));
+  return !settlementRunning;
+}
+
+let settlementStartedAt = 0;
+let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
+
+async function runSettlement(includeApiFetch = true) {
+  if (global.__sbShuttingDown) return { settled: 0, paid: 0, skipped: true };       // server is stopping: start nothing new
+  if (settlementRunning && Date.now() - settlementStartedAt > 4 * 60 * 1000) { console.log('[Settlement] Previous run looks stuck (>4 min) - releasing the lock.'); settlementRunning = false; }
+  if (settlementRunning) {
+    console.log('[Settlement] Skipped — a settlement run is already in progress.');
+    return { settled: 0, paid: 0, skipped: true };
+  }
+  settlementRunning = true; settlementStartedAt = Date.now();
+  try {
+    if (Date.now() - lastRecovery > 5 * 60 * 1000) await recoverUnpaidPayouts();     // first pass after a restart, then every 5 min
+    return await _runSettlementInner(includeApiFetch);
+  } finally {
+    settlementRunning = false;
+  }
+}
+
+async function _runSettlementInner(includeApiFetch) {
+  const startTime = Date.now();
+  console.log(`\n🔄 [Settlement] Starting${includeApiFetch ? '' : ' (fast DB-only pass)'}...`);
+
+  // ── 1. Count bets that still need processing ──
+  // This includes truly pending bets AND already-lost bets that still have
+  // unresolved selections — the latter keep grading purely for display
+  // (so match 3/4/5 still show ✅/❌ once they finish), without re-triggering
+  // any finalize/payout logic, since finalizeBetAsLost only ever runs once.
+  const openQuery = { $or: [
+    { status: 'pending' },
+    { status: 'lost', selections: { $elemMatch: { result: 'pending' } } }
+  ]};
+
+  let pendingCount;
+  try {
+    pendingCount = await Bet.countDocuments(openQuery);
+  } catch(e) {
+    console.error('[Settlement] MongoDB error counting pending bets:', e.message);
+    return { settled: 0, paid: 0, error: e.message };
+  }
+
+  if (!pendingCount) {
+    console.log('[Settlement] No pending bets. Done.');
+    return { settled: 0, paid: 0 };
+  }
+  console.log(`[Settlement] ${pendingCount} pending bets to check`);
+
+  // ── 2. Build match result lookup ──
+  // Source A: Juan API (days 0-7, parallel calls) — only on the slower,
+  // periodic full pass. This hits the external API 8x per call with no
+  // caching, so it must NOT run on every fast per-minute check.
+  let apiMatches = [];
+  if (includeApiFetch) {
+    try {
+      apiMatches = await getFixtures(7);
+      console.log(`[Settlement] API snapshot: ${apiMatches.length} matches`);
+    } catch(e) {
+      console.error('[Settlement] API fetch failed (continuing with DB only):', e.message);
+    }
+  }
+
+  // Source A2: confirm which started fixtures have really ended. This records
+  // live observations and, only on an explicit provider FINISHED (or a verified
+  // feed-ended game, see finalResultService), marks the fixture final.
+  try {
+    const openBets0 = await Bet.find(openQuery).lean();
+    const fx = new Map();
+    for (const b of openBets0) for (const sel of (b.selections || [])) {
+      if (sel.result === 'pending' && String(sel.matchId).startsWith('sofabets_') && !fx.has(sel.matchId))
+        fx.set(sel.matchId, { matchId: sel.matchId, homeTeam: sel.homeTeam, awayTeam: sel.awayTeam, league: sel.league, commenceTime: sel.commenceTime });
+    }
+    if (fx.size) {
+      const t = await Promise.race([finalResults.trackFixtures(Array.from(fx.values()), Match), new Promise(r => setTimeout(() => r({ finalized: 0, waiting: [{ matchId: '-', why: 'tracker still running (continuing without it)' }] }), 25000))]);
+      const old = t.waiting.filter(w => w.why !== 'still in play');
+      console.log(`[Settlement] Tracker: ${fx.size} fixtures, ${t.finalized} confirmed final, ${t.waiting.length} waiting`);
+      old.slice(0, 15).forEach(w => console.log(`  [Tracker] waiting ${w.matchId}: ${w.why}`));
+    }
+  } catch (e) { console.error('[Settlement] Tracker failed (continuing):', e.message); }
+
+  // Source B: DB matches marked finished with a result — this is the primary,
+  // fast source. updateLive() writes results here every ~10s as matches end,
+  // so checking this alone every minute is what actually delivers "real time"
+  // settlement without needing the heavy API call on every pass.
+  let dbMatches = [];
+  try {
+    // LIVE SCORE ≠ FINAL RESULT: only matches the provider explicitly
+    // confirmed as FINISHED (finalVerified) may ever be used to grade a bet.
+    dbMatches = await Match.find({
+      status: 'finished',
+      finalVerified: true,
+      result: { $nin: [null, undefined] }
+    }).lean();
+    console.log(`[Settlement] DB finished matches: ${dbMatches.length}`);
+  } catch(e) {
+    console.error('[Settlement] DB match fetch failed:', e.message);
+    return { settled: 0, paid: 0, error: e.message };
+  }
+
+  // Build lookup maps for fast matching
+  const resultMap = new Map(); // matchId → {result, homeScore, awayScore}
+
+  // Keyed by EXACT fixture identity only (the matchId, plus a canonical
+  // provider-fixture key so live/non-live id shapes of the same fixture
+  // match). Never by team names — that can attach another fixture's result.
+  const addToMap = (matchId, homeTeam, awayTeam, result, homeScore, awayScore) => {
+    if (!result) return;
+    const entry = { result, homeScore, awayScore, homeTeam, awayTeam };
+    resultMap.set(matchId, entry);
+    resultMap.set(finalResults.fixtureKey(matchId), entry);
+  };
+
+  // DB matches first — only provider-verified finals reach this map.
+  for (const m of dbMatches) {
+    addToMap(m.matchId, m.homeTeam, m.awayTeam, m.result, m.score?.home, m.score?.away);
+  }
+  // API snapshot — only fixtures whose provider status is FINISHED.
+  for (const m of apiMatches) {
+    if (m.result && m.status === 'finished' && m.finalVerified === true) addToMap(m.matchId, m.homeTeam, m.awayTeam, m.result, m.score?.home, m.score?.away);
+  }
+
+  console.log(`[Settlement] Result map: ${resultMap.size} entries`);
+
+  // ── 3. Load all bets needing processing (pending + already-lost-but-display-pending) ──
+  let bets;
+  try {
+    bets = await Bet.find(openQuery);
+  } catch(e) {
+    console.error('[Settlement] DB error fetching bets:', e.message);
+    return { settled: 0, paid: 0, error: e.message };
+  }
+
+  let totalSettled = 0, totalPaid = 0;
+  const now = Date.now();
+  const matchRows = new Map(); // matchId -> Match row, loaded once per run
+  officialMemo.clear();
+
+
+  for (const bet of bets) {
+    try {
+      let changed = false;
+
+      for (const s of bet.selections) {
+        if (s.result !== 'pending') continue;
+
+        // SofaBets-native (More Markets) selection: market-aware settlement.
+        // A 1st-half market settles once the first half is officially over, a
+        // 2nd-half market from (full time - half time), a full-match market
+        // only after the verified final. Nothing settles from a live score.
+        if (isProviderSel(s)) {
+          const g = await gradeProviderSel(s, matchRows);
+          if (g && g.status) {
+            s.result = g.status;
+            s.settledAt = new Date();
+            s.periodLabel = g.periodLabel || undefined;
+            s.pendingReason = undefined;
+            s.settledSource = g.source;
+            if (g.status === 'void' && g.reason) s.voidReason = g.reason;
+            if (g.score) s.score = { home: g.score.home, away: g.score.away };
+            changed = true;
+            console.log(`   Graded (${g.source}): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel} = ${g.status}${g.score ? ` (${g.periodLabel} ${g.score.home}-${g.score.away})` : ''}`);
+            continue;
+          }
+          // Not settleable yet (period not finished / data missing): stays pending.
+          // Remember WHY, so My Bets / the admin can see what it is waiting for.
+          const why = pendingMessage(g, s);
+          try { if (g && g.finalKnown) console.log(`   [Pending-but-final] ${bet.betCode} ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g.reason}`); } catch (_) {}
+          if (why && s.pendingReason !== why) { s.pendingReason = why; s.pendingCheckedAt = new Date(); changed = true; }
+          // The match is over and verified, but this market cannot be graded from the data we have
+          // (needs corners/cards/players, or a period score we never captured). Nothing is left for
+          // manual approval: after a short grace period the leg is VOIDED automatically and the
+          // stake is refunded - never guessed, never left pending.
+          const finalEntry = resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId));
+          if (finalEntry) {
+            const mrow = matchRows.get(s.matchId);
+            // When the result became final: the verified time if we have it, otherwise the moment THIS run first saw the
+            // match final (remembered on the selection) - never "kickoff + 4 hours", which kept refunds waiting for hours.
+            let finalAt;
+            if (mrow && mrow.finalVerifiedAt) finalAt = new Date(mrow.finalVerifiedAt).getTime();
+            else {
+              if (!s.finalSeenAt) { s.finalSeenAt = new Date(now); changed = true; }
+              finalAt = new Date(s.finalSeenAt).getTime();
+            }
+            if (now - finalAt >= graceFor(g)) {
+              s.result = 'void'; s.settledAt = new Date(); s.settledSource = 'auto-void';
+              s.voidReason = 'This market could not be settled automatically - stake refunded';
+              s.pendingReason = undefined; changed = true;
+              console.log(`   Auto-VOID (unreadable market, match final): ${s.homeTeam} vs ${s.awayTeam} | ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`);
+            } else {
+              console.log(`   Unreadable market, match final - will auto-void after grace: ${s.marketLabel} -> ${s.pickLabel}: ${g && g.reason}`);
+            }
+            continue;
+          }
+        }
+
+        // Look up the VERIFIED-FINAL result by exact fixture identity only.
+        let entry = (!isProviderSel(s)) ? (resultMap.get(s.matchId) || resultMap.get(finalResults.fixtureKey(s.matchId))) : null;
+
+        if (entry) {
+          const applied = applyResult(s, entry.result, entry.homeScore, entry.awayScore);
+          if (applied) {
+            changed = true;
+            console.log(`  ✅ Graded (final verified): ${s.homeTeam} vs ${s.awayTeam} | market:${s.providerMarketKey || s.market} selection:${s.providerSelectionKey || s.pick} → ${s.result} (final: ${entry.homeScore}-${entry.awayScore})`);
+          }
+          continue;
+        }
+
+        // ── No verified final result — the selection STAYS PENDING ──
+        // A live/in-progress score, a score on a Match row, `status:'finished'`
+        // without verification, or a match missing from the live list are all
+        // NOT final. The only thing that may resolve a selection without a
+        // verified final is the existing void rule for fixtures that have been
+        // unresolvable for 10+ hours AND are not currently being updated live.
+        const kickoffTime = s.commenceTime
+          ? new Date(s.commenceTime).getTime()
+          : new Date(bet.createdAt).getTime();
+        const hoursAgo = (now - kickoffTime) / 3600000;
+        if (hoursAgo <= 24) continue; // allow the tracker a full day to confirm the result before any void
+
+        let dbMatch = null;
+        try { dbMatch = await Match.findOne({ matchId: s.matchId }).lean(); } catch(e) {}
+        const lastTouched = dbMatch?.updatedAt ? new Date(dbMatch.updatedAt).getTime() : 0;
+        const activelyLive = dbMatch && dbMatch.status === 'live' && (now - lastTouched) < 30 * 60 * 1000;
+        if (activelyLive) continue; // genuinely still being played/updated — never void
+
+        console.log(`  ⚠️ VOID (${hoursAgo.toFixed(1)}h, no verified final result): ${s.homeTeam} vs ${s.awayTeam}`);
+        s.result    = 'void';
+        s.settledAt = new Date();
+        changed     = true;
+      }
+
+      if (!changed) continue;
+
+      // ── INSTANT LOSS SETTLEMENT ──
+      // The moment ANY graded selection is a loss, the whole accumulator is
+      // dead — settle it right now, exactly like Betika/SportPesa, without
+      // waiting for the remaining matches. Guarded by bet.status !== 'lost'
+      // so a bet that was already settled-as-lost in an earlier run (and is
+      // only here now because it still has pending selections to grade for
+      // display) never gets finalized/notified a second time.
+      const hasLoss = bet.selections.some(s => !s.excludedFromPayout && s.result === 'lost');
+      if (hasLoss && bet.status === 'pending') {
+        const { status, netPayout } = await finalizeBetAsLost(bet);
+        totalSettled++;
+        console.log(`  🎯 Bet ${bet.betCode}: LOST instantly (1+ selection lost, others may still be pending)`);
+        continue;
+      }
+
+      if (bet.status === 'lost') {
+        // Already settled as lost in a prior run — just persist the newly
+        // graded selection(s) for display, no re-finalization.
+        await bet.save();
+        continue;
+      }
+
+      // Check if all selections are resolved — only the real, payout-affecting
+      // ones. An admin-added game left pending shouldn't hold up settling the
+      // user's actual bet; it keeps grading independently in later runs.
+      const allDone = bet.selections.filter(s => !s.excludedFromPayout).every(s => s.result !== 'pending');
+      if (!allDone) {
+        await bet.save(); // save partial progress
+        continue;
+      }
+
+      // All done, nothing lost — finalize as won (or void-refund)
+      const { status, netPayout } = await finalizeBet(bet);
+      totalSettled++;
+      if (status === 'won' && netPayout > 0) totalPaid++;
+      console.log(`  🎯 Bet ${bet.betCode}: ${status.toUpperCase()} ${status === 'won' ? `(KES ${netPayout})` : ''}`);
+
+    } catch(e) {
+      console.error(`  [Settlement] Error processing bet ${bet.betCode}:`, e.message);
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`✅ [Settlement] Done in ${elapsed}s — ${totalSettled} settled, ${totalPaid} paid out\n`);
+  return { settled: totalSettled, paid: totalPaid };
+}
+
+// Event-driven trigger: called the moment a fixture is confirmed final, so its bets settle within seconds instead of
+// waiting for the next scheduled pass. Calls arriving close together share ONE run; if a run is already in progress
+// it tries again shortly (so the new final is never left waiting for the next timer tick).
+let settleSoonTimer = null;
+function settleSoon(delayMs = 1500) {
+  if (settleSoonTimer) return;
+  settleSoonTimer = setTimeout(async () => {
+    settleSoonTimer = null;
+    try {
+      const r = await runSettlement(false);
+      if (r && r.skipped) settleSoon(3000);
+    } catch (e) { console.error('[Settlement] settleSoon failed:', e.message); }
+  }, delayMs);
+  if (settleSoonTimer.unref) settleSoonTimer.unref();
+}
+
+module.exports = { runSettlement, settleSoon, whenIdle, mergeFixtureRows, gradeSelection, gradeProviderSelection, _test: { finalizeBet, finalizeBetAsLost, recoverUnpaidPayouts, gradeProviderSel, graceFor, AUTO_VOID_GRACE_MS, AUTO_VOID_GOAL_GRACE_MS } };
