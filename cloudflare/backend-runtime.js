@@ -109,8 +109,9 @@ export class BackendRuntime {
   async cronTick(job = 'all') {
     const wantLive = job !== 'settle', wantSettle = job !== 'live';
     this.running = this.running || {};
-    if (this.running[job] && Date.now() - this.running[job] < 3 * 60000) return { skipped: true, job };
-    this.running[job] = Date.now();
+    if (this.running[job]) return { skipped: true, job };
+    const lock = {};
+    this.running[job] = lock;
     const statusId = job === 'all' ? 'tick' : 'tick_' + job;
     const out = { live: 0, settle: 0, errors: [] };
     const tickStart = Date.now();
@@ -169,7 +170,7 @@ export class BackendRuntime {
     } catch (e) {
       out.errors.push(e && e.message);
     } finally {
-      this.running[job] = 0;
+      if (this.running[job] === lock) delete this.running[job];
     }
     // Shown in GET /api/health ("cron") so it is obvious whether the background job is alive and what failed.
     globalThis.__sbCron = { at: new Date().toISOString(), ms: Date.now() - tickStart, live: out.live, settle: out.settle, errors: out.errors.slice(0, 5) };

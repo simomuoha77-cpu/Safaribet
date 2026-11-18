@@ -386,6 +386,42 @@ test('cron jobs are separate: the settle job never runs the live poll and vice v
   }
 });
 
+test('duplicate Cloudflare cron jobs are skipped until the active job finishes', async () => {
+  const { BackendRuntime } = await import('./backend-runtime.js');
+  const rt = new BackendRuntime({}, { MONGO_URI: 'x' });
+
+  let release, markStarted;
+  const started = new Promise(resolve => { markStarted = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  let liveCalls = 0;
+
+  rt.initialize = async () => ({ app: { locals: { engine: {
+    updateLive: async () => {
+      liveCalls++;
+      if (liveCalls === 1) {
+        markStarted();
+        await gate;
+      }
+      return { live: 1 };
+    },
+    runSettlement: async () => {},
+    settleJackpots: async () => {}
+  } } } });
+
+  const first = rt.cronTick('live');
+  await started;
+  const duplicate = await rt.cronTick('live');
+  assert.deepEqual(duplicate, { skipped: true, job: 'live' });
+
+  release();
+  const completed = await first;
+  assert.deepEqual(completed.errors, []);
+
+  const next = await rt.cronTick('live');
+  assert.deepEqual(next.errors, []);
+  assert.equal(liveCalls, 2, 'a new run is allowed after the previous lock is released');
+});
+
 test('idle Durable Object closes MongoDB (so it can sleep) and reconnects on the next request', async () => {
   const { BackendRuntime } = await import('./backend-runtime.js');
   let state = 1, connects = 0, disconnects = 0;

@@ -2,7 +2,17 @@
 const Module = require('module'); const orig = Module._load;
 const store = new Map();                    // bet _id -> doc
 const walletCalls = [], wallet = { credits: [], failNext: 0 }, history = [];
+let countGate = null;
 const Bet = {
+  countDocuments: async () => {
+    if (countGate) {
+      const gate = countGate;
+      countGate = null;
+      gate.entered();
+      await gate.promise;
+    }
+    return 0;
+  },
   find: q => ({ limit: async () => [...store.values()].filter(d => d.payoutState === q.payoutState && q.status.$in.includes(d.status) && d.settledAt && d.settledAt <= q.settledAt.$lte).map(d => Object.assign(d, { save: async () => {} })) }),
   findOneAndUpdate: async (q, u) => { const d = store.get(q._id); if (!d || d.status !== q.status) return null; Object.assign(d, u.$set); return d; },
   updateOne: async (q, u) => { const d = store.get(q._id); if (d && (q.status === undefined || d.status === q.status)) { Object.assign(d, u.$set || {}); for (const k in (u.$unset || {})) delete d[k]; } return {}; }
@@ -19,7 +29,7 @@ Module._load = function (r, p, i) {
   if (r.endsWith('services/notificationService')) return { notify: async () => {} };
   return orig.apply(this, arguments);
 };
-const { _test } = require('../engine/settlementEngine.js');
+const { runSettlement, whenIdle, _test } = require('../engine/settlementEngine.js');
 const mkBet = (id, sels, stake = 100) => { const d = { _id: id, userId: 'u1', betCode: 'BET' + id, stake, status: 'pending', selections: sels, save: async function () { const s = store.get(id); Object.assign(s, { status: this.status, payout: this.payout, netPayout: this.netPayout }); } }; store.set(id, d); return d; };
 let pass = 0, fail = 0;
 const check = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? 'PASS ' : 'FAIL ') + name); };
@@ -82,5 +92,25 @@ const check = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? 'PAS
   store.set(22, { _id: 22, userId: 'u1', betCode: 'BET22', stake: 100, status: 'won', payoutState: 'pending', netPayout: 180, settledAt: new Date(), selections: [] });
   const before2 = wallet.credits.length; await _test.recoverUnpaidPayouts();
   check('a just-claimed payout is left alone for 90s', wallet.credits.length === before2 && store.get(22).payoutState === 'pending');
+  // 11) concurrent settlement runs cannot overlap
+  let signalEntered, releaseCount;
+  const entered = new Promise(resolve => { signalEntered = resolve; });
+  const held = new Promise(resolve => { releaseCount = resolve; });
+  countGate = { entered: signalEntered, promise: held };
+
+  const firstRun = runSettlement(false);
+  await entered;
+  const duplicateRun = await runSettlement(false);
+  check('overlapping settlement run is skipped', duplicateRun.skipped === true);
+  check('whenIdle reports settlement is running', await whenIdle(10) === false);
+
+  releaseCount();
+  const firstResult = await firstRun;
+  check('first settlement run completes normally', firstResult.skipped !== true);
+  check('whenIdle reports settlement is idle afterward', await whenIdle(10) === true);
+
+  const nextRun = await runSettlement(false);
+  check('new settlement run starts after previous run completes', nextRun.skipped !== true);
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);
 })();

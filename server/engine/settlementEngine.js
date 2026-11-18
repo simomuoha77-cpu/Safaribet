@@ -507,28 +507,27 @@ async function recoverUnpaidPayouts() {
 }
 
 // Resolves once no settlement run is in progress (used by the graceful shutdown on deploys).
+let settlementLock = null; // prevents fast and full settlement passes from overlapping
+
 async function whenIdle(timeoutMs = 15000) {
   const t = Date.now();
-  while (settlementRunning && Date.now() - t < timeoutMs) await new Promise(r => setTimeout(r, 200));
-  return !settlementRunning;
+  while (settlementLock && Date.now() - t < timeoutMs) await new Promise(r => setTimeout(r, 200));
+  return !settlementLock;
 }
 
-let settlementStartedAt = 0;
-let settlementRunning = false; // prevents the fast per-minute pass and the slower 5-min pass from ever overlapping
-
 async function runSettlement(includeApiFetch = true) {
-  if (global.__sbShuttingDown) return { settled: 0, paid: 0, skipped: true };       // server is stopping: start nothing new
-  if (settlementRunning && Date.now() - settlementStartedAt > 4 * 60 * 1000) { console.log('[Settlement] Previous run looks stuck (>4 min) - releasing the lock.'); settlementRunning = false; }
-  if (settlementRunning) {
+  if (global.__sbShuttingDown) return { settled: 0, paid: 0, skipped: true }; // server is stopping: start nothing new
+  if (settlementLock) {
     console.log('[Settlement] Skipped — a settlement run is already in progress.');
     return { settled: 0, paid: 0, skipped: true };
   }
-  settlementRunning = true; settlementStartedAt = Date.now();
+  const lock = {};
+  settlementLock = lock;
   try {
-    if (Date.now() - lastRecovery > 5 * 60 * 1000) await recoverUnpaidPayouts();     // first pass after a restart, then every 5 min
+    if (Date.now() - lastRecovery > 5 * 60 * 1000) await recoverUnpaidPayouts(); // first pass after a restart, then every 5 min
     return await _runSettlementInner(includeApiFetch);
   } finally {
-    settlementRunning = false;
+    if (settlementLock === lock) settlementLock = null;
   }
 }
 
