@@ -147,8 +147,19 @@ export class BackendRuntime {
       // Lobby pictures (Aviator / JetX): download from JuanAI and keep a copy in MongoDB so the casino page always shows them.
       // Nothing was doing this on Workers, so every cold start left the cards blank. Cheap when the copies are fresh (no request).
       if (wantLive && typeof engine.ensureCasinoArt === 'function') {
-        try { await Promise.race([engine.ensureCasinoArt(), new Promise(r => setTimeout(r, 30000))]); }
-        catch (e) { out.errors.push('casino-art: ' + e.message); }
+        let artTimer;
+        try {
+          await Promise.race([
+            Promise.resolve().then(() => engine.ensureCasinoArt()),
+            new Promise((_, reject) => {
+              artTimer = setTimeout(() => reject(new Error('casino artwork timed out after 30s')), 30000);
+            })
+          ]);
+        } catch (e) {
+          out.errors.push('casino-art: ' + e.message);
+        } finally {
+          if (artTimer) clearTimeout(artTimer);
+        }
       }
       if (wantSettle && minute % 5 === 0) {
         try { await runSettlement(true); } catch (e) { out.errors.push('settle-full: ' + e.message); }
