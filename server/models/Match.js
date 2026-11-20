@@ -96,6 +96,7 @@ const matchSchema = new mongoose.Schema({
   liveAbsentSince: { type: Date, default: null },
   lastLiveMinute:  { type: Number, default: null },
   lastFinalCheckAt:{ type: Date, default: null },
+  lastExactCheckAt:{ type: Date, default: null }, // last actual exact-provider lookup; separate from ordinary feed observations
   isStatic:   { type: Boolean, default: false },
   source:     { type: String, enum: ['juanai'], default: 'juanai' }
 }, { timestamps: true });

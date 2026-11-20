@@ -217,10 +217,18 @@ function saveLiveCache(matches) {
   return clean;
 }
 
-// One shared refresh at a time; callers can await it (used when a customer opens the app and the snapshot is old).
+// One shared refresh at a time. Customer requests may trigger a refresh, but must not
+// fan out a full all-sports provider refresh on every request. The cooldown applies
+// across completed refreshes as well as concurrent ones.
 let liveRefreshPromise = null;
+let liveRefreshStartedAt = 0;
+const LIVE_REFRESH_COOLDOWN_MS = 10000;
 function refreshLiveCache() {
-  if (!liveRefreshPromise) liveRefreshPromise = refreshLiveCacheInner().finally(() => { liveRefreshPromise = null; });
+  if (liveRefreshPromise) return liveRefreshPromise;
+  const now = Date.now();
+  if (now - liveRefreshStartedAt < LIVE_REFRESH_COOLDOWN_MS) return Promise.resolve();
+  liveRefreshStartedAt = now;
+  liveRefreshPromise = refreshLiveCacheInner().finally(() => { liveRefreshPromise = null; });
   return liveRefreshPromise;
 }
 const LIVE_FRESH_MS = 30000;

@@ -31,7 +31,8 @@ const Match = {
 };
 const Bet = { find: () => ({ lean: async () => [] }) };
 let feed = [];                       // what the provider returns for today (football)
-const provStub = { getMatchesForDate: async (d, o) => (d === todayStr() ? feed : []), getLiveFixtures: async () => [], resolveExactFixture: async () => null, betIsPlacing: () => false, getMatchMarkets: async () => null };
+let fixtureCalls = 0, liveCalls = 0;
+const provStub = { getMatchesForDate: async (d, o) => { fixtureCalls++; return d === todayStr() ? feed : []; }, getLiveFixtures: async () => { liveCalls++; return feed.filter(m => m.status === 'IN_PLAY'); }, resolveExactFixture: async () => null, betIsPlacing: () => false, getMatchMarkets: async () => null };
 function todayStr() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 Module._load = function (r, p, i) {
   if (r === 'axios') return {};
@@ -93,7 +94,9 @@ function raw(i, over) {
   const KICK = new Date(Date.now() - 600000).toISOString();
   const live = (min, hs, as, clock) => raw(1, { utcDate: KICK, status: 'IN_PLAY', minute: min, score: { fullTime: { home: hs, away: as } }, liveClockSec: clock, clockRunning: true });
   feed = [live(10, 0, 0, 600)];
+  const fixtureCallsBeforeLive = fixtureCalls;
   await liveCall();
+  check('live tracker uses the dedicated live feed without crawling the full fixture catalogue', liveCalls === 1 && fixtureCalls === fixtureCallsBeforeLive);
   const liveFirst = wire.one; check('first live poll stores the game in full', rows.size === 1 && liveFirst > 300 && wire.touch === 0);
   const id = Array.from(rows.keys())[0];
   const t0 = new Date(rows.get(id).lastLiveSeenAt).getTime();

@@ -1,10 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "safaribet-staging",
-  "keep_vars": true,
+  "name": "safaribet-test",
   "vars": {
-    // STAGING ONLY: include the real error name/message in failed place-bet responses. Never set on production.
-    "SB_DEBUG_ERRORS": "1",
     "SOFABETS_FIXTURE_CACHE_TTL_MS": "240000"
   },
   "main": "cloudflare/worker.js",

@@ -392,11 +392,15 @@ async function trackFixturesSeq(fixtures, Match, opts) {
         // provider calls in a day). It also backs off with the age of the game: the provider does not know some games at all.
         const age = now - kickoff.getTime();
         const gap = force ? FORCE_EXACT_GAP_MS : age > VERY_OLD_FIXTURE_MS ? VERY_OLD_EXACT_GAP_MS : age > OLD_FIXTURE_MS ? OLD_EXACT_GAP_MS : EXACT_CHECK_GAP_MS;
-        const dbLast = rows.reduce((mx, r) => Math.max(mx, r.lastFinalCheckAt ? new Date(r.lastFinalCheckAt).getTime() : 0), 0);
-        const last = Math.max(exactChecked.get(id) || 0, exactChecked.get(fx.matchId) || 0, dbLast);
+        // lastFinalCheckAt also records ordinary feed observations (including "not found"). It must NOT suppress
+        // the first exact lookup when a customer opens My Bets. Persist a separate timestamp for actual exact-id calls.
+        const dbLastExact = rows.reduce((mx, r) => Math.max(mx, r.lastExactCheckAt ? new Date(r.lastExactCheckAt).getTime() : 0), 0);
+        const last = Math.max(exactChecked.get(id) || 0, exactChecked.get(fx.matchId) || 0, dbLastExact);
         if (now - last >= gap) {
           exactChecked.set(id, now);
-          try { await Match.updateMany({ matchId: { $in: sibIds } }, { $set: { lastFinalCheckAt: new Date() } }); } catch (_) {}
+          try {
+            await Match.updateMany({ matchId: { $in: sibIds } }, { $set: { lastFinalCheckAt: new Date(), lastExactCheckAt: new Date() } });
+          } catch (_) {}
           const fin = await verifyFinalResult(fx.matchId);
           if (fin) { await finish({ home: fin.homeScore, away: fin.awayScore }, 'provider-exact'); continue; }
         }

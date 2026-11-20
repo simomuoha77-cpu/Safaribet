@@ -183,6 +183,50 @@ test('legacy process-lifetime refresh loops are disabled in Worker mode', async 
 });
 
 
+
+test('public per-team logo lookups use edge cache while personalized APIs stay uncached', async () => {
+  const previousCaches = globalThis.caches;
+  const stored = new Map();
+  let originCalls = 0;
+  globalThis.caches = {
+    default: {
+      match: async key => stored.get(key.url) || undefined,
+      put: async (key, response) => { stored.set(key.url, response); }
+    }
+  };
+  try {
+    const e = {
+      BACKEND_RUNTIME: {
+        idFromName: name => ({ name }),
+        get: () => ({ fetch: async () => {
+          originCalls++;
+          return new Response(JSON.stringify({ success: true, logos: { Arsenal: '/crest.png' } }), {
+            status: 200, headers: { 'content-type': 'application/json' }
+          });
+        } })
+      },
+      ASSETS: { fetch: async () => new Response('asset') }
+    };
+    const ctx = { waitUntil: promise => promise };
+    const url = 'https://example.test/api/sports/team-logos?names=Arsenal';
+    const first = await worker.fetch(new Request(url), e, ctx);
+    const second = await worker.fetch(new Request(url), e, ctx);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(originCalls, 1, 'repeated public logo lookup should hit edge cache');
+    assert.match(second.headers.get('cache-control'), /public, max-age=60/);
+
+    await worker.fetch(new Request('https://example.test/api/sports/team-logos?names=Chelsea'), e, ctx);
+    assert.equal(originCalls, 2, 'different team query must have a separate cache key');
+
+    await worker.fetch(new Request('https://example.test/api/wallet/balance'), e, ctx);
+    assert.equal(originCalls, 3, 'personal wallet endpoint must always reach the backend');
+  } finally {
+    if (previousCaches === undefined) delete globalThis.caches;
+    else globalThis.caches = previousCaches;
+  }
+});
+
 test('API requests are forwarded to the single backend Durable Object', async () => {
   let forwarded;
   const e = {
@@ -453,4 +497,60 @@ test('public polling endpoints are answered from the edge cache (the Durable Obj
     await worker.fetch(new Request('https://safaribet.top/api/odds/all-counts', { method: 'POST' }), env, ctx);
     assert.equal(hits, 4, 'only GET is cached');
   } finally { delete globalThis.caches; }
+});
+
+
+test('public list endpoints use edge caching with bounded freshness windows', async () => {
+  const previousCaches = globalThis.caches;
+  const stored = new Map();
+  let originCalls = 0;
+  globalThis.caches = {
+    default: {
+      match: async key => stored.get(key.url)?.clone(),
+      put: async (key, response) => { stored.set(key.url, response.clone()); }
+    }
+  };
+  try {
+    const e = {
+      BACKEND_RUNTIME: {
+        idFromName: name => ({ name }),
+        get: () => ({ fetch: async request => {
+          originCalls++;
+          return new Response(JSON.stringify({ success: true, path: new URL(request.url).pathname }), {
+            status: 200, headers: { 'content-type': 'application/json' }
+          });
+        } })
+      },
+      ASSETS: { fetch: async () => new Response('asset') }
+    };
+    const ctx = { waitUntil: promise => promise };
+    const allCountsUrl = 'https://example.test/api/odds/all-counts';
+    const first = await worker.fetch(new Request(allCountsUrl), e, ctx);
+    const second = await worker.fetch(new Request(allCountsUrl), e, ctx);
+    assert.equal(first.headers.get('cache-control'), 'public, max-age=30');
+    assert.equal(second.headers.get('cache-control'), 'public, max-age=30');
+    assert.equal(originCalls, 1, 'all-counts is fetched once during the 30-second edge window');
+
+    await worker.fetch(new Request('https://example.test/api/sports/live'), e, ctx);
+    await worker.fetch(new Request('https://example.test/api/sports/live'), e, ctx);
+    assert.equal(originCalls, 2, 'public live list is cached at the edge');
+    await worker.fetch(new Request('https://example.test/api/odds/matches/football'), e, ctx);
+    await worker.fetch(new Request('https://example.test/api/odds/matches/football'), e, ctx);
+    assert.equal(originCalls, 3, 'public sport match list is cached at the edge');
+  } finally {
+    if (previousCaches === undefined) delete globalThis.caches;
+    else globalThis.caches = previousCaches;
+  }
+});
+
+test('homepage has one market-count poller instead of duplicate legacy POST polling', async () => {
+  const fs = await import('node:fs');
+  const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /\/\* market-count-all \*\//);
+  assert.match(html, /running = false; apply\(\); schedule\(30000\);/);
+  assert.doesNotMatch(html, /\/\* market-count \*\//);
+  assert.doesNotMatch(html, /\/api\/odds\/market-counts(?:['"`])/);
+  const odds = fs.readFileSync(new URL('../server/routes/odds.js', import.meta.url), 'utf8');
+  assert.match(odds, /const MC_RETRY_MS = 60 \* 1000/);
+  assert.match(odds, /Date\.now\(\) - \(mcTried\.get\(x\.id\) \|\| 0\) >= MC_RETRY_MS/);
 });

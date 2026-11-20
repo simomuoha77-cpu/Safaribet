@@ -72,11 +72,13 @@ function copyEnvironment(env) {
 // long as it is awake, and a request every second or two kept it awake all day. Only an exact allow-list, GET, no cookies/auth
 // needed (none of these read the logged-in user), and only successful JSON answers are stored.
 const EDGE_CACHE_SECONDS = {
-  '/api/settings/site': 10, '/api/odds/all-counts': 5, '/api/odds/featured': 10, '/api/sports/live/count': 5,
-  '/api/sports/team-logos/all': 60, '/api/content': 20, '/api/app-info': 60, '/api/version': 30
+  '/api/settings/site': 10, '/api/odds/all-counts': 30, '/api/odds/featured': 10, '/api/sports/live/count': 5,
+  '/api/sports/live': 5, '/api/sports/football': 10,
+  '/api/sports/team-logos': 60, '/api/sports/team-logos/all': 60, '/api/content': 20, '/api/app-info': 60, '/api/version': 30
 };
 async function edgeCached(request, env, ctx, path, fetchOrigin) {
-  const ttl = EDGE_CACHE_SECONDS[path];
+  const dynamicTtl = /^\/api\/odds\/matches\/[a-z0-9-]+$/i.test(path) || /^\/api\/sports\/category\/[a-z0-9-]+$/i.test(path) ? 10 : 0;
+  const ttl = EDGE_CACHE_SECONDS[path] || dynamicTtl;
   if (!ttl || request.method !== 'GET' || typeof caches === 'undefined' || !caches.default) return fetchOrigin();
   const key = new Request(new URL(request.url).toString(), { method: 'GET' });
   try {

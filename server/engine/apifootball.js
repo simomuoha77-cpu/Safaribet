@@ -327,11 +327,14 @@ async function getFixtures(daysAhead = 7) {
 }
 
 async function getLive() {
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(new Date());
   try {
-    const matches = await sofaBets.getMatchesForDate(today, { sport: 'football' });
+    // The live tracker only needs in-play fixtures. getMatchesForDate() crawls
+    // the full football catalogue and then merges the live feed; doing that
+    // again every minute made the cron Durable Object wait on many pages that
+    // are irrelevant to live-score updates. Use the provider's dedicated,
+    // fully paginated live feed instead (strict mode keeps outages distinct
+    // from a genuine empty live list).
+    const matches = await sofaBets.getLiveFixtures('football', { strict: true });
     return matches.map(normalizeDirectSofaMatch).filter(Boolean).filter(m => m.status === 'live');
   } catch (e) {
     throw new Error('SofaBets direct live feed unavailable: ' + e.message);

@@ -379,6 +379,10 @@ router.use('/featured', (req, res, next) => {
 const mcDone = new Map();               // matchId -> { n, ts }
 const mcInflight = new Map();           // matchId -> Promise
 const MC_KEEP_MS = 6 * 3600000;
+const MC_RETRY_MS = 60 * 1000;
+// Failed or unavailable catalogues must not be fetched again on every page poll.
+// Market counts are display metadata, so a one-minute retry window keeps the count feature
+// while preventing repeated provider fan-out and keeping the backend Durable Object idle.
 const MC_CONC = Number(process.env.MARKET_COUNT_CONCURRENCY || 2);
 let mcActive = 0; const mcWaiters = [];
 function mcAcquire() { return new Promise(r => { if (mcActive < MC_CONC) { mcActive++; r(); } else mcWaiters.push(r); }); }
@@ -461,9 +465,15 @@ router.post('/market-counts-all', async (req, res) => {
     }
     // Never compete with the match feed: no upstream market fetching while the feed is cold or a queue is already backed up.
     const feedWarm = !!C.get('fixtures', FIXTURES_TTL);
-    const fetchList = (feedWarm && mcWaiters.length < 8) ? todo.filter(x => counts[x.id] == null) : [];
+    const fetchList = (feedWarm && mcWaiters.length < 8)
+      ? todo.filter(x => counts[x.id] == null && Date.now() - (mcTried.get(x.id) || 0) >= MC_RETRY_MS)
+      : [];
     if (fetchList.length) {
-      const jobs = fetchList.map(x => mcFetchOne(x.id, x.p));
+      const jobs = fetchList.map(x => {
+        mcTried.set(x.id, Date.now());
+        if (mcTried.size > 6000) mcTried.delete(mcTried.keys().next().value);
+        return mcFetchOne(x.id, x.p);
+      });
       await Promise.race([Promise.all(jobs), new Promise(r => setTimeout(r, 6000))]);
       for (const x of fetchList) { const k = mcDone.get(x.id); if (k) counts[x.id] = k.n; }
     }

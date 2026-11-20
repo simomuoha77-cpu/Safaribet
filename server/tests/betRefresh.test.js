@@ -58,7 +58,7 @@ const addRow = (id, mins) => rows.set(id, { matchId: id, homeTeam: 'H', awayTeam
   check('scheduled pass does NOT ask the provider before the minimum game length', exactCalls === 0 && rows.get('sofabets_football_200').finalVerified !== true);
   await F.trackFixtures([sel('sofabets_football_200', 25)], Match, { force: true });
   const r200 = rows.get('sofabets_football_200');
-  check('forced check asks for the exact fixture and confirms FINISHED', exactCalls === 1 && r200.finalVerified === true && r200.score.home === 2);
+  check('forced check asks for the exact fixture and confirms FINISHED', exactCalls === 1 && r200.finalVerified === true && r200.score.home === 2 && r200.lastExactCheckAt instanceof Date);
   // never guess: provider answers "in play" -> nothing is finalised
   F._resetCache();
   addRow('sofabets_football_201', 25); exactAnswer = { providerMatchId: '201', status: 'IN_PLAY', score: { fullTime: { home: 0, away: 0 } } };
