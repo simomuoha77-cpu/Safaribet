@@ -1,11 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "safaribet-test",
+  "name": "safaribet-staging",
+  "keep_vars": true,
   "vars": {
     "SOFABETS_FIXTURE_CACHE_TTL_MS": "240000"
   },
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-11-09",
+  "triggers": { "crons": ["* * * * *"] },
   "compatibility_flags": [
     "nodejs_compat"
   ],
