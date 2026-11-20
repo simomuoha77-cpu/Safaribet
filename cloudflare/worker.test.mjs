@@ -353,16 +353,18 @@ test('the real admin.html exists and the Worker can inject into it', async () =>
 
 test('cron trigger runs the live poll + settlement tick inside the backend Durable Object', async () => {
   const calls = [];
+  const names = [];
   const e = {
     BACKEND_RUNTIME: {
-      idFromName: n => n,
-      get: () => ({ fetch: async req => { calls.push([req.method, new URL(req.url).pathname]); return new Response('{"live":5}'); } })
+      idFromName: n => { names.push(n); return n; },
+      get: id => ({ fetch: async req => { calls.push([id, req.method, new URL(req.url).pathname]); return new Response('{"live":5}'); } })
     }
   };
   const pending = [];
   await worker.scheduled({}, e, { waitUntil: p => pending.push(p) });
   await Promise.all(pending);
-  assert.deepEqual(calls, [['POST', '/__cron/tick'], ['POST', '/__cron/tick']]);
+  assert.deepEqual(names, ['safaribet-primary']);
+  assert.deepEqual(calls, [['safaribet-primary', 'POST', '/__cron/tick'], ['safaribet-primary', 'POST', '/__cron/tick']]);
   assert.equal(calls.length, 2, 'live poll and settlement are two separate invocations (own subrequest budget each)');
 });
 

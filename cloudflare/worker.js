@@ -103,10 +103,10 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.BACKEND_RUNTIME) return;
     copyEnvironment(env);
-    // A SEPARATE instance ('safaribet-cron') of the same class: the live poll and settlement run in their own event loop and
-    // never compete with customers' requests (bet placement, deposits) served by 'safaribet-primary'. Both talk to the same MongoDB;
-    // settlement and payouts are idempotent (atomic claim per bet), so a deploy or an overlap can never pay a bet twice.
-    const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-cron');
+    // Reuse the same named BackendRuntime as customer API traffic. The separate cron name
+    // created a second Express runtime and MongoDB connection, adding another billed DO instance.
+    // Durable Objects support concurrent requests; per-job locks and atomic settlement claims protect background work.
+    const backendId = env.BACKEND_RUNTIME.idFromName('safaribet-primary');
     // Two separate requests = two invocations, each with its OWN limit of outgoing requests (50 on the free plan): the live poll
     // can no longer use them all up before the settlement lookups run.
     for (const job of ['settle', 'live']) {
